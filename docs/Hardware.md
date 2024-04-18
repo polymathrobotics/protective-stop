@@ -42,7 +42,9 @@
 <p align="center">
   <img width="40%" src="/docs/img/applied-heatsink.png"> <br><i> After </i>
 </p>
+
 - Screw on the heatsink to the Raspberry Pi, and through to the UPS.
+
 <p align="center">
   <img width="40%" src="/docs/img/thermal-pad-placement.png"> <br><i> Thermal Pad Placement </i>
 </p>
