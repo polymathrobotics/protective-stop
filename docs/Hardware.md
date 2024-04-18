@@ -98,3 +98,15 @@ We will go through the wire soldering connections in the diagram above one by on
 <p align="center">
   <img width="20%" src="/docs/img/stopbutton-esp.png"> <br><i> Corresponding ESP32 wiring for stop button </i>
 </p>
+
+2. LED Ring to ESP32
+- LED Ring DI → ESP32 D2 (Green wire)
+- LED Ring PWR5V → ESP32 VIN (Red wire)
+- LED Ring GND → ESP32 GND (Black wire)
+
+<p align="center">
+  <img width="20%" src="/docs/img/ledring.png"> <br><i> LED ring wiring </i>
+</p>
+<p align="center">
+  <img width="20%" src="/docs/img/ledring-esp.png"> <br><i> Corresponding ESP32 wiring for LED ring </i>
+</p>
