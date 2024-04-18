@@ -51,8 +51,8 @@
 
 
 4. Add e-ink display to UPS using GPIO header.
-<p align="center" style="transform: rotate(90deg);">
-  <img width="30%" src="/docs/img/gpio-1.png"> <br><i> Left to right: UPS, GPIO header, e-ink display </i>
+<p align="center">
+  <img width="30%" src="/docs/img/gpio-1.png"> <br><i> Top to bottom: UPS, GPIO header, e-ink display </i>
 </p>
 <p align="center">
   <img width="30%" src="/docs/img/gpio-2.png"> <br><i> Add header to underside of e-ink </i>
@@ -93,8 +93,8 @@ We will go through the wire soldering connections in the diagram above one by on
 - Don't forget to put O-ring on E-stop button!
 
 <p align="center">
-  <img width="40%" src="/docs/img/stopbutton.png"> <br><i> Stop button wiring </i>
+  <img width="20%" src="/docs/img/stopbutton.png"> <br><i> Stop button wiring </i>
 </p>
 <p align="center">
-  <img width="40%" src="/docs/img/stopbutton-esp.png"> <br><i> Corresponding ESP32 wiring for stop button </i>
+  <img width="20%" src="/docs/img/stopbutton-esp.png"> <br><i> Corresponding ESP32 wiring for stop button </i>
 </p>
