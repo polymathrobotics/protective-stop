@@ -20,9 +20,11 @@
 ## Assembly Instructions
 ### Preliminary Steps
 1. Tape over Raspberry Pi USB connections 
-![Taped over Raspberry Pi](/protective-stop/docs/img/rpi-tape.png | width="100")
+
+![Taped over Raspberry Pi](/protective-stop/docs/img/rpi-tape.png)
 
 2. Solder Raspberry Pi GPIO pins
+
 ![Soldered Raspberry Pi](/protective-stop/docs/img/soldered-rpi.png)
 *Left side = before, right side = after*
     - Use flux to make soldering easier
