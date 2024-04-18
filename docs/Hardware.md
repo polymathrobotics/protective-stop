@@ -25,11 +25,14 @@
 
 
 2. Solder Raspberry Pi GPIO pins
-</br>
-<img src="/docs/img/soldered-rpi.png" align="centre" width="50%"><br/>
-
 - Use flux to make soldering easier
 - Secure a few pins on each end first for better stability
 - May want to clean singe marks from flux after soldering; we used a toothbrush and water for this.
+</br>
+<img src="/docs/img/soldered-rpi.png" align="centre" width="50%"><br/>
+
 
 3. Apply Raspberry Pi heat sink.
+</br>
+<img src="/docs/img/heatsink.png" align="centre" width="50%"><br/>
+<img src="/docs/img/applied-heatsink.png" align="centre" width="50%"><br/>
