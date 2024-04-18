@@ -51,14 +51,14 @@
 
 
 4. Add e-ink display to UPS using GPIO header.
-<p align="center">
-  <img width="40%" src="/docs/img/gpio-1.png"> <br><i> Top to bottom: UPS, GPIO header, e-ink display </i>
+<p align="center" style="transform: rotate(90deg);">
+  <img width="30%" src="/docs/img/gpio-1.png"> <br><i> Left to right: UPS, GPIO header, e-ink display </i>
 </p>
 <p align="center">
-  <img width="40%" src="/docs/img/gpio-2.png"> <br><i> Add header to underside of e-ink </i>
+  <img width="30%" src="/docs/img/gpio-2.png"> <br><i> Add header to underside of e-ink </i>
 </p>
 <p align="center">
-  <img width="40%" src="/docs/img/gpio-3.png"> <br><i> Install e-ink to UPS by plugging in GPIO header to pins </i>
+  <img width="30%" src="/docs/img/gpio-3.png"> <br><i> Install e-ink to UPS by plugging in GPIO header to pins </i>
 </p>
 
 
@@ -82,3 +82,19 @@ graph TD
     classDef component fill:#346beb,stroke:#333,stroke-width:2px;
     class USB-C,UPS,R,E,C,ES,L,PB,EB component;
 ```
+
+### Wire Soldering
+We will go through the wire soldering connections in the diagram above one by one.
+
+1. Stop Button to ESP32
+- Stop Button C → ESP32 D18 (Blue wire)
+- Stop Button NO → ESP32 D19 (Yellow wire)
+- Stop Button NC → ESP32 D21 (White wire)
+- Don't forget to put O-ring on E-stop button!
+
+<p align="center">
+  <img width="40%" src="/docs/img/stopbutton.png"> <br><i> Stop button wiring </i>
+</p>
+<p align="center">
+  <img width="40%" src="/docs/img/stopbutton-esp.png"> <br><i> Corresponding ESP32 wiring for stop button </i>
+</p>
