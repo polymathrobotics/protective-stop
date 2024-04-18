@@ -30,19 +30,15 @@
 - Secure a few pins on each end first for better stability
 - May want to clean singe marks from flux after soldering; we used a toothbrush and water for this.
 <p align="center">
-  <img width="40%" src="/docs/img/soldered-rpi.png">
+  <img width="40%" src="/docs/img/soldered-rpi.png"><br><i> Left = before, right = after </i>
 </p>
-<p align="center"><i> Left = before, right = after </i></p>
-
 3. Apply Raspberry Pi heat sink.
 <p align="center">
-  <img width="40%" src="/docs/img/heatsink.png">
+  <img width="40%" src="/docs/img/heatsink.png"> <br><i> Before </i>
 </p>
-<p align="center"><i> Before </i></p>
 <p align="center">
-  <img width="40%" src="/docs/img/applied-heatsink.png">
+  <img width="40%" src="/docs/img/applied-heatsink.png"> <br><i> After </i>
 </p>
-<p align="center"><i> After </i></p>
 
 
 
