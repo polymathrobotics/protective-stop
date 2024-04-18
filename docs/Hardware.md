@@ -20,19 +20,24 @@
 ## Assembly Instructions
 ### Preliminary Steps
 1. Tape over Raspberry Pi USB connections
-</br>
-<img src="/docs/img/rpi-tape.png" align="center" width="50%"><br/>
+<p align="center">
+  <img width="40%" src="/docs/img/rpi-tape.png">
+</p>
 
 
 2. Solder Raspberry Pi GPIO pins
 - Use flux to make soldering easier
 - Secure a few pins on each end first for better stability
 - May want to clean singe marks from flux after soldering; we used a toothbrush and water for this.
-</br>
-<img src="/docs/img/soldered-rpi.png" align="centre" width="50%"><br/>
+<p align="center">
+  <img width="40%" src="/docs/img/soldered-rpi.png">
+</p>
 
 
 3. Apply Raspberry Pi heat sink.
-</br>
-<img src="/docs/img/heatsink.png" align="centre" width="50%"><br/>
-<img src="/docs/img/applied-heatsink.png" align="centre" width="50%"><br/>
+<p align="center">
+  <img width="40%" src="/docs/img/heatsink.png">
+</p>
+<p align="center">
+  <img width="40%" src="/docs/img/applied-heatsink.png">
+</p>
