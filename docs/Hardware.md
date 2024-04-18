@@ -29,10 +29,10 @@
 - Use flux to make soldering easier
 - Secure a few pins on each end first for better stability
 - May want to clean singe marks from flux after soldering; we used a toothbrush and water for this.
-<p align="center">
-  <img width="40%" src="/docs/img/soldered-rpi.png">
-</p>
-*Left = before, right = after*
+<figure align="center">
+  <img src="/docs/img/soldered-rpi.png">
+  <figcaption>Left = before, right = after.</figcaption>
+</figure>
 
 
 3. Apply Raspberry Pi heat sink.
