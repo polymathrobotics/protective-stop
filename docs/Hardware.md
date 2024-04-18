@@ -32,6 +32,7 @@
 <p align="center">
   <img width="40%" src="/docs/img/soldered-rpi.png">
 </p>
+*Left = before, right = after*
 
 
 3. Apply Raspberry Pi heat sink.
