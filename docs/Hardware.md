@@ -25,7 +25,7 @@
 </p>
 
 
-2. Solder Raspberry Pi GPIO pins
+2. Solder Raspberry Pi GPIO pin extender
 - Use flux to make soldering easier
 - Secure a few pins on each end first for better stability
 - May want to clean singe marks from flux after soldering; we used a toothbrush and water for this.
@@ -58,7 +58,27 @@
   <img width="40%" src="/docs/img/gpio-2.png"> <br><i> Add header to underside of e-ink </i>
 </p>
 <p align="center">
-  <img width="40%" src="/docs/img/gpio-3.png"> <br><i> Install e-ink to UPS by plugging in GPIO pins to header </i>
+  <img width="40%" src="/docs/img/gpio-3.png"> <br><i> Install e-ink to UPS by plugging in GPIO header to pins </i>
 </p>
 
 
+## Wiring
+Now it’s time to starting connecting stuff together. The connections at a glance are shown below.
+```mermaid
+graph TD
+    USB-C -->|Power Out| UPS(UPS)
+    UPS(UPS) -->|Power Out| R(Raspi)
+    R -->|Control| ES(Eink Screen)
+    R <-->|USB Power and Data| C(Cell Modem)
+		C -->|USB Power and Data| E(ESP32)
+    E -->|D2 to DI, + and GND| L(LED Ring)
+    E -->|D22 to switch, + and GNDx2| PB(Power Button)
+    PB -->|switch to input| UPS
+    UPS -->|Lowbat to D34| E
+    EB(Estop Button) -->|C to D18| E
+    EB -->|NC to D21| E
+    EB -->|NO to D19| E
+
+    classDef component fill:#346beb,stroke:#333,stroke-width:2px;
+    class USB-C,UPS,R,E,C,ES,L,PB,EB component;
+```
