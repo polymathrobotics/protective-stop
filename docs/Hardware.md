@@ -30,7 +30,7 @@
 - Secure a few pins on each end first for better stability
 - May want to clean singe marks from flux after soldering; we used a toothbrush and water for this.
 <p align="center">
-  <img width="40%" src="/docs/img/heatsink.png">
+  <img width="40%" src="/docs/img/soldered-rpi.png">
 </p>
 <p align="center">Caption for the image</p>
 
