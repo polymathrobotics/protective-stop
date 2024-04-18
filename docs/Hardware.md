@@ -32,6 +32,8 @@
 <p align="center">
   <img width="40%" src="/docs/img/soldered-rpi.png"><br><i> Left = before, right = after </i>
 </p>
+
+
 3. Apply Raspberry Pi heat sink.
 - The Geekworm heatsink we used came with two thermal pads, one is 0.5mm and the other is 1mm. Make sure each pad goes in the right place! It comes with a diagram.
 <p align="center">
