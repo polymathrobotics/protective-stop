@@ -32,12 +32,18 @@
 <p align="center">
   <img width="40%" src="/docs/img/soldered-rpi.png">
 </p>
-<p align="center">Caption for the image</p>
+<p align="center"><i> Left = before, right = after </i></p>
 
 3. Apply Raspberry Pi heat sink.
 <p align="center">
   <img width="40%" src="/docs/img/heatsink.png">
 </p>
+<p align="center"><i> Before </i></p>
 <p align="center">
   <img width="40%" src="/docs/img/applied-heatsink.png">
 </p>
+<p align="center"><i> After </i></p>
+
+
+
+
