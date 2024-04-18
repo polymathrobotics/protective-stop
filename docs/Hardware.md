@@ -21,13 +21,12 @@
 ### Preliminary Steps
 1. Tape over Raspberry Pi USB connections 
 
-<a href="url"><img src="/docs/img/rpi-tape.png" align="left" width="500"></a>
+<a href="Taped Raspberry Pi"><img src="/docs/img/rpi-tape.png" align="left" width="500"></a><break>
 
 
 2. Solder Raspberry Pi GPIO pins
+<a href="Soldered Raspberry Pi"><img src="/docs/img/soldered-rpi.png" align="left" width="500"></a>
 
-![Soldered Raspberry Pi](/docs/img/soldered-rpi.png)
-*Left side = before, right side = after*
 
     - Use flux to make soldering easier
     - Secure a few pins on each end first for better stability
