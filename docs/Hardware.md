@@ -50,5 +50,15 @@
 </p>
 
 
+4. Add e-ink display to UPS using GPIO header.
+<p align="center">
+  <img width="40%" src="/docs/img/gpio-1.png"> <br><i> Top to bottom: UPS, GPIO header, e-ink display </i>
+</p>
+<p align="center">
+  <img width="40%" src="/docs/img/gpio-2.png"> <br><i> Add header to underside of e-ink </i>
+</p>
+<p align="center">
+  <img width="40%" src="/docs/img/gpio-3.png"> <br><i> Install e-ink to UPS by plugging in GPIO pins to header </i>
+</p>
 
 
