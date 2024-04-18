@@ -21,7 +21,7 @@
 ### Preliminary Steps
 1. Tape over Raspberry Pi USB connections 
 
-<img src="/docs/img/rpi-tape.png" width="100">
+<a href="url"><img src="/docs/img/rpi-tape.png" align="left" width="500"></a>
 
 
 2. Solder Raspberry Pi GPIO pins
