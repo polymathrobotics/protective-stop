@@ -84,7 +84,7 @@ graph TD
 ```
 
 ### Wire Soldering
-We will go through the wire soldering connections in the diagram above one by one.
+We will go through the wire soldering connections in the diagram above one by one. The color of the wires does not actually matter, but they are referred to throughout these instructions to enhance clarity.
 
 1. Stop Button to ESP32
 - Stop Button C → ESP32 D18 (Blue wire)
@@ -109,4 +109,26 @@ We will go through the wire soldering connections in the diagram above one by on
 </p>
 <p align="center">
   <img width="30%" src="/docs/img/ledring-esp32.png"> <br><i> Corresponding ESP32 wiring for LED ring </i>
+</p>
+
+3. Power Button to ESP32 and UPS
+- Power Button LED power terminal  → ESP32 D22 and UPS pin 3 (White wires)
+- Power Button LED ground and switch contact A → ESP32 GND (Black wire)
+- Power Button switch contact B→ ESP32 D23 (Red wire)
+- Don’t forget to put O-ring on power button!
+
+<p align="center">
+  <img width="30%" src="/docs/img/powerbutton-colors.png"> <br><i> Color of oval corresponds color of wire to connect to terminal. </i>
+</p>
+<p align="center">
+  <img width="30%" src="/docs/img/powerbutton-wires.png"> <br><i> Corresponding ESP32 wiring for LED ring </i>
+</p>
+<p align="center">
+  <img width="30%" src="/docs/img/powerbutton-white.png"> <br><i> White wire soldered to UPS </i>
+</p>
+<p align="center">
+  <img width="30%" src="/docs/img/ups-diagram.png"> <br><i> Diagram of UPS </i>
+</p>
+<p align="center">
+  <img width="30%" src="/docs/img/powerbutton-esp32.png"> <br><i> Black, white, and red wires soldered to ESP32 </i>
 </p>
