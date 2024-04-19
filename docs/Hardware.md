@@ -121,7 +121,7 @@ We will go through the wire soldering connections in the diagram above one by on
   <img width="30%" src="/docs/img/powerbutton-colors.png"> <br><i> Color of oval corresponds color of wire to connect to terminal. </i>
 </p>
 <p align="center">
-  <img width="30%" src="/docs/img/powerbutton-wires.png"> <br><i> Corresponding ESP32 wiring for LED ring </i>
+  <img width="60%" src="/docs/img/powerbutton-wires.png"> <br><i> Corresponding ESP32 wiring for LED ring </i>
 </p>
 <p align="center">
   <img width="30%" src="/docs/img/powerbutton-white.png"> <br><i> White wire soldered to UPS </i>
