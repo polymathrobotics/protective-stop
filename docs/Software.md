@@ -173,7 +173,7 @@ On your local machine your local machine or (robot that you want the p-stop to c
 mkdir -p colcon_ws/src
 cd colcon_ws/src
 ```
-3. Put the [`pstop_msg`](../estop_msg) folder in this repo inside the `src` directory. It contains a custom message definition for our protective stop.
+3. Put the [`pstop_msg`](../pstop_msg) folder in this repo inside the `src` directory. It contains a custom message definition for our protective stop.
 4. Go back to the `colcon_ws` directory and run:
 ```
 colcon build
