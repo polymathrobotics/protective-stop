@@ -132,3 +132,18 @@ We will go through the wire soldering connections in the diagram above one by on
 <p align="center">
   <img width="30%" src="/docs/img/powerbutton-esp32.png"> <br><i> Black, white, and red wires soldered to ESP32 </i>
 </p>
+
+- Two white wires should be connected to the same terminal on the button (power button LED power terminal)
+    - Tip: Solder these wires together first, and then solder them to the terminal
+- The black wire is soldered across two power button terminals (power button LED ground and switch contact A)
+    - Tip: Solder the end of the wire to the further terminal first, then the closer one
+- Red wire is soldered normally
+
+4. UPS to ESP32 (battery indicator)
+- Lowbat to D34 (yellow wire)
+<p align="center">
+  <img width="30%" src="/docs/img/ups-lowbat.png"> <br><i> UPS lowbat soldering </i>
+</p>
+<p align="center">
+  <img width="30%" src="/docs/img/esp-d34.png"> <br><i> ESP32 pin D34 soldering </i>
+</p>
