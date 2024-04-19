@@ -173,7 +173,7 @@ On your local machine your local machine or (robot that you want the p-stop to c
 mkdir -p colcon_ws/src
 cd colcon_ws/src
 ```
-3. Put the [`../pstop_msg`](estop_msg) folder in this repo inside the `src` directory. It contains a custom message definition for our protective stop.
+3. Put the [`pstop_msg`](../estop_msg) folder in this repo inside the `src` directory. It contains a custom message definition for our protective stop.
 4. Go back to the `colcon_ws` directory and run:
 ```
 colcon build
@@ -186,7 +186,7 @@ In a terminal on your local machine where you have built and sourced the custom 
 1. Launch a rosbridge_server with `ros2 launch rosbridge_server rosbridge_websocket_launch.xml`.
 - If you are running this in a Docker container, make sure that port 9090 is exposed by doing `docker run -p 9090:9090 ...`
 2. To run the roslibpy client, run `python roslibpy_client.py [ip address]`. 
-- You can set a default ip address by altering line 12 of [`../roslibpy_client.py`](roslibpy_client.py):
+- You can set a default ip address by altering line 12 of [`roslibpy_client.py`](../roslibpy_client.py):
 ```
 parser.add_argument('target', type=str, help='Target IP address', default='')
 ```
