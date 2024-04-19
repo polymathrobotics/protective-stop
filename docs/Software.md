@@ -39,8 +39,30 @@
 - You will be prompted for the password — this is the password set earlier during the OS customization step.
 
 ## Raspberry Pi Software Installation
+1. After connecting to the Raspberry Pi through SSH, install Tailscale on it with the following commands. You will be provided a link to log in to your Tailscale account after the last step.
+```bash
+curl -fsSL https://pkgs.tailscale.com/stable/ubuntu/focal.noarmor.gpg | sudo tee /usr/share/keyrings/tailscale-archive-keyring.gpg >/dev/null
+curl -fsSL https://pkgs.tailscale.com/stable/ubuntu/focal.tailscale-keyring.list | sudo tee /etc/apt/sources.list.d/tailscale.list
+sudo apt-get update
+sudo apt-get install tailscale
+sudo tailscale up
+```
+2. We can then check the Tailscale address of the Rasperry Pi with `tailscale ip -4`. Now, we can access the Raspberry Pi over VPN anywhere through Tailscale by using `ssh [username]@[tailscale ip]`
 
-## Arduino Set-up
+3. Install the following packages on the Raspberry Pi:
+- Install chrony with `sudo apt install chrony`
+- Install pip with `sudo apt install python3-pip -y` 
+- Install PySerial with `sudo pip install pyserial --break-system-packages`
+- Install the roslibpy with: 
+```
+sudo apt install git-all
+git clone https://github.com/gramaziokohler/roslibpy.git
+cd roslibpy
+sudo pip install -r requirements-dev.txt --break-system-packages
+```
+- Install `rosbridge-server` on your local machine (robot that you want the p-stop to control) with `sudo apt-get install ros-humble-rosbridge-server`.
+
+## ESP32 Set-up
 
 ## SIM Module Set-up
 
