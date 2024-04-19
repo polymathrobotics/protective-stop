@@ -1,4 +1,4 @@
-mport time
+import time
 import socket
 import serial
 import roslibpy
@@ -7,6 +7,11 @@ from datetime import datetime
 from PIL import Image, ImageDraw, ImageFont
 from waveshare_epd import epd2in13_V4
 from flask import Flask, request, jsonify, render_template
+import argparse
+
+parser = argparse.ArgumentParser(description='roslibpy client')
+parser.add_argument('target', type=str, help='Target IP address', default='')
+args = parser.parse_args()
 
 # Flask app for live configuration
 app = Flask(__name__)
@@ -15,7 +20,7 @@ app = Flask(__name__)
 sender_id = socket.gethostname()
 heartbeat_rate = 1
 heartbeat_timeout = 5
-target = '100.90.142.102'
+target = args.target
 battery_status = "Good"
 state = ""
 

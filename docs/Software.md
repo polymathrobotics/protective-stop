@@ -60,7 +60,6 @@ git clone https://github.com/gramaziokohler/roslibpy.git
 cd roslibpy
 sudo pip install -r requirements-dev.txt --break-system-packages
 ```
-- Install rosbridge-server on your local machine (robot that you want the p-stop to control) with `sudo apt-get install ros-humble-rosbridge-server`.
 
 ## ESP32 Set-up
 On the Raspberry Pi (over SSH):
@@ -76,7 +75,7 @@ scp esp32_new.ino.bin esp32_new.ino.bootloader.bin esp32_new.ino.partitions.bin 
 ```
 3. Now, run the bash script for flashing the ESP32 with `bash esp32_flash.sh`. This should output something like this:
 ```
-polymath@polymath-estop-001:~ $ bash esp.sh
+polymath@polymath-estop-001:~ $ bash esp32_flash.sh
 esptool.py v4.7.0
 Serial port /dev/serial/by-id/usb-Silicon_Labs_CP2102_USB_to_UART_Bridge_Controller_0001-if00-port0
 Connecting.....
@@ -119,7 +118,80 @@ Reading from serial port...
 5. At this point, the LED ring should be lighting up and be responsive to the red stop button.
 
 ## SIM Module Set-up
+On the Raspberry Pi:
+1. Install minicom with `sudo apt install minicom`
+2. Start minimcom with `sudo systemctl stop ModemManager.service && minicom -D /dev/ttyUSB2`
+- This may not work properly if `/dev/ttyUSB2` is not the right address.
+- You can tell whether it's working properly by typing `ATE` and then Enter in the minicom terminal and seeing if there is an `OK` response.
+- You may have to try some different addresses, which can be found with:
+```
+cd /dev/serial/by-id
+ls
+```
+3. In the minicom terminal, issue the following commands:
+```
+ATE
+AT&F
+ATI
+AT&V
+AT+CGDCONT?
+AT+CUSBPIDSWITCH?
+AT+CGPSAUTO?
+AT+CUSBPIDSWITCH=9001,1,1
+AT+CGDCONT=1,"IPV4V6","h2g2"
+AT+CGDCONT=6,"IPV4V6","h2g2"
+AT+CGPSAUTO=1
+```
+4. Exit minicom (`Ctrl+A, Z, X`), and then power cycle the system.
+5. Now, configure the Raspian Bookworm Network Manager with: `sudo nmcli connection add type gsm ifname '*' con-name '1-gsm' apn 'h2g2' connection.autoconnect yes`
+6. If you need more detailed instructions, refer to https://wimsworld.wordpress.com/2023/12/
 
 ## E-ink Paper Display
+On the Raspberry Pi terminal:
+1. Install the following:
+```
+sudo pip3 install RPi.GPIO
+sudo pip3 install spidev
+```
+2. Git clone the e-Paper repo with `git clone https://github.com/waveshare/e-Paper.git`
+3. Go in the Raspberry Pi directory with: `cd e-Paper/RaspberryPi_JetsonNano/`
+4. Set up the libraries with `sudo python3 [setup.py](http://setup.py/) install`
+5. Install flask with `pip install flask --break-system-packages`
+6. Configure the Raspberry Pi by typing `sudo raspi-config`. 
+- Go to `Choose Interfacing Options -> SPI -> Yes Enable SPI interface`
+<p align="center">
+  <img width="30%" src="/docs/img/rpi-config.png"> <br><i> Raspberry Pi Config Menu </i>
+</p>
+
+7. Reboot your Raspberry Pi with either `sudo reboot` or power cycle.
+
+## roslibpy Custom Message Set-up
+On your local machine your local machine or (robot that you want the p-stop to control):
+1. Install rosbridge-server with `sudo apt-get install ros-$ROS-DISTRO-rosbridge-server`.
+2. Create a colcon workspace if you don't already have one:
+```
+mkdir -p colcon_ws/src
+cd colcon_ws/src
+```
+3. Put the [`pstop_msg`](estop_msg) folder in this repo inside the `src` directory. It contains a custom message definition for our protective stop.
+4. Go back to the `colcon_ws` directory and run:
+```
+colcon build
+source install/setup.bash
+```
+5. To verify that our custom message set-up was successful, you can run `ros2 interface show estop_interface/msg/EStopMsg`, which should print out the message definition.
 
 ## roslibpy Client Set-up
+In a terminal on your local machine where you have built and sourced the custom message type above:
+1. Launch a rosbridge_server with `ros2 launch rosbridge_server rosbridge_websocket_launch.xml`.
+- If you are running this in a Docker container, make sure that port 9090 is exposed by doing `docker run -p 9090:9090 ...`
+2. To run the roslibpy client, run `python roslibpy_client.py [ip address]`. 
+- You can set a default ip address by altering line 12 of [`roslibpy_client.py`](roslibpy_client.py):
+```
+parser.add_argument('target', type=str, help='Target IP address', default='')
+```
+3. To use the flask interface, connect to the Raspberry Pi through SSH with portforwarding:
+```
+ssh -L 8000:localhost:5000 [username]@[tailscale ip]
+```
+- Now, you should be able to see the flask interface by going to `http://localhost:8000/config`.

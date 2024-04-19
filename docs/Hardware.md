@@ -159,3 +159,5 @@ We will go through the wire soldering connections in the diagram above one by on
 
 7. Add antennas - if you want to use cellular data instead of WiFi
 - Screw on antennas to AUX and MAIN pins on the underside of the modem
+
+Now you're ready to move onto [Software](/docs/Software.md)
