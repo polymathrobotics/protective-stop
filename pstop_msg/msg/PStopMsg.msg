@@ -1,0 +1,8 @@
+int64 checksum
+string sender_timestamp
+string sender_id
+uint32 rolling_counter
+float32 expected_heartbeat_rate
+uint32 expected_heartbeat_timeout
+string state
+string target
