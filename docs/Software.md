@@ -1,5 +1,5 @@
 # Software/Firmware
-
+![alt text](image.png)
 ## Imaging Raspberry Pi
 1. Basic Set-up
 - Take a microSD card and insert it into a computer with [Raspberry Pi Imager](https://www.raspberrypi.com/software/). Use a microSD adapter if necessary.
@@ -64,15 +64,16 @@ sudo pip install -r requirements-dev.txt --break-system-packages
 ## ESP32 Set-up
 On the Raspberry Pi (over SSH):
 1. Install esptool with `pip install esptool --break-system-packages`
-2. Make sure these four files on Raspberry Pi:
+2. Make sure these four files on Raspberry Pi, which are in the [pstop_MCU/build](../pstop_MCU/build/) folder:
 - `boot_app0.bin`
-- `estop_MCU.ino.bin`
-- `estop_MCU.ino.bootloader.bin`
-- `estop_MCU.ino.partitions.bin`
+- `pstop_MCU.ino.bin`
+- `pstop_MCU.ino.bootloader.bin`
+- `pstop_MCU.ino.partitions.bin`
 - If you are moving these files from your local computer, this can be done by going into the directory with these files and doing:
 ```
 scp esp32_new.ino.bin esp32_new.ino.bootloader.bin esp32_new.ino.partitions.bin [username]@[tailscale ip]:/path/to/home/dir
 ```
+- The original [`pstop_MCU.ino`](../pstop_MCU/pstop_MCU.ino) file is also included, so you can make changes and re-compile if desired.
 3. Now, run the [esp32_flash.sh](../esp32_flash.sh) bash script with `bash esp32_flash.sh`. This should output something like this:
 ```
 polymath@polymath-estop-001:~ $ bash esp32_flash.sh
