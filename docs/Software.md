@@ -73,7 +73,7 @@ On the Raspberry Pi (over SSH):
 ```
 scp esp32_new.ino.bin esp32_new.ino.bootloader.bin esp32_new.ino.partitions.bin [username]@[tailscale ip]:/path/to/home/dir
 ```
-3. Now, run the [esp32_flash.sh](../esp32_flash.sh) bash scripw with `bash esp32_flash.sh`. This should output something like this:
+3. Now, run the [esp32_flash.sh](../esp32_flash.sh) bash script with `bash esp32_flash.sh`. This should output something like this:
 ```
 polymath@polymath-estop-001:~ $ bash esp32_flash.sh
 esptool.py v4.7.0
