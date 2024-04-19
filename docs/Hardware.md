@@ -105,8 +105,8 @@ We will go through the wire soldering connections in the diagram above one by on
 - LED Ring GND → ESP32 GND (Black wire)
 
 <p align="center">
-  <img width="20%" src="/docs/img/ledring.png"> <br><i> LED ring wiring </i>
+  <img width="30%" src="/docs/img/ledring.png"> <br><i> LED ring wiring </i>
 </p>
 <p align="center">
-  <img width="20%" src="/docs/img/ledring-esp.png"> <br><i> Corresponding ESP32 wiring for LED ring </i>
+  <img width="30%" src="/docs/img/ledring-esp32.png"> <br><i> Corresponding ESP32 wiring for LED ring </i>
 </p>
