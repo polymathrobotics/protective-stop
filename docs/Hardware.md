@@ -147,3 +147,15 @@ We will go through the wire soldering connections in the diagram above one by on
 <p align="center">
   <img width="30%" src="/docs/img/esp-d34.png"> <br><i> ESP32 pin D34 soldering </i>
 </p>
+
+5. Connect cell modem to ESP32 and RPi UPS.
+- Modem USB → ESP32 microUSB (solid black cable)
+- Modem microUSB → UPS microUSB (black/white cable)
+
+6. Add battery to USP.
+<p align="center">
+  <img width="30%" src="/docs/img/connected-sys.png"> <br><i> Wired and connected system. </i>
+</p>
+
+7. Add antennas - if you want to use cellular data instead of WiFi
+- Screw on antennas to AUX and MAIN pins on the underside of the modem
