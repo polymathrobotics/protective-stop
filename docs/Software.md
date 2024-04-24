@@ -2,10 +2,11 @@
 
 ## Imaging Raspberry Pi
 1. Basic Set-up
+- Download [Raspberry Pi OS image](https://downloads.raspberrypi.com/raspios_lite_arm64/images/raspios_lite_arm64-2024-03-15/2024-03-15-raspios-bookworm-arm64-lite.img.xz?_gl=1*13v8f9s*_ga*MTc2NDY2NjEzLjE3MTIzNTk2OTQ.*_ga_22FD70LWDS*MTcxMzgyMDE2OC4zLjEuMTcxMzgyMDE3My4wLjAuMA..).
 - Take a microSD card and insert it into a computer with [Raspberry Pi Imager](https://www.raspberrypi.com/software/). Use a microSD adapter if necessary.
 - In the imager:
     - For device, elect “Raspberry Pi Zero 2W”.
-    - For operating system, use “Custom” and use `2024-03-15-raspios-bookworm-arm64-lite.img`. This file is included in the repo but you will have to unzip.
+    - For operating system, use “Custom” and use the image you just downloaded, which should be called `2024-03-15-raspios-bookworm-arm64-lite.img`.
     - For storage, choose the microSD card you just inserted.
 <p align="center">
   <img width="30%" src="/docs/img/rpi-imager.png"> <br><i> Raspberry Pi Imager </i>
@@ -60,6 +61,7 @@ git clone https://github.com/gramaziokohler/roslibpy.git
 cd roslibpy
 sudo pip install -r requirements-dev.txt --break-system-packages
 ```
+- For more information on roslibpy, refer to the [roslibpy repo](https://github.com/gramaziokohler/roslibpy).
 
 ## ESP32 Set-up
 On the Raspberry Pi (over SSH):
@@ -117,6 +119,7 @@ Reading from serial port...
 ```
 4. After seeing "Reading from serial port", you can stop the script with Ctrl + C.
 5. At this point, the LED ring should be lighting up and be responsive to the red stop button.
+For more information on esptool, refer to their [repo](https://github.com/espressif/esptool) or [docs](https://docs.espressif.com/projects/esptool/en/latest/esp32/).
 
 ## SIM Module Set-up
 On the Raspberry Pi:
@@ -165,8 +168,9 @@ sudo pip3 install spidev
 </p>
 
 7. Reboot your Raspberry Pi with either `sudo reboot` or power cycle.
+For more info on this display, please refer to Waveshare's [manual](https://www.waveshare.com/wiki/2.13inch_e-Paper_HAT_Manual).
 
-## roslibpy Custom Message Set-up
+## Custom Message Set-up
 On your local machine your local machine or (robot that you want the p-stop to control):
 1. Install rosbridge-server with `sudo apt-get install ros-$ROS-DISTRO-rosbridge-server`.
 2. Create a colcon workspace if you don't already have one:
@@ -196,3 +200,26 @@ parser.add_argument('target', type=str, help='Target IP address', default='')
 ssh -L 8000:localhost:5000 [username]@[tailscale ip]
 ```
 - Now, you should be able to see the flask interface by going to `http://localhost:8000/config`.
+- For more information about roslibpy and rosbridge_server, see [Robot Web Tools](https://robotwebtools.github.io/).
+
+## Starting on Boot
+If you want to start the roslibpy client above on boot, we can do so with a systemctl service.
+1. Create a service file with `sudo nano /etc/systemd/system/pstop-autostart.service`.
+2. Edit the service file `nano` or your text editor of choice and add:
+```
+[Unit]
+Description=Start protective stop on boot
+After=multi-user.target
+
+[Service]
+Type=idle
+ExecStart=/usr/bin/python /path/roslibpy_client.py
+
+[Install]
+WantedBy=multi-user.target
+```
+3. Reload the systemd manager configuration: `sudo systemctl daemon-reload`.
+4. Enable the service: `sudo systemctl enable pstop-autostart.service`.
+5. This service should now start on boot!
+- You can reboot either by power cycling or with `sudo reboot`.
+- You can also test it without rebooting with `sudo systemctl start pstop-autostart.service`.
