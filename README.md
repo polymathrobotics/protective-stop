@@ -4,7 +4,7 @@ By Kai Ma and Ilia Baranov
 
 This initiative is focused on developing a low-cost, reliable protective stop mechanism for robotics and automation systems. Our protective stop system is designed to be a preventative measure that initiates a controlled shutdown with no immediate danger.
 
-**Safety disclaimer:** This system is not designed to be an emergency stop; as such, it should not be used when there is an immediate threat to human safety or significant risk to equipment is a more drastic action used when there is an immediate threat to human safety or significant risk to equipment. It is not designed immediate, uuncontrolled shutdowns.
+**Safety disclaimer:** This system is not designed to be an emergency stop; as such, it should not be used when there is an immediate threat to human safety or significant risk to equipment. It is not designed for immediate, uuncontrolled shutdowns.
 
 The main components of the system are:
 - Raspberry Pi and ESP32 microcontroller for primary functionality
