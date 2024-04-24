@@ -23,4 +23,5 @@ See instructions:
 </p>
 
 ## TODO
+- [ ] One-click software install --- create custom image/clone SD card
 - [ ] Handle shutdown gracefully for RPi
