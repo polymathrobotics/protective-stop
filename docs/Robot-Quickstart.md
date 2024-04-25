@@ -14,7 +14,7 @@ sudo tailscale up
 
 
 ## roslibpy Custom Message Set-up
-On your local machine your local machine or (robot that you want the p-stop to control):
+On your local machine (or robot that you want the p-stop to control):
 1. Install rosbridge-server with `sudo apt-get install ros-$ROS-DISTRO-rosbridge-server`.
 2. Create a colcon workspace if you don't already have one:
 ```
