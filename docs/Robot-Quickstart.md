@@ -27,7 +27,7 @@ cd colcon_ws/src
 colcon build
 source install/setup.bash
 ```
-5. To verify that our custom message set-up was successful, you can run `ros2 interface show estop_interface/msg/EStopMsg`, which should print out the message definition.
+5. To verify that our custom message set-up was successful, you can run `ros2 interface show pstop_msg/msg/EStopMsg`, which should print out the message definition.
 
 ## roslibpy Client Set-up
 In a terminal on your local machine where you have built and sourced the custom message type above:

@@ -76,7 +76,7 @@ def update_display(sender_id, target, battery_status, message=None):
 client = roslibpy.Ros(host=target, port=9090)
 client.run()
 
-talker = roslibpy.Topic(client, '/estop', 'estop_interface/msg/EStopMsg')
+talker = roslibpy.Topic(client, '/pstop', 'pstop_msg/msg/EStopMsg')
 talker.advertise()
 
 arduino_port = '/dev/ttyUSB0'
