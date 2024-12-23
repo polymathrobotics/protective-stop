@@ -7,8 +7,8 @@
 uint8 VERSION = 0
 
 # PSTOP message constants
-uint8 OK = 0
-uint8 STOP = 1
+uint8 STOP = 0
+uint8 OK = 1
 
 # The PSTOP message id value from the above definitions.
 uint8 message

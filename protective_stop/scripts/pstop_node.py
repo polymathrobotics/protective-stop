@@ -68,7 +68,7 @@ def main():
     client = roslibpy.Ros(host=host, port=port)
     
     # Define the topic to which messages will be published
-    publisher = roslibpy.Topic(client, '/pstop_topic', 'pstop_msg/msg/PStopMsg')
+    publisher = roslibpy.Topic(client, '/protective_stop', 'pstop_msg/msg/PStopMsg',queue_size=1,queue_length=1)
     
     client.run()
     
@@ -84,18 +84,18 @@ def main():
                     'label': 'active'
                 },
                 timestamp={
-                    'sec': 1234567890,
-                    'nanosec': 123456789
+                    'sec': int(time.time()),
+                    'nanosec': int((time.time() - int(time.time())) * 1e9)
                 },
                 id={
                     'uuid': [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
                 },
                 receiver_id={
-                    'uuid': [15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0]
+                    'uuid': [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
                 },
                 counter=counter,
-                heartbeat_timeout={
-                    'sec': 1,
+                heartbeat_timeout={ # Not used by the PSTOP, only Machine Node
+                    'sec': 0,
                     'nanosec': 0
                 },
                 checksum_type='CRC-16',
