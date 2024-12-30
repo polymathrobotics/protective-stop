@@ -5,6 +5,7 @@ from rclpy.parameter_event_handler import ParameterEventHandler
 from rclpy.executors import SingleThreadedExecutor
 from pstop_msg.msg import PStopMsg
 from rclpy.duration import Duration
+from rclpy.time import Time
 from unique_identifier_msgs.msg import UUID
 from std_msgs.msg import Bool
 
@@ -15,6 +16,10 @@ from rclpy.event_handler import QoSSubscriptionEventType
 from rclpy.lifecycle import State, TransitionCallbackReturn, LifecycleNode
 from lifecycle_msgs.msg import State
 
+from rcl_interfaces.msg import ParameterDescriptor
+from rclpy.parameter import Parameter
+
+
 
 class MachineNode(LifecycleNode):
     def __init__(self, node_name):    
@@ -22,22 +27,22 @@ class MachineNode(LifecycleNode):
         self.get_logger().debug(f'Initializing {node_name}')
 
         # Declaring ROS2 params
-        self.declare_parameter('machine_UUID', [0x00] * 16)
-        self.declare_parameter('heartbeat_timeout', 1.0)
-        self.declare_parameter('pstop_auto_accept', True)
-        self.declare_parameter('pstops_connected', [""])
+        self.declare_parameter('machine_UUID', [0x00] * 16,ParameterDescriptor(description='uint8[16] UUID from unique_identifier_msgs'))
+        self.declare_parameter('heartbeat_timeout', 1.0,ParameterDescriptor(description='timeout float value in seconds before pstop is triggered'))
+        self.declare_parameter('pstop_auto_accept', True,ParameterDescriptor(description='If set to false, need to explicitly create an allow list in pstops_connected'))
+        self.declare_parameter('pstops_connected', [""],ParameterDescriptor(description='array of UUID values for all connected pstops'))
 
         self.timer = None  # Timer will be initialized during configuration
         self.publisher_pstop = None  # To be initialized in on_activate
         self.publisher_status = None  # To be initialized in on_activate
-        self.reply = PStopMsg()  # Primary message, tracks global state, with changes per PSTOP sent
-        self.reply.state = State(id=State.PRIMARY_STATE_UNCONFIGURED, label="unconfigured")
-        self.pstop_data = {}  # Dictionary to store all connected PStops
         self.param_event_handler = None  # To be initialized in on_configure
         self.get_logger().info('pstop_machine_node node has been initialized')
 
     def on_configure(self, state: State) -> TransitionCallbackReturn:
         self.get_logger().info(f"Configuring node '{self.get_name()}' in state '{state.label}'.")
+
+        self.reply = PStopMsg()  # Primary message, tracks global state, with changes per PSTOP sent
+        self.pstop_data = {}  # Dictionary to store all connected PStops
 
         # Initialize timer
         self.heartbeat_timeout = self.get_parameter('heartbeat_timeout').get_parameter_value().double_value
@@ -78,7 +83,7 @@ class MachineNode(LifecycleNode):
         self.get_logger().info(f"Activating node '{self.get_name()}' in state '{state.label}'.")
         
         # Start Timer
-        self.timer = self.create_timer(self.heartbeat_timeout / 3.0, self.timer_callback)
+        self.timer = self.create_timer(self.heartbeat_timeout / 10.0, self.timer_callback)
 
         # Pubs and Subs
         self.subscriber_pstop = self.create_subscription(PStopMsg, 'protective_stop', self.pstop_callback, 1)
@@ -107,40 +112,97 @@ class MachineNode(LifecycleNode):
     def on_shutdown(self, state: State) -> TransitionCallbackReturn:
         self.get_logger().info(f"Shutting down node '{self.get_name()}' in state '{state.label}'.")
         # Clean up resources, close connections, etc.
+        # TODO: Review what actually needs to happen here.
+        #self.destroy_publisher(self.publisher_pstop)
+        #self.destroy_publisher(self.publisher_status)
+        #self.destroy_subscription(self.subscriber_pstop)
+        #self.destroy_timer(self.timer)
+        #self.destroy_node()
         return TransitionCallbackReturn.SUCCESS
-        
-    def on_finalize(self, state: State):
-        self.destroy_node()
-        rclpy.shutdown()
         
     def pstop_callback(self, msg):
         """
         Main subscriber callback, most machine node logic happens here
+        For the pstop output topic to be set true (IE all is well), all of the following must be met:
+        - version matches
+        - message value is set to 1 (OK)
+        - timestamp delta between messages must not exceed heartbeat_timeout
+        - id must be on pstop connected list (if not set to auto accept)
+        - receiver_id must match this machine node's uuid
+        - counter must not skip more than 3 messages
+        - checksum type and value must be valid
+        - received_stamp and received_counter must be valid for the machine node
+            Valid meaning not in the future, not further behind than heartbeat_timeout, not skipping more than 3 messages
+        On top of the above, the pstop node must go through a connection process:
+        - Send a connection PStopMsg with state field set to "TRANSITION_STATE_ACTIVATING"
+        - Receives back same from this machine node
+            If it does not receive same back from machine node, it loops until it does
+        - Sets to PRIMARY_STATE_ACTIVE
+        - Receives same from machine node
+        To disconnect, same process is done, however sending TRANSITION_STATE_DEACTIVATING and then PRIMARY_STATE_INACTIVE
         """
-        uuid = tuple(msg.id.uuid.tolist())  # just for clarity
+        uuid = tuple(msg.id.uuid.tolist())
+        recv_uuid = tuple(msg.receiver_id.uuid.tolist())
 
         if uuid == tuple(self.machine_UUID):
             self.get_logger().debug('Ignoring self-generated message')
-        else:  # Not self generated
+        elif (recv_uuid == tuple(self.machine_UUID)) and (msg.VERSION == 0):  # Not self generated and intended for this machine node
             self.get_logger().debug(f'❗ Got message from: {uuid}')
 
-            self.pstop_data.setdefault(uuid, {"last_timestamp": 0, "counter": 0, "state": 0, "message": 0})
-            self.pstop_data[uuid].update({
-                "last_timestamp": msg.stamp,
-                "counter": self.pstop_data[uuid]["counter"] + 1,
-                "state": msg.state,
-                "message": msg.message
-            })
+            # Add Pstop publisher to array of publishers, if auto accepting is True
+            if (self.pstop_auto_accept): # and (msg.state.id != State.TRANSITION_STATE_DEACTIVATING):
+                if uuid not in self.pstop_data: #this is a new pstop
+                    self.pstop_data.setdefault(uuid, {"last_timestamp": 0, "counter": 0, "state": 0, "last_state":0, "message": 0})        
+                    self.set_parameters([
+                        Parameter(
+                            name='pstops_connected',
+                            value=[str(key) for key in self.pstop_data.keys()]
+                        )
+                    ])
+                
+                self.pstop_data[uuid].update({
+                    "received_time" : self.get_clock().now(),
+                    "last_timestamp": msg.stamp,
+                    "counter": self.pstop_data[uuid]["counter"] + 1,
+                    "last_state": self.pstop_data[uuid]["state"],
+                    "state": msg.state.id,
+                    "message": msg.message
+                })
+            
 
-            self.reply.stamp = self.get_clock().now().to_msg()
-            self.reply.counter = self.pstop_data[uuid]["counter"]
-            self.reply.receiver_id.uuid = uuid
-            self.reply.heartbeat_timeout.sec = int(self.heartbeat_timeout)
-            self.reply.heartbeat_timeout.nanosec = int((self.heartbeat_timeout - self.reply.heartbeat_timeout.sec) * 1e9)
-            self.reply.received_stamp = msg.stamp
-            self.reply.received_counter = msg.counter
-            self.get_logger().debug(f'❗ Sending: {self.reply}')
-            self.publisher_pstop.publish(self.reply)
+            if uuid in list(self.pstop_data.keys()):# Check that pstop message is in our allow list of pstops
+                self.get_logger().debug(f"This is the droid {uuid} we are looking for")
+                
+                self.reply.state = State(id=State.PRIMARY_STATE_UNCONFIGURED, label="unconfigured")
+                
+                self.reply.stamp = self.get_clock().now().to_msg()
+                self.reply.counter = self.pstop_data[uuid]["counter"]
+                self.reply.receiver_id.uuid = uuid
+                self.reply.heartbeat_timeout.sec = int(self.heartbeat_timeout)
+                self.reply.heartbeat_timeout.nanosec = int((self.heartbeat_timeout - self.reply.heartbeat_timeout.sec) * 1e9)
+                self.reply.received_stamp = msg.stamp
+                self.reply.received_counter = msg.counter
+                
+                if self.pstop_data[uuid]["state"] == State.TRANSITION_STATE_ACTIVATING:
+                    self.reply.state = State(id=State.TRANSITION_STATE_ACTIVATING, label="activating")
+                    
+                # The pstop has followed process, we are now successfully bonded
+                if (self.pstop_data[uuid]["state"] == State.PRIMARY_STATE_ACTIVE) and (self.pstop_data[uuid]["last_state"]== State.TRANSITION_STATE_ACTIVATING):
+                    self.reply.state = State(id=State.PRIMARY_STATE_ACTIVE, label="active")
+                    
+                if self.pstop_data[uuid]["state"] == State.TRANSITION_STATE_DEACTIVATING:
+                    self.reply.state = State(id=State.TRANSITION_STATE_DEACTIVATING, label="deactivating")
+                    if uuid in self.pstop_data:
+                        self.pstop_data.pop(uuid)
+                        self.set_parameters([ #TODO: Don't update this repeatedly, check if the pstop has already been removed
+                            Parameter(
+                                name='pstops_connected',
+                                value=[str(key) for key in self.pstop_data.keys()]
+                            )
+                        ])
+
+                self.get_logger().info(f"State:\n{self.format_pstop_msg(self.reply)}")
+                self.publisher_pstop.publish(self.reply)
 
     def parameter_callback(self, event):
         """
@@ -177,11 +239,42 @@ class MachineNode(LifecycleNode):
     def timer_callback(self):
         """
         Handles loss of comms or timeouts
+        if a pstop is connected, and is in active mode, it must report in at least every heartbeat_timeout seconds
         """
-        self.get_logger().info(f"State:\n{self.format_pstop_msg(self.reply)}")
+        #self.get_logger().info(f"State:\n{self.format_pstop_msg(self.reply)}")
+        
+        for uuid, data in self.pstop_data.items():
+            if self.get_clock().now() > (data["received_time"] + Duration(seconds=self.heartbeat_timeout)):
+                self.get_logger().warn(f"missed update from {uuid}")
+
         val = Bool()
         val.data = bool(self.reply.message)
         self.publisher_status.publish(val)
+        
+        
+        # CRC-16 Calculation Function
+    def compute_crc16(data: bytes, poly: int = 0x1021, init: int = 0xFFFF) -> int:
+        """
+        Compute CRC-16-CCITT for the given data.
+
+        Args:
+            data (bytes): The input data.
+            poly (int): Polynomial used for CRC calculation (default 0x1021).
+            init (int): Initial value for the CRC (default 0xFFFF).
+
+        Returns:
+            int: Computed CRC-16 checksum.
+        """
+        crc = init
+        for byte in data:
+            crc ^= byte << 8
+            for _ in range(8):
+                if crc & 0x8000:
+                    crc = (crc << 1) ^ poly
+                else:
+                    crc <<= 1
+                crc &= 0xFFFF  # Ensure CRC remains a 16-bit value
+        return crc
 
 
 def main(args=None):
