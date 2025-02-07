@@ -4,13 +4,13 @@
   "battery_level": 100.0,
   "target_pairs": [
     {
-      "ip": "100.125.44.33",
+      "ip": "0.0.0.0",
       "uuid": "00000000-0000-0000-0000-000000000000\t",
       "status": "Not Connected"
     }
   ],
-  "TailscaleIP": "100.109.0.13",
-  "DNSName": "pstop-001.tail13f8.ts.net.",
+  "TailscaleIP": "0.0.0.0",
+  "DNSName": "it.s.a.me.pstop",
   "WifiSignal": 73,
   "CellularSignal": 50,
   "WifiConnections": [
@@ -35,7 +35,7 @@
       "state": "activated"
     },
     {
-      "name": "ibaranov",
+      "name": "test",
       "device": "",
       "state": ""
     },
