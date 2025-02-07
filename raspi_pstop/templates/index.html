@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Config Node</title>
+    <link rel="icon" type="image/png" href="/static/images/polymath_logo.png">
+    <script>
+        function updateData() {
+            fetch('/data')
+                .then(response => response.json())
+                .then(data => {
+                    document.getElementById('status_summary').textContent = data.status_summary;
+                    
+                    // Update Tailscale information
+                    document.getElementById('tailscale-ip').textContent = data.TailscaleIP;
+                    document.getElementById('dns-name').textContent = data.DNSName;
+                    document.getElementById('uuid').textContent = data.uuid;
+
+                    // Update battery level
+                    document.getElementById('battery-level').textContent = data.BatteryLevel + '%';
+
+                    // Update Wi-Fi and cellular signal strength
+                    document.getElementById('wifi-signal').textContent = data.WifiSignal + '%';
+                    document.getElementById('cellular-signal').textContent = data.CellularSignal + '%';
+
+                    // Update target IP/UUID pairs table
+                    let pairsTable = document.getElementById('pairs-table');
+                    pairsTable.innerHTML = ''; // Clear existing rows
+                    data.TargetPairs.forEach((pair, index) => {
+                        let row = `
+                            <tr>
+                                <td>${index}</td>
+                                <td>${pair.ip}</td>
+                                <td>${pair.uuid}</td>
+                                <td>${pair.status}</td>
+                                <td>
+                                    <form method="POST" style="display:inline;">
+                                        <button type="submit" name="action" value="remove_${index}">Remove</button>
+                                    </form>
+                                </td>
+                            </tr>
+                        `;
+                        pairsTable.innerHTML += row;
+                    });
+
+                    // Update Wi-Fi connections table
+                    let wifiTable = document.getElementById('wifi-connections');
+                    wifiTable.innerHTML = ''; // Clear existing rows
+                    data.WifiConnections.forEach(conn => {
+                        // Skip rows starting with '1-gsm', 'tailscale0', or 'lo'
+                        if (/^(1-gsm|tailscale0|lo)/.test(conn.name)) {
+                            return;
+                        }
+                        let isPSTOPHotspot = conn.name === "PSTOP-001-Hotspot"; // Check for specific connection
+                        let row = `
+                            <tr>
+                                <td>${conn.name}</td>
+                                <td>${conn.device}</td>
+                                <td>${conn.state}</td>
+                                <td>
+                                    <form method="POST" action="/wifi" style="display:inline;">
+                                        <button type="submit" name="action" value="activate_${conn.name}">Activate</button>
+                                    </form>
+                                    <form method="POST" action="/wifi" style="display:inline;">
+                                        <button type="submit" name="action" value="remove_${conn.name}" 
+                                                ${isPSTOPHotspot ? "disabled" : ""}>
+                                            Remove
+                                        </button>
+                                    </form>
+                                </td>
+                            </tr>
+                        `;
+                        wifiTable.innerHTML += row;
+                    });
+                })
+                .catch(err => console.error('Error updating data:', err));
+        }
+
+        setInterval(updateData, 1000); // Refresh every second
+        window.onload = updateData;
+    </script>
+</head>
+<body>
+    <!-- Logo at the top of the page -->
+    <div style="text-align: left; margin-bottom: 20px;">
+        <img src="/static/images/polymath_logo.png" alt="Polymath Robotics Logo" style="width: 100px; height: auto;">
+    </div>
+    
+    <p><strong>Status:</strong> <span id="status_summary"></span></p>
+    
+    <!-- Tailscale Information -->
+    <p><strong>Tailscale IP:</strong> <span id="tailscale-ip"></span></p>
+    <p><strong>DNS Name:</strong> <span id="dns-name"></span></p>
+    <p><strong>UUID:</strong> <span id="uuid"></span></p>
+    
+    <!-- Battery and Signal Strength -->
+    <p><strong>Battery Level:</strong> <span id="battery-level"></span></p>
+    <p><strong>Wi-Fi Signal Strength:</strong> <span id="wifi-signal"></span></p>
+    <p><strong>Cellular Signal Strength:</strong> <span id="cellular-signal"></span></p>
+    
+    <!-- Target IP/UUID Pairs -->
+    <h2>Target IP/UUID Pairs</h2>
+    <table border="1">
+        <thead>
+            <tr><th>Index</th><th>IP</th><th>UUID</th><th>Status</th><th>Actions</th></tr>
+        </thead>
+        <tbody id="pairs-table">
+            <!-- Rows populated dynamically -->
+        </tbody>
+    </table>
+
+    <!-- Add New Pair -->
+    <h3>Add a New Pair</h3>
+    <form method="POST">
+        <label>New IP Address:
+            <input type="text" name="new_ip" required />
+        </label>
+        <label>New UUID:
+            <input type="text" name="new_uuid" required />
+        </label>
+        <br/><br/>
+        <button type="submit" name="action" value="add">Add New Pair</button>
+    </form>
+
+    <!-- Wi-Fi Connections -->
+    <h2>Wi-Fi Connections</h2>
+    <table border="1">
+        <thead>
+            <tr><th>Name</th><th>Device</th><th>Status</th><th>Actions</th></tr>
+        </thead>
+        <tbody id="wifi-connections">
+            <!-- Rows populated dynamically -->
+        </tbody>
+    </table>
+
+    <!-- Add New Wi-Fi Connection -->
+    <h3>Add a New Wi-Fi Connection</h3>
+    <p>Note: The Wi-Fi network must be reachable for this to succeed</p>
+    <form method="POST" action="/wifi">
+        <label>SSID:
+            <input type="text" name="ssid" required />
+        </label>
+        <label>Password:
+            <input type="password" name="password" required />
+        </label>
+        <br/><br/>
+        <button type="submit" name="action" value="add">Add Connection</button>
+    </form>
+</body>
+</html>
+

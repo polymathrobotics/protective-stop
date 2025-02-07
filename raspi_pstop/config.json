@@ -1,0 +1,49 @@
+{
+  "shutdown": false,
+  "uuid": "00000000-0000-0000-0000-000000000001",
+  "battery_level": 100.0,
+  "target_pairs": [
+    {
+      "ip": "100.125.44.33",
+      "uuid": "00000000-0000-0000-0000-000000000000\t",
+      "status": "Not Connected"
+    }
+  ],
+  "TailscaleIP": "100.109.0.13",
+  "DNSName": "pstop-001.tail13f8.ts.net.",
+  "WifiSignal": 73,
+  "CellularSignal": 50,
+  "WifiConnections": [
+    {
+      "name": "prime_guest",
+      "device": "wlan0",
+      "state": "activated"
+    },
+    {
+      "name": "1-gsm",
+      "device": "cdc-wdm0",
+      "state": "activated"
+    },
+    {
+      "name": "tailscale0",
+      "device": "tailscale0",
+      "state": "activated"
+    },
+    {
+      "name": "lo",
+      "device": "lo",
+      "state": "activated"
+    },
+    {
+      "name": "ibaranov",
+      "device": "",
+      "state": ""
+    },
+    {
+      "name": "PSTOP-001-Hotspot",
+      "device": "",
+      "state": ""
+    }
+  ],
+  "status_summary": "Not Connected"
+}
