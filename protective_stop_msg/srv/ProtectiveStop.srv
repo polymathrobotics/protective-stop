@@ -1,0 +1,8 @@
+uint8 version
+string recv_uuid
+string sender_uuid
+
+---
+bool success
+string message
+ProtectiveStopParams params

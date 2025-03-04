@@ -1,0 +1,19 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>protective_stop_remote</name>
+  <version>0.0.0</version>
+  <description>Service for handling protective stop functionality</description>
+  <maintainer email="your@email.com">Your Name</maintainer>
+  <license>Apache-2.0</license>
+
+  <depend>python3-flask</depend>
+  <depend>python3-rpi.gpio</depend>
+  <depend>python3-smbus</depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+    <rosdep>
+      <depend>python3-roslibpy</depend>
+    </rosdep>
+  </export>
+</package>

@@ -1,0 +1,33 @@
+include:
+- project: 'polymathrobotics/ci/ci_templates'
+  ref: main
+  file: '/ros/ros2_package.impl.yml'
+- project: 'polymathrobotics/ci/ci_templates'
+  ref: main
+  file: '/docker-bake/bake_with_vcs_import_arm64.impl.yml'
+- project: 'polymathrobotics/ci/ci_templates'
+  ref: main
+  file: '/docker-bake/bake_with_vcs_import_x86.impl.yml'
+- project: 'polymathrobotics/ci/ci_templates'
+  ref: main
+  file: '/common/rules.yml'
+- project: 'polymathrobotics/ci/ci_templates'
+  ref: main
+  file: '/common/stages.yml'
+
+
+# EVALUATION
+build_and_test_protective_stop_node:
+  image: registry.gitlab.com/polymathrobotics/ros_base:humble
+  variables:
+    PACKAGE_NAME: protective_stop_node
+  extends: .ros2_build_and_test
+
+eval_protective_stop_node:
+  extends: .ros2_evaluate
+  needs:
+    - job: build_and_test_protective_stop_node
+      artifacts: true
+  artifacts:
+      reports:
+        junit: $ARTIFACTS_PATH/test_results/test_results/$PACKAGE_NAME/*.xml
