@@ -159,7 +159,7 @@ filter: drop-shadow(0px 4px 6.8px rgba(0, 0, 0, 0.25));
 
   const animation = `transition-colors duration-200`;
   const btn = React.useMemo(() => {
-    const Wrapper = ({ children }) =>
+    const Wrapper = ({ children}) =>
       clickable ? (
         <div
           style={{ backgroundColor: primaryColor }}

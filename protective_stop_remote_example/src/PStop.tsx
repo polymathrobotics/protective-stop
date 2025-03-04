@@ -63,11 +63,11 @@ function useThrottle(cb, delay) {
 
  - reconnection attempt
   - reconnect now button
- - reconcile status of remote pstop with pstop node. 
+ - reconcile status of remote pstop with pstop node.
  - how to err if timeout is exceeded on client?
- - add settings for receiver id, sender id, etc 
+ - add settings for receiver id, sender id, etc
  - add nice readable errrors for each state
- * 
+ *
  */
 
 const PStop = React.memo(() => {
@@ -106,7 +106,7 @@ const PStop = React.memo(() => {
     try {
       setError(null);
       const client = new PStopClient({
-        receiverId: "1111",
+        receiverId: "xxxx",
       });
       setClient(client);
       client.addMessageListener((msg) => {
