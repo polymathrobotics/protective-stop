@@ -1,0 +1,10 @@
+python3-roslibpy:
+  ubuntu: 
+    pip: 
+      - roslibpy
+  debian: 
+    pip: 
+      - roslibpy
+  osx: 
+    pip: 
+      - roslibpy
