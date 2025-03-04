@@ -36,7 +36,7 @@ suite("client", () => {
 
   test("Can activate the protective stop", async () => {
     const pStopClient = new PStopClient({
-      receiverId: "1111",
+      receiverId: "xxxx",
     });
     const resp = await pStopClient.activate();
     expect(resp.success).toBe(true);
@@ -51,22 +51,22 @@ suite("client", () => {
 
   test.skip("Throws if activated twice synchronosly", async () => {
     const senderId = "2222";
-    const pStopClient = new PStopClient({ receiverId: "1111", senderId });
+    const pStopClient = new PStopClient({ receiverId: "xxxx", senderId });
     const promise = pStopClient.activate();
     // Immediately abort
     pStopClient.abort();
 
     expect(resp.success).toBe(true);
-    const pStopClient2 = new PStopClient({ receiverId: "1111", senderId });
+    const pStopClient2 = new PStopClient({ receiverId: "xxxx", senderId });
   });
 
   test.skip("Throws if activated twice", async () => {
     const senderId = "2222";
-    const pStopClient = new PStopClient({ receiverId: "1111", senderId });
+    const pStopClient = new PStopClient({ receiverId: "xxxx", senderId });
     const resp = await pStopClient.activate();
     expect(resp.success).toBe(true);
 
-    const pStopClient2 = new PStopClient({ receiverId: "1111", senderId });
+    const pStopClient2 = new PStopClient({ receiverId: "xxxx", senderId });
     let caughtFlag = false;
     try {
       await pStopClient2.activate();
@@ -85,7 +85,7 @@ suite("client", () => {
 
   test("Can deactivate the protective stop", async () => {
     const pStopClient = new PStopClient({
-      receiverId: "1111",
+      receiverId: "xxxx",
     });
     const active = await pStopClient.activate();
     expect(active.success).toBe(true);
@@ -96,7 +96,7 @@ suite("client", () => {
 
   test.skip("Can initiate a pstop request", async () => {
     const pStopClient = new PStopClient({
-      receiverId: "1111",
+      receiverId: "xxxx",
     });
 
     const pressed = signal();
@@ -137,7 +137,7 @@ suite("client", () => {
 
   test.skip("Records missed heartbeats", async () => {
     const pStopClient = new PStopClient({
-      receiverId: "1111",
+      receiverId: "xxxx",
     });
     const active = await pStopClient.activate();
     expect(active.success).toBe(true);
@@ -171,7 +171,7 @@ suite("client", () => {
 
   test.skip("Can recover from missed heartbeats", async () => {
     const pStopClient = new PStopClient({
-      receiverId: "1111",
+      receiverId: "xxxx",
     });
     const active = await pStopClient.activate();
     expect(active.success).toBe(true);
@@ -216,7 +216,7 @@ suite("client", () => {
 
   test.skip("Watchdog catches unstable robot connections and can recover", async () => {
     const pStopClient = new PStopClient({
-      receiverId: "1111",
+      receiverId: "xxxx",
     });
     const active = await pStopClient.activate();
     expect(active.success).toBe(true);

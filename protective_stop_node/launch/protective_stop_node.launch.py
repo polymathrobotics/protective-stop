@@ -7,14 +7,15 @@ def generate_launch_description():
     machine_uuid = LaunchConfiguration("machine_uuid")
     machine_uuid_arg = DeclareLaunchArgument(
         "machine_uuid",
-        default_value="1111",
+        # TODO(troy): Set to an actual UUID once the tooling around this is better.
+        default_value="xxxx",
         description="Machine UUID",
     )
 
     heartbeat_timeout = LaunchConfiguration("heartbeat_timeout")
     heartbeat_timeout_arg = DeclareLaunchArgument(
         "heartbeat_timeout",
-        default_value=0.1
+        default_value='0.1',
         description="Heartbeat timeout",
     )
 
