@@ -19,6 +19,8 @@ from protective_stop_node.models import (
     ConnectionStatus,
 )
 
+from std_srvs.srv import Trigger
+
 from rclpy.duration import Duration
 from rclpy.time import Time
 import traceback
@@ -93,7 +95,7 @@ class ProtectiveStopNode(LifecycleNode):
         )
 
         self.unsafe_service = self.create_service(
-            ProtectiveStopSrv, f"{self.get_name()}/toggle_unsafe_mode", self.toggle_unsafe_mode
+            Trigger, f"{self.get_name()}/toggle_unsafe_mode", self.toggle_unsafe_mode
         )
 
     def on_configure(self, state: State) -> TransitionCallbackReturn:
@@ -183,14 +185,18 @@ Node configured successfully with:
         """
 
         self.unsafe_mode = not self.unsafe_mode
+
+        unsafe_string = 'Unsafe Mode Enabled' if self.unsafe_mode else 'Unsafe Mode Disabled'
+
         self.get_logger().warn(
             colored(
-                f"Received request to toggle unsafe mode. Current state: {self.unsafe_mode}",
+                f"Received request to toggle unsafe mode. Current state: {unsafe_string}",
                 "yellow",
             )
         )
 
         response.success = True
+        response.message = f"Unsafe Mode Toggled to {unsafe_string}"
 
         return response
 
