@@ -1,0 +1,6 @@
+# set to true to bypass the pstop (effectively disabling it). Set to false to re-enable protective stop
+bool bypass
+---
+# success and message indicate successful toggling of the pstop mode and if the protective stop is currently enabled
+bool success
+bool protective_stop_enabled

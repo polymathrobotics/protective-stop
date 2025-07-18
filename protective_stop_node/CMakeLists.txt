@@ -33,6 +33,10 @@ if(BUILD_TESTING)
     test/launch.test.py
     TIMEOUT "60"
   )
+  add_launch_test(
+    test/unsafe_mode.test.py
+    TIMEOUT "60"
+  )
 endif()
 
 ament_package()
