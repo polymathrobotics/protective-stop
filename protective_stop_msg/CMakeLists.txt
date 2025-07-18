@@ -20,6 +20,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/ProtectiveStopHeartbeat.msg"
   "msg/ProtectiveStopDebug.msg"
   "msg/ProtectiveStopDebugRemote.msg"
+  "srv/BypassProtectiveStop.srv"
   "srv/ProtectiveStop.srv"
   DEPENDENCIES lifecycle_msgs builtin_interfaces unique_identifier_msgs
 )

@@ -7,6 +7,7 @@ from protective_stop_msg.msg import (
     ProtectiveStopDebug,
 )
 from protective_stop_msg.srv import (
+    BypassProtectiveStop,
     ProtectiveStop as ProtectiveStopSrv,
 )
 from termcolor import colored
@@ -19,10 +20,7 @@ from protective_stop_node.models import (
     ConnectionStatus,
 )
 
-from std_srvs.srv import Trigger
-
 from rclpy.duration import Duration
-from rclpy.time import Time
 import traceback
 from functools import partial
 
@@ -95,7 +93,7 @@ class ProtectiveStopNode(LifecycleNode):
         )
 
         self.unsafe_service = self.create_service(
-            Trigger, f"{self.get_name()}/toggle_unsafe_mode", self.toggle_unsafe_mode
+            BypassProtectiveStop, f"{self.get_name()}/bypass_protective_stop", self.set_unsafe_mode
         )
 
     def on_configure(self, state: State) -> TransitionCallbackReturn:
@@ -173,7 +171,7 @@ Node configured successfully with:
         self.get_logger().info(f"Shutting down node '{self.get_name()}' in state '{state.label}'.")
         return TransitionCallbackReturn.SUCCESS
 
-    def toggle_unsafe_mode(self, request, response):
+    def set_unsafe_mode(self, request, response):
         """
         USE WITH CAUTION
 
@@ -183,21 +181,18 @@ Node configured successfully with:
         of connection with the protective_stop_node, the protective_stop_node
         will send healthy signals.
         """
-
-        self.unsafe_mode = not self.unsafe_mode
-
-        unsafe_string = 'Unsafe Mode Enabled' if self.unsafe_mode else 'Unsafe Mode Disabled'
-
+        self.unsafe_mode = request.bypass
+ 
+        unsafe_string = 'Unsafe Mode ENABLED. If you lose connection to your protective stop on machine, it will continue to produce a heartbeat.' if self.unsafe_mode else 'Unsafe Mode DISABLED.'
         self.get_logger().warn(
             colored(
-                f"Received request to toggle unsafe mode. Current state: {unsafe_string}",
+                f"Received request to toggle unsafe mode / bypass the pstop. Current state: {unsafe_string}",
                 "yellow",
             )
         )
 
         response.success = True
-        response.message = f"Unsafe Mode Toggled to {unsafe_string}"
-
+        response.protective_stop_enabled = not self.unsafe_mode
         return response
 
     def state_transition_callback(self, activate: bool, request, response):
