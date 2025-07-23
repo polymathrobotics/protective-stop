@@ -114,7 +114,6 @@ def generate_test_description():
 """
 TODO(troy):
 - put launch test on different domain_id to maintain purity
-
 """
 
 
@@ -135,14 +134,11 @@ class TestProtectiveStopNode(unittest.TestCase):
         self.node = rclpy.create_node(
             "test_node",
         )
-        # self.node.declare_parameter("use_sim_time", True)
         params = self.node.get_parameters(["use_sim_time"])
         if params:
             use_sim_time_value = params[0].value
             print("use_sim_time:", use_sim_time_value)
 
-        # self.executor = SingleThreadedExecutor()
-        # self.executor.add_node(self.node)
 
         self.activating_msgs = []
         self.pstop_msgs = []
@@ -181,7 +177,6 @@ class TestProtectiveStopNode(unittest.TestCase):
             PROTECTIVE_STOP_HB_TOPIC,
             self.protective_stop_hb_callback,
             1,
-            # qos_profile=QoSProfile(reliability=ReliabilityPolicy.RELIABLE, depth=10),
         )
 
         self.pstop_debug_subscriber = self.node.create_subscription(
@@ -189,31 +184,13 @@ class TestProtectiveStopNode(unittest.TestCase):
             PROTECTIVE_STOP_DEBUG_TOPIC,
             self.protective_stop_debug_callback,
             1,
-            # qos_profile=QoSProfile(reliability=ReliabilityPolicy.RELIABLE, depth=10),
         )
 
-        # self.spin_thread = threading.Thread(target=self._spin_fn, args=(self.executor,))
-        # self.spin_thread.start()
-
-        # self.node.get_logger().info("SETUP")
-        # while rclpy.ok():
-        # sub_count = self.pstop_publisher.get_subscription_count()
-        # if sub_count >= 2:
-        # break
-        # else:
-        # print(f"Waiting for subscriptions... {sub_count}")
-        # time.sleep(0.01)
-
     def tearDown(self):
-        # self.spin_thread.join()
         self.node.destroy_node()
-        # self.executor.shutdown()
 
-    # def _spin_fn(self, executor):
-    # rclpy.spin(self.node, executor=executor)
 
     def protective_stop_debug_callback(self, msg):
-        # self.node.get_logger().info("Received message")
         self.pstop_debug_msgs.append(msg)
 
     def protective_stop_hb_callback(self, msg):

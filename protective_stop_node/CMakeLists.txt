@@ -12,17 +12,6 @@ ament_python_install_package(protective_stop_node
   SCRIPTS_DESTINATION lib/${PROJECT_NAME}
 )
 
-# install(DIRECTORY
-  # protective_stop_node
-  # DESTINATION lib/${PROJECT_NAME}
-# )
-
-# Install Python executables
-# install(PROGRAMS
-  # protective_stop_node/protective_stop_node.py
-  # DESTINATION lib/${PROJECT_NAME}
-# )
-
 install(DIRECTORY launch
   DESTINATION share/${PROJECT_NAME})
 
