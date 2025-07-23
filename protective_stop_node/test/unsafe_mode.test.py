@@ -1,24 +1,16 @@
 # !/usr/bin/env python3
 import pytest
-from protective_stop_msg.msg import (
-    ProtectiveStopHeartbeat,
-)
-import threading
 import launch_testing.actions
 import launch_testing
 from launch_ros.actions import Node as LaunchNode
 from launch import LaunchDescription
-from protective_stop_msg.srv import (
-    BypassProtectiveStop,
-)
+from protective_stop_msg.srv import BypassProtectiveStop
+from protective_stop_msg.msg import ProtectiveStopHeartbeat
 
-from protective_stop_node.protective_stop_node import (
-    PROTECTIVE_STOP_HB_TOPIC,
-)
+from protective_stop_node.test_utils.base_test import BaseTestProtectiveStopNode
+from protective_stop_node.protective_stop_node import PROTECTIVE_STOP_HB_TOPIC
 import rclpy
 import time
-import unittest
-import uuid
 
 """
 Separating out the unsafe mode tests to a separate file to keep the test file clean and unlikely to suffer any kind of cross-test pollution.
@@ -71,43 +63,13 @@ def generate_test_description():
     )
 
 
-class TestProtectiveStopNode(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        rclpy.init()
-
-    @classmethod
-    def tearDownClass(cls):
-        if rclpy.ok():
-            rclpy.shutdown()
-
-    def setUp(self):
-        self.done_event = threading.Event()
-        self.uuid = str(uuid.uuid4())
-
-        self.node = rclpy.create_node(
-            "test_node",
-        )
-        self.pstop_hb_msgs = []
-
-        self.unsafe_mode_client = self.node.create_client(
-            BypassProtectiveStop, "/protective_stop_node/bypass_protective_stop"
-        )
-        if not self.unsafe_mode_client.wait_for_service(timeout_sec=5.0):
-            self.fail("Service /protective_stop_node/bypass_protective_stop not available")
-
-        self.pstop_bool_subscriber = self.node.create_subscription(
-            ProtectiveStopHeartbeat,
-            PROTECTIVE_STOP_HB_TOPIC,
-            self.protective_stop_hb_callback,
-            1,
-        )
-
-    def tearDown(self):
-        self.node.destroy_node()
-
-    def protective_stop_hb_callback(self, msg):
-        self.pstop_hb_msgs.append(msg)
+class TestProtectiveStopNode(BaseTestProtectiveStopNode):
+    # Set class variables for this specific test
+    machine_uuid = machine_uuid
+    TEST_HEARTBEAT_TIMEOUT_S = TEST_HEARTBEAT_TIMEOUT_S
+    TEST_DEACTIVATION_TIMEOUT_S = TEST_DEACTIVATION_TIMEOUT_S
+    TIMEOUT_PADDING = TIMEOUT_PADDING
+    MAX_PSTOP_COUNT = MAX_PSTOP_COUNT
 
     def test_unsafe_mode(self):
         request = BypassProtectiveStop.Request()

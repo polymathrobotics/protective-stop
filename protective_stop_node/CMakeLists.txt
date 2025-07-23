@@ -7,7 +7,6 @@ find_package(ament_cmake_python REQUIRED)
 find_package(rclpy REQUIRED)
 find_package(protective_stop_msg REQUIRED)
 
-# Install Python package (Ensure package directory exists)
 ament_python_install_package(protective_stop_node
   SCRIPTS_DESTINATION lib/${PROJECT_NAME}
 )
