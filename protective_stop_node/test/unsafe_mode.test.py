@@ -145,15 +145,3 @@ class TestProtectiveStopNode(unittest.TestCase):
             time.sleep(0.1)
 
         self.assertTrue(self.pstop_hb_msgs[-1].stop)
-
-"""
-todo:
-- unsafe mode!!
-- multiple p-stops test
-
-
-- publish heartbeat with foreign sender_uuid
-- test for two pstops that disagree on whether connected or not
-- what if two pstops with same uuid publish?
-
-"""
