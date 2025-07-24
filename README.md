@@ -43,13 +43,15 @@ To register a remote protective stop, the node also exposes two services:
 In order to integrate with the node, you have to activate it first before starting to send heartbeat messages.
 
 
-#### Unsafe Mode
+#### User Monitor Mode
 
 **USE WITH EXTREME CAUTION**
 
-In the case where your robot's internet connection is not reliable, there is an unsafe mode that you can trigger via the `/protective_stop/bypass_protective_stop` service, which will relax the requirement in the pstop node that it needs to be connected to a remote in order to send safe heartbeat messages to your controls system. Setting bypass to `true` will result in unsafe mode, while setting it to `false` will re-engage the pstop.
+In the case you have a test driver or other onsite personnel to operate a physical E-stop, you can set a parameter in the protective stop to indicate the robot does not need to be monitored by a remote protective stop:
 
-It is intentionally written as a service (instead of param) so users don't get lock in this param by default. It should only be used if you are aware of the risks.
+```bash
+ros2 param set /protective_stop_node is_user_monitored False
+```
 
 
 ### Protective Stop Remote

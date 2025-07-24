@@ -9,6 +9,7 @@ from launch_ros.substitutions import FindPackageShare
 from launch import LaunchDescription
 from protective_stop_msg.srv import ProtectiveStop as ProtectiveStopSrv
 
+from rcl_interfaces.srv import SetParameters
 from protective_stop_node.models import PStopRemoteStatusEnum
 from protective_stop_node.test_utils.helpers import build_pstop_message
 from protective_stop_node.test_utils.base_test import BaseTestProtectiveStopNode
@@ -51,13 +52,6 @@ TODO(troy):
 
 
 class TestProtectiveStopNode(BaseTestProtectiveStopNode):
-    # Set class variables for this specific test
-    machine_uuid = machine_uuid
-    TEST_HEARTBEAT_TIMEOUT_S = TEST_HEARTBEAT_TIMEOUT_S
-    TEST_DEACTIVATION_TIMEOUT_S = TEST_DEACTIVATION_TIMEOUT_S
-    TIMEOUT_PADDING = TIMEOUT_PADDING
-    MAX_PSTOP_COUNT = MAX_PSTOP_COUNT
-
     def test_activation_lifecycle(self):
         self._activate()
 
@@ -199,3 +193,42 @@ class TestProtectiveStopNode(BaseTestProtectiveStopNode):
         # Should be able to re-activate since it has been deactivated internally
         self._activate()
         self._deactivate()
+
+    def test_setting_unmonitored_mode(self):
+        # Setup params client
+        self.set_params_srv = self.node.create_client(SetParameters, '/protective_stop_node/set_parameters')
+        if not self.set_params_srv.wait_for_service(timeout_sec=5.0):
+            self.fail("Service /protective_stop_node/set_parameters not available")
+
+        future = self.set_params_srv.call_async(SetParameters.Request(
+            parameters=[
+                rclpy.parameter.Parameter("is_user_monitored", rclpy.Parameter.Type.BOOL, False).to_parameter_msg()
+            ]
+        ))
+        rclpy.spin_until_future_complete(self.node, future)
+
+
+        # Wait for a heartbeat with stop == False
+        timeout = 5.0
+        start_time = time.time()
+        while time.time() - start_time < timeout:
+            rclpy.spin_once(self.node, timeout_sec=0.1)
+            time.sleep(0.1)
+
+        self.assertFalse(self.pstop_hb_msgs[-1].stop)
+
+        # test re-enable pstop
+        future = self.set_params_srv.call_async(SetParameters.Request(
+            parameters=[
+                rclpy.parameter.Parameter("is_user_monitored", rclpy.Parameter.Type.BOOL, True).to_parameter_msg()
+            ]
+        ))
+        rclpy.spin_until_future_complete(self.node, future)
+
+        # Wait for a heartbeat with stop == True
+        start_time = time.time()
+        while time.time() - start_time < timeout:
+            rclpy.spin_once(self.node, timeout_sec=0.1)
+            time.sleep(0.1)
+
+        self.assertTrue(self.pstop_hb_msgs[-1].stop)

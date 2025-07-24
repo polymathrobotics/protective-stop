@@ -17,6 +17,10 @@ launch:
       name: max_pstop_count
       default: "3"
       description: "Maximum protective stop count"
+  - arg:
+      name: is_user_monitored
+      default: "true"
+      description: "Enable or disable user monitoring mode"
   - node:
       pkg: protective_stop_node
       exec: protective_stop_node
@@ -31,6 +35,8 @@ launch:
           value: $(var deactivation_timeout)
         - name: max_pstop_count
           value: $(var max_pstop_count)
+        - name: is_user_monitored
+          value: $(var is_user_monitored)
   - node:
       pkg: nav2_lifecycle_manager
       exec: lifecycle_manager

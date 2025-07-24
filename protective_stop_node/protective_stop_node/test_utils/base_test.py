@@ -10,7 +10,7 @@ from protective_stop_msg.msg import (
     ProtectiveStopDebug,
     ProtectiveStopHeartbeat,
 )
-from protective_stop_msg.srv import ProtectiveStop as ProtectiveStopSrv, BypassProtectiveStop
+from protective_stop_msg.srv import ProtectiveStop as ProtectiveStopSrv
 
 from protective_stop_node.protective_stop_node import (
     PROTECTIVE_STOP_TOPIC,
@@ -22,7 +22,7 @@ from protective_stop_node.test_utils.helpers import build_pstop_message
 
 class BaseTestProtectiveStopNode(unittest.TestCase):
     """Base test class for protective stop node tests."""
-    
+
     # These should be set by the child class or test module
     machine_uuid = "machine-uuid"
     TEST_HEARTBEAT_TIMEOUT_S = 0.1
@@ -67,12 +67,6 @@ class BaseTestProtectiveStopNode(unittest.TestCase):
         )
         if not self.deactivate_client.wait_for_service(timeout_sec=5.0):
             self.fail("Service /protective_stop_node/deactivate not available")
-
-        self.unsafe_mode_client = self.node.create_client(
-            BypassProtectiveStop, "/protective_stop_node/bypass_protective_stop"
-        )
-        if not self.unsafe_mode_client.wait_for_service(timeout_sec=5.0):
-            self.fail("Service /protective_stop_node/bypass_protective_stop not available")
 
         self.pstop_publisher = self.node.create_publisher(
             ProtectiveStop,
