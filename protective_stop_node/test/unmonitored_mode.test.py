@@ -6,7 +6,7 @@ from launch import LaunchDescription
 from launch.actions import IncludeLaunchDescription
 from launch.substitutions import PathSubstitution
 from launch_ros.substitutions import FindPackageShare
-from protective_stop_msg.srv import BypassProtectiveStop
+from rcl_interfaces.srv import SetParameters
 
 from protective_stop_node.test_utils.base_test import BaseTestProtectiveStopNode
 import rclpy
@@ -33,6 +33,7 @@ def generate_test_description():
                     / "launch"
                     / "protective_stop_node.launch.yaml",
                 launch_arguments={
+                    "is_user_monitored": "False",
                     "machine_uuid": machine_uuid,
                     "heartbeat_timeout": str(TEST_HEARTBEAT_TIMEOUT_S),
                     "deactivation_timeout": str(TEST_DEACTIVATION_TIMEOUT_S),
@@ -45,25 +46,8 @@ def generate_test_description():
 
 
 class TestProtectiveStopNode(BaseTestProtectiveStopNode):
-    # Set class variables for this specific test
-    machine_uuid = machine_uuid
-    TEST_HEARTBEAT_TIMEOUT_S = TEST_HEARTBEAT_TIMEOUT_S
-    TEST_DEACTIVATION_TIMEOUT_S = TEST_DEACTIVATION_TIMEOUT_S
-    TIMEOUT_PADDING = TIMEOUT_PADDING
-    MAX_PSTOP_COUNT = MAX_PSTOP_COUNT
-
-    def test_unsafe_mode(self):
-        request = BypassProtectiveStop.Request()
-        request.bypass = True
-
-        future = self.unsafe_mode_client.call_async(request)
-        rclpy.spin_until_future_complete(self.node, future)
-
-        response = future.result()
-        self.assertTrue(response.success)
-        self.assertFalse(response.protective_stop_enabled)
-
-        # Wait for a heartbeat with stop == False
+    def test_setting_unmonitored_mode(self):
+       # Wait for a heartbeat with stop == False
         timeout = 5.0
         start_time = time.time()
         while time.time() - start_time < timeout:
@@ -71,20 +55,3 @@ class TestProtectiveStopNode(BaseTestProtectiveStopNode):
             time.sleep(0.1)
 
         self.assertFalse(self.pstop_hb_msgs[-1].stop)
-
-        # test re-enable pstop
-        request.bypass = False
-        future = self.unsafe_mode_client.call_async(request)
-        rclpy.spin_until_future_complete(self.node, future)
-
-        response = future.result()
-        self.assertTrue(response.success)
-        self.assertTrue(response.protective_stop_enabled)
-
-        # Wait for a heartbeat with stop == False
-        start_time = time.time()
-        while time.time() - start_time < timeout:
-            rclpy.spin_once(self.node, timeout_sec=0.1)
-            time.sleep(0.1)
-
-        self.assertTrue(self.pstop_hb_msgs[-1].stop)

@@ -7,7 +7,6 @@ from protective_stop_msg.msg import (
     ProtectiveStopDebug,
 )
 from protective_stop_msg.srv import (
-    BypassProtectiveStop,
     ProtectiveStop as ProtectiveStopSrv,
 )
 from termcolor import colored
@@ -27,7 +26,7 @@ from functools import partial
 
 from rclpy.lifecycle import State, TransitionCallbackReturn, LifecycleNode
 
-from rcl_interfaces.msg import ParameterDescriptor
+from rcl_interfaces.msg import ParameterDescriptor, SetParametersResult
 
 
 PROTECTIVE_STOP_TOPIC = "/protective_stop"
@@ -67,19 +66,30 @@ class ProtectiveStopNode(LifecycleNode):
                 description="Maximum number of pstops that can be registered to the protective stop node"
             ),
         )
+
+        self.declare_parameter(
+            "is_user_monitored",
+            True,
+            ParameterDescriptor(
+                description="If True, the node will monitor connected pstops and enforce their state. If False, it will not enforce that a pstop remote is connected to the node in order for it to send healthy heartbeats."
+            ),
+        )
+
         # Dictionary to store all connected PStops
         self.connected_remote_pstop_state = {}
         self.connected_remote_pstop_state_lock = threading.Lock()
 
-        self.hb_timer = None  # Timer will be initialized during configuration
-        self.debug_timer = None  # Timer will be initialized during configuration
-        self.publisher_pstop = None  # To be initialized in on_activate
-        self.machine_uuid = None  # To be initialized in on_configure
-        self.publisher_hb = None  # To be initialized in on_activate
-        self.param_event_handler = None  # To be initialized in on_configure
+        """
+        Initialize the node's state and parameters
+        """
+        self.hb_timer = None
+        self.debug_timer = None
+        self.publisher_pstop = None
+        self.machine_uuid = None
+        self.publisher_hb = None
+        self.param_event_handler = None
+        self.is_user_monitored = None
 
-        self.unsafe_mode = False
-        self.get_logger().info("protective stop node has been initialized")
 
         self.activate_service = self.create_service(
             ProtectiveStopSrv,
@@ -92,9 +102,8 @@ class ProtectiveStopNode(LifecycleNode):
             partial(self.state_transition_callback, False),
         )
 
-        self.unsafe_service = self.create_service(
-            BypassProtectiveStop, f"{self.get_name()}/bypass_protective_stop", self.set_unsafe_mode
-        )
+        self.add_on_set_parameters_callback(self.parameters_callback)
+
 
     def on_configure(self, state: State) -> TransitionCallbackReturn:
         self.get_logger().info(f"Configuring node '{self.get_name()}'  in state '{state.label}'.")
@@ -112,6 +121,11 @@ class ProtectiveStopNode(LifecycleNode):
             self.get_parameter("max_pstop_count").get_parameter_value().integer_value
         )
 
+        self.is_user_monitored = (
+            self.get_parameter("is_user_monitored").get_parameter_value().bool_value
+        )
+        self.set_is_user_monitored(self.is_user_monitored)
+
         self.get_logger().info(
             colored(
                 f"""
@@ -119,7 +133,9 @@ Node configured successfully with:
     - machine_uuid: '{self.machine_uuid}'.
     - heartbeat timeout: {self.heartbeat_timeout}
     - max pstop count: {self.max_pstop_count}
-    - deactivation timeout: {self.deactivation_timeout}""",
+    - deactivation timeout: {self.deactivation_timeout}
+    - user monitor mode: {self.is_user_monitored}
+    """,
                 "cyan",
             )
         )
@@ -171,7 +187,19 @@ Node configured successfully with:
         self.get_logger().info(f"Shutting down node '{self.get_name()}' in state '{state.label}'.")
         return TransitionCallbackReturn.SUCCESS
 
-    def set_unsafe_mode(self, request, response):
+    def parameters_callback(self, params):
+        """
+        Callback for parameter updates
+        """
+        for param in params:
+            if param.name == "is_user_monitored":
+                self.set_is_user_monitored(param.value)
+        return SetParametersResult(
+            successful=True,
+            reason="Parameter update processed successfully."
+        )
+
+    def set_is_user_monitored(self, is_user_monitored: bool):
         """
         USE WITH CAUTION
 
@@ -181,19 +209,15 @@ Node configured successfully with:
         of connection with the protective_stop_node, the protective_stop_node
         will send healthy signals.
         """
-        self.unsafe_mode = request.bypass
- 
-        unsafe_string = 'Unsafe Mode ENABLED. If you lose connection to your protective stop on machine, it will continue to produce a heartbeat.' if self.unsafe_mode else 'Unsafe Mode DISABLED.'
+        self.is_user_monitored = is_user_monitored
+
+        warning_str = 'User Monitor Mode DISABLED. If you lose connection to your protective stop on machine, it will continue to produce a heartbeat.' if not self.is_user_monitored else 'User Monitor Mode ENABLED.'
         self.get_logger().warn(
             colored(
-                f"Received request to toggle unsafe mode / bypass the pstop. Current state: {unsafe_string}",
+                f"Received request to set monitoring mode. Current state: {warning_str}",
                 "yellow",
             )
         )
-
-        response.success = True
-        response.protective_stop_enabled = not self.unsafe_mode
-        return response
 
     def state_transition_callback(self, activate: bool, request, response):
         """
@@ -384,7 +408,7 @@ Node configured successfully with:
         Handles loss of comms or timeouts
         if a pstop is connected, and is in active mode, it must report in at least every heartbeat_timeout seconds
         """
-        stop = None if not self.unsafe_mode else False
+        stop = None if self.is_user_monitored else False
 
         # Find all non-deactivated pstops
         if not len(

@@ -22,7 +22,7 @@ if(BUILD_TESTING)
     TIMEOUT "60"
   )
   add_launch_test(
-    test/unsafe_mode.test.py
+    test/unmonitored_mode.test.py
     TIMEOUT "60"
   )
 endif()
