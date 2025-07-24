@@ -1,5 +1,0 @@
-repositories:
-  protective_stop:
-    type: git
-    url: git@gitlab.com:polymathrobotics/protective-stop.git
-    version: main
