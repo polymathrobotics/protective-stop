@@ -1,0 +1,47 @@
+---
+
+launch:
+  - arg:
+      name: machine_uuid
+      default: "xxxx"
+      description: "Machine UUID"
+  - arg:
+      name: heartbeat_timeout
+      default: "0.1"
+      description: "Heartbeat timeout"
+  - arg:
+      name: deactivation_timeout
+      default: "3.0"
+      description: "Deactivation timeout"
+  - arg:
+      name: max_pstop_count
+      default: "3"
+      description: "Maximum protective stop count"
+  - node:
+      pkg: protective_stop_node
+      exec: protective_stop_node
+      name: protective_stop_node
+      output: screen
+      param:
+        - name: machine_uuid
+          value: $(var machine_uuid)
+        - name: heartbeat_timeout
+          value: $(var heartbeat_timeout)
+        - name: deactivation_timeout
+          value: $(var deactivation_timeout)
+        - name: max_pstop_count
+          value: $(var max_pstop_count)
+  - node:
+      pkg: nav2_lifecycle_manager
+      exec: lifecycle_manager
+      name: lifecycle_manager_navigation
+      output: screen
+      param:
+        - name: autostart
+          value: true
+        - name: bond_timeout
+          value: 0.0
+        - name: node_names
+          value: ["protective_stop_node"]
+        - name: use_sim_time
+          value: true

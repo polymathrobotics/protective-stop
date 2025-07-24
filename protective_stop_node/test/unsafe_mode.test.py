@@ -2,13 +2,13 @@
 import pytest
 import launch_testing.actions
 import launch_testing
-from launch_ros.actions import Node as LaunchNode
 from launch import LaunchDescription
+from launch.actions import IncludeLaunchDescription
+from launch.substitutions import PathSubstitution
+from launch_ros.substitutions import FindPackageShare
 from protective_stop_msg.srv import BypassProtectiveStop
-from protective_stop_msg.msg import ProtectiveStopHeartbeat
 
 from protective_stop_node.test_utils.base_test import BaseTestProtectiveStopNode
-from protective_stop_node.protective_stop_node import PROTECTIVE_STOP_HB_TOPIC
 import rclpy
 import time
 
@@ -26,40 +26,21 @@ MAX_PSTOP_COUNT = 3
 
 @pytest.mark.launch_test
 def generate_test_description():
-    # Start in debug mode log level
-    protective_stop_node = LaunchNode(
-        package="protective_stop_node",
-        executable="protective_stop_node",
-        name="protective_stop_node",
-        output="screen",
-        parameters=[
-            {"machine_uuid": machine_uuid},
-            {"heartbeat_timeout": TEST_HEARTBEAT_TIMEOUT_S},
-            {"deactivation_timeout": TEST_DEACTIVATION_TIMEOUT_S},
-            {"max_pstop_count": MAX_PSTOP_COUNT},
-        ],
-    )
-
-    # Lifecycle Manager
-    nav2_lifecycle_manager = LaunchNode(
-        package="nav2_lifecycle_manager",
-        executable="lifecycle_manager",
-        name="lifecycle_manager_navigation",
-        output="screen",
-        arguments=["--ros-args", "--log-level", "INFO"],
-        parameters=[
-            {"autostart": True},
-            {"bond_timeout": 0.0},
-            {"node_names": ["protective_stop_node"]},
-        ],
-    )
-
-    context = {"protective_stop_node": protective_stop_node}
-    return (
-        LaunchDescription(
-            [protective_stop_node, nav2_lifecycle_manager, launch_testing.actions.ReadyToTest()]
-        ),
-        context,
+    return LaunchDescription(
+        [
+            IncludeLaunchDescription(
+                PathSubstitution(FindPackageShare("protective_stop_node"))
+                    / "launch"
+                    / "protective_stop_node.launch.yaml",
+                launch_arguments={
+                    "machine_uuid": machine_uuid,
+                    "heartbeat_timeout": str(TEST_HEARTBEAT_TIMEOUT_S),
+                    "deactivation_timeout": str(TEST_DEACTIVATION_TIMEOUT_S),
+                    "max_pstop_count": str(MAX_PSTOP_COUNT),
+                }.items(),
+            ),
+            launch_testing.actions.ReadyToTest(),
+        ]
     )
 
 
