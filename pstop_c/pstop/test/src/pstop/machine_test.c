@@ -247,19 +247,23 @@ test_bond_ok_stop(void)
 
     TEST_ASSERT_EQUAL(0, robot_status_counter);
 
+    msg.message = PSTOP_MESSAGE_STOP;
+    TEST_ASSERT_EQUAL(PSTOP_OK, machine.handle_machine_message_cb(&machine, &msg, &resp));
+    TEST_ASSERT_EQUAL(PSTOP_MESSAGE_STOP, resp_obj.message);
+
     for(int i = 0; i < 10; ++i) {
         msg.message = PSTOP_MESSAGE_OK;
         TEST_ASSERT_EQUAL(PSTOP_OK, machine.handle_machine_message_cb(&machine, &msg, &resp));
         TEST_ASSERT_EQUAL(PSTOP_MESSAGE_OK, resp_obj.message);
         TEST_ASSERT_EQUAL(PSTOP_STATUS_OK, lastStatus);
-        TEST_ASSERT_EQUAL(i + 1, robot_status_counter);
+        TEST_ASSERT_EQUAL(i + 2, robot_status_counter);
     }
 
     msg.message = PSTOP_MESSAGE_STOP;
     TEST_ASSERT_EQUAL(PSTOP_OK, machine.handle_machine_message_cb(&machine, &msg, &resp));
     TEST_ASSERT_EQUAL(PSTOP_MESSAGE_STOP, resp_obj.message);
     TEST_ASSERT_EQUAL(PSTOP_STATUS_STOP, lastStatus);
-    TEST_ASSERT_EQUAL(11, robot_status_counter);
+    TEST_ASSERT_EQUAL(12, robot_status_counter);
 }
 
 int

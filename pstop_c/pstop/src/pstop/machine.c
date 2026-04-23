@@ -58,6 +58,7 @@ handle_bond_msg(pstop_machine_t *machine, pstop_client_data_t *client, const pst
     init_new_client(&(machine->application), client, msg);
 
     client->client_state = PSTOP_CLIENT_BONDED;
+    machine->robot_state.restart_state = ROBOT_RESTART_STATE_NEED_STOP;
 
     // create BOND response
     resp->message = PSTOP_MESSAGE_BOND;
@@ -73,6 +74,21 @@ handle_ok_msg(pstop_machine_t *machine, pstop_client_data_t *client, const pstop
         resp->message = PSTOP_MESSAGE_UNBOND;
         return PSTOP_OK;
     }
+
+    if(machine->robot_state.restart_state == ROBOT_RESTART_STATE_NEED_STOP) {
+        resp->message = PSTOP_MESSAGE_STOP;
+        return PSTOP_OK;
+
+    }
+
+    // this isn't the client that requested the STOP
+    if((machine->robot_state.client_stop_id != 0U) && (machine->robot_state.client_stop_id != client->local_client_id)) {
+        resp->message = PSTOP_MESSAGE_STOP;
+        return PSTOP_OK;
+    }
+
+    machine->robot_state.restart_state = ROBOT_RESTART_STATE_OK;
+    machine->robot_state.client_stop_id = 0U;
 
     resp->message = PSTOP_MESSAGE_OK;
 
@@ -92,6 +108,10 @@ handle_stop_msg(pstop_machine_t *machine, pstop_client_data_t *client, const pst
 
     resp->message = PSTOP_MESSAGE_STOP;
 
+    machine->robot_state.robot_state = ROBOT_STATE_STOPPED;
+    machine->robot_state.client_stop_id = client->local_client_id;
+    machine->robot_state.restart_state = ROBOT_RESTART_STATE_STOP_RECEIVED;
+
     // only if this client can send stop. Might need to go stop -> ok first
     machine->application.status_cb(PSTOP_STATUS_STOP);
 
@@ -108,6 +128,8 @@ handle_unbond_msg(pstop_machine_t *machine, pstop_client_data_t *client, const p
 
     // if this is the last client then stop the robot
     if(machine->pstops.num_clients == 0U) {
+        machine->robot_state.robot_state = ROBOT_STATE_STOPPED;
+        machine->robot_state.restart_state = ROBOT_RESTART_STATE_NEED_STOP;
         machine_stop_robot(machine);
     }
 
@@ -155,7 +177,6 @@ machine_handle_message(pstop_machine_t *machine, const pstop_msg_t *req, pstop_m
         }
     }
 
-
     switch(req->message) {
     case PSTOP_MESSAGE_BOND:
         return handle_bond_msg(machine, client, req, *resp);
@@ -163,11 +184,12 @@ machine_handle_message(pstop_machine_t *machine, const pstop_msg_t *req, pstop_m
         return handle_unbond_msg(machine, client, req, *resp);
     case PSTOP_MESSAGE_OK:
         return handle_ok_msg(machine, client, req, *resp);
-    case PSTOP_MESSAGE_STOP:
-        return handle_stop_msg(machine, client, req, *resp);
+    default:
+        break;
     }
 
-    return PSTOP_FATAL;
+    // by default we'll assume any invalid message means stop
+    return handle_stop_msg(machine, client, req, *resp);
 }
 
 static
@@ -222,6 +244,10 @@ machine_init(pstop_machine_t *machine, const pstop_application_t *app, pstop_cli
     machine->pstops.clients = clients;
     machine->pstops.max_clients = max_clients;
     machine->pstops.num_clients = 0U;
+
+    machine->robot_state.client_stop_id = 0U;
+    machine->robot_state.restart_state = ROBOT_RESTART_STATE_OK;
+    machine->robot_state.robot_state = ROBOT_STATE_OK;
 
     pstop_clients_init(&(machine->pstops));
 }

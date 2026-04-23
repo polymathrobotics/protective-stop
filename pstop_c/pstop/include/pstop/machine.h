@@ -29,6 +29,33 @@ typedef pstop_error_t (* machine_handle_message_t)(pstop_machine_t *machine, con
  */
 typedef pstop_error_t (* pstop_check_heartbeats_t)(pstop_machine_t *machine);
 
+#define ROBOT_STATE_OK      0
+#define ROBOT_STATE_STOPPED 1
+
+#define ROBOT_RESTART_STATE_OK 0
+#define ROBOT_RESTART_STATE_NEED_STOP 1
+#define ROBOT_RESTART_STATE_STOP_RECEIVED 2
+
+typedef struct {
+
+    /* Is the robot stopped or OK? */
+    int robot_state;
+
+    /**
+     * The client ID that caused the robot to stop if stopped.
+     * 0 if robot is not stopped or if applicaton just started
+     * Or the client ID that has started the stop/ok cycle to get robot moving.
+     */
+    uint32_t client_stop_id;
+
+    /**
+     * 0 = everything is OK
+     * 1 = need stop message
+     * 2 = stop received
+     */
+    int restart_state;
+} robot_state_t;
+
 typedef struct pstop_machine_t {
 
     protocol_handle_message_t handle_protocol_message_cb;
@@ -40,6 +67,8 @@ typedef struct pstop_machine_t {
     pstop_clients_t pstops;
 
     pstop_application_t application;
+
+    robot_state_t robot_state;
 
 } pstop_machine_t;
 

@@ -4,6 +4,8 @@
 
 #include "pstop/pstop_client.h"
 
+static uint32_t next_client_id = 0U;
+
 void
 pstop_client_init(pstop_client_data_t *client)
 {
@@ -17,6 +19,7 @@ pstop_client_init(pstop_client_data_t *client)
     client->lost_message_counter = 0U;
     client->missed_heartbeats_counter = 0U;
     client->client_state = PSTOP_CLIENT_UNKNOWN;
+    client->local_client_id = next_client_id++;
 }
 
 static

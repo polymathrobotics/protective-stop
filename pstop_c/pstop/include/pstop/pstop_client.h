@@ -18,6 +18,8 @@ typedef enum {
 
 typedef struct {
 
+    uint32_t local_client_id;
+
     device_id_t client_id;
 
     // last time we've heard from this client
