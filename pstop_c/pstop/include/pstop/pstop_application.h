@@ -17,6 +17,18 @@ typedef int      (* pstop_status_t)(pstop_status_message_t status);
 
 typedef void     (* log_message_t)(pstop_error_t error, const char *message);
 
+typedef struct {
+    /**
+     * Default timeout for all new clients.
+     */
+    uint64_t default_timeout_ms;
+
+    uint16_t max_lost_messages;
+
+    uint16_t max_missed_heartbeats;
+
+} pstop_application_config_t;
+
 typedef struct pstop_application_t {
 
     /**
@@ -47,14 +59,7 @@ typedef struct pstop_application_t {
      */
     log_message_t log_message_cb;
 
-    /**
-     * Default timeout for all new clients.
-     */
-    uint64_t default_timeout_ms;
-
-    uint16_t max_lost_messages;
-
-    uint16_t max_missed_heartbeats;
+    pstop_application_config_t app_config;
 
 } pstop_application_t;
 

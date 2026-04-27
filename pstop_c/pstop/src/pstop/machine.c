@@ -38,7 +38,7 @@ init_new_client(pstop_application_t *application, pstop_client_data_t *client, c
     device_id_copy(&(client->client_id), &(msg->id));
     client->last_timestamp = now;
     client->last_received_heartbeat = 0U;
-    client->heartbeat_ms = application->default_timeout_ms;
+    client->heartbeat_ms = application->app_config.default_timeout_ms;
     client->msg_counter = 1U;
     client->last_counter = 0U;
 
@@ -58,7 +58,13 @@ handle_bond_msg(pstop_machine_t *machine, pstop_client_data_t *client, const pst
     init_new_client(&(machine->application), client, msg);
 
     client->client_state = PSTOP_CLIENT_BONDED;
-    machine->robot_state.restart_state = ROBOT_RESTART_STATE_NEED_STOP;
+
+    if(machine->pstops.num_clients == 1U) {
+        // first client connecting then we'll need a stop/start sequence from anyone
+        machine->robot_state.restart_state = ROBOT_RESTART_STATE_NEED_STOP;
+        machine->robot_state.client_stop_id = 0U;
+        machine->robot_state.robot_state = ROBOT_STATE_STOPPED;
+    }
 
     // create BOND response
     resp->message = PSTOP_MESSAGE_BOND;
@@ -78,15 +84,18 @@ handle_ok_msg(pstop_machine_t *machine, pstop_client_data_t *client, const pstop
     if(machine->robot_state.restart_state == ROBOT_RESTART_STATE_NEED_STOP) {
         resp->message = PSTOP_MESSAGE_STOP;
         return PSTOP_OK;
-
     }
 
     // this isn't the client that requested the STOP
-    if((machine->robot_state.client_stop_id != 0U) && (machine->robot_state.client_stop_id != client->local_client_id)) {
-        resp->message = PSTOP_MESSAGE_STOP;
-        return PSTOP_OK;
+    if(machine->robot_state.client_stop_id != 0U) {
+        if(machine->robot_state.client_stop_id != client->local_client_id) {
+            resp->message = PSTOP_MESSAGE_STOP;
+            return PSTOP_OK;
+        }
     }
-
+    // either this is the client that started the STOP/OK cycle or we're in a
+    // normal case where STOP/OK has already finished.
+    machine->robot_state.robot_state = ROBOT_STATE_OK;
     machine->robot_state.restart_state = ROBOT_RESTART_STATE_OK;
     machine->robot_state.client_stop_id = 0U;
 
@@ -95,6 +104,26 @@ handle_ok_msg(pstop_machine_t *machine, pstop_client_data_t *client, const pstop
     machine->application.status_cb(PSTOP_STATUS_OK);
 
     return PSTOP_OK;
+}
+
+static
+void
+handle_need_stop(pstop_machine_t *machine, pstop_client_data_t *client, pstop_msg_t *resp)
+{
+    // if another node already started the stop/ok cycle then we'll expect that
+    // node to send us the OK.
+    if(machine->robot_state.client_stop_id == client->local_client_id) {
+        machine->robot_state.robot_state = ROBOT_STATE_STOPPED;
+        machine->robot_state.restart_state = ROBOT_RESTART_STATE_STOP_RECEIVED;
+    }
+    else {
+        if(machine->robot_state.client_stop_id == 0U) {
+            // we have a new client that sent us a STOP message.
+            machine->robot_state.robot_state = ROBOT_STATE_STOPPED;
+            machine->robot_state.client_stop_id = client->local_client_id;
+            machine->robot_state.restart_state = ROBOT_RESTART_STATE_STOP_RECEIVED;
+        }
+    }
 }
 
 static
@@ -108,11 +137,11 @@ handle_stop_msg(pstop_machine_t *machine, pstop_client_data_t *client, const pst
 
     resp->message = PSTOP_MESSAGE_STOP;
 
-    machine->robot_state.robot_state = ROBOT_STATE_STOPPED;
-    machine->robot_state.client_stop_id = client->local_client_id;
-    machine->robot_state.restart_state = ROBOT_RESTART_STATE_STOP_RECEIVED;
+    // do we need a stop/ok cycle?
+    if(machine->robot_state.restart_state == ROBOT_RESTART_STATE_NEED_STOP) {
+        handle_need_stop(machine, client, resp);
+    }
 
-    // only if this client can send stop. Might need to go stop -> ok first
     machine->application.status_cb(PSTOP_STATUS_STOP);
 
     return PSTOP_OK;
@@ -128,9 +157,7 @@ handle_unbond_msg(pstop_machine_t *machine, pstop_client_data_t *client, const p
 
     // if this is the last client then stop the robot
     if(machine->pstops.num_clients == 0U) {
-        machine->robot_state.robot_state = ROBOT_STATE_STOPPED;
-        machine->robot_state.restart_state = ROBOT_RESTART_STATE_NEED_STOP;
-        machine_stop_robot(machine);
+        machine_stop_robot(machine, NULL);
     }
 
     return PSTOP_OK;
@@ -156,7 +183,7 @@ machine_handle_message(pstop_machine_t *machine, const pstop_msg_t *req, pstop_m
        return result;
     }
 
-    (*resp)->heartbeat_timeout = machine->application.default_timeout_ms;
+    (*resp)->heartbeat_timeout = machine->application.app_config.default_timeout_ms;
 
     // can we find this client?
     pstop_client_data_t *client = pstop_client_get(&(machine->pstops), &(req->id));
@@ -225,7 +252,7 @@ machine_check_heartbeats(pstop_machine_t *machine)
         uint16_t missed = (uint16_t)(diff / client->heartbeat_ms);
         if(missed > client->missed_heartbeats_counter) {
             // trigger a stop!
-            machine_stop_robot(machine);
+            machine_stop_robot(machine, client);
             return PSTOP_MISSED_HEARTBEATS;
         }
     }
@@ -253,7 +280,14 @@ machine_init(pstop_machine_t *machine, const pstop_application_t *app, pstop_cli
 }
 
 void
-machine_stop_robot(pstop_machine_t *machine)
+machine_stop_robot(pstop_machine_t *machine, pstop_client_data_t *client)
 {
+    machine->robot_state.robot_state = ROBOT_STATE_STOPPED;
+    machine->robot_state.restart_state = ROBOT_RESTART_STATE_NEED_STOP;
+
+    if(client != NULL) {
+        machine->robot_state.client_stop_id = client->local_client_id;
+    }
+
     machine->application.status_cb(PSTOP_STATUS_STOP);
 }

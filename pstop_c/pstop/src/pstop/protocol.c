@@ -2,7 +2,7 @@
 #include <stdlib.h>
 
 #include "pstop/protocol.h"
-
+#if 0
 static
 void
 init_response_from_request(const pstop_msg_t *req, pstop_msg_t *resp)
@@ -12,6 +12,7 @@ init_response_from_request(const pstop_msg_t *req, pstop_msg_t *resp)
     resp->received_counter = req->counter;
     resp->received_stamp = req->stamp;
 }
+#endif
 
 static
 pstop_error_t
@@ -41,11 +42,11 @@ validate_message(pstop_machine_t *machine, pstop_client_data_t *client, const ps
     // check for lost messages
     if(req->counter != (client->msg_counter - 1U)) {
         client->lost_message_counter++;
-        if(client->lost_message_counter >= machine->application.max_lost_messages) {
+        if(client->lost_message_counter >= machine->application.app_config.max_lost_messages) {
             // too many lost messages
             // clean up this client
             *resp = NULL;
-            machine_stop_robot(machine);
+            machine_stop_robot(machine, NULL);
             return PSTOP_MSG_LOST;
         }
     }
@@ -79,6 +80,10 @@ protocol_handle_message(pstop_machine_t *machine, const pstop_msg_t *req, pstop_
     // now send the message to the machine for pstop handling.
     // This function will create a new client if necessary
     pstop_error_t result = machine->handle_machine_message_cb(machine, req, resp);
+
+    if(result != PSTOP_OK) {
+        return result;
+    }
 
     if(resp != NULL) {
         // add in response black channel values
