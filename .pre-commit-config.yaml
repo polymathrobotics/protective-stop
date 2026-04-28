@@ -1,8 +1,8 @@
 ---
 # Apply Polymath Code Standard formatters and linters
 repos:
-  - repo: ~/dev/polymath/infra/polymath_code_standard
-    rev: feafa20be0c307cccb867209885ce4f83a34e9ce
+  - repo: https://github.com/polymathrobotics/polymath_code_standard
+    rev: v2.1.1
     hooks:
       # Everything
       - id: polymath-general
