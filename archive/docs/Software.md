@@ -29,7 +29,7 @@
 
 4. Proceed with flashing the Pi — there will be a “write” and “verify” step.
 
-5. Remove microSD from your computer and insert it in the Raspberry Pi. Turn on power and wait a couple minutes for the Raspberry Pi to boot.  
+5. Remove microSD from your computer and insert it in the Raspberry Pi. Turn on power and wait a couple minutes for the Raspberry Pi to boot.
 
 6. You can use find the IP address of the Raspberry Pi by going on your computer and running `nmap -p 22 --open [your network range]`.
 - Your network range will be something like `192.168.93.0/24`, and can be found by running `ifconfig` or `ip addr`.
@@ -52,9 +52,9 @@ sudo tailscale up
 
 3. Install the following packages on the Raspberry Pi:
 - Install chrony with `sudo apt install chrony`
-- Install pip with `sudo apt install python3-pip -y` 
+- Install pip with `sudo apt install python3-pip -y`
 - Install PySerial with `sudo pip install pyserial --break-system-packages`
-- Install the roslibpy with: 
+- Install the roslibpy with:
 ```
 sudo apt install git-all
 git clone https://github.com/gramaziokohler/roslibpy.git
@@ -161,7 +161,7 @@ sudo pip3 install spidev
 3. Go in the Raspberry Pi directory with: `cd e-Paper/RaspberryPi_JetsonNano/`
 4. Set up the libraries with `sudo python3 [setup.py](http://setup.py/) install`
 5. Install flask with `pip install flask --break-system-packages`
-6. Configure the Raspberry Pi by typing `sudo raspi-config`. 
+6. Configure the Raspberry Pi by typing `sudo raspi-config`.
 - Go to `Choose Interfacing Options -> SPI -> Yes Enable SPI interface`
 <p align="center">
   <img width="30%" src="/docs/img/rpi-config.png"> <br><i> Raspberry Pi Config Menu </i>
@@ -190,7 +190,7 @@ source install/setup.bash
 In a terminal on your local machine where you have built and sourced the custom message type above:
 1. Launch a rosbridge_server with `ros2 launch rosbridge_server rosbridge_websocket_launch.xml`.
 - If you are running this in a Docker container, make sure that port 9090 is exposed by doing `docker run -p 9090:9090 ...`
-2. To run the roslibpy client, run `python roslibpy_client.py [ip address]`. 
+2. To run the roslibpy client, run `python roslibpy_client.py [ip address]`.
 - You can set a default ip address by altering line 12 of [`roslibpy_client.py`](../roslibpy_client.py):
 ```
 parser.add_argument('target', type=str, help='Target IP address', default='')

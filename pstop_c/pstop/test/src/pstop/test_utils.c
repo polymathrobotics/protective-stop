@@ -16,4 +16,3 @@ device_id_set(device_id_t *device_id, const char *id)
         memcpy(device_id->data, id, DEVICE_ID_LENGTH);
     }
 }
-

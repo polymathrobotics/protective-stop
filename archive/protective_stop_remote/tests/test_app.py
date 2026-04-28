@@ -9,6 +9,6 @@ def client():
 
 
 def test_data_endpoint(client):
-    response = client.get("/data")
+    response = client.get('/data')
     assert response.status_code == 200
-    assert response.json["status_summary"] == "Not Connected"
+    assert response.json['status_summary'] == 'Not Connected'

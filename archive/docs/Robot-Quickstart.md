@@ -33,7 +33,7 @@ source install/setup.bash
 In a terminal on your local machine where you have built and sourced the custom message type above:
 1. Launch a rosbridge_server with `ros2 launch rosbridge_server rosbridge_websocket_launch.xml`.
 - If you are running this in a Docker container, make sure that port 9090 is exposed by doing `docker run -p 9090:9090 ...`
-2. To run the roslibpy client, run `python roslibpy_client.py [ip address]`. 
+2. To run the roslibpy client, run `python roslibpy_client.py [ip address]`.
 - You can set a default ip address by altering line 12 of [`roslibpy_client.py`](../roslibpy_client.py):
 ```
 parser.add_argument('target', type=str, help='Target IP address', default='')

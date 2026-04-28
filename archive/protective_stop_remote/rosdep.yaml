@@ -1,10 +1,11 @@
+---
 python3-roslibpy:
-  ubuntu: 
-    pip: 
+  ubuntu:
+    pip:
       - roslibpy
-  debian: 
-    pip: 
+  debian:
+    pip:
       - roslibpy
-  osx: 
-    pip: 
+  osx:
+    pip:
       - roslibpy

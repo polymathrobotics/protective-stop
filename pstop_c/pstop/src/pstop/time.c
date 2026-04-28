@@ -16,4 +16,3 @@ time_get_now(void)
     return 0U;
 #endif
 }
-

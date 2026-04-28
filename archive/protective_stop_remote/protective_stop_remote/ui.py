@@ -1,6 +1,3 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-
 # Controls the LED ring, E paper display
 # Due to control of LED ring, must be run as root on raspi
 
@@ -19,44 +16,45 @@
 # ESTOP = Spinning Red
 # Lost Connection = Flashing Yellow
 
-from waveshare_epd import epd2in13_V4
-from PIL import Image, ImageDraw, ImageFont
-
+import logging
+import math
 import time
+
 import board
 import neopixel
-import logging
-
+from PIL import Image, ImageDraw, ImageFont
+from waveshare_epd import epd2in13_V4
 
 pixel_pin = board.D18
 # The number of NeoPixels
 num_pixels = 16
 ORDER = neopixel.GRB
 
-pixels = neopixel.NeoPixel(
-    pixel_pin, num_pixels, brightness=50, auto_write=False, pixel_order=ORDER
-)
+pixels = neopixel.NeoPixel(pixel_pin, num_pixels, brightness=50, auto_write=False, pixel_order=ORDER)
 
 # NeoPixel ring configuration
 PIXEL_PIN = board.D18  # GPIO pin connected to the NeoPixels
-NUM_PIXELS = 16        # Number of pixels in the ring
-BRIGHTNESS = 1       # Brightness of the LEDs (0.0 to 1.0)
-GAMMA = 1.8            # Gamma correction value for human eyesight
-FADE_FACTOR = 0.6      # Base fading factor for trail (stronger fade)
-TRAIL_LENGTH = 7       # Number of pixels in the fading trail
-FRAME_DELAY = 0.05     # Delay between frames in seconds
+NUM_PIXELS = 16  # Number of pixels in the ring
+BRIGHTNESS = 1  # Brightness of the LEDs (0.0 to 1.0)
+GAMMA = 1.8  # Gamma correction value for human eyesight
+FADE_FACTOR = 0.6  # Base fading factor for trail (stronger fade)
+TRAIL_LENGTH = 7  # Number of pixels in the fading trail
+FRAME_DELAY = 0.05  # Delay between frames in seconds
 
 font24 = ImageFont.truetype('/home/administrator/static/Font.ttc', 12)
 logo = Image.open('/home/administrator/static/images/polymath_logo_small.png')
+
 
 def gamma_correct(value, gamma):
     """Apply gamma correction to a value."""
     return int((value / 255) ** gamma * 255)
 
+
 def fade_pixel(color, factor):
     """Fade a color by a given factor with gamma correction."""
     return tuple(gamma_correct(int(c * factor), GAMMA) for c in color)
-    
+
+
 def fading_trail():
     """Create a fading trail effect with two red segments chasing each other."""
     segment1 = 0
@@ -84,10 +82,12 @@ def fading_trail():
         # Wait a bit before the next frame
         time.sleep(FRAME_DELAY)
 
+
 def solid_color(color):
     """Set all pixels to a solid color."""
     pixels.fill(color)
     pixels.show()
+
 
 def pulsing_color(color, duration=2):
     """Pulse the LEDs with the given color over a specified duration."""
@@ -99,6 +99,7 @@ def pulsing_color(color, duration=2):
         pixels.show()
         time.sleep(duration / steps)
 
+
 def flashing_color(color, interval=0.5):
     """Flash the LEDs on and off with the given color at a specified interval."""
     for _ in range(int(5 / interval)):
@@ -109,25 +110,24 @@ def flashing_color(color, interval=0.5):
         pixels.show()
         time.sleep(interval)
 
-def ui_node(shared):
 
+def ui_node(shared):
     # ========== E-Paper Setup ==========
     try:
         # Instantiate the display
         epd = epd2in13_V4.EPD()
-        logging.info("Initializing e-paper...")
+        logging.info('Initializing e-paper...')
         epd.init_fast()
-        #epd.init()
-        #epd.Clear(0xFF)
-        
+        # epd.init()
+        # epd.Clear(0xFF)
+
         # Display startup logo
         image1 = Image.new('1', (epd.height, epd.width), 255)  # 255: clear the frame
-        image1.paste(logo, (2,2))    
+        image1.paste(logo, (2, 2))
         epd.display(epd.getbuffer(image1))
 
-
     except IOError as e:
-        logging.error(f"E-Paper Initialization Error: {e}")
+        logging.error(f'E-Paper Initialization Error: {e}')
         epd = None  # If e-paper fails, we skip display updates
 
     # Update function for the E-Paper display layout
@@ -155,22 +155,21 @@ def ui_node(shared):
             high_level_status = shared.get('status_summary', 'Unknown')
 
             # Draw details
-            draw.text((start_x+34, start_y-2), f"{tailscale_dns}", font=font, fill=0)
-            draw.text((start_x+180, start_y+ 1 * line_spacing), f"Bat: {battery_level}%", font=font, fill=0)
-            draw.text((start_x+34, start_y + 1 * line_spacing), f"WiFi: {wifi_signal}%", font=font, fill=0)
-            draw.text((start_x+110, start_y + 1 * line_spacing), f"Cell: {cell_signal}%", font=font, fill=0)
-            draw.text((start_x, start_y + 2 * line_spacing), f"Status: {high_level_status}", font=font, fill=0)
-            draw.text((start_x, start_y + 3 * line_spacing), f"UUID: {uuid}", font=font, fill=0)
-            draw.text((start_x, start_y + 4 * line_spacing), f"Target UUID: {target_uuid}", font=font, fill=0)
-            draw.text((start_x, start_y + 5 * line_spacing), f"Target IP: {target_ip}", font=font, fill=0)
-
+            draw.text((start_x + 34, start_y - 2), f'{tailscale_dns}', font=font, fill=0)
+            draw.text((start_x + 180, start_y + 1 * line_spacing), f'Bat: {battery_level}%', font=font, fill=0)
+            draw.text((start_x + 34, start_y + 1 * line_spacing), f'WiFi: {wifi_signal}%', font=font, fill=0)
+            draw.text((start_x + 110, start_y + 1 * line_spacing), f'Cell: {cell_signal}%', font=font, fill=0)
+            draw.text((start_x, start_y + 2 * line_spacing), f'Status: {high_level_status}', font=font, fill=0)
+            draw.text((start_x, start_y + 3 * line_spacing), f'UUID: {uuid}', font=font, fill=0)
+            draw.text((start_x, start_y + 4 * line_spacing), f'Target UUID: {target_uuid}', font=font, fill=0)
+            draw.text((start_x, start_y + 5 * line_spacing), f'Target IP: {target_ip}', font=font, fill=0)
 
             # Update display
             epd.displayPartial(epd.getbuffer(image))
-            #epd.display_fast(epd.getbuffer(image))
+            # epd.display_fast(epd.getbuffer(image))
 
         except IOError as e:
-            logging.error(f"Display Update Error: {e}")
+            logging.error(f'Display Update Error: {e}')
 
     def display_shutdown_message():
         if epd:
@@ -184,13 +183,13 @@ def ui_node(shared):
                 uuid = shared.get('uuid', 'N/A').split('-')[-1]
                 tailscale_dns = shared.get('DNSName', 'N/A')[:-1]
                 battery_level = shared.get('battery_level', 'Unknown')
-                
-                text = "PSTOP Powered Off"
+
+                text = 'PSTOP Powered Off'
                 text_x, text_y = 10, 40  # Adjust positioning as needed
                 draw.text((text_x, text_y), text, font=font24, fill=0)
-                draw.text((text_x, text_y+ 1*20), f"{tailscale_dns}", font=font24, fill=0)
-                draw.text((text_x, text_y + 2 * 20), f"UUID: {uuid}", font=font24, fill=0)
-                draw.text((text_x, text_y + 3 * 20), f"Battery: {battery_level}%", font=font24, fill=0)
+                draw.text((text_x, text_y + 1 * 20), f'{tailscale_dns}', font=font24, fill=0)
+                draw.text((text_x, text_y + 2 * 20), f'UUID: {uuid}', font=font24, fill=0)
+                draw.text((text_x, text_y + 3 * 20), f'Battery: {battery_level}%', font=font24, fill=0)
 
                 # Display in partial update (for speed) or full update
                 epd.displayPartBaseImage(epd.getbuffer(image))
@@ -200,7 +199,7 @@ def ui_node(shared):
                 epd.sleep()
 
             except IOError as e:
-                logging.error(f"E-Paper Display Error: {e}")
+                logging.error(f'E-Paper Display Error: {e}')
 
     try:
         while True:
@@ -210,7 +209,7 @@ def ui_node(shared):
                 pixels.show()
                 display_shutdown_message()
                 break
-                
+
             if epd:
                 # Update e-paper display
                 update_display(shared, epd, font24)
@@ -218,19 +217,19 @@ def ui_node(shared):
             if 'status_summary' in shared:
                 status = shared['status_summary']
 
-                if status == "Not Connected":
+                if status == 'Not Connected':
                     solid_color((0, 0, 255))  # Solid Blue
 
-                elif status == "Connecting":
+                elif status == 'Connecting':
                     pulsing_color((0, 0, 255))  # Pulsing Blue
 
-                elif status == "OK":
+                elif status == 'OK':
                     solid_color((0, 255, 0))  # Solid Green
 
-                elif status == "ESTOP":
+                elif status == 'ESTOP':
                     fading_trail()  # Spinning Red (already implemented)
 
-                elif status == "Lost Connection":
+                elif status == 'Lost Connection':
                     flashing_color((255, 255, 0))  # Flashing Yellow
 
                 else:
@@ -239,11 +238,11 @@ def ui_node(shared):
 
             time.sleep(0.1)  # Adjust polling interval as needed
     except KeyboardInterrupt:
-        print("[UI Node] Shutting down")
+        print('[UI Node] Shutting down')
         pixels.fill((0, 0, 0))
         pixels.show()
 
+
 # Running standalone if needed
 if __name__ == '__main__':
-    ui_node(shared={'status_summary': "Not Connected"})
-
+    ui_node(shared={'status_summary': 'Not Connected'})
