@@ -64,3 +64,13 @@ In this repo currently, we've implemented it as a web client, but it can also be
 ### Foxglove Websocket Bridge
 
 The bridge acts as the proxy between the remote and the node, so the two can talk to one-another. If it is not online, the other components will fail gracefully.
+
+## Building the PSTOP C library
+
+```bash
+mkdir build
+cd build
+cmake ..
+make
+```
+
