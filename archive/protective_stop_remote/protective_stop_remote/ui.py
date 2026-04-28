@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Polymath Robotics, Inc.
+# SPDX-License-Identifier: Apache-2.0
 # Controls the LED ring, E paper display
 # Due to control of LED ring, must be run as root on raspi
 

@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Polymath Robotics, Inc.
+# SPDX-License-Identifier: Apache-2.0
 # Automatically started on boot, combines data from other nodes
 
 from multiprocessing import Manager, Process

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Polymath Robotics, Inc.
+// SPDX-License-Identifier: Apache-2.0
+
 #ifndef PSTOP_MACHINE_H
 #define PSTOP_MACHINE_H
 

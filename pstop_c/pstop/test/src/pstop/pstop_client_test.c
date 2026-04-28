@@ -1,4 +1,7 @@
 
+// SPDX-FileCopyrightText: 2026 Polymath Robotics, Inc.
+// SPDX-License-Identifier: Apache-2.0
+
 #include "pstop/pstop_client.h"
 
 #include <string.h>
