@@ -45,6 +45,7 @@ log_error(pstop_error_t error, const char *message)
 
 }
 
+static
 pstop_application_t pstop_app = {
     .get_time_cb = get_time,
     .machine_device_id.data = "testing",
@@ -58,7 +59,7 @@ pstop_application_t pstop_app = {
 
 #define MAX_CLIENTS 2U
 
-pstop_client_data_t pstop_clients[MAX_CLIENTS];
+static pstop_client_data_t pstop_clients[MAX_CLIENTS];
 
 static
 void
@@ -115,6 +116,8 @@ test_new_client_operator_allowed(void)
 
     TEST_ASSERT_EQUAL(PSTOP_OK, machine.handle_machine_message_cb(&machine, &msg, &resp));
     TEST_ASSERT_EQUAL(PSTOP_MESSAGE_BOND, resp->message);
+    TEST_ASSERT_EQUAL(101U, pstop_clients[0].last_timestamp);
+    TEST_ASSERT_EQUAL(60U, pstop_clients[0].heartbeat_ms);
 }
 
 static
@@ -222,7 +225,7 @@ test_bond_unbond(void)
     TEST_ASSERT_EQUAL(PSTOP_OK, machine.handle_machine_message_cb(&machine, &msg, &resp));
     TEST_ASSERT_EQUAL(PSTOP_MESSAGE_UNBOND, resp_obj.message);
     TEST_ASSERT_NULL(pstop_client_get(&(machine.pstops), &id));
-    TEST_ASSERT_EQUAL(0U, machine.pstops.num_clients);
+    TEST_ASSERT_EQUAL(0U, pstop_client_num_active(&(machine.pstops)));
     TEST_ASSERT_EQUAL(PSTOP_STATUS_STOP, lastStatus);
 }
 
@@ -339,6 +342,50 @@ test_bond_ok_stop(void)
 
 static
 void
+test_bond_stop_ok(void)
+{
+    pstop_machine_t machine;
+
+    machine_init(&machine, &pstop_app, pstop_clients, MAX_CLIENTS);
+
+    device_id_t id;
+    pstop_msg_t msg;
+    init_client(&id, &msg, "test1");
+
+    pstop_msg_t resp_obj;
+    pstop_message_init(&resp_obj);
+    pstop_msg_t *resp = &resp_obj;
+
+    operator_allowed_flag = 1;
+    current_time = 100U;
+
+    robot_status_counter = 0;
+
+    msg.message = PSTOP_MESSAGE_BOND;
+    TEST_ASSERT_EQUAL(PSTOP_OK, machine.handle_machine_message_cb(&machine, &msg, &resp));
+    TEST_ASSERT_EQUAL(PSTOP_MESSAGE_BOND, resp_obj.message);
+
+    TEST_ASSERT_EQUAL(0, robot_status_counter);
+
+    msg.message = PSTOP_MESSAGE_STOP;
+    TEST_ASSERT_EQUAL(PSTOP_OK, machine.handle_machine_message_cb(&machine, &msg, &resp));
+    TEST_ASSERT_EQUAL(PSTOP_MESSAGE_STOP, resp_obj.message);
+
+    msg.message = PSTOP_MESSAGE_OK;
+    TEST_ASSERT_EQUAL(PSTOP_OK, machine.handle_machine_message_cb(&machine, &msg, &resp));
+    TEST_ASSERT_EQUAL(PSTOP_MESSAGE_OK, resp_obj.message);
+
+    msg.message = PSTOP_MESSAGE_STOP;
+    TEST_ASSERT_EQUAL(PSTOP_OK, machine.handle_machine_message_cb(&machine, &msg, &resp));
+    TEST_ASSERT_EQUAL(PSTOP_MESSAGE_STOP, resp_obj.message);
+
+    msg.message = PSTOP_MESSAGE_OK;
+    TEST_ASSERT_EQUAL(PSTOP_OK, machine.handle_machine_message_cb(&machine, &msg, &resp));
+    TEST_ASSERT_EQUAL(PSTOP_MESSAGE_OK, resp_obj.message);
+}
+
+static
+void
 test_2_clients(void)
 {
     pstop_machine_t machine;
@@ -432,10 +479,10 @@ test_2_clients_stop_unbond(void)
     TEST_ASSERT_EQUAL(PSTOP_MESSAGE_OK, resp_obj.message);
 }
 
-int
+void
 main_machine_test(void)
 {
-    UnityBegin("machine_test.c");
+    UnitySetTestFile("machine_test.c");
 
     RUN_TEST(test_new_client_operator_not_allowed);
     RUN_TEST(test_new_client_operator_allowed);
@@ -448,6 +495,5 @@ main_machine_test(void)
     RUN_TEST(test_2_clients);
     RUN_TEST(test_2_clients_stop_unbond);
     RUN_TEST(test_bond_ok);
-
-    return UNITY_END();
+    RUN_TEST(test_bond_stop_ok);
 }

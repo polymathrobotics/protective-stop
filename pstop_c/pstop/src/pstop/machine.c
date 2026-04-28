@@ -37,7 +37,6 @@ init_new_client(pstop_application_t *application, pstop_client_data_t *client, c
 
     device_id_copy(&(client->client_id), &(msg->id));
     client->last_timestamp = now;
-    client->last_received_heartbeat = 0U;
     client->heartbeat_ms = application->app_config.default_timeout_ms;
     client->msg_counter = 1U;
     client->last_counter = 0U;
@@ -60,12 +59,9 @@ handle_bond_msg(pstop_machine_t *machine, pstop_client_data_t *client, const pst
         return PSTOP_OK;
     }
 
-    // brand new client, let's initialize it
-    init_new_client(&(machine->application), client, msg);
-
     client->client_state = PSTOP_CLIENT_BONDED;
 
-    if(machine->pstops.num_clients == 1U) {
+    if(pstop_client_num_active(&(machine->pstops)) == 1U) {
         // first client connecting then we'll need a stop/start sequence from anyone
         machine->robot_state.restart_state = ROBOT_RESTART_STATE_NEED_STOP;
         machine->robot_state.client_stop_id = 0U;
@@ -148,6 +144,12 @@ handle_stop_msg(pstop_machine_t *machine, pstop_client_data_t *client, const pst
         handle_need_stop(machine, client, resp);
     }
 
+    if(machine->robot_state.client_stop_id == 0U) {
+        machine->robot_state.robot_state = ROBOT_STATE_STOPPED;
+        machine->robot_state.client_stop_id = client->local_client_id;
+        machine->robot_state.restart_state = ROBOT_RESTART_STATE_STOP_RECEIVED;
+    }
+
     machine->application.status_cb(PSTOP_STATUS_STOP);
 
     return PSTOP_OK;
@@ -167,10 +169,10 @@ handle_unbond_msg(pstop_machine_t *machine, pstop_client_data_t *client, const p
         machine->robot_state.robot_state = ROBOT_STATE_STOPPED;
     }
 
-    pstop_client_remove(&(machine->pstops), &(msg->id));
+    pstop_client_deactivate(client);
 
     // if this is the last client then stop the robot
-    if((machine->pstops.num_clients == 0U) || (machine->robot_state.robot_state == ROBOT_STATE_STOPPED)) {
+    if((pstop_client_num_active(&(machine->pstops)) == 0U) || (machine->robot_state.robot_state == ROBOT_STATE_STOPPED)) {
         machine_stop_robot(machine, NULL);
     }
 
@@ -216,7 +218,12 @@ machine_handle_message(pstop_machine_t *machine, const pstop_msg_t *req, pstop_m
 
             return result;
         }
+        // brand new client, let's initialize it
+        init_new_client(&(machine->application), client, req);
     }
+
+    uint64_t now = machine->application.get_time_cb();
+    client->last_timestamp = now;
 
     switch(req->message) {
     case PSTOP_MESSAGE_BOND:
@@ -237,20 +244,24 @@ static
 pstop_error_t
 machine_check_heartbeats(pstop_machine_t *machine)
 {
-    //const device_id_t *this_client = &machine->application.machine_device_id;
-
     uint64_t now = machine->application.get_time_cb();
 
-    for(uint16_t i = 0U; i < machine->pstops.num_clients; ++i) {
-        pstop_client_data_t *client = &(machine->pstops.clients[i]);
+    int needsStop = 0;
 
-        // if for some reason now is in the past compared to the last heart beat
-        // then there's no need to check if we've heard from this client
-        if(now <= client->last_received_heartbeat) {
+    // check all clients in case multiple clients are failing
+    for(uint16_t i = 0U; i < machine->pstops.max_clients; ++i) {
+        pstop_client_data_t *client = &(machine->pstops.clients[i]);
+        if(client->client_state == PSTOP_CLIENT_UNKNOWN) {
             continue;
         }
 
-        uint64_t diff = client->last_received_heartbeat - now;
+        // if for some reason now is in the past compared to the last heart beat
+        // then there's no need to check if we've heard from this client
+        if(now <= client->last_timestamp) {
+            continue;
+        }
+
+        uint64_t diff = now - client->last_timestamp;
 
         // if we're still within the heartbeat timeout then this client is still
         // good.
@@ -258,17 +269,22 @@ machine_check_heartbeats(pstop_machine_t *machine)
             continue;
         }
 
-        client->missed_heartbeats_counter++;
+        //client->missed_heartbeats_counter++;
 
         // problem! this client hasn't talked to us in a while
         // if we're still within the window of missed heartbeats then we're OK
 
-        uint16_t missed = (uint16_t)(diff / client->heartbeat_ms);
-        if(missed > client->missed_heartbeats_counter) {
+        client->missed_heartbeats_counter = (uint16_t)(diff / client->heartbeat_ms);
+        if(client->missed_heartbeats_counter >= machine->application.app_config.max_missed_heartbeats) {
             // trigger a stop!
-            machine_stop_robot(machine, client);
-            return PSTOP_MISSED_HEARTBEATS;
+            client->client_state = PSTOP_CLIENT_UNKNOWN;
+            needsStop = 1;
         }
+    }
+
+    if(needsStop != 0) {
+        machine_stop_robot(machine, NULL);
+        return PSTOP_MISSED_HEARTBEATS;
     }
 
     return PSTOP_OK;
@@ -284,7 +300,6 @@ machine_init(pstop_machine_t *machine, const pstop_application_t *app, pstop_cli
     machine->application = *app;
     machine->pstops.clients = clients;
     machine->pstops.max_clients = max_clients;
-    machine->pstops.num_clients = 0U;
 
     machine->robot_state.client_stop_id = 0U;
     machine->robot_state.restart_state = ROBOT_RESTART_STATE_OK;
@@ -301,6 +316,9 @@ machine_stop_robot(pstop_machine_t *machine, pstop_client_data_t *client)
 
     if(client != NULL) {
         machine->robot_state.client_stop_id = client->local_client_id;
+    }
+    else {
+        machine->robot_state.client_stop_id = 0U;
     }
 
     machine->application.status_cb(PSTOP_STATUS_STOP);

@@ -35,13 +35,11 @@ test_device_cmp(void)
     TEST_ASSERT_NOT_EQUAL(0, device_id_cmp(&lhs, &rhs));
 }
 
-int
+void
 main_device_id_test(void)
 {
-    UnityBegin("device_id_test.c");
+    UnitySetTestFile("device_id_test.c");
 
     RUN_TEST(test_device_init);
     RUN_TEST(test_device_cmp);
-
-    return UNITY_END();
 }

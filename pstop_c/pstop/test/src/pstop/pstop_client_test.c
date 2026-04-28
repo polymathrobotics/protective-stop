@@ -15,7 +15,6 @@ assert_empty_client(pstop_client_data_t *client)
         TEST_ASSERT_EQUAL(0U, client->client_id.data[i]);
     }
     TEST_ASSERT_EQUAL(0U, client->last_timestamp);
-    TEST_ASSERT_EQUAL(0U, client->last_received_heartbeat);
     TEST_ASSERT_EQUAL(0U, client->heartbeat_ms);
     TEST_ASSERT_EQUAL(0U, client->msg_counter);
     TEST_ASSERT_EQUAL(0U, client->clock_drift);
@@ -39,8 +38,7 @@ test_clients_init(void)
     pstop_client_data_t client_data[5];
     pstop_clients_t clients = {
         .clients = client_data,
-        .max_clients = 5,
-        .num_clients = 0
+        .max_clients = 5
     };
 
     memset(client_data, 0x13, sizeof(pstop_client_data_t) * 5);
@@ -58,28 +56,25 @@ test_get_free_client(void)
     pstop_client_data_t client_data[2];
     pstop_clients_t clients = {
         .clients = client_data,
-        .max_clients = 2,
-        .num_clients = 0
+        .max_clients = 2
     };
 
     pstop_clients_init(&clients);
-    TEST_ASSERT_EQUAL(0U, clients.num_clients);
-
-    memset(client_data, 0x13, sizeof(pstop_client_data_t) * 2);
+    TEST_ASSERT_EQUAL(0U, pstop_client_num_active(&clients));
 
     pstop_client_data_t *c1 = pstop_client_get_free_client(&clients);
     TEST_ASSERT_NOT_NULL(c1);
-    TEST_ASSERT_EQUAL(1U, clients.num_clients);
+    TEST_ASSERT_EQUAL(1U, pstop_client_num_active(&clients));
     assert_empty_client(c1);
 
     pstop_client_data_t *c2 = pstop_client_get_free_client(&clients);
     TEST_ASSERT_NOT_NULL(c2);
-    TEST_ASSERT_EQUAL(2U, clients.num_clients);
+    TEST_ASSERT_EQUAL(2U, pstop_client_num_active(&clients));
     assert_empty_client(c2);
 
     pstop_client_data_t *c3 = pstop_client_get_free_client(&clients);
     TEST_ASSERT_NULL(c3);
-    TEST_ASSERT_EQUAL(2U, clients.num_clients);
+    TEST_ASSERT_EQUAL(2U, pstop_client_num_active(&clients));
 }
 
 static
@@ -89,12 +84,11 @@ test_remove_client(void)
     pstop_client_data_t client_data[2];
     pstop_clients_t clients = {
         .clients = client_data,
-        .max_clients = 2,
-        .num_clients = 0
+        .max_clients = 2
     };
 
     pstop_clients_init(&clients);
-    TEST_ASSERT_EQUAL(0U, clients.num_clients);
+    TEST_ASSERT_EQUAL(0U, pstop_client_num_active(&clients));
 
     device_id_t c1_id;
     device_id_set(&c1_id, "test");
@@ -108,9 +102,9 @@ test_remove_client(void)
     device_id_copy(&(c2->client_id), &c2_id);
 
     // remove first client and make sure second client was copied over
-    TEST_ASSERT_EQUAL(2U, clients.num_clients);
-    pstop_client_remove(&clients, &(c1->client_id));
-    TEST_ASSERT_EQUAL(1U, clients.num_clients);
+    TEST_ASSERT_EQUAL(2U, pstop_client_num_active(&clients));
+    pstop_client_deactivate(c1);
+    TEST_ASSERT_EQUAL(1U, pstop_client_num_active(&clients));
 
     // validate that the client is no longer in the list
     TEST_ASSERT_NULL(pstop_client_get(&clients, &c1_id));
@@ -119,23 +113,21 @@ test_remove_client(void)
     c2 = pstop_client_get(&clients, &c2_id);
     TEST_ASSERT_NOT_NULL(c2);
     TEST_ASSERT_EQUAL(0, device_id_cmp(&c2_id, &(c2->client_id)));
-    assert_empty_client(&(clients.clients[1]));
 
     // now remove last client
-    pstop_client_remove(&clients, &c2_id);
-    TEST_ASSERT_EQUAL(0U, clients.num_clients);
-    assert_empty_client(&(clients.clients[0]));
+    pstop_client_deactivate(c2);
+    TEST_ASSERT_EQUAL(0U, pstop_client_num_active(&clients));
 }
 
-int
+void
 main_pstop_client_test(void)
 {
-    UnityBegin("pstop_client_test.c");
+    //UnityBegin("pstop_client_test.c");
+    UnitySetTestFile("pstop_client_test.c");
 
     RUN_TEST(test_client_init);
     RUN_TEST(test_clients_init);
     RUN_TEST(test_get_free_client);
     RUN_TEST(test_remove_client);
 
-    return UNITY_END();
 }

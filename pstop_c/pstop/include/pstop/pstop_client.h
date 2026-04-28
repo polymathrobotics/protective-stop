@@ -8,6 +8,7 @@
 
 typedef enum {
 
+    PSTOP_CLIENT_INITING = 0,
     PSTOP_CLIENT_BONDED = 1,
     PSTOP_CLIENT_UNBONDED = 2,
     PSTOP_CLIENT_STOPPED = 3,
@@ -24,9 +25,6 @@ typedef struct {
 
     // last time we've heard from this client
     uint64_t last_timestamp;
-
-    // last time we've heard from this client
-    uint64_t last_received_heartbeat;
 
     // how frequently we should hear from this client
     uint64_t heartbeat_ms;
@@ -55,7 +53,6 @@ typedef struct {
 
     pstop_client_data_t *clients;
     uint16_t max_clients;
-    uint16_t num_clients;
 
 } pstop_clients_t;
 
@@ -69,6 +66,8 @@ void pstop_client_init(pstop_client_data_t *client);
  */
 void pstop_clients_init(pstop_clients_t *clients);
 
+uint16_t pstop_client_num_active(pstop_clients_t *clients);
+
 /**
  * Returns an empty pstop_client if one is available
  *
@@ -76,10 +75,7 @@ void pstop_clients_init(pstop_clients_t *clients);
  */
 pstop_client_data_t *pstop_client_get_free_client(pstop_clients_t *clients);
 
-/**
- * Removes the specified pstop client by the device ID.
- */
-void pstop_client_remove(pstop_clients_t *clients, const device_id_t *client_id);
+void pstop_client_deactivate(pstop_client_data_t *client);
 
 /**
  * Finds the specified pstop client by device ID.
