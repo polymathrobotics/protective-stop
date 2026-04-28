@@ -54,6 +54,12 @@ static
 pstop_error_t
 handle_bond_msg(pstop_machine_t *machine, pstop_client_data_t *client, const pstop_msg_t *msg, pstop_msg_t *resp)
 {
+    // if we're already bonded, then don't do anything else
+    if(client->client_state == PSTOP_CLIENT_BONDED) {
+        resp->message = PSTOP_MESSAGE_BOND;
+        return PSTOP_OK;
+    }
+
     // brand new client, let's initialize it
     init_new_client(&(machine->application), client, msg);
 
@@ -153,10 +159,18 @@ handle_unbond_msg(pstop_machine_t *machine, pstop_client_data_t *client, const p
 {
     resp->message = PSTOP_MESSAGE_UNBOND;
 
+    // if the client unbonding is the same client that needs the stop/ok cycle
+    // then we reset the stop/ok cycle
+    if(machine->robot_state.client_stop_id == client->local_client_id) {
+        machine->robot_state.restart_state = ROBOT_RESTART_STATE_NEED_STOP;
+        machine->robot_state.client_stop_id = 0U;
+        machine->robot_state.robot_state = ROBOT_STATE_STOPPED;
+    }
+
     pstop_client_remove(&(machine->pstops), &(msg->id));
 
     // if this is the last client then stop the robot
-    if(machine->pstops.num_clients == 0U) {
+    if((machine->pstops.num_clients == 0U) || (machine->robot_state.robot_state == ROBOT_STATE_STOPPED)) {
         machine_stop_robot(machine, NULL);
     }
 
