@@ -16,7 +16,7 @@ pstop_error_t
 add_new_client(pstop_machine_t *machine, const device_id_t *id, pstop_client_data_t **client)
 {
     // no client found, can we add it?
-    if(!machine->application.operator_allowed_cb(id)) {
+    if(!machine->application->operator_allowed_cb(id)) {
         // This ID is not allowed
         *client = NULL;
         return PSTOP_OPERATOR_NOT_ALLOWED;
@@ -106,7 +106,7 @@ handle_ok_msg(pstop_machine_t *machine, pstop_client_data_t *client, const pstop
 
     resp->message = PSTOP_MESSAGE_OK;
 
-    machine->application.status_cb(PSTOP_STATUS_OK);
+    machine->application->status_cb(PSTOP_STATUS_OK);
 
     return PSTOP_OK;
 }
@@ -153,7 +153,7 @@ handle_stop_msg(pstop_machine_t *machine, pstop_client_data_t *client, const pst
         machine->robot_state.restart_state = ROBOT_RESTART_STATE_STOP_RECEIVED;
     }
 
-    machine->application.status_cb(PSTOP_STATUS_STOP);
+    machine->application->status_cb(PSTOP_STATUS_STOP);
 
     return PSTOP_OK;
 }
@@ -190,7 +190,6 @@ machine_handle_message(pstop_machine_t *machine, const pstop_msg_t *req, pstop_m
     if(resp == NULL) {
         return PSTOP_FATAL;
     }
-
     if(*resp == NULL) {
         return PSTOP_FATAL;
     }
@@ -198,11 +197,10 @@ machine_handle_message(pstop_machine_t *machine, const pstop_msg_t *req, pstop_m
     // validate that the message parameters are correct
     pstop_error_t result = pstop_is_message_valid(req);
     if(result != PSTOP_OK) {
-       *resp = NULL;
        return result;
     }
 
-    (*resp)->heartbeat_timeout = machine->application.app_config.default_timeout_ms;
+    (*resp)->heartbeat_timeout = machine->application->app_config.default_timeout_ms;
 
     // can we find this client?
     pstop_client_data_t *client = pstop_client_get(&(machine->pstops), &(req->id));
@@ -222,10 +220,10 @@ machine_handle_message(pstop_machine_t *machine, const pstop_msg_t *req, pstop_m
             return result;
         }
         // brand new client, let's initialize it
-        init_new_client(&(machine->application), client, req);
+        init_new_client(machine->application, client, req);
     }
 
-    uint64_t now = machine->application.get_time_cb();
+    uint64_t now = machine->application->get_time_cb();
     client->last_timestamp = now;
 
     switch(req->message) {
@@ -247,7 +245,7 @@ static
 pstop_error_t
 machine_check_heartbeats(pstop_machine_t *machine)
 {
-    uint64_t now = machine->application.get_time_cb();
+    uint64_t now = machine->application->get_time_cb();
 
     int needsStop = 0;
 
@@ -278,7 +276,7 @@ machine_check_heartbeats(pstop_machine_t *machine)
         // if we're still within the window of missed heartbeats then we're OK
 
         client->missed_heartbeats_counter = (uint16_t)(diff / client->heartbeat_ms);
-        if(client->missed_heartbeats_counter >= machine->application.app_config.max_missed_heartbeats) {
+        if(client->missed_heartbeats_counter >= machine->application->app_config.max_missed_heartbeats) {
             // trigger a stop!
             client->client_state = PSTOP_CLIENT_UNKNOWN;
             needsStop = 1;
@@ -294,13 +292,13 @@ machine_check_heartbeats(pstop_machine_t *machine)
 }
 
 void
-machine_init(pstop_machine_t *machine, const pstop_application_t *app, pstop_client_data_t *clients, uint16_t max_clients)
+machine_init(pstop_machine_t *machine, pstop_application_t *app, pstop_client_data_t *clients, uint16_t max_clients)
 {
     machine->handle_machine_message_cb = machine_handle_message;
     machine->handle_protocol_message_cb = protocol_handle_message;
     machine->check_heartbeats_cb = machine_check_heartbeats;
 
-    machine->application = *app;
+    machine->application = app;
     machine->pstops.clients = clients;
     machine->pstops.max_clients = max_clients;
 
@@ -324,5 +322,5 @@ machine_stop_robot(pstop_machine_t *machine, pstop_client_data_t *client)
         machine->robot_state.client_stop_id = 0U;
     }
 
-    machine->application.status_cb(PSTOP_STATUS_STOP);
+    machine->application->status_cb(PSTOP_STATUS_STOP);
 }

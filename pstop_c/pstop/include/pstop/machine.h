@@ -69,13 +69,13 @@ typedef struct pstop_machine_t {
 
     pstop_clients_t pstops;
 
-    pstop_application_t application;
+    pstop_application_t *application;
 
     robot_state_t robot_state;
 
 } pstop_machine_t;
 
-void machine_init(pstop_machine_t *machine, const pstop_application_t *app, pstop_client_data_t *clients, uint16_t max_clients);
+void machine_init(pstop_machine_t *machine, pstop_application_t *app, pstop_client_data_t *clients, uint16_t max_clients);
 
 void machine_stop_robot(pstop_machine_t *machine, pstop_client_data_t *client);
 
