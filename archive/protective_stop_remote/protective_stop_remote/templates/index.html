@@ -9,7 +9,7 @@
                 .then(response => response.json())
                 .then(data => {
                     document.getElementById('status_summary').textContent = data.status_summary;
-                    
+
                     // Update Tailscale information
                     document.getElementById('tailscale-ip').textContent = data.TailscaleIP;
                     document.getElementById('dns-name').textContent = data.DNSName;
@@ -61,7 +61,7 @@
                                         <button type="submit" name="action" value="activate_${conn.name}">Activate</button>
                                     </form>
                                     <form method="POST" action="/wifi" style="display:inline;">
-                                        <button type="submit" name="action" value="remove_${conn.name}" 
+                                        <button type="submit" name="action" value="remove_${conn.name}"
                                                 ${isPSTOPHotspot ? "disabled" : ""}>
                                             Remove
                                         </button>
@@ -84,19 +84,19 @@
     <div style="text-align: left; margin-bottom: 20px;">
         <img src="/static/images/polymath_logo.png" alt="Polymath Robotics Logo" style="width: 100px; height: auto;">
     </div>
-    
+
     <p><strong>Status:</strong> <span id="status_summary"></span></p>
-    
+
     <!-- Tailscale Information -->
     <p><strong>Tailscale IP:</strong> <span id="tailscale-ip"></span></p>
     <p><strong>DNS Name:</strong> <span id="dns-name"></span></p>
     <p><strong>UUID:</strong> <span id="uuid"></span></p>
-    
+
     <!-- Battery and Signal Strength -->
     <p><strong>Battery Level:</strong> <span id="battery-level"></span></p>
     <p><strong>Wi-Fi Signal Strength:</strong> <span id="wifi-signal"></span></p>
     <p><strong>Cellular Signal Strength:</strong> <span id="cellular-signal"></span></p>
-    
+
     <!-- Target IP/UUID Pairs -->
     <h2>Target IP/UUID Pairs</h2>
     <table border="1">
@@ -147,4 +147,3 @@
     </form>
 </body>
 </html>
-

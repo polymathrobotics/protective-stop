@@ -3,24 +3,24 @@
 launch:
   - arg:
       name: machine_uuid
-      default: "xxxx"
-      description: "Machine UUID"
+      default: xxxx
+      description: Machine UUID
   - arg:
       name: heartbeat_timeout
-      default: "0.1"
-      description: "Heartbeat timeout"
+      default: '0.1'
+      description: Heartbeat timeout
   - arg:
       name: deactivation_timeout
-      default: "3.0"
-      description: "Deactivation timeout"
+      default: '3.0'
+      description: Deactivation timeout
   - arg:
       name: max_pstop_count
-      default: "3"
-      description: "Maximum protective stop count"
+      default: '3'
+      description: Maximum protective stop count
   - arg:
       name: is_user_monitored
-      default: "true"
-      description: "Enable or disable user monitoring mode"
+      default: 'true'
+      description: Enable or disable user monitoring mode
   - node:
       pkg: protective_stop_node
       exec: protective_stop_node
@@ -48,6 +48,6 @@ launch:
         - name: bond_timeout
           value: 0.0
         - name: node_names
-          value: ["protective_stop_node"]
+          value: [protective_stop_node]
         - name: use_sim_time
           value: true

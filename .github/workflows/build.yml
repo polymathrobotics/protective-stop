@@ -1,0 +1,30 @@
+---
+name: ROS2 Build and Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build_and_test_ros2:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - rosdistro: humble
+            ubuntu: jammy
+          - rosdistro: jazzy
+            ubuntu: noble
+          - rosdistro: kilted
+            ubuntu: noble
+          - rosdistro: rolling
+            ubuntu: noble
+    container:
+      image: rostooling/setup-ros-docker:ubuntu-${{ matrix.ubuntu }}-latest
+    steps:
+      - name: Build and run tests
+        uses: ros-tooling/action-ros-ci@v0.4
+        with:
+          target-ros2-distro: ${{ matrix.rosdistro }}

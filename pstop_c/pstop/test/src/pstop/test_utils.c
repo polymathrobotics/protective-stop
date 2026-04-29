@@ -1,4 +1,7 @@
 
+// SPDX-FileCopyrightText: 2026 Polymath Robotics, Inc.
+// SPDX-License-Identifier: Apache-2.0
+
 #include <string.h>
 
 #include "pstop/test_utils.h"
@@ -16,4 +19,3 @@ device_id_set(device_id_t *device_id, const char *id)
         memcpy(device_id->data, id, DEVICE_ID_LENGTH);
     }
 }
-
