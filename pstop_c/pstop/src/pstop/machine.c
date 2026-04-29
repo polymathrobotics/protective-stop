@@ -176,7 +176,7 @@ handle_unbond_msg(pstop_machine_t *machine, pstop_client_data_t *client, const p
 
     // if this is the last client then stop the robot
     if((pstop_client_num_active(&(machine->pstops)) == 0U) || (machine->robot_state.robot_state == ROBOT_STATE_STOPPED)) {
-        machine_stop_robot(machine, NULL);
+        machine_stop_robot(machine);
     }
 
     return PSTOP_OK;
@@ -270,8 +270,6 @@ machine_check_heartbeats(pstop_machine_t *machine)
             continue;
         }
 
-        //client->missed_heartbeats_counter++;
-
         // problem! this client hasn't talked to us in a while
         // if we're still within the window of missed heartbeats then we're OK
 
@@ -284,7 +282,7 @@ machine_check_heartbeats(pstop_machine_t *machine)
     }
 
     if(needsStop != 0) {
-        machine_stop_robot(machine, NULL);
+        machine_stop_robot(machine);
         return PSTOP_MISSED_HEARTBEATS;
     }
 
@@ -310,17 +308,11 @@ machine_init(pstop_machine_t *machine, pstop_application_t *app, pstop_client_da
 }
 
 void
-machine_stop_robot(pstop_machine_t *machine, pstop_client_data_t *client)
+machine_stop_robot(pstop_machine_t *machine)
 {
     machine->robot_state.robot_state = ROBOT_STATE_STOPPED;
     machine->robot_state.restart_state = ROBOT_RESTART_STATE_NEED_STOP;
-
-    if(client != NULL) {
-        machine->robot_state.client_stop_id = client->local_client_id;
-    }
-    else {
-        machine->robot_state.client_stop_id = 0U;
-    }
+    machine->robot_state.client_stop_id = 0U;
 
     machine->application->status_cb(PSTOP_STATUS_STOP);
 }

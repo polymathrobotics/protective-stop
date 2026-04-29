@@ -69,4 +69,6 @@ mkdir build
 cd build
 cmake ..
 make
+
+./pstop/pstop_test
 ```
