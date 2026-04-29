@@ -14,6 +14,8 @@ typedef uint8_t message_type_t;
 #define PSTOP_MESSAGE_UNBOND 3U
 #define PSTOP_MESSAGE_UNKNOWN 0xFFU
 
+#define PSTOP_MESSAGE_SIZE 64U
+
 /**
  * A PSTOP message object. With enough information
  * to provide basic black channel support.
@@ -42,7 +44,7 @@ typedef struct {
 
     /**
      * A timeout in milliseconds that we expect to receive heartbeats from
-     * this machine. Only valiud when sent from machine to operator.
+     * this machine. Only valid when sent from machine to operator.
      */
     uint32_t heartbeat_timeout;
 
@@ -74,6 +76,12 @@ void pstop_message_init(pstop_msg_t *msg);
 uint16_t pstop_calculate_checksum(const pstop_msg_t *msg);
 
 pstop_error_t pstop_is_message_valid(const pstop_msg_t *msg);
+
+/**
+ * Network encoding/decoding functions
+ */
+void pstop_message_decode(pstop_msg_t *msg, const uint8_t *data);
+void pstop_message_encode(const pstop_msg_t *msg, uint8_t *data);
 
 #endif /* PSTOP_PSTOP_MSG_H */
 

@@ -16,7 +16,7 @@ pstop_application_config_init(pstop_application_config_t *config)
 {
     config->default_timeout_ms = 100U;
     config->max_lost_messages = 1U;
-    config->max_missed_heartbeats = 0U;
+    config->max_missed_heartbeats = 1U;
 }
 
 void

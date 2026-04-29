@@ -44,3 +44,15 @@ pstop_is_message_valid(const pstop_msg_t *msg)
 
     return PSTOP_OK;
 }
+
+void
+pstop_message_decode(pstop_msg_t *msg, const uint8_t *data)
+{
+
+}
+
+void
+pstop_message_encode(const pstop_msg_t *msg, uint8_t *data)
+{
+
+}
