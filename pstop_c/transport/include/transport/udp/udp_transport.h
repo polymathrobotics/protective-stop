@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Polymath Robotics, Inc.
+// SPDX-License-Identifier: Apache-2.0
+
 #ifndef PSTOP_TRANSPORT_UDP_UDPTRANSPORT_H
 #define PSTOP_TRANSPORT_UDP_UDPTRANSPORT_H
 
