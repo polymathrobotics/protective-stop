@@ -1,4 +1,7 @@
 
+// SPDX-FileCopyrightText: 2026 Polymath Robotics, Inc.
+// SPDX-License-Identifier: Apache-2.0
+
 #include <stdlib.h>
 
 #include "pstop/protocol.h"
@@ -42,11 +45,11 @@ validate_message(pstop_machine_t *machine, pstop_client_data_t *client, const ps
     // check for lost messages
     if(req->counter != (client->msg_counter - 1U)) {
         client->lost_message_counter++;
-        if(client->lost_message_counter >= machine->application.app_config.max_lost_messages) {
+        if(client->lost_message_counter >= machine->application->app_config.max_lost_messages) {
             // too many lost messages
             // clean up this client
             *resp = NULL;
-            machine_stop_robot(machine, NULL);
+            machine_stop_robot(machine);
             return PSTOP_MSG_LOST;
         }
     }

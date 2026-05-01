@@ -1,13 +1,12 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-
+# SPDX-FileCopyrightText: 2026 Polymath Robotics, Inc.
+# SPDX-License-Identifier: Apache-2.0
 # Handles configuration via webpage + saving config to json file
 
 import json
-import subprocess
 import re
-from flask import Flask, request, redirect, render_template, jsonify
-import logging
+import subprocess
+
+from flask import Flask, jsonify, redirect, render_template, request
 
 app = Flask(__name__)
 CONFIG_FILE = 'config.json'
@@ -17,121 +16,118 @@ CONFIG_FILE = 'config.json'
 
 def list_wifi_connections():
     try:
-        result = subprocess.run(['nmcli', '-t', '-f', 'NAME,DEVICE,STATE',
-                                'connection', 'show'], capture_output=True, text=True)
+        result = subprocess.run(
+            ['nmcli', '-t', '-f', 'NAME,DEVICE,STATE', 'connection', 'show'], capture_output=True, text=True
+        )
         if result.returncode != 0:
-            raise Exception(f"nmcli error: {result.stderr}")
+            raise Exception(f'nmcli error: {result.stderr}')
 
         connections = []
-        for line in result.stdout.strip().split("\n"):
+        for line in result.stdout.strip().split('\n'):
             name, device, state = line.split(':')
-            connections.append(
-                {"name": name, "device": device, "state": state})
+            connections.append({'name': name, 'device': device, 'state': state})
         return connections
     except Exception as e:
-        print(f"Error listing Wi-Fi connections: {e}")
+        print(f'Error listing Wi-Fi connections: {e}')
         return []
 
 
 def add_wifi_connection(ssid, password):
     try:
-        result = subprocess.run(['nmcli', 'dev', 'wifi', 'connect',
-                                ssid, 'password', password], capture_output=True, text=True)
+        result = subprocess.run(
+            ['nmcli', 'dev', 'wifi', 'connect', ssid, 'password', password], capture_output=True, text=True
+        )
         if result.returncode != 0:
-            raise Exception(f"nmcli error: {result.stderr}")
+            raise Exception(f'nmcli error: {result.stderr}')
         return True
     except Exception as e:
-        print(f"Error adding Wi-Fi connection: {e}")
+        print(f'Error adding Wi-Fi connection: {e}')
         return False
 
 
 def remove_wifi_connection(name):
     try:
-        result = subprocess.run(
-            ['nmcli', 'connection', 'delete', name], capture_output=True, text=True)
+        result = subprocess.run(['nmcli', 'connection', 'delete', name], capture_output=True, text=True)
         if result.returncode != 0:
-            raise Exception(f"nmcli error: {result.stderr}")
+            raise Exception(f'nmcli error: {result.stderr}')
         return True
     except Exception as e:
-        print(f"Error removing Wi-Fi connection: {e}")
+        print(f'Error removing Wi-Fi connection: {e}')
         return False
 
 
 def activate_wifi_connection(name):
     """Activate a specific Wi-Fi connection."""
     try:
-        result = subprocess.run(
-            ['nmcli', 'connection', 'up', name], capture_output=True, text=True)
+        result = subprocess.run(['nmcli', 'connection', 'up', name], capture_output=True, text=True)
         if result.returncode != 0:
-            raise Exception(f"nmcli error: {result.stderr}")
+            raise Exception(f'nmcli error: {result.stderr}')
         return True
     except Exception as e:
-        print(f"Error activating Wi-Fi connection: {e}")
+        print(f'Error activating Wi-Fi connection: {e}')
         return False
+
 
 # Tailscale and signal strength functions
 
 
 def get_wifi_signal_strength():
     try:
-        result = subprocess.run(
-            ['nmcli', '-t', '-f', 'IN-USE,SIGNAL', 'dev', 'wifi'], capture_output=True, text=True)
+        result = subprocess.run(['nmcli', '-t', '-f', 'IN-USE,SIGNAL', 'dev', 'wifi'], capture_output=True, text=True)
         if result.returncode != 0:
-            raise Exception(f"nmcli error: {result.stderr}")
+            raise Exception(f'nmcli error: {result.stderr}')
 
-        wifi_lines = result.stdout.strip().split("\n")
+        wifi_lines = result.stdout.strip().split('\n')
         for line in wifi_lines:
             if line.startswith('*'):
                 _, signal = line.split(':')
                 return int(signal)
     except Exception as e:
-        print(f"Error getting Wi-Fi signal strength: {e}")
+        print(f'Error getting Wi-Fi signal strength: {e}')
         return None
 
 
 def get_cellular_signal_strength():
     try:
-        result = subprocess.run(
-            ['mmcli', '-L'], capture_output=True, text=True)
+        result = subprocess.run(['mmcli', '-L'], capture_output=True, text=True)
         if result.returncode != 0:
-            raise Exception(f"mmcli error: {result.stderr}")
+            raise Exception(f'mmcli error: {result.stderr}')
 
         output = result.stdout.strip()
         match = re.search(r'/Modem/(\d+)', output)
         if not match:
-            raise Exception("Could not find a modem index in mmcli output.")
+            raise Exception('Could not find a modem index in mmcli output.')
 
         modem_index = match.group(1)
 
-        result = subprocess.run(
-            ['mmcli', '-m', modem_index], capture_output=True, text=True)
+        result = subprocess.run(['mmcli', '-m', modem_index], capture_output=True, text=True)
         if result.returncode != 0:
-            raise Exception(f"mmcli error: {result.stderr}")
+            raise Exception(f'mmcli error: {result.stderr}')
 
         output = result.stdout
         signal_match = re.search(r'signal quality: (\d+)', output)
         if signal_match:
             return int(signal_match.group(1))
         else:
-            raise Exception("Signal quality not found in modem details.")
+            raise Exception('Signal quality not found in modem details.')
     except Exception as e:
-        print(f"Error getting cellular signal strength: {e}")
+        print(f'Error getting cellular signal strength: {e}')
         return None
 
 
 def fetch_tailscale_info(shared):
     try:
-        result = subprocess.run(
-            ["tailscale", "status", "--json"], capture_output=True, text=True, check=True)
+        result = subprocess.run(['tailscale', 'status', '--json'], capture_output=True, text=True, check=True)
         status = json.loads(result.stdout)
-        tailscale_ips = status.get("Self", {}).get("TailscaleIPs", [])
-        dns_name = status.get("Self", {}).get("DNSName", "")
-        shared["TailscaleIP"] = tailscale_ips[0] if tailscale_ips else "N/A"
-        shared["DNSName"] = dns_name if dns_name else "N/A"
+        tailscale_ips = status.get('Self', {}).get('TailscaleIPs', [])
+        dns_name = status.get('Self', {}).get('DNSName', '')
+        shared['TailscaleIP'] = tailscale_ips[0] if tailscale_ips else 'N/A'
+        shared['DNSName'] = dns_name if dns_name else 'N/A'
     except Exception as e:
-        print(f"Error fetching Tailscale info: {e}")
-        shared["TailscaleIP"] = "N/A"
-        shared["DNSName"] = "N/A"
+        print(f'Error fetching Tailscale info: {e}')
+        shared['TailscaleIP'] = 'N/A'
+        shared['DNSName'] = 'N/A'
+
 
 # Load and save configuration
 
@@ -150,31 +146,32 @@ def save_config(cfg):
         with open(CONFIG_FILE, 'w') as f:
             json.dump(cfg, f, indent=2)
     except Exception as e:
-        print(f"Error saving config: {e}")
+        print(f'Error saving config: {e}')
+
 
 # Shared dictionary initialization
 
 
 def initialize_shared_dict(shared):
     """Ensure all required keys exist in the shared dictionary with default values."""
-    if "status_summary" not in shared:
-        shared["status_summary"] = "Not Connected"
-    if "uuid" not in shared:
-        shared["uuid"] = "Unassigned!"
-    if "TailscaleIP" not in shared:
-        shared["TailscaleIP"] = "N/A"
-    if "DNSName" not in shared:
-        shared["DNSName"] = "N/A"
-    if "battery_level" not in shared:
-        shared["battery_level"] = "Unknown"
-    if "WifiSignal" not in shared:
-        shared["WifiSignal"] = "N/A"
-    if "CellularSignal" not in shared:
-        shared["CellularSignal"] = "N/A"
-    if "target_pairs" not in shared:
-        shared["target_pairs"] = []
-    if "WifiConnections" not in shared:
-        shared["WifiConnections"] = []
+    if 'status_summary' not in shared:
+        shared['status_summary'] = 'Not Connected'
+    if 'uuid' not in shared:
+        shared['uuid'] = 'Unassigned!'
+    if 'TailscaleIP' not in shared:
+        shared['TailscaleIP'] = 'N/A'
+    if 'DNSName' not in shared:
+        shared['DNSName'] = 'N/A'
+    if 'battery_level' not in shared:
+        shared['battery_level'] = 'Unknown'
+    if 'WifiSignal' not in shared:
+        shared['WifiSignal'] = 'N/A'
+    if 'CellularSignal' not in shared:
+        shared['CellularSignal'] = 'N/A'
+    if 'target_pairs' not in shared:
+        shared['target_pairs'] = []
+    if 'WifiConnections' not in shared:
+        shared['WifiConnections'] = []
 
 
 def load_shared_from_config(shared):
@@ -194,19 +191,19 @@ def config_app(shared={}):
     def get_data():
         """API endpoint for live data updates."""
         fetch_tailscale_info(shared)
-        shared["WifiSignal"] = get_wifi_signal_strength() or "N/A"
-        shared["CellularSignal"] = get_cellular_signal_strength() or "N/A"
-        shared["WifiConnections"] = list_wifi_connections()
+        shared['WifiSignal'] = get_wifi_signal_strength() or 'N/A'
+        shared['CellularSignal'] = get_cellular_signal_strength() or 'N/A'
+        shared['WifiConnections'] = list_wifi_connections()
         return jsonify({
-            "status_summary": shared.get("status_summary", "Not Connected"),
-            "uuid": shared.get("uuid", "Unassigned"),
-            "TailscaleIP": shared.get("TailscaleIP", "N/A"),
-            "DNSName": shared.get("DNSName", "N/A"),
-            "BatteryLevel": shared.get("battery_level", "Unknown"),
-            "WifiSignal": shared.get("WifiSignal", "N/A"),
-            "CellularSignal": shared.get("CellularSignal", "N/A"),
-            "TargetPairs": shared.get("target_pairs", []),
-            "WifiConnections": shared["WifiConnections"]
+            'status_summary': shared.get('status_summary', 'Not Connected'),
+            'uuid': shared.get('uuid', 'Unassigned'),
+            'TailscaleIP': shared.get('TailscaleIP', 'N/A'),
+            'DNSName': shared.get('DNSName', 'N/A'),
+            'BatteryLevel': shared.get('battery_level', 'Unknown'),
+            'WifiSignal': shared.get('WifiSignal', 'N/A'),
+            'CellularSignal': shared.get('CellularSignal', 'N/A'),
+            'TargetPairs': shared.get('target_pairs', []),
+            'WifiConnections': shared['WifiConnections'],
         })
 
     @app.route('/wifi', methods=['POST'])
@@ -237,8 +234,7 @@ def config_app(shared={}):
                 new_uuid = request.form.get('new_uuid', '')
                 if new_ip and new_uuid:
                     pairs = list(shared['target_pairs'])
-                    pairs.append({'ip': new_ip, 'uuid': new_uuid,
-                                 'status': "Not Connected"})
+                    pairs.append({'ip': new_ip, 'uuid': new_uuid, 'status': 'Not Connected'})
                     shared['target_pairs'] = pairs
                     save_config(dict(shared))
             elif action.startswith('remove_'):

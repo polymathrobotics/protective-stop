@@ -42,7 +42,6 @@ To register a remote protective stop, the node also exposes two services:
 
 In order to integrate with the node, you have to activate it first before starting to send heartbeat messages.
 
-
 #### User Monitor Mode
 
 **USE WITH EXTREME CAUTION**
@@ -53,13 +52,11 @@ In the case you have a test driver or other onsite personnel to operate a physic
 ros2 param set /protective_stop_node is_user_monitored False
 ```
 
-
 ### Protective Stop Remote
 
 The remote is run next to the operator of the P-Stop. It exchanges heartbeat messages with the node on the robot, the latter of which will signal if it detects that the heartbeats are coming in at the expected rate.
 
 In this repo currently, we've implemented it as a web client, but it can also be instantiated as a hardware interface.
-
 
 ### Foxglove Websocket Bridge
 
@@ -72,5 +69,6 @@ mkdir build
 cd build
 cmake ..
 make
-```
 
+./pstop/pstop_test
+```

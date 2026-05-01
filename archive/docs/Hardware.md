@@ -24,8 +24,7 @@
   <img width="40%" src="/docs/img/rpi-tape.png">
 </p>
 
-
-2. Solder Raspberry Pi GPIO pin extender
+1. Solder Raspberry Pi GPIO pin extender
 - Use flux to make soldering easier
 - Secure a few pins on each end first for better stability
 - May want to clean singe marks from flux after soldering; we used a toothbrush and water for this.
@@ -33,8 +32,7 @@
   <img width="40%" src="/docs/img/soldered-rpi.png"><br><i> Left = before, right = after </i>
 </p>
 
-
-3. Apply Raspberry Pi heat sink.
+1. Apply Raspberry Pi heat sink.
 - The Geekworm heatsink we used came with two thermal pads, one is 0.5mm and the other is 1mm. Make sure each pad goes in the right place! It comes with a diagram.
 <p align="center">
   <img width="40%" src="/docs/img/heatsink.png"> <br><i> Before </i>
@@ -49,8 +47,7 @@
   <img width="40%" src="/docs/img/thermal-pad-placement.png"> <br><i> Thermal Pad Placement </i>
 </p>
 
-
-4. Add e-ink display to UPS using GPIO header.
+1. Add e-ink display to UPS using GPIO header.
 <p align="center">
   <img width="30%" src="/docs/img/gpio-1.png"> <br><i> Top to bottom: UPS, GPIO header, e-ink display </i>
 </p>
@@ -61,16 +58,16 @@
   <img width="30%" src="/docs/img/gpio-3.png"> <br><i> Install e-ink to UPS by plugging in GPIO header to pins </i>
 </p>
 
-
 ## Wiring
 Now it’s time to starting connecting stuff together. The connections at a glance are shown below.
+
 ```mermaid
 graph TD
     USB-C -->|Power Out| UPS(UPS)
     UPS(UPS) -->|Power Out| R(Raspi)
     R -->|Control| ES(Eink Screen)
     R <-->|USB Power and Data| C(Cell Modem)
-		C -->|USB Power and Data| E(ESP32)
+        C -->|USB Power and Data| E(ESP32)
     E -->|D2 to DI, + and GND| L(LED Ring)
     E -->|D22 to switch, + and GNDx2| PB(Power Button)
     PB -->|switch to input| UPS
@@ -99,7 +96,7 @@ We will go through the wire soldering connections in the diagram above one by on
   <img width="20%" src="/docs/img/stopbutton-esp.png"> <br><i> Corresponding ESP32 wiring for stop button </i>
 </p>
 
-2. LED Ring to ESP32
+1. LED Ring to ESP32
 - LED Ring DI → ESP32 D2 (Green wire)
 - LED Ring PWR5V → ESP32 VIN (Red wire)
 - LED Ring GND → ESP32 GND (Black wire)
@@ -111,7 +108,7 @@ We will go through the wire soldering connections in the diagram above one by on
   <img width="30%" src="/docs/img/ledring-esp32.png"> <br><i> Corresponding ESP32 wiring for LED ring </i>
 </p>
 
-3. Power Button to ESP32 and UPS
+1. Power Button to ESP32 and UPS
 - Power Button LED power terminal  → ESP32 D22 and UPS pin 3 (White wires)
 - Power Button LED ground and switch contact A → ESP32 GND (Black wire)
 - Power Button switch contact B→ ESP32 D23 (Red wire)
@@ -134,12 +131,12 @@ We will go through the wire soldering connections in the diagram above one by on
 </p>
 
 - Two white wires should be connected to the same terminal on the button (power button LED power terminal)
-    - Tip: Solder these wires together first, and then solder them to the terminal
+  - Tip: Solder these wires together first, and then solder them to the terminal
 - The black wire is soldered across two power button terminals (power button LED ground and switch contact A)
-    - Tip: Solder the end of the wire to the further terminal first, then the closer one
+  - Tip: Solder the end of the wire to the further terminal first, then the closer one
 - Red wire is soldered normally
 
-4. UPS to ESP32 (battery indicator)
+1. UPS to ESP32 (battery indicator)
 - Lowbat to D34 (yellow wire)
 <p align="center">
   <img width="30%" src="/docs/img/ups-lowbat.png"> <br><i> UPS lowbat soldering </i>
@@ -148,16 +145,16 @@ We will go through the wire soldering connections in the diagram above one by on
   <img width="30%" src="/docs/img/esp-d34.png"> <br><i> ESP32 pin D34 soldering </i>
 </p>
 
-5. Connect cell modem to ESP32 and RPi UPS.
+1. Connect cell modem to ESP32 and RPi UPS.
 - Modem USB → ESP32 microUSB (solid black cable)
 - Modem microUSB → UPS microUSB (black/white cable)
 
-6. Add battery to USP.
+1. Add battery to USP.
 <p align="center">
   <img width="30%" src="/docs/img/connected-sys.png"> <br><i> Wired and connected system. </i>
 </p>
 
-7. Add antennas - if you want to use cellular data instead of WiFi
+1. Add antennas - if you want to use cellular data instead of WiFi
 - Screw on antennas to AUX and MAIN pins on the underside of the modem
 
 Now you're ready to move onto [Software](/docs/Software.md)

@@ -1,4 +1,7 @@
 
+// SPDX-FileCopyrightText: 2026 Polymath Robotics, Inc.
+// SPDX-License-Identifier: Apache-2.0
+
 #include <time.h>
 
 #include "pstop/time.h"
@@ -16,4 +19,3 @@ time_get_now(void)
     return 0U;
 #endif
 }
-

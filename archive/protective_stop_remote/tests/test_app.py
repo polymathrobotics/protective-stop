@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Polymath Robotics, Inc.
+# SPDX-License-Identifier: Apache-2.0
 import pytest
 from protective_stop_remote.app import config_app
 
@@ -9,6 +11,6 @@ def client():
 
 
 def test_data_endpoint(client):
-    response = client.get("/data")
+    response = client.get('/data')
     assert response.status_code == 200
-    assert response.json["status_summary"] == "Not Connected"
+    assert response.json['status_summary'] == 'Not Connected'

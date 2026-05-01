@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Polymath Robotics, Inc.
+// SPDX-License-Identifier: Apache-2.0
+
 #ifndef PSTOP_PSTOP_MSG_H
 #define PSTOP_PSTOP_MSG_H
 
@@ -89,4 +92,3 @@ void pstop_message_decode(pstop_msg_t *msg, const uint8_t *data);
 void pstop_message_encode(const pstop_msg_t *msg, uint8_t *data);
 
 #endif /* PSTOP_PSTOP_MSG_H */
-

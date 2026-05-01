@@ -1,24 +1,26 @@
+# SPDX-FileCopyrightText: 2026 Polymath Robotics, Inc.
+# SPDX-License-Identifier: Apache-2.0
 # !/usr/bin/env python3
-import pytest
-import launch_testing.util
-import launch_testing.actions
-import launch_testing
-from launch.actions import IncludeLaunchDescription
-from launch.substitutions import PathSubstitution
-from launch_ros.substitutions import FindPackageShare
-from launch import LaunchDescription
-from protective_stop_msg.srv import ProtectiveStop as ProtectiveStopSrv
-
-from rcl_interfaces.srv import SetParameters
-from protective_stop_node.models import PStopRemoteStatusEnum
-from protective_stop_node.test_utils.helpers import build_pstop_message
-from protective_stop_node.test_utils.base_test import BaseTestProtectiveStopNode
-import rclpy
 import time
 import uuid
 
+import launch_testing
+import launch_testing.actions
+import launch_testing.util
+import pytest
+import rclpy
+from launch import LaunchDescription
+from launch.actions import IncludeLaunchDescription
+from launch.substitutions import PathSubstitution
+from launch_ros.substitutions import FindPackageShare
+from rcl_interfaces.srv import SetParameters
 
-machine_uuid = "machine-uuid"
+from protective_stop_msg.srv import ProtectiveStop as ProtectiveStopSrv
+from protective_stop_node.models import PStopRemoteStatusEnum
+from protective_stop_node.test_utils.base_test import BaseTestProtectiveStopNode
+from protective_stop_node.test_utils.helpers import build_pstop_message
+
+machine_uuid = 'machine-uuid'
 TEST_HEARTBEAT_TIMEOUT_S = 0.1
 TEST_DEACTIVATION_TIMEOUT_S = 3.0
 TIMEOUT_PADDING = 0.05
@@ -27,22 +29,18 @@ MAX_PSTOP_COUNT = 3
 
 @pytest.mark.launch_test
 def generate_test_description():
-    return LaunchDescription(
-        [
-            IncludeLaunchDescription(
-                PathSubstitution(FindPackageShare("protective_stop_node"))
-                    / "launch"
-                    / "protective_stop_node.launch.yaml",
-                launch_arguments={
-                    "machine_uuid": machine_uuid,
-                    "heartbeat_timeout": str(TEST_HEARTBEAT_TIMEOUT_S),
-                    "deactivation_timeout": str(TEST_DEACTIVATION_TIMEOUT_S),
-                    "max_pstop_count": str(MAX_PSTOP_COUNT),
-                }.items(),
-            ),
-            launch_testing.actions.ReadyToTest(),
-        ]
-    )
+    return LaunchDescription([
+        IncludeLaunchDescription(
+            PathSubstitution(FindPackageShare('protective_stop_node')) / 'launch' / 'protective_stop_node.launch.yaml',
+            launch_arguments={
+                'machine_uuid': machine_uuid,
+                'heartbeat_timeout': str(TEST_HEARTBEAT_TIMEOUT_S),
+                'deactivation_timeout': str(TEST_DEACTIVATION_TIMEOUT_S),
+                'max_pstop_count': str(MAX_PSTOP_COUNT),
+            }.items(),
+        ),
+        launch_testing.actions.ReadyToTest(),
+    ])
 
 
 """
@@ -80,9 +78,9 @@ class TestProtectiveStopNode(BaseTestProtectiveStopNode):
         rclpy.spin_until_future_complete(self.node, future)
 
         response = future.result()
-        self.assertIsNotNone(response, "No response received from /state_transition_service")
+        self.assertIsNotNone(response, 'No response received from /state_transition_service')
         self.assertFalse(response.success)
-        self.assertEqual(response.message, "Unknown receiver uuid")
+        self.assertEqual(response.message, 'Unknown receiver uuid')
         self.assertEqual(response.params.machine_uuid, machine_uuid)
 
     def test_err_deactivating_before_activating(self):
@@ -94,9 +92,9 @@ class TestProtectiveStopNode(BaseTestProtectiveStopNode):
         rclpy.spin_until_future_complete(self.node, future)
 
         response = future.result()
-        self.assertIsNotNone(response, "No response received from /state_transition_service")
+        self.assertIsNotNone(response, 'No response received from /state_transition_service')
         self.assertFalse(response.success)
-        self.assertEqual(response.message, "Deactivation failed. UUID not in connected list")
+        self.assertEqual(response.message, 'Deactivation failed. UUID not in connected list')
 
     def test_multiple_activations_deactivations(self):
         for _ in range(MAX_PSTOP_COUNT):
@@ -118,29 +116,25 @@ class TestProtectiveStopNode(BaseTestProtectiveStopNode):
         self._activate()
         self._spin_till_ok()
 
-        self.assertFalse(self.pstop_hb_msgs[-1].stop, "Protective stop bool not set to true")
+        self.assertFalse(self.pstop_hb_msgs[-1].stop, 'Protective stop bool not set to true')
 
         PSTOP_PRESSED = True
 
         while not self.pstop_hb_msgs[-1].stop:
-            self.pstop_publisher.publish(
-                build_pstop_message(machine_uuid, self.uuid, PSTOP_PRESSED)
-            )
+            self.pstop_publisher.publish(build_pstop_message(machine_uuid, self.uuid, PSTOP_PRESSED))
             time.sleep(TEST_HEARTBEAT_TIMEOUT_S - TIMEOUT_PADDING)
             rclpy.spin_once(self.node, timeout_sec=0.1)
 
-        self.assertTrue(self.pstop_hb_msgs[-1].stop, "Protective stop bool not set to false")
+        self.assertTrue(self.pstop_hb_msgs[-1].stop, 'Protective stop bool not set to false')
 
         PSTOP_PRESSED = False
 
         while self.pstop_hb_msgs[-1].stop:
-            self.pstop_publisher.publish(
-                build_pstop_message(machine_uuid, self.uuid, PSTOP_PRESSED)
-            )
+            self.pstop_publisher.publish(build_pstop_message(machine_uuid, self.uuid, PSTOP_PRESSED))
             time.sleep(TEST_HEARTBEAT_TIMEOUT_S - TIMEOUT_PADDING)
             rclpy.spin_once(self.node, timeout_sec=0.1)
 
-        self.assertFalse(self.pstop_hb_msgs[-1].stop, "Protective stop bool not set to false")
+        self.assertFalse(self.pstop_hb_msgs[-1].stop, 'Protective stop bool not set to false')
 
         self._deactivate()
 
@@ -187,7 +181,6 @@ class TestProtectiveStopNode(BaseTestProtectiveStopNode):
             time.sleep(TEST_HEARTBEAT_TIMEOUT_S + 1.0)
             rclpy.spin_once(self.node, timeout_sec=0.1)
 
-
         time.sleep(TEST_DEACTIVATION_TIMEOUT_S)
 
         # Should be able to re-activate since it has been deactivated internally
@@ -198,15 +191,16 @@ class TestProtectiveStopNode(BaseTestProtectiveStopNode):
         # Setup params client
         self.set_params_srv = self.node.create_client(SetParameters, '/protective_stop_node/set_parameters')
         if not self.set_params_srv.wait_for_service(timeout_sec=5.0):
-            self.fail("Service /protective_stop_node/set_parameters not available")
+            self.fail('Service /protective_stop_node/set_parameters not available')
 
-        future = self.set_params_srv.call_async(SetParameters.Request(
-            parameters=[
-                rclpy.parameter.Parameter("is_user_monitored", rclpy.Parameter.Type.BOOL, False).to_parameter_msg()
-            ]
-        ))
+        future = self.set_params_srv.call_async(
+            SetParameters.Request(
+                parameters=[
+                    rclpy.parameter.Parameter('is_user_monitored', rclpy.Parameter.Type.BOOL, False).to_parameter_msg()
+                ]
+            )
+        )
         rclpy.spin_until_future_complete(self.node, future)
-
 
         # Wait for a heartbeat with stop == False
         timeout = 5.0
@@ -218,11 +212,13 @@ class TestProtectiveStopNode(BaseTestProtectiveStopNode):
         self.assertFalse(self.pstop_hb_msgs[-1].stop)
 
         # test re-enable pstop
-        future = self.set_params_srv.call_async(SetParameters.Request(
-            parameters=[
-                rclpy.parameter.Parameter("is_user_monitored", rclpy.Parameter.Type.BOOL, True).to_parameter_msg()
-            ]
-        ))
+        future = self.set_params_srv.call_async(
+            SetParameters.Request(
+                parameters=[
+                    rclpy.parameter.Parameter('is_user_monitored', rclpy.Parameter.Type.BOOL, True).to_parameter_msg()
+                ]
+            )
+        )
         rclpy.spin_until_future_complete(self.node, future)
 
         # Wait for a heartbeat with stop == True
