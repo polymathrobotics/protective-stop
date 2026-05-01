@@ -49,7 +49,7 @@ validate_message(pstop_machine_t *machine, pstop_client_data_t *client, const ps
             // too many lost messages
             // clean up this client
             *resp = NULL;
-            machine_stop_robot(machine, NULL);
+            machine_stop_robot(machine);
             return PSTOP_MSG_LOST;
         }
     }

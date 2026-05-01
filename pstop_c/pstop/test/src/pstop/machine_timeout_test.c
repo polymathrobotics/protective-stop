@@ -180,6 +180,8 @@ test_bond_stop_timeout_2_missed_timeouts(void)
 
     current_time = 222U; // now two missed heartbeats
     TEST_ASSERT_EQUAL(PSTOP_MISSED_HEARTBEATS, machine.check_heartbeats_cb(&machine));
+    TEST_ASSERT_EQUAL(ROBOT_STATE_STOPPED, machine.robot_state.robot_state);
+    TEST_ASSERT_EQUAL(ROBOT_RESTART_STATE_NEED_STOP, machine.robot_state.restart_state);
 }
 
 void

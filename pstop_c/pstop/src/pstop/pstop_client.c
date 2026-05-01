@@ -24,13 +24,6 @@ pstop_client_init(pstop_client_data_t *client)
     client->local_client_id = next_client_id++;
 }
 
-static
-void
-pstop_client_copy(pstop_client_data_t *dest, pstop_client_data_t *src)
-{
-    memcpy(dest, src, sizeof(pstop_client_data_t));
-}
-
 void
 pstop_clients_init(pstop_clients_t *clients)
 {
