@@ -12,7 +12,7 @@ typedef uint8_t message_type_t;
 #define PSTOP_MESSAGE_STOP 1U
 #define PSTOP_MESSAGE_BOND 2U
 #define PSTOP_MESSAGE_UNBOND 3U
-#define PSTOP_MESSAGE_UNKNOWN 0xFFU
+#define PSTOP_MESSAGE_UNKNOWN 0x0FU
 
 #define PSTOP_MESSAGE_SIZE 64U
 
@@ -21,6 +21,16 @@ typedef uint8_t message_type_t;
  * to provide basic black channel support.
  */
 typedef struct {
+    /**
+     * Version of this message. Currently just 0x0
+     */
+    uint8_t version;
+
+    /**
+     * Type of message.
+     */
+    message_type_t message;
+
     /**
      * The timestamp (in milliseconds) of this message.
      */
@@ -58,11 +68,6 @@ typedef struct {
      * Or 0 if we are establishing a new bonding.
      */
     uint32_t received_counter;
-
-    /**
-     * The type of message.
-     */
-    message_type_t message;
 
     /**
      * a CRC-16 checksum of the above values.

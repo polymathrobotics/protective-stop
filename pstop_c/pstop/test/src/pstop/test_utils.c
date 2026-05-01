@@ -4,7 +4,7 @@
 #include "pstop/test_utils.h"
 
 void
-device_id_set(device_id_t *device_id, const char *id)
+device_id_set_str(device_id_t *device_id, const char *id)
 {
     device_id_init(device_id);
 

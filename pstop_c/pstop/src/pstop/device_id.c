@@ -10,6 +10,12 @@ device_id_init(device_id_t *device_id)
 }
 
 void
+device_id_set_bytes(device_id_t *device_id, const uint8_t *data)
+{
+    memcpy(device_id->data, data, DEVICE_ID_LENGTH);
+}
+
+void
 device_id_copy(device_id_t *device_id, const device_id_t *id)
 {
     memcpy(device_id->data, id->data, DEVICE_ID_LENGTH);

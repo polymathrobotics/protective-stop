@@ -25,13 +25,13 @@ void
 test_device_cmp(void)
 {
     device_id_t lhs;
-    device_id_set(&lhs, "testing");
+    device_id_set_str(&lhs, "testing");
 
     device_id_t rhs;
-    device_id_set(&rhs, "testing");
+    device_id_set_str(&rhs, "testing");
 
     TEST_ASSERT_EQUAL(0, device_id_cmp(&lhs, &rhs));
-    device_id_set(&rhs, "test");
+    device_id_set_str(&rhs, "test");
     TEST_ASSERT_NOT_EQUAL(0, device_id_cmp(&lhs, &rhs));
 }
 

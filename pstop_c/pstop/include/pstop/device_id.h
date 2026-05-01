@@ -14,6 +14,8 @@ typedef struct {
  */
 void device_id_init(device_id_t *device_id);
 
+void device_id_set_bytes(device_id_t *device_id, const uint8_t *data);
+
 /**
  * Copies the device ID from id to device_id.
  */

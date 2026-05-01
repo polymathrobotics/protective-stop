@@ -91,10 +91,10 @@ test_remove_client(void)
     TEST_ASSERT_EQUAL(0U, pstop_client_num_active(&clients));
 
     device_id_t c1_id;
-    device_id_set(&c1_id, "test");
+    device_id_set_str(&c1_id, "test");
 
     device_id_t c2_id;
-    device_id_set(&c2_id, "test2");
+    device_id_set_str(&c2_id, "test2");
     pstop_client_data_t *c1 = pstop_client_get_free_client(&clients);
     pstop_client_data_t *c2 = pstop_client_get_free_client(&clients);
 
@@ -122,12 +122,10 @@ test_remove_client(void)
 void
 main_pstop_client_test(void)
 {
-    //UnityBegin("pstop_client_test.c");
     UnitySetTestFile("pstop_client_test.c");
 
     RUN_TEST(test_client_init);
     RUN_TEST(test_clients_init);
     RUN_TEST(test_get_free_client);
     RUN_TEST(test_remove_client);
-
 }
