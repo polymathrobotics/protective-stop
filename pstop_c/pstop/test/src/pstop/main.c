@@ -6,6 +6,7 @@
 
 extern void main_device_id_test(void);
 extern void main_pstop_client_test(void);
+extern void main_pstop_msg_test(void);
 extern void main_machine_test(void);
 extern void main_machine_timeout_test(void);
 
@@ -20,6 +21,7 @@ main(void)
 
     main_device_id_test();
     main_pstop_client_test();
+    main_pstop_msg_test();
     main_machine_test();
     main_machine_timeout_test();
 

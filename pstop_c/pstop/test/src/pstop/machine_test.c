@@ -68,7 +68,7 @@ static
 void
 init_client(device_id_t *id1, pstop_msg_t *msg, const char *id)
 {
-    device_id_set(id1, id);
+    device_id_set_str(id1, id);
     device_id_copy(&(msg->id), id1);
 }
 
@@ -104,7 +104,7 @@ test_new_client_operator_allowed(void)
     machine_init(&machine, &pstop_app, pstop_clients, MAX_CLIENTS);
 
     device_id_t id;
-    device_id_set(&id, "test");
+    device_id_set_str(&id, "test");
 
     pstop_msg_t msg;
     msg.message = PSTOP_MESSAGE_BOND;
@@ -128,7 +128,7 @@ pstop_client_data_t *
 client_send_ok(pstop_machine_t *machine, const char *device_id, uint8_t respMsg)
 {
     device_id_t id;
-    device_id_set(&id, device_id);
+    device_id_set_str(&id, device_id);
 
     pstop_msg_t msg;
     msg.message = PSTOP_MESSAGE_OK;
@@ -304,7 +304,7 @@ test_bond_ok_stop(void)
     machine_init(&machine, &pstop_app, pstop_clients, MAX_CLIENTS);
 
     device_id_t id;
-    device_id_set(&id, "test");
+    device_id_set_str(&id, "test");
 
     pstop_msg_t msg;
     msg.message = PSTOP_MESSAGE_BOND;

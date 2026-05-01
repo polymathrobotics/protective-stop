@@ -68,7 +68,7 @@ static
 void
 init_client(device_id_t *id1, pstop_msg_t *msg, const char *id)
 {
-    device_id_set(id1, id);
+    device_id_set_str(id1, id);
     device_id_copy(&(msg->id), id1);
 }
 
