@@ -20,3 +20,18 @@ target_link_libraries(machine_app PUBLIC
   pstop
   transport_udp
 )
+
+add_executable(client_app
+  examples/client/client_app.c
+)
+
+target_include_directories(client_app PUBLIC
+  ${CMAKE_CURRENT_SOURCE_DIR}/pstop/include
+  ${CMAKE_CURRENT_SOURCE_DIR}/transport/include
+  include
+)
+
+target_link_libraries(client_app PUBLIC
+  pstop
+  transport_udp
+)

@@ -8,13 +8,13 @@
 
 #include "pstop/error.h"
 #include "pstop/device_id.h"
+#include "pstop/os.h"
 
 typedef enum {
     PSTOP_STATUS_OK = 0,
     PSTOP_STATUS_STOP = 1
 } pstop_status_message_t;
 
-typedef uint64_t (* get_current_time_t)(void);
 typedef int      (* is_operator_allowed_t)(const device_id_t *device_id);
 typedef int      (* pstop_status_t)(pstop_status_message_t status);
 
@@ -34,10 +34,7 @@ typedef struct {
 
 typedef struct pstop_application_t {
 
-    /**
-     * Callback to return the current time.
-     */
-    get_current_time_t get_time_cb;
+    pstop_os_env env;
 
     /**
      * The device ID for this machine

@@ -2,6 +2,8 @@
 // SPDX-FileCopyrightText: 2026 Polymath Robotics, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
+#include <stdio.h>
+
 #include <unistd.h>
 #include <string.h>
 #include <errno.h>
@@ -11,8 +13,17 @@
 
 #include "transport/udp/udp_transport.h"
 
+void
+transport_udp_init(udp_transport_data_t *transport)
+{
+    memset(&transport->addr, 0, sizeof(transport->addr));
+    transport->fd = -1;
+    transport->poll_fds.fd = -1;
+    transport->poll_fds.events = 0;
+}
+
 int
-transport_udp_open(udp_transport_data_t *transport, const char *host, int port)
+transport_udp_listen(udp_transport_data_t *transport, const char *host, int port)
 {
     memset(&transport->addr, 0, sizeof(transport->addr));
     transport->addr.sin_addr.s_addr = inet_addr(host);
@@ -22,15 +33,41 @@ transport_udp_open(udp_transport_data_t *transport, const char *host, int port)
     // create datagram socket
     transport->fd = socket(AF_INET, SOCK_DGRAM, 0);
     if(transport->fd == -1) {
+        fprintf(stderr, "socket errno=%d\n", errno);
         return -1;
     }
 
     int result = bind(transport->fd, (struct sockaddr*)&transport->addr, sizeof(transport->addr));
 
+    if(result < 0) {
+        fprintf(stderr, "errno=%d\n", errno);
+        return -1;
+    }
     transport->poll_fds.fd = transport->fd;
     transport->poll_fds.events = POLLIN;
 
-    return result;
+    return transport->fd;
+}
+
+int
+transport_udp_connect(udp_transport_data_t *transport, const char *host, int port)
+{
+    memset(&transport->addr, 0, sizeof(transport->addr));
+    transport->addr.sin_addr.s_addr = inet_addr(host);
+    transport->addr.sin_port = htons(port);
+    transport->addr.sin_family = AF_INET;
+
+    // create datagram socket
+    transport->fd = socket(AF_INET, SOCK_DGRAM, 0);
+    if(transport->fd == -1) {
+        fprintf(stderr, "socket errno=%d\n", errno);
+        return -1;
+    }
+
+    transport->poll_fds.fd = transport->fd;
+    transport->poll_fds.events = POLLIN;
+
+    return transport->fd;
 }
 
 int
@@ -76,18 +113,10 @@ transport_udp_write(udp_transport_data_t *transport, const uint8_t *data, size_t
     }
     ssize_t numbytes = sendto(transport->fd, data, length, 0, addr, addrSize);
 
-    //fprintf(stderr, "Wrote bytes: %d\n", (int)numbytes);
     if(numbytes == -1) {
-        // fprintf(stderr, "errono=%d\n", errno);
+        fprintf(stderr, "errno=%d\n", errno);
         return -1;
     }
 
     return numbytes;
-}
-
-void
-transport_init_udp(udp_transport_data_t *transport)
-{
-    transport->fd = -1;
-    memset(&transport->addr, 0, sizeof(transport->addr));
 }

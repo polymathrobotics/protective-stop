@@ -11,10 +11,10 @@ time_get_now(void)
 {
 #ifdef __linux__
     struct timespec ts;
-    timespec_get(&ts, CLOCK_REALTIME);
+    timespec_get(&ts, TIME_UTC);
 
     // Calculate milliseconds
-    return ((uint64_t)ts.tv_sec) * 1000ULL + ((uint64_t)ts.tv_nsec) / 1000000ULL;
+    return (((uint64_t)ts.tv_sec) * 1000ULL) + (((uint64_t)ts.tv_nsec) / 1000000ULL);
 #else
     return 0U;
 #endif

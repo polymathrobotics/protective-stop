@@ -5,7 +5,6 @@
 #include <stdlib.h>
 
 #include "pstop/pstop_application.h"
-#include "pstop/time.h"
 
 static
 void
@@ -25,7 +24,7 @@ pstop_application_config_init(pstop_application_config_t *config)
 void
 pstop_application_init(pstop_application_t *app)
 {
-    app->get_time_cb = time_get_now;
+    pstop_os_env_init(&app->env);
     app->operator_allowed_cb = NULL;
     app->status_cb = NULL;
     app->log_message_cb = no_log;

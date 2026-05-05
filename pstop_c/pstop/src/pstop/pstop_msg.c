@@ -174,18 +174,13 @@ static
 void
 write_uint64(uint64_t value, uint8_t *data, size_t *pos)
 {
-    uint8_t *bytes = data + *pos;
-    *pos = *pos + 4U;
 #if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
-    bytes[0] = (uint8_t)(value & 0xFFU);
-    bytes[1] = (uint8_t)((value >> 8U) & 0xFFU);
-    bytes[2] = (uint8_t)((value >> 16U) & 0xFFU);
-    bytes[3] = (uint8_t)((value >> 24U) & 0xFFU);
-    bytes[4] = (uint8_t)((value >> 32U) & 0xFFU);
-    bytes[5] = (uint8_t)((value >> 40U) & 0xFFU);
-    bytes[6] = (uint8_t)((value >> 48U) & 0xFFU);
-    bytes[7] = (uint8_t)((value >> 56U) & 0xFFU);
+    uint64_t *bytes = (uint64_t *)(data + *pos);
+    *pos = *pos + 8U;
+    *bytes = value;
 #else
+    uint8_t *bytes = data + *pos;
+    *pos = *pos + 8U;
     bytes[7] = (uint8_t)(value & 0xFFU);
     bytes[6] = (uint8_t)((value >> 8U) & 0xFFU);
     bytes[5] = (uint8_t)((value >> 16U) & 0xFFU);

@@ -65,9 +65,20 @@ encode_pstop_msg()
 {
     pstop_msg_t msg;
     msg.version = 0x0U;
-    msg.message = 0x3U;
+    msg.message = 0x2U;
     msg.stamp = 0x0807060504030201U;
     msg.received_stamp = 0x1817161514131211U;
+    uint8_t ID_BYTES[] = {
+        0x20U, 0x21U, 0x22U, 0x23U, 0x24U, 0x25U, 0x26U, 0x27U,
+        0x28U, 0x29U, 0x2AU, 0x2BU, 0x2CU, 0x2DU, 0x2EU, 0x2FU // device UUID
+    };
+    device_id_set_bytes(&msg.id, ID_BYTES);
+
+    uint8_t RECEIVER_ID_BYTES[] = {
+        0x30U, 0x31U, 0x32U, 0x33U, 0x34U, 0x35U, 0x36U, 0x37U,
+        0x38U, 0x39U, 0x3AU, 0x3BU, 0x3CU, 0x3DU, 0x3EU, 0x3FU // receiver UUID
+    };
+    device_id_set_bytes(&msg.receiver_id, RECEIVER_ID_BYTES);
 
     msg.heartbeat_timeout = 0x43424140U;
     msg.counter = 0x53525150U;
@@ -76,6 +87,7 @@ encode_pstop_msg()
 
     uint8_t bytes[PSTOP_MESSAGE_SIZE];
     pstop_message_encode(&msg, bytes);
+    TEST_ASSERT_EQUAL_UINT8_ARRAY(PSTOP_MSG_BYTES, bytes, PSTOP_MESSAGE_SIZE);
 }
 
 void

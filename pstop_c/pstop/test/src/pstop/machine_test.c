@@ -50,7 +50,7 @@ log_error(pstop_error_t error, const char *message)
 
 static
 pstop_application_t pstop_app = {
-    .get_time_cb = get_time,
+    .env.get_time_cb = get_time,
     .machine_device_id.data = "testing",
     .operator_allowed_cb = is_operator_allowed,
     .status_cb = robot_status,
