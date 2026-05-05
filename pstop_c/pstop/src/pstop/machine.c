@@ -36,7 +36,7 @@ static
 void
 init_new_client(pstop_application_t *application, pstop_client_data_t *client, const pstop_msg_t *msg)
 {
-    uint64_t now = application->get_time_cb();
+    uint64_t now = application->env.get_time_cb();
 
     device_id_copy(&(client->client_id), &(msg->id));
     client->last_timestamp = now;
@@ -223,7 +223,7 @@ machine_handle_message(pstop_machine_t *machine, const pstop_msg_t *req, pstop_m
         init_new_client(machine->application, client, req);
     }
 
-    uint64_t now = machine->application->get_time_cb();
+    uint64_t now = machine->application->env.get_time_cb();
     client->last_timestamp = now;
 
     switch(req->message) {
@@ -245,7 +245,7 @@ static
 pstop_error_t
 machine_check_heartbeats(pstop_machine_t *machine)
 {
-    uint64_t now = machine->application->get_time_cb();
+    uint64_t now = machine->application->env.get_time_cb();
 
     int needsStop = 0;
 
@@ -314,5 +314,7 @@ machine_stop_robot(pstop_machine_t *machine)
     machine->robot_state.restart_state = ROBOT_RESTART_STATE_NEED_STOP;
     machine->robot_state.client_stop_id = 0U;
 
-    machine->application->status_cb(PSTOP_STATUS_STOP);
+    if(machine->application->status_cb != NULL) {
+        machine->application->status_cb(PSTOP_STATUS_STOP);
+    }
 }

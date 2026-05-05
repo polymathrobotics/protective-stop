@@ -32,6 +32,13 @@ check_message_order(pstop_client_data_t *client, const pstop_msg_t *msg)
 }
 
 static
+int
+is_checksum_valid(const pstop_msg_t *req)
+{
+    return 1;
+}
+
+static
 pstop_error_t
 validate_message(pstop_machine_t *machine, pstop_client_data_t *client, const pstop_msg_t *req, pstop_msg_t **resp)
 {
@@ -65,7 +72,12 @@ validate_message(pstop_machine_t *machine, pstop_client_data_t *client, const ps
 pstop_error_t
 protocol_handle_message(pstop_machine_t *machine, const pstop_msg_t *req, pstop_msg_t **resp)
 {
-    // validate checksum
+    // validate black channel bits
+
+    if(!is_checksum_valid(req)) {
+        *resp = NULL;
+        return PSTOP_MSG_INVALID_CHECKSUM;
+    }
 
     pstop_client_data_t *client = pstop_client_get(&(machine->pstops), &(req->id));
 
@@ -74,10 +86,12 @@ protocol_handle_message(pstop_machine_t *machine, const pstop_msg_t *req, pstop_
     }
     else {
         // validate lost/out of order message
+        #if 0
         pstop_error_t result = validate_message(machine, client, req, resp);
         if(result != PSTOP_OK) {
             return result;
         }
+            #endif
     }
 
     // now send the message to the machine for pstop handling.
