@@ -8,11 +8,12 @@ find_package(unity REQUIRED)
 add_library(pstop
   src/pstop/checksum.c
   src/pstop/device_id.c
+  src/pstop/machine_client_data.c
   src/pstop/machine.c
   src/pstop/os.c
   src/pstop/protocol.c
   src/pstop/pstop_application.c
-  src/pstop/pstop_client.c
+  src/pstop/pstop_client_data.c
   src/pstop/pstop_msg.c
   src/pstop/time.c
 )
@@ -25,7 +26,7 @@ add_executable(pstop_test
   test/src/pstop/device_id_test.c
   test/src/pstop/machine_test.c
   test/src/pstop/machine_timeout_test.c
-  test/src/pstop/pstop_client_test.c
+  test/src/pstop/pstop_client_data_test.c
   test/src/pstop/pstop_msg_test.c
 
   test/src/pstop/test_utils.c

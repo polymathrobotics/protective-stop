@@ -7,7 +7,7 @@
 #include "pstop/pstop_msg.h"
 #include "pstop/error.h"
 #include "pstop/pstop_application.h"
-#include "pstop/pstop_client.h"
+#include "pstop/pstop_client_data.h"
 
 typedef struct pstop_machine_t pstop_machine_t;
 
