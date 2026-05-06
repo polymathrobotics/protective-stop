@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: 2026 Polymath Robotics, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
-#ifndef PSTOP_PSTOP_CLIENT_H
-#define PSTOP_PSTOP_CLIENT_H
+#ifndef PSTOP_PSTOP_CLIENT_DATA_H
+#define PSTOP_PSTOP_CLIENT_DATA_H
 
 #include <stdint.h>
 
@@ -87,4 +87,4 @@ void pstop_client_deactivate(pstop_client_data_t *client);
  */
 pstop_client_data_t *pstop_client_get(pstop_clients_t *clients, const device_id_t *client_id);
 
-#endif /* PSTOP_PSTOP_CLIENT_H */
+#endif /* PSTOP_PSTOP_CLIENT_DATA_H */

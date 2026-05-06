@@ -5,7 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "pstop/pstop_client.h"
+#include "pstop/pstop_client_data.h"
 
 static uint32_t next_client_id = 0U;
 

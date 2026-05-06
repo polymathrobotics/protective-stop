@@ -31,7 +31,7 @@ int
 robot_status(pstop_status_message_t status)
 {
     if(lastStatus != status) {
-        fprintf(stderr, "Status = %d\n", (int)status);
+        fprintf(stderr, "Robot Status = %d\n", (int)status);
         lastStatus = status;
     }
 
@@ -77,7 +77,12 @@ main(int argc, char *argv[])
 
             fprintf(stderr, "Got message: %d from %d\n", req_msg.message, req_msg.id.data[15]);
             pstop_error_t error = machine.handle_protocol_message_cb(&machine, &req_msg, &resp_msg_ptr);
+            if(error != PSTOP_OK) {
+                fprintf(stderr, "Invalid request: %d\n", (int)error);
+                continue;
+            }
             if(resp_msg_ptr != NULL) {
+                //fprintf(stderr, "Sending resp: counter=%d\n", resp_msg.counter);
                 pstop_message_encode(&resp_msg, respbytes);
                 transport_udp_write(&udp_transport, respbytes, PSTOP_MESSAGE_SIZE, (struct sockaddr_in *)&client);
             }
@@ -85,7 +90,7 @@ main(int argc, char *argv[])
                 fprintf(stderr, "Invalid response: %d\n", (int)error);
             }
         }
-        //machine.check_heartbeats_cb(&machine);
+        machine.check_heartbeats_cb(&machine);
     }
 
     transport_udp_close(&udp_transport);
