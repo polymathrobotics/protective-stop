@@ -15,11 +15,11 @@ void
 assert_empty_client(pstop_client_data_t *client)
 {
     for(int i = 0; i < DEVICE_ID_LENGTH; ++i) {
-        TEST_ASSERT_EQUAL(0U, client->client_id.data[i]);
+        TEST_ASSERT_EQUAL(0U, client->client_data.client_id.data[i]);
     }
-    TEST_ASSERT_EQUAL(0U, client->last_timestamp);
-    TEST_ASSERT_EQUAL(0U, client->heartbeat_ms);
-    TEST_ASSERT_EQUAL(0U, client->msg_counter);
+    TEST_ASSERT_EQUAL(0U, client->client_data.last_timestamp);
+    TEST_ASSERT_EQUAL(0U, client->client_data.heartbeat_ms);
+    TEST_ASSERT_EQUAL(0U, client->client_data.msg_counter);
     TEST_ASSERT_EQUAL(0U, client->clock_drift);
 }
 
@@ -101,8 +101,8 @@ test_remove_client(void)
     pstop_client_data_t *c1 = pstop_client_get_free_client(&clients);
     pstop_client_data_t *c2 = pstop_client_get_free_client(&clients);
 
-    device_id_copy(&(c1->client_id), &c1_id);
-    device_id_copy(&(c2->client_id), &c2_id);
+    device_id_copy(&(c1->client_data.client_id), &c1_id);
+    device_id_copy(&(c2->client_data.client_id), &c2_id);
 
     // remove first client and make sure second client was copied over
     TEST_ASSERT_EQUAL(2U, pstop_client_num_active(&clients));
@@ -115,7 +115,7 @@ test_remove_client(void)
     // verify that the other client is still available
     c2 = pstop_client_get(&clients, &c2_id);
     TEST_ASSERT_NOT_NULL(c2);
-    TEST_ASSERT_EQUAL(0, device_id_cmp(&c2_id, &(c2->client_id)));
+    TEST_ASSERT_EQUAL(0, device_id_cmp(&c2_id, &(c2->client_data.client_id)));
 
     // now remove last client
     pstop_client_deactivate(c2);

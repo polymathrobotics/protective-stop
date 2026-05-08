@@ -38,19 +38,19 @@ protocol_handle_message(pstop_machine_t *machine, const pstop_msg_t *req, pstop_
 
     // if we've already seen this client, then validate the counter/timestamps
     if(client != NULL) {
-        if(req->counter <= client->last_counter) {
+        if(req->counter <= client->client_data.last_counter) {
             *resp = NULL;
             return PSTOP_MSG_OUT_OF_ORDER;
         }
-        if((req->counter - client->last_counter) > machine->application->app_config.max_lost_messages) {
+        if((req->counter - client->client_data.last_counter) > machine->application->app_config.max_lost_messages) {
             *resp = NULL;
             return PSTOP_MSG_LOST;
         }
-        if(req->stamp <= client->last_timestamp) {
+        if(req->stamp <= client->client_data.last_timestamp) {
             *resp = NULL;
             return PSTOP_MSG_OUT_OF_ORDER;
         }
-        if(req->received_counter != client->msg_counter) {
+        if(req->received_counter != client->client_data.msg_counter) {
 
         }
     }
@@ -79,10 +79,10 @@ protocol_handle_message(pstop_machine_t *machine, const pstop_msg_t *req, pstop_
 
         // null client will happen on unbond
         if(client != NULL) {
-            (*resp)->counter = client->msg_counter + 1U;
-            client->msg_counter++;
-            client->last_counter = req->counter;
-            client->last_timestamp = now;
+            (*resp)->counter = client->client_data.msg_counter + 1U;
+            client->client_data.msg_counter++;
+            client->client_data.last_counter = req->counter;
+            client->client_data.last_timestamp = now;
         }
 
         return PSTOP_OK;

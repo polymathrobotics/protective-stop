@@ -12,7 +12,7 @@
 #include "transport/udp/udp_transport.h"
 #include "pstop/device_id.h"
 #include "pstop/os.h"
-#include "pstop/machine_client_data.h"
+#include "pstop/protocol_data.h"
 
 udp_transport_data_t udp_transport;
 
@@ -50,7 +50,7 @@ read_msg(udp_transport_data_t *transport, pstop_os_env *env, pstop_msg_t *resp, 
 }
 
 int
-send_msg(udp_transport_data_t *transport, pstop_os_env *env, machine_client_data_t *machine, const device_id_t *uuid, uint8_t msg)
+send_msg(udp_transport_data_t *transport, pstop_os_env *env, protocol_data_t *machine, const device_id_t *uuid, uint8_t msg)
 {
     uint8_t reqbytes[PSTOP_MESSAGE_SIZE];
 
@@ -83,7 +83,7 @@ send_msg(udp_transport_data_t *transport, pstop_os_env *env, machine_client_data
 }
 
 void
-send_bond(udp_transport_data_t *transport, pstop_os_env *env, machine_client_data_t *machine, const device_id_t *uuid)
+send_bond(udp_transport_data_t *transport, pstop_os_env *env, protocol_data_t *machine, const device_id_t *uuid)
 {
     if(send_msg(transport, env, machine, uuid, PSTOP_MESSAGE_BOND)) {
         fprintf(stderr, "BOND Success\n");
@@ -91,7 +91,7 @@ send_bond(udp_transport_data_t *transport, pstop_os_env *env, machine_client_dat
 }
 
 void
-send_ok(udp_transport_data_t *transport, pstop_os_env *env, machine_client_data_t *machine, const device_id_t *uuid, int is_ok)
+send_ok(udp_transport_data_t *transport, pstop_os_env *env, protocol_data_t *machine, const device_id_t *uuid, int is_ok)
 {
     if(is_ok) {
         if(send_msg(transport, env, machine, uuid, PSTOP_MESSAGE_OK)) {
@@ -106,7 +106,7 @@ send_ok(udp_transport_data_t *transport, pstop_os_env *env, machine_client_data_
 }
 
 void
-send_unbond(udp_transport_data_t *transport, pstop_os_env *env, machine_client_data_t *machine, const device_id_t *uuid)
+send_unbond(udp_transport_data_t *transport, pstop_os_env *env, protocol_data_t *machine, const device_id_t *uuid)
 {
     if(send_msg(transport, env, machine, uuid, PSTOP_MESSAGE_UNBOND)) {
         fprintf(stderr, "UNBOND Success\n");
@@ -135,8 +135,8 @@ main(int argc, char *argv[])
         return -1;
     }
 
-    machine_client_data_t machine;
-    machine_client_init(&machine);
+    protocol_data_t machine;
+    protocol_data_init(&machine);
 
     pstop_os_env env;
     pstop_os_env_init(&env);
@@ -160,11 +160,11 @@ main(int argc, char *argv[])
     fprintf(stderr, "uuid=%d\n", this_uuid.data[15]);
     send_bond(&udp_transport, &env, &machine, &this_uuid);
 
-    sleep_ms(300);
+    sleep_ms(750);
 
     for(int i = 0; i < 30; ++i) {
         send_ok(&udp_transport, &env, &machine, &this_uuid, (i % 2));
-        sleep_ms(300);
+        sleep_ms(750);
     }
 
     send_unbond(&udp_transport, &env, &machine, &this_uuid);

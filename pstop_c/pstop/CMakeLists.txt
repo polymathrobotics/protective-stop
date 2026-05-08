@@ -8,10 +8,10 @@ find_package(unity REQUIRED)
 add_library(pstop
   src/pstop/checksum.c
   src/pstop/device_id.c
-  src/pstop/machine_client_data.c
   src/pstop/machine.c
   src/pstop/os.c
   src/pstop/protocol.c
+  src/pstop/protocol_data.c
   src/pstop/pstop_application.c
   src/pstop/pstop_client_data.c
   src/pstop/pstop_msg.c

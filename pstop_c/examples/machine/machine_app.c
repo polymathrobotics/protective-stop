@@ -31,7 +31,12 @@ int
 robot_status(pstop_status_message_t status)
 {
     if(lastStatus != status) {
-        fprintf(stderr, "Robot Status = %d\n", (int)status);
+        if(status == PSTOP_STATUS_OK) {
+            fprintf(stderr, "Robot Status = OK\n");
+        }
+        else {
+            fprintf(stderr, "Robot Status = STOP\n");
+        }
         lastStatus = status;
     }
 

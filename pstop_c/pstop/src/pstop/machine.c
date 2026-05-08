@@ -38,11 +38,11 @@ init_new_client(pstop_application_t *application, pstop_client_data_t *client, c
 {
     uint64_t now = application->env.get_time_cb();
 
-    device_id_copy(&(client->client_id), &(msg->id));
-    client->last_timestamp = now;
-    client->heartbeat_ms = application->app_config.default_timeout_ms;
-    client->msg_counter = 0U;
-    client->last_counter = 0U;
+    device_id_copy(&(client->client_data.client_id), &(msg->id));
+    client->client_data.last_timestamp = now;
+    client->client_data.heartbeat_ms = application->app_config.default_timeout_ms;
+    client->client_data.msg_counter = 0U;
+    client->client_data.last_counter = 0U;
 
     if(now >= msg->stamp) {
         client->clock_drift = (int64_t)(now - msg->stamp);
@@ -224,7 +224,7 @@ machine_handle_message(pstop_machine_t *machine, const pstop_msg_t *req, pstop_m
     }
 
     uint64_t now = machine->application->env.get_time_cb();
-    client->last_timestamp = now;
+    client->client_data.last_timestamp = now;
 
     switch(req->message) {
     case PSTOP_MESSAGE_BOND:
@@ -239,6 +239,15 @@ machine_handle_message(pstop_machine_t *machine, const pstop_msg_t *req, pstop_m
 
     // by default we'll assume any invalid message means stop
     return handle_stop_msg(machine, client, req, *resp);
+}
+
+static
+void
+machine_notify_hal(pstop_machine_t *machine, pstop_status_message_t status)
+{
+    if(machine->application->status_cb != NULL) {
+        machine->application->status_cb(status);
+    }
 }
 
 static
@@ -258,22 +267,22 @@ machine_check_heartbeats(pstop_machine_t *machine)
 
         // if for some reason now is in the past compared to the last heart beat
         // then there's no need to check if we've heard from this client
-        if(now <= client->last_timestamp) {
+        if(now <= client->client_data.last_timestamp) {
             continue;
         }
 
-        uint64_t diff = now - client->last_timestamp;
+        uint64_t diff = now - client->client_data.last_timestamp;
 
         // if we're still within the heartbeat timeout then this client is still
         // good.
-        if(diff <= client->heartbeat_ms) {
+        if(diff <= client->client_data.heartbeat_ms) {
             continue;
         }
 
         // problem! this client hasn't talked to us in a while
         // if we're still within the window of missed heartbeats then we're OK
 
-        client->missed_heartbeats_counter = (uint16_t)(diff / client->heartbeat_ms);
+        client->missed_heartbeats_counter = (uint16_t)(diff / client->client_data.heartbeat_ms);
         if(client->missed_heartbeats_counter >= machine->application->app_config.max_missed_heartbeats) {
             // trigger a stop!
             client->client_state = PSTOP_CLIENT_UNKNOWN;
@@ -285,6 +294,14 @@ machine_check_heartbeats(pstop_machine_t *machine)
         fprintf(stderr, "Hearbeat failure!\n");
         machine_stop_robot(machine);
         return PSTOP_MISSED_HEARTBEATS;
+    }
+
+    if(machine->robot_state.robot_state == ROBOT_STATE_STOPPED) {
+        machine_notify_hal(machine, PSTOP_STATUS_STOP);
+    }
+    else {
+        machine_notify_hal(machine, PSTOP_STATUS_OK);
+
     }
 
     return PSTOP_OK;
@@ -303,7 +320,7 @@ machine_init(pstop_machine_t *machine, pstop_application_t *app, pstop_client_da
 
     machine->robot_state.client_stop_id = 0U;
     machine->robot_state.restart_state = ROBOT_RESTART_STATE_OK;
-    machine->robot_state.robot_state = ROBOT_STATE_OK;
+    machine->robot_state.robot_state = ROBOT_STATE_STOPPED;
 
     pstop_clients_init(&(machine->pstops));
 }
@@ -315,7 +332,5 @@ machine_stop_robot(pstop_machine_t *machine)
     machine->robot_state.restart_state = ROBOT_RESTART_STATE_NEED_STOP;
     machine->robot_state.client_stop_id = 0U;
 
-    if(machine->application->status_cb != NULL) {
-        machine->application->status_cb(PSTOP_STATUS_STOP);
-    }
+    machine_notify_hal(machine, PSTOP_STATUS_STOP);
 }
