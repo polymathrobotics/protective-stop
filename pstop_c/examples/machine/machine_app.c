@@ -60,6 +60,14 @@ main(int argc, char *argv[])
         return -1;
     }
 
+    device_id_t machine_uuid = {
+        .data = {
+            0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
+            0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0xFF
+        }
+    };
+    device_id_copy(&(machine.application->machine_device_id), &machine_uuid);
+
     uint8_t reqbytes[PSTOP_MESSAGE_SIZE];
     uint8_t respbytes[PSTOP_MESSAGE_SIZE];
 

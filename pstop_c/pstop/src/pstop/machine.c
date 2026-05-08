@@ -41,7 +41,7 @@ init_new_client(pstop_application_t *application, pstop_client_data_t *client, c
     device_id_copy(&(client->client_id), &(msg->id));
     client->last_timestamp = now;
     client->heartbeat_ms = application->app_config.default_timeout_ms;
-    client->msg_counter = 1U;
+    client->msg_counter = 0U;
     client->last_counter = 0U;
 
     if(now >= msg->stamp) {

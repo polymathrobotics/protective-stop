@@ -62,14 +62,12 @@ send_msg(udp_transport_data_t *transport, pstop_os_env *env, machine_client_data
     req_msg.message = msg;
     device_id_copy(&req_msg.id, uuid);
     device_id_copy(&req_msg.receiver_id, &(machine->client_id));
-    req_msg.counter = machine->last_counter + 1U;
+    req_msg.counter = machine->msg_counter + 1U;
     req_msg.received_counter = machine->last_counter;
     req_msg.received_stamp = machine->last_timestamp;
     req_msg.stamp = now;
 
-    machine->last_timestamp = now;
-    machine->last_counter = req_msg.counter;
-
+    machine->msg_counter++;
     pstop_message_encode(&req_msg, reqbytes);
 
     transport_udp_write(transport, reqbytes, PSTOP_MESSAGE_SIZE, NULL);

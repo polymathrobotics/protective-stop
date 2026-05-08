@@ -26,6 +26,7 @@ add_executable(pstop_test
   test/src/pstop/device_id_test.c
   test/src/pstop/machine_test.c
   test/src/pstop/machine_timeout_test.c
+  test/src/pstop/protocol_test.c
   test/src/pstop/pstop_client_data_test.c
   test/src/pstop/pstop_msg_test.c
 
