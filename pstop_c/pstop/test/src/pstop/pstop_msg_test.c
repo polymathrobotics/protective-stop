@@ -24,7 +24,7 @@ PSTOP_MSG_BYTES[] = {
     0x50U, 0x51U, 0x52U, 0x53U, // counter
     0x60U, 0x61U, 0x62U, 0x63U, // received counter
 
-    0x70U, 0x71U // checksum
+    0xD7U, 0xBFU // checksum
 };
 
 static
@@ -56,7 +56,7 @@ decode_pstop_msg()
     TEST_ASSERT_EQUAL(0x43424140U, msg.heartbeat_timeout);
     TEST_ASSERT_EQUAL(0x53525150U, msg.counter);
     TEST_ASSERT_EQUAL(0x63626160U, msg.received_counter);
-    TEST_ASSERT_EQUAL(0x7170U, msg.checksum);
+    TEST_ASSERT_EQUAL(0xBFD7U, msg.checksum);
 }
 
 static
