@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: 2026 Polymath Robotics, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
-#ifndef PSTOP_MACHINE_CLIENT_DATA_H
-#define PSTOP_MACHINE_CLIENT_DATA_H
+#ifndef PSTOP_PROTOCOL_DATA_H
+#define PSTOP_PROTOCOL_DATA_H
 
 #include <stdint.h>
 
@@ -23,8 +23,8 @@ typedef struct {
 
     uint32_t last_counter;
 
-} machine_client_data_t;
+} protocol_data_t;
 
-void machine_client_init(machine_client_data_t *client);
+void protocol_data_init(protocol_data_t *client);
 
-#endif /* PSTOP_MACHINE_CLIENT_DATA_H */
+#endif /* PSTOP_PROTOCOL_DATA_H */

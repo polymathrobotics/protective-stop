@@ -12,11 +12,7 @@ static uint32_t next_client_id = 0U;
 void
 pstop_client_init(pstop_client_data_t *client)
 {
-    device_id_init(&(client->client_id));
-    client->last_timestamp = 0U;
-    client->heartbeat_ms = 0U;
-    client->msg_counter = 0U;
-    client->last_counter = 0U;
+    protocol_data_init(&(client->client_data));
     client->clock_drift = 0U;
     client->lost_message_counter = 0U;
     client->missed_heartbeats_counter = 0U;
@@ -78,7 +74,7 @@ pstop_client_get(pstop_clients_t *clients, const device_id_t *client_id)
 {
     for(uint16_t i = 0U; i < clients->max_clients; ++i) {
         if(clients->clients[i].client_state != PSTOP_CLIENT_UNKNOWN) {
-            if(device_id_cmp(&(clients->clients[i].client_id), client_id) == 0) {
+            if(device_id_cmp(&(clients->clients[i].client_data.client_id), client_id) == 0) {
                 return &(clients->clients[i]);
             }
         }

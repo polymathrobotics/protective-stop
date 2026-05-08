@@ -119,8 +119,8 @@ test_new_client_operator_allowed(void)
 
     TEST_ASSERT_EQUAL(PSTOP_OK, machine.handle_machine_message_cb(&machine, &msg, &resp));
     TEST_ASSERT_EQUAL(PSTOP_MESSAGE_BOND, resp->message);
-    TEST_ASSERT_EQUAL(101U, pstop_clients[0].last_timestamp);
-    TEST_ASSERT_EQUAL(60U, pstop_clients[0].heartbeat_ms);
+    TEST_ASSERT_EQUAL(101U, pstop_clients[0].client_data.last_timestamp);
+    TEST_ASSERT_EQUAL(60U, pstop_clients[0].client_data.heartbeat_ms);
 }
 
 static
