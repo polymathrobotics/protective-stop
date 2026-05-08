@@ -5,6 +5,8 @@
 
 #include <unity/unity.h>
 
+#include "pstop/checksum.h"
+
 #include "pstop/test_utils.h"
 
 static uint64_t current_time;
@@ -71,8 +73,11 @@ test_protocol_invalid_receiver_id(void)
 
     pstop_msg_t req;
     pstop_msg_t resp;
+    pstop_message_init(&req);
+    pstop_message_init(&resp);
     pstop_msg_t *handle = &resp;
     device_id_set_str(&req.receiver_id, "incorrect");
+
     TEST_ASSERT_EQUAL(PSTOP_ERROR_INVALID_ID, machine.handle_protocol_message_cb(&machine, &req, &handle));
 }
 
@@ -87,8 +92,11 @@ test_protocol_operator_not_allowed(void)
 
     pstop_msg_t req;
     pstop_msg_t resp;
+    pstop_message_init(&req);
+    pstop_message_init(&resp);
     pstop_msg_t *handle = &resp;
     device_id_set_str(&req.receiver_id, "testing");
+
     TEST_ASSERT_EQUAL(PSTOP_OPERATOR_NOT_ALLOWED, machine.handle_protocol_message_cb(&machine, &req, &handle));
 }
 
@@ -112,6 +120,7 @@ test_protocol_bond_request(void)
     pstop_message_init(&resp);
     pstop_msg_t *handle = &resp;
     device_id_set_str(&req.receiver_id, "testing");
+
     TEST_ASSERT_EQUAL(PSTOP_OK, machine.handle_protocol_message_cb(&machine, &req, &handle));
     TEST_ASSERT_EQUAL(PSTOP_MESSAGE_BOND, resp.message);
     TEST_ASSERT_EQUAL(1U, resp.counter);

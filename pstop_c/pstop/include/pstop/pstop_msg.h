@@ -77,11 +77,11 @@ typedef struct {
      */
     uint16_t checksum;
 
+    uint16_t calculated_checksum;
+
 } pstop_msg_t;
 
 void pstop_message_init(pstop_msg_t *msg);
-
-uint16_t pstop_calculate_checksum(const pstop_msg_t *msg);
 
 pstop_error_t pstop_is_message_valid(const pstop_msg_t *msg);
 

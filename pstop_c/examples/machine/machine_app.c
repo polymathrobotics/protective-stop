@@ -43,6 +43,15 @@ robot_status(pstop_status_message_t status)
     return 0;
 }
 
+void
+dump_bytes(const uint8_t *b)
+{
+    for(int i = 0U; i < PSTOP_MESSAGE_SIZE; ++i) {
+        fprintf(stderr, "%X ", (int)b[i]);
+    }
+    fprintf(stderr, "\n");
+}
+
 int
 main(int argc, char *argv[])
 {
@@ -86,6 +95,7 @@ main(int argc, char *argv[])
         result = transport_udp_read(&udp_transport, reqbytes, PSTOP_MESSAGE_SIZE, &client);
 
         if(result == PSTOP_MESSAGE_SIZE) {
+            //dump_bytes(reqbytes);
             pstop_message_decode(&req_msg, reqbytes);
 
             fprintf(stderr, "Got message: %d from %d\n", req_msg.message, req_msg.id.data[15]);

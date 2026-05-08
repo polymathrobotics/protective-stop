@@ -13,6 +13,7 @@
 #include "pstop/device_id.h"
 #include "pstop/os.h"
 #include "pstop/protocol_data.h"
+#include "pstop/checksum.h"
 
 udp_transport_data_t udp_transport;
 
@@ -49,6 +50,15 @@ read_msg(udp_transport_data_t *transport, pstop_os_env *env, pstop_msg_t *resp, 
     return 0;
 }
 
+void
+dump_bytes(const uint8_t *b)
+{
+    for(int i = 0U; i < PSTOP_MESSAGE_SIZE; ++i) {
+        fprintf(stderr, "%X ", (int)b[i]);
+    }
+    fprintf(stderr, "\n");
+}
+
 int
 send_msg(udp_transport_data_t *transport, pstop_os_env *env, protocol_data_t *machine, const device_id_t *uuid, uint8_t msg)
 {
@@ -56,6 +66,9 @@ send_msg(udp_transport_data_t *transport, pstop_os_env *env, protocol_data_t *ma
 
     pstop_msg_t req_msg;
     pstop_msg_t resp_msg;
+
+    pstop_message_init(&req_msg);
+    pstop_message_init(&resp_msg);
 
     uint64_t now = env->get_time_cb();
 
@@ -66,9 +79,11 @@ send_msg(udp_transport_data_t *transport, pstop_os_env *env, protocol_data_t *ma
     req_msg.received_counter = machine->last_counter;
     req_msg.received_stamp = machine->last_timestamp;
     req_msg.stamp = now;
+    req_msg.checksum = 0x00U;
 
     machine->msg_counter++;
     pstop_message_encode(&req_msg, reqbytes);
+    //dump_bytes(reqbytes);
 
     transport_udp_write(transport, reqbytes, PSTOP_MESSAGE_SIZE, NULL);
 

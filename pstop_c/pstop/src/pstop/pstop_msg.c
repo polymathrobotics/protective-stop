@@ -21,17 +21,7 @@ pstop_message_init(pstop_msg_t *msg)
     msg->received_counter = 0U;
     msg->message = PSTOP_MESSAGE_UNKNOWN;
     msg->checksum = 0U;
-}
-
-// this check belongs in the black channel protocol code
-uint16_t
-pstop_calculate_checksum(const pstop_msg_t *msg)
-{
-    // calculate checksum
-    const uint8_t *start = (const uint8_t *)msg;
-    const uint8_t *end = start + (((const uint8_t *)&(msg->checksum)) - start);
-
-    return checksum_crc16(start, (end - start));
+    msg->calculated_checksum = 0U;
 }
 
 static
@@ -96,11 +86,10 @@ static
 void
 write_uint16(uint16_t value, uint8_t *data, size_t *pos)
 {
-    uint8_t *bytes = data + *pos;
-    *pos = *pos + 2U;
 #if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
-    bytes[0] = (uint8_t)(value & 0xFFU);
-    bytes[1] = (uint8_t)((value >> 8U)& 0xFFU);
+    uint16_t *bytes = (uint16_t *)(data + *pos);
+    *pos = *pos + 2U;
+    *bytes = value;
 #else
     bytes[1] = (uint8_t)(value & 0xFFU);
     bytes[0] = (uint8_t)((value >> 8U)& 0xFFU);
@@ -206,9 +195,8 @@ void
 pstop_message_decode(pstop_msg_t *msg, const uint8_t *data)
 {
     size_t pos = 0U;
-    uint8_t b = read_uint8(data, &pos);
-    msg->version = (b & 0xF0) >> 4U;
-    msg->message = (b & 0x0F);
+    msg->version = read_uint8(data, &pos);
+    msg->message = read_uint8(data, &pos);
     msg->stamp = read_uint64(data, &pos);
     msg->received_stamp = read_uint64(data, &pos);
     read_device_uuid(&msg->id, data, &pos);
@@ -217,14 +205,15 @@ pstop_message_decode(pstop_msg_t *msg, const uint8_t *data)
     msg->counter = read_uint32(data, &pos);
     msg->received_counter = read_uint32(data, &pos);
     msg->checksum = read_uint16(data, &pos);
+    msg->calculated_checksum = checksum_crc16(data, PSTOP_MESSAGE_SIZE - 2U);
 }
 
 void
 pstop_message_encode(const pstop_msg_t *msg, uint8_t *data)
 {
     size_t pos = 0U;
-    uint8_t b = (msg->version << 4) | msg->message;
-    write_uint8(b, data, &pos);
+    write_uint8(msg->version, data, &pos);
+    write_uint8(msg->message, data, &pos);
     write_uint64(msg->stamp, data, &pos);
     write_uint64(msg->received_stamp, data, &pos);
     write_device_uuid(&msg->id, data, &pos);
@@ -232,5 +221,6 @@ pstop_message_encode(const pstop_msg_t *msg, uint8_t *data)
     write_uint32(msg->heartbeat_timeout, data, &pos);
     write_uint32(msg->counter, data, &pos);
     write_uint32(msg->received_counter, data, &pos);
-    write_uint16(msg->checksum, data, &pos);
+    uint16_t checksum = checksum_crc16(data, PSTOP_MESSAGE_SIZE - 2U);
+    write_uint16(checksum, data, &pos);
 }

@@ -11,7 +11,7 @@ static
 int
 is_checksum_valid(const pstop_msg_t *req)
 {
-    return 1;
+    return req->checksum == req->calculated_checksum;
 }
 
 pstop_error_t
