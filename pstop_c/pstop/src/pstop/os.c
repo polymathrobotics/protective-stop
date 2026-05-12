@@ -6,7 +6,7 @@
 #include "pstop/time.h"
 
 void
-pstop_os_env_init(pstop_os_env *env)
+pstop_os_env_init(pstop_os_env_t *env)
 {
     env->get_time_cb = time_get_now;
 }
