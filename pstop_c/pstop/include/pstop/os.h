@@ -8,15 +8,15 @@
 
 typedef uint64_t (* get_current_time_t)(void);
 
-typedef struct pstop_os_env {
+typedef struct pstop_os_env_t {
 
     /**
      * Callback to return the current time.
      */
     get_current_time_t get_time_cb;
 
-} pstop_os_env;
+} pstop_os_env_t;
 
-void pstop_os_env_init(pstop_os_env *env);
+void pstop_os_env_init(pstop_os_env_t *env);
 
 #endif /* PSTOP_OS_H */

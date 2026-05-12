@@ -34,7 +34,7 @@ typedef struct {
 
 typedef struct pstop_application_t {
 
-    pstop_os_env env;
+    pstop_os_env_t env;
 
     /**
      * The device ID for this machine
@@ -55,7 +55,7 @@ typedef struct pstop_application_t {
     pstop_status_t status_cb;
 
     /**
-     * Callback to handle any errors in the system.
+     * Callback to log any errors in the system. Can be NULL.
      */
     log_message_t log_message_cb;
 

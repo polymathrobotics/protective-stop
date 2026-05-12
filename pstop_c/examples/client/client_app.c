@@ -27,7 +27,7 @@ sleep_ms(uint64_t ms)
 }
 
 int
-read_msg(udp_transport_data_t *transport, pstop_os_env *env, pstop_msg_t *resp, uint64_t timeout)
+read_msg(udp_transport_data_t *transport, pstop_os_env_t *env, pstop_msg_t *resp, uint64_t timeout)
 {
     struct sockaddr_storage client;
     uint8_t respbytes[PSTOP_MESSAGE_SIZE];
@@ -60,7 +60,7 @@ dump_bytes(const uint8_t *b)
 }
 
 int
-send_msg(udp_transport_data_t *transport, pstop_os_env *env, protocol_data_t *machine, const device_id_t *uuid, uint8_t msg)
+send_msg(udp_transport_data_t *transport, pstop_os_env_t *env, protocol_data_t *machine, const device_id_t *uuid, uint8_t msg)
 {
     uint8_t reqbytes[PSTOP_MESSAGE_SIZE];
 
@@ -98,7 +98,7 @@ send_msg(udp_transport_data_t *transport, pstop_os_env *env, protocol_data_t *ma
 }
 
 void
-send_bond(udp_transport_data_t *transport, pstop_os_env *env, protocol_data_t *machine, const device_id_t *uuid)
+send_bond(udp_transport_data_t *transport, pstop_os_env_t *env, protocol_data_t *machine, const device_id_t *uuid)
 {
     if(send_msg(transport, env, machine, uuid, PSTOP_MESSAGE_BOND)) {
         fprintf(stderr, "BOND Success\n");
@@ -106,7 +106,7 @@ send_bond(udp_transport_data_t *transport, pstop_os_env *env, protocol_data_t *m
 }
 
 void
-send_ok(udp_transport_data_t *transport, pstop_os_env *env, protocol_data_t *machine, const device_id_t *uuid, int is_ok)
+send_ok(udp_transport_data_t *transport, pstop_os_env_t *env, protocol_data_t *machine, const device_id_t *uuid, int is_ok)
 {
     if(is_ok) {
         if(send_msg(transport, env, machine, uuid, PSTOP_MESSAGE_OK)) {
@@ -121,7 +121,7 @@ send_ok(udp_transport_data_t *transport, pstop_os_env *env, protocol_data_t *mac
 }
 
 void
-send_unbond(udp_transport_data_t *transport, pstop_os_env *env, protocol_data_t *machine, const device_id_t *uuid)
+send_unbond(udp_transport_data_t *transport, pstop_os_env_t *env, protocol_data_t *machine, const device_id_t *uuid)
 {
     if(send_msg(transport, env, machine, uuid, PSTOP_MESSAGE_UNBOND)) {
         fprintf(stderr, "UNBOND Success\n");
@@ -153,7 +153,7 @@ main(int argc, char *argv[])
     protocol_data_t machine;
     protocol_data_init(&machine);
 
-    pstop_os_env env;
+    pstop_os_env_t env;
     pstop_os_env_init(&env);
 
     device_id_t machine_uuid = {
