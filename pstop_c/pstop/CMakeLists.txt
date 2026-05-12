@@ -8,6 +8,7 @@ find_package(unity REQUIRED)
 add_library(pstop
   src/pstop/checksum.c
   src/pstop/device_id.c
+  src/pstop/endian.c
   src/pstop/machine.c
   src/pstop/os.c
   src/pstop/protocol.c
@@ -24,6 +25,7 @@ target_include_directories(pstop PUBLIC include)
 
 add_executable(pstop_test
   test/src/pstop/device_id_test.c
+  test/src/pstop/endian_test.c
   test/src/pstop/machine_test.c
   test/src/pstop/machine_timeout_test.c
   test/src/pstop/protocol_test.c

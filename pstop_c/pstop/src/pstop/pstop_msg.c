@@ -7,6 +7,7 @@
 #include "pstop/pstop_msg.h"
 #include "pstop/checksum.h"
 #include "pstop/constants.h"
+#include "pstop/endian.h"
 
 void
 pstop_message_init(pstop_msg_t *msg)
@@ -69,16 +70,9 @@ uint16_t
 read_uint16(const uint8_t *data, size_t *pos)
 {
 #if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
-    const uint16_t *bytes = (const uint16_t *)(data + *pos);
-    *pos = *pos + 2U;
-    return *bytes;
+    return read_uint16_le(data, pos);
 #else
-    const uint8_t *bytes = data + *pos;
-    *pos = *pos + 2U;
-    uint16_t b0 = (uint16_t)bytes[0];
-    uint16_t b1 = (uint16_t)bytes[1];
-    uint16_t val = (b0 << 8) | b1;
-    return val;
+    return read_uint16_be(data, pos);
 #endif
 }
 
@@ -87,12 +81,9 @@ void
 write_uint16(uint16_t value, uint8_t *data, size_t *pos)
 {
 #if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
-    uint16_t *bytes = (uint16_t *)(data + *pos);
-    *pos = *pos + 2U;
-    *bytes = value;
+    write_uint16_le(value, data, pos);
 #else
-    bytes[1] = (uint8_t)(value & 0xFFU);
-    bytes[0] = (uint8_t)((value >> 8U)& 0xFFU);
+    write_uint16_be(value, data, pos);
 #endif
 }
 
@@ -101,18 +92,9 @@ uint32_t
 read_uint32(const uint8_t *data, size_t *pos)
 {
 #if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
-    const uint32_t *bytes = (const uint32_t *)(data + *pos);
-    *pos = *pos + 4U;
-    return *bytes;
+    return read_uint32_le(data, pos);
 #else
-    const uint8_t *bytes = data + *pos;
-    *pos = *pos + 4U;
-    uint32_t b0 = (uint32_t)bytes[0];
-    uint32_t b1 = (uint32_t)bytes[1];
-    uint32_t b2 = (uint32_t)bytes[2];
-    uint32_t b3 = (uint32_t)bytes[3];
-    uint32_t val = (b0 << 24) | (b1 << 16U) | (b2 << 8U) | b3;
-    return val;
+    return read_uint32_be(data, pos);
 #endif
 }
 
@@ -120,18 +102,10 @@ static
 void
 write_uint32(uint32_t value, uint8_t *data, size_t *pos)
 {
-    uint8_t *bytes = data + *pos;
-    *pos = *pos + 4U;
 #if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
-    bytes[0] = (uint8_t)(value & 0xFFU);
-    bytes[1] = (uint8_t)((value >> 8U) & 0xFFU);
-    bytes[2] = (uint8_t)((value >> 16U) & 0xFFU);
-    bytes[3] = (uint8_t)((value >> 24U) & 0xFFU);
+    write_uint32_le(value, data, pos);
 #else
-    bytes[3] = (uint8_t)(value & 0xFFU);
-    bytes[2] = (uint8_t)((value >> 8U) & 0xFFU);
-    bytes[1] = (uint8_t)((value >> 16U) & 0xFFU);
-    bytes[0] = (uint8_t)((value >> 24U) & 0xFFU);
+    write_uint32_be(value, data, pos);
 #endif
 }
 
@@ -140,22 +114,9 @@ uint64_t
 read_uint64(const uint8_t *data, size_t *pos)
 {
 #if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
-    const uint64_t *bytes = (const uint64_t *)(data + *pos);
-    *pos = *pos + 8U;
-    return *bytes;
+    return read_uint64_le(data, pos);
 #else
-    const uint8_t *bytes = data + *pos;
-    *pos = *pos + 8U;
-    uint64_t b0 = (uint64_t)bytes[0];
-    uint64_t b1 = (uint64_t)bytes[1];
-    uint64_t b2 = (uint64_t)bytes[2];
-    uint64_t b3 = (uint64_t)bytes[3];
-    uint64_t b4 = (uint64_t)bytes[4];
-    uint64_t b5 = (uint64_t)bytes[5];
-    uint64_t b6 = (uint64_t)bytes[6];
-    uint64_t b7 = (uint64_t)bytes[7];
-    uint64_t val = (b0 << 56U) | (b1 << 48U) | (b2 << 40U) | (b3 << 32U) | (b4 << 24U) | (b5 << 16U) | (b6 << 8U) | b7;
-    return val;
+    return read_uint64_be(data, pos);
 #endif
 }
 
@@ -164,20 +125,9 @@ void
 write_uint64(uint64_t value, uint8_t *data, size_t *pos)
 {
 #if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
-    uint64_t *bytes = (uint64_t *)(data + *pos);
-    *pos = *pos + 8U;
-    *bytes = value;
+    write_uint64_le(value, data, pos);
 #else
-    uint8_t *bytes = data + *pos;
-    *pos = *pos + 8U;
-    bytes[7] = (uint8_t)(value & 0xFFU);
-    bytes[6] = (uint8_t)((value >> 8U) & 0xFFU);
-    bytes[5] = (uint8_t)((value >> 16U) & 0xFFU);
-    bytes[4] = (uint8_t)((value >> 24U) & 0xFFU);
-    bytes[3] = (uint8_t)((value >> 32U) & 0xFFU);
-    bytes[2] = (uint8_t)((value >> 40U) & 0xFFU);
-    bytes[1] = (uint8_t)((value >> 48U) & 0xFFU);
-    bytes[0] = (uint8_t)((value >> 56U) & 0xFFU);
+    write_uint64_be(value, data, pos);
 #endif
 }
 
