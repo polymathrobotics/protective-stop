@@ -184,13 +184,10 @@ handle_unbond_msg(pstop_machine_t *machine, pstop_client_data_t *client, const p
 
 static
 pstop_error_t
-machine_handle_message(pstop_machine_t *machine, const pstop_msg_t *req, pstop_msg_t **resp)
+machine_handle_message(pstop_machine_t *machine, const pstop_msg_t *req, pstop_msg_t *resp)
 {
     // validate we have a response message
     if(resp == NULL) {
-        return PSTOP_FATAL;
-    }
-    if(*resp == NULL) {
         return PSTOP_FATAL;
     }
 
@@ -200,7 +197,7 @@ machine_handle_message(pstop_machine_t *machine, const pstop_msg_t *req, pstop_m
        return result;
     }
 
-    (*resp)->heartbeat_timeout = machine->application->app_config.default_timeout_ms;
+    resp->heartbeat_timeout = machine->application->app_config.default_timeout_ms;
 
     // can we find this client?
     pstop_client_data_t *client = pstop_client_get(&(machine->pstops), &(req->id));
@@ -208,14 +205,14 @@ machine_handle_message(pstop_machine_t *machine, const pstop_msg_t *req, pstop_m
         // if not, are they requesting something other than bond?
         if(req->message != PSTOP_MESSAGE_BOND) {
             // send back UNBOND message
-            (*resp)->message = PSTOP_MESSAGE_UNBOND;
+            resp->message = PSTOP_MESSAGE_UNBOND;
             return PSTOP_OK;
         }
         // can we add this new client?
         result = add_new_client(machine, &(req->id), &client);
         if(result != PSTOP_OK) {
             // send back UNBOND message
-            (*resp)->message = PSTOP_MESSAGE_UNBOND;
+            resp->message = PSTOP_MESSAGE_UNBOND;
 
             return result;
         }
@@ -228,17 +225,17 @@ machine_handle_message(pstop_machine_t *machine, const pstop_msg_t *req, pstop_m
 
     switch(req->message) {
     case PSTOP_MESSAGE_BOND:
-        return handle_bond_msg(machine, client, req, *resp);
+        return handle_bond_msg(machine, client, req, resp);
     case PSTOP_MESSAGE_UNBOND:
-        return handle_unbond_msg(machine, client, req, *resp);
+        return handle_unbond_msg(machine, client, req, resp);
     case PSTOP_MESSAGE_OK:
-        return handle_ok_msg(machine, client, req, *resp);
+        return handle_ok_msg(machine, client, req, resp);
     default:
         break;
     }
 
     // by default we'll assume any invalid message means stop
-    return handle_stop_msg(machine, client, req, *resp);
+    return handle_stop_msg(machine, client, req, resp);
 }
 
 static

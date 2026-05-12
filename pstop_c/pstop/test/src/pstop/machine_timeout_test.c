@@ -84,9 +84,8 @@ test_bond_timeout(void)
     pstop_msg_t msg;
     init_client(&id, &msg, "test1");
 
-    pstop_msg_t resp_obj;
-    pstop_message_init(&resp_obj);
-    pstop_msg_t *resp = &resp_obj;
+    pstop_msg_t resp;
+    pstop_message_init(&resp);
 
     operator_allowed_flag = 1;
     current_time = 100U;
@@ -95,7 +94,7 @@ test_bond_timeout(void)
 
     msg.message = PSTOP_MESSAGE_BOND;
     TEST_ASSERT_EQUAL(PSTOP_OK, machine.handle_machine_message_cb(&machine, &msg, &resp));
-    TEST_ASSERT_EQUAL(PSTOP_MESSAGE_BOND, resp_obj.message);
+    TEST_ASSERT_EQUAL(PSTOP_MESSAGE_BOND, resp.message);
 
     current_time = 150U; // no timeout yet!
     TEST_ASSERT_EQUAL(PSTOP_OK, machine.check_heartbeats_cb(&machine));
@@ -122,9 +121,8 @@ test_bond_stop_timeout(void)
     pstop_msg_t msg;
     init_client(&id, &msg, "test1");
 
-    pstop_msg_t resp_obj;
-    pstop_message_init(&resp_obj);
-    pstop_msg_t *resp = &resp_obj;
+    pstop_msg_t resp;
+    pstop_message_init(&resp);
 
     operator_allowed_flag = 1;
     current_time = 100U;
@@ -133,11 +131,11 @@ test_bond_stop_timeout(void)
 
     msg.message = PSTOP_MESSAGE_BOND;
     TEST_ASSERT_EQUAL(PSTOP_OK, machine.handle_machine_message_cb(&machine, &msg, &resp));
-    TEST_ASSERT_EQUAL(PSTOP_MESSAGE_BOND, resp_obj.message);
+    TEST_ASSERT_EQUAL(PSTOP_MESSAGE_BOND, resp.message);
 
     msg.message = PSTOP_MESSAGE_STOP;
     TEST_ASSERT_EQUAL(PSTOP_OK, machine.handle_machine_message_cb(&machine, &msg, &resp));
-    TEST_ASSERT_EQUAL(PSTOP_MESSAGE_STOP, resp_obj.message);
+    TEST_ASSERT_EQUAL(PSTOP_MESSAGE_STOP, resp.message);
 
     current_time = 170U; // now a timeout!
     TEST_ASSERT_EQUAL(PSTOP_MISSED_HEARTBEATS, machine.check_heartbeats_cb(&machine));
@@ -158,9 +156,8 @@ test_bond_stop_timeout_2_missed_timeouts(void)
     pstop_msg_t msg;
     init_client(&id, &msg, "test1");
 
-    pstop_msg_t resp_obj;
-    pstop_message_init(&resp_obj);
-    pstop_msg_t *resp = &resp_obj;
+    pstop_msg_t resp;
+    pstop_message_init(&resp);
 
     operator_allowed_flag = 1;
     current_time = 100U;
@@ -169,11 +166,11 @@ test_bond_stop_timeout_2_missed_timeouts(void)
 
     msg.message = PSTOP_MESSAGE_BOND;
     TEST_ASSERT_EQUAL(PSTOP_OK, machine.handle_machine_message_cb(&machine, &msg, &resp));
-    TEST_ASSERT_EQUAL(PSTOP_MESSAGE_BOND, resp_obj.message);
+    TEST_ASSERT_EQUAL(PSTOP_MESSAGE_BOND, resp.message);
 
     msg.message = PSTOP_MESSAGE_STOP;
     TEST_ASSERT_EQUAL(PSTOP_OK, machine.handle_machine_message_cb(&machine, &msg, &resp));
-    TEST_ASSERT_EQUAL(PSTOP_MESSAGE_STOP, resp_obj.message);
+    TEST_ASSERT_EQUAL(PSTOP_MESSAGE_STOP, resp.message);
 
     current_time = 170U; // now a missed heartbeat
     TEST_ASSERT_EQUAL(PSTOP_OK, machine.check_heartbeats_cb(&machine));
