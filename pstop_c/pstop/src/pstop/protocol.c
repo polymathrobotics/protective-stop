@@ -51,7 +51,8 @@ protocol_handle_message(pstop_machine_t *machine, const pstop_msg_t *req, pstop_
             return PSTOP_MSG_OUT_OF_ORDER;
         }
         if(req->received_counter != client->client_data.msg_counter) {
-
+            *resp = NULL;
+            return PSTOP_MSG_LOST;
         }
     }
 
