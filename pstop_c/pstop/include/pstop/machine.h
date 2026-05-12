@@ -14,7 +14,7 @@ typedef struct pstop_machine_t pstop_machine_t;
 /**
  * A function callback to handle protocol (black channel) messages.
  */
-typedef pstop_error_t (* protocol_handle_message_t)(pstop_machine_t *machine, const pstop_msg_t *req, pstop_msg_t **resp);
+typedef pstop_error_t (* protocol_handle_message_t)(pstop_machine_t *machine, const pstop_msg_t *req, pstop_msg_t *resp);
 
 /**
  * A function callback to handle new messages that have arrived.
@@ -23,7 +23,7 @@ typedef pstop_error_t (* protocol_handle_message_t)(pstop_machine_t *machine, co
  * @Param req     The request message
  * @Param resp    A pointer to a response message. If NULL then no response is sent back.
  */
-typedef pstop_error_t (* machine_handle_message_t)(pstop_machine_t *machine, const pstop_msg_t *req, pstop_msg_t **resp);
+typedef pstop_error_t (* machine_handle_message_t)(pstop_machine_t *machine, const pstop_msg_t *req, pstop_msg_t *resp);
 
 /**
  * A function callback that is called to check the heartbeats of the connected PSTOPs

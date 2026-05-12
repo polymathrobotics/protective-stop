@@ -15,22 +15,19 @@ is_checksum_valid(const pstop_msg_t *req)
 }
 
 pstop_error_t
-protocol_handle_message(pstop_machine_t *machine, const pstop_msg_t *req, pstop_msg_t **resp)
+protocol_handle_message(pstop_machine_t *machine, const pstop_msg_t *req, pstop_msg_t *resp)
 {
     // validate checksum
     if(!is_checksum_valid(req)) {
-        *resp = NULL;
         return PSTOP_MSG_INVALID_CHECKSUM;
     }
 
     // make sure te target ID is this machine ID
     if(device_id_cmp(&(machine->application->machine_device_id), &(req->receiver_id))) {
-        *resp = NULL;
         return PSTOP_ERROR_INVALID_ID;
     }
 
     if(!machine->application->operator_allowed_cb(&(req->id))) {
-        *resp = NULL;
         return PSTOP_OPERATOR_NOT_ALLOWED;
     }
 
@@ -39,19 +36,15 @@ protocol_handle_message(pstop_machine_t *machine, const pstop_msg_t *req, pstop_
     // if we've already seen this client, then validate the counter/timestamps
     if(client != NULL) {
         if(req->counter <= client->client_data.last_counter) {
-            *resp = NULL;
             return PSTOP_MSG_OUT_OF_ORDER;
         }
         if((req->counter - client->client_data.last_counter) > machine->application->app_config.max_lost_messages) {
-            *resp = NULL;
             return PSTOP_MSG_LOST;
         }
         if(req->stamp <= client->client_data.last_timestamp) {
-            *resp = NULL;
             return PSTOP_MSG_OUT_OF_ORDER;
         }
         if(req->received_counter != client->client_data.msg_counter) {
-            *resp = NULL;
             return PSTOP_MSG_LOST;
         }
     }
@@ -64,30 +57,26 @@ protocol_handle_message(pstop_machine_t *machine, const pstop_msg_t *req, pstop_
         return result;
     }
 
-    if(resp != NULL) {
-        // add in response black channel values
-        client = pstop_client_get(&(machine->pstops), &(req->id));
+    // add in response black channel values
+    client = pstop_client_get(&(machine->pstops), &(req->id));
 
-        uint64_t now = machine->application->env.get_time_cb();
+    uint64_t now = machine->application->env.get_time_cb();
 
-        // let's add response black channel values
-        (*resp)->counter = 0U; // 0 will be if this operator requested unbond.
-        (*resp)->stamp = now;
-        (*resp)->received_counter = req->counter;
-        (*resp)->received_stamp = req->stamp;
-        device_id_copy(&(*resp)->id, &(machine->application->machine_device_id));
-        device_id_copy(&(*resp)->receiver_id, &(req->id));
+    // let's add response black channel values
+    resp->counter = 0U; // 0 will be if this operator requested unbond.
+    resp->stamp = now;
+    resp->received_counter = req->counter;
+    resp->received_stamp = req->stamp;
+    device_id_copy(&(resp->id), &(machine->application->machine_device_id));
+    device_id_copy(&(resp->receiver_id), &(req->id));
 
-        // null client will happen on unbond
-        if(client != NULL) {
-            (*resp)->counter = client->client_data.msg_counter + 1U;
-            client->client_data.msg_counter++;
-            client->client_data.last_counter = req->counter;
-            client->client_data.last_timestamp = now;
-        }
-
-        return PSTOP_OK;
+    // null client will happen on unbond
+    if(client != NULL) {
+        resp->counter = client->client_data.msg_counter + 1U;
+        client->client_data.msg_counter++;
+        client->client_data.last_counter = req->counter;
+        client->client_data.last_timestamp = now;
     }
 
-    return PSTOP_FATAL;
+    return PSTOP_OK;
 }
