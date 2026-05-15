@@ -123,7 +123,7 @@ Node configured successfully with:
         self.publisher_pstop = self.create_publisher(ProtectiveStop, PROTECTIVE_STOP_TOPIC, 1)
         self.publisher_pstop_debug = self.create_publisher(ProtectiveStopDebug, PROTECTIVE_STOP_DEBUG_TOPIC, 1)
         self.publisher_hb = self.create_publisher(ProtectiveStopHeartbeat, PROTECTIVE_STOP_HB_TOPIC, 1)
-        
+
         self.activate_service = self.create_service(
             ProtectiveStopSrv,
             f'{self.get_name()}/activate',
