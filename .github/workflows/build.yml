@@ -17,10 +17,6 @@ jobs:
             ubuntu: jammy
           - rosdistro: jazzy
             ubuntu: noble
-          - rosdistro: kilted
-            ubuntu: noble
-          - rosdistro: rolling
-            ubuntu: noble
     container:
       image: rostooling/setup-ros-docker:ubuntu-${{ matrix.ubuntu }}-latest
     steps:

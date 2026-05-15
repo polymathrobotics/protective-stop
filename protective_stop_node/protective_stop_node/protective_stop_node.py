@@ -82,17 +82,8 @@ class ProtectiveStopNode(LifecycleNode):
         self.publisher_hb = None
         self.param_event_handler = None
         self.is_user_monitored = None
-
-        self.activate_service = self.create_service(
-            ProtectiveStopSrv,
-            f'{self.get_name()}/activate',
-            partial(self.state_transition_callback, True),
-        )
-        self.deactivate_service = self.create_service(
-            ProtectiveStopSrv,
-            f'{self.get_name()}/deactivate',
-            partial(self.state_transition_callback, False),
-        )
+        self.activate_service = None
+        self.deactivate_service = None
 
         self.add_on_set_parameters_callback(self.parameters_callback)
 
@@ -133,6 +124,17 @@ Node configured successfully with:
         self.publisher_pstop_debug = self.create_publisher(ProtectiveStopDebug, PROTECTIVE_STOP_DEBUG_TOPIC, 1)
         self.publisher_hb = self.create_publisher(ProtectiveStopHeartbeat, PROTECTIVE_STOP_HB_TOPIC, 1)
 
+        self.activate_service = self.create_service(
+            ProtectiveStopSrv,
+            f'{self.get_name()}/activate',
+            partial(self.state_transition_callback, True),
+        )
+        self.deactivate_service = self.create_service(
+            ProtectiveStopSrv,
+            f'{self.get_name()}/deactivate',
+            partial(self.state_transition_callback, False),
+        )
+
         self.hb_timer = self.create_timer(self.heartbeat_timeout, self.process_heartbeat)
         self.debug_timer = self.create_timer(1.0, self._publish_debug_msg)
         return TransitionCallbackReturn.SUCCESS
@@ -154,7 +156,13 @@ Node configured successfully with:
             self.publisher_hb = None
         if self.publisher_pstop_debug:
             self.destroy_publisher(self.publisher_pstop_debug)
-            self
+            self.publisher_pstop_debug = None
+        if self.activate_service is not None:
+            self.destroy_service(self.activate_service)
+            self.activate_service = None
+        if self.deactivate_service is not None:
+            self.destroy_service(self.deactivate_service)
+            self.deactivate_service = None
         self.get_logger().info('Node deactivated successfully.')
         return TransitionCallbackReturn.SUCCESS
 
