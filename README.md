@@ -72,3 +72,13 @@ make
 
 ./pstop/pstop_test
 ```
+
+### Code coverage (BullseyeCoverage)
+
+Coverage is opt-in and requires BullseyeCoverage. From `pstop_c/`, either run on the host (Bullseye installed locally):
+
+```bash
+scripts/run-coverage.sh           # covsrc summary
+scripts/run-coverage.sh --html    # HTML report at build/coverage-html/
+```
+
