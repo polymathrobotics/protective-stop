@@ -1,10 +1,25 @@
 # SPDX-FileCopyrightText: 2026 Polymath Robotics, Inc.
 # SPDX-License-Identifier: Apache-2.0
-cmake_minimum_required(VERSION 3.12)
+cmake_minimum_required(VERSION 3.14)
 project(PSTOP C)
+
+option(PSTOP_ENABLE_COVERAGE "Build with BullseyeCoverage instrumentation" OFF)
+
+if(PSTOP_ENABLE_COVERAGE)
+  find_program(BULLSEYE_COV01     cov01     REQUIRED)
+  find_program(BULLSEYE_COVSELECT covselect REQUIRED)
+  find_program(BULLSEYE_COVSRC    covsrc    REQUIRED)
+  find_program(BULLSEYE_COVHTML   covhtml   REQUIRED)
+  set(PSTOP_COVFILE "${CMAKE_BINARY_DIR}/pstop.cov"
+      CACHE FILEPATH "BullseyeCoverage .cov file location")
+endif()
 
 add_subdirectory(pstop)
 add_subdirectory(transport)
+
+if(PSTOP_ENABLE_COVERAGE)
+  include(cmake/Coverage.cmake)
+endif()
 
 add_executable(machine_app
   examples/machine/machine_app.c

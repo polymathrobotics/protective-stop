@@ -4,3 +4,5 @@ __pycache__
 node_modules
 /.ruff.toml
 */build/
+*/build-cov/
+*.cov
