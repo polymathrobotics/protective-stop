@@ -1,0 +1,47 @@
+---
+name: pstop_c coverage
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'pstop_c/**'
+      - '.github/workflows/pstop_c_coverage.yml'
+  pull_request:
+    paths:
+      - 'pstop_c/**'
+      - '.github/workflows/pstop_c_coverage.yml'
+
+jobs:
+  bullseye_coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build pstop_c image with BullseyeCoverage
+        uses: docker/build-push-action@v5
+        with:
+          context: pstop_c
+          file: pstop_c/Containerfile
+          tags: pstop_c-build:ci
+          load: true
+          secrets: |
+            bullseye_license_key=${{ secrets.BULLSEYE_LICENSE_KEY }}
+
+      - name: Run coverage build + HTML report
+        run: |
+          docker run --rm \
+            --user "$(id -u):$(id -g)" \
+            -v "${{ github.workspace }}/pstop_c":/workspace \
+            pstop_c-build:ci \
+            bash -c 'scripts/run-coverage.sh --html'
+
+      - name: Upload coverage HTML report
+        uses: actions/upload-artifact@v4
+        with:
+          name: pstop_c-coverage-html
+          path: pstop_c/build/coverage-html
+          if-no-files-found: error
