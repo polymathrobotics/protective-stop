@@ -1,0 +1,60 @@
+# SPDX-FileCopyrightText: 2026 Polymath Robotics, Inc.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Build environment for pstop_c with BullseyeCoverage baked in.
+#
+# Bullseye's install script is downloaded from upstream during the build and
+# activated with a license key passed via a BuildKit secret -- the key never
+# enters image layer history.
+#
+#   DOCKER_BUILDKIT=1 docker build \
+#     --secret id=bullseye_license_key,env=BULLSEYE_LICENSE_KEY \
+#     -t pstop_c-build -f Containerfile .
+#
+# Or with podman:
+#
+#   podman build \
+#     --secret id=bullseye_license_key,src=$HOME/.bullseye-key \
+#     -t pstop_c-build -f Containerfile .
+#
+# Mount the pstop_c directory at /workspace to build. Pass --user so build
+# artifacts (build/, build/coverage-html/, build/pstop.cov) are owned by you
+# rather than root on the host:
+#
+#   docker run --rm --user "$(id -u):$(id -g)" \
+#     -v "$PWD":/workspace pstop_c-build \
+#     bash -c 'scripts/run-coverage.sh --html'
+
+FROM ubuntu:24.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+        build-essential \
+        ca-certificates \
+        cmake \
+        curl \
+        git \
+        xz-utils \
+ && rm -rf /var/lib/apt/lists/*
+
+ARG BULLSEYE_VERSION=9.25.2
+ARG BULLSEYE_PREFIX=/opt/BullseyeCoverage
+
+RUN --mount=type=secret,id=bullseye_license_key,required=true \
+    set -eu \
+ && license_key="$(cat /run/secrets/bullseye_license_key)" \
+ && curl -fsSL \
+      "https://www.bullseye.com/download/BullseyeCoverage-${BULLSEYE_VERSION}-Linux-x64.tar.xz" \
+      | tar -xJf - -C /tmp \
+ && "/tmp/BullseyeCoverage-${BULLSEYE_VERSION}/install" \
+        --prefix "${BULLSEYE_PREFIX}" \
+        --key "${license_key}" \
+        --search "$PATH" \
+        --quiet \
+ && rm -rf "/tmp/BullseyeCoverage-${BULLSEYE_VERSION}"
+
+ENV PATH="${BULLSEYE_PREFIX}/bin:${PATH}"
+
+WORKDIR /workspace
