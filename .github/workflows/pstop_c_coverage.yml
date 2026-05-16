@@ -37,7 +37,26 @@ jobs:
             --user "$(id -u):$(id -g)" \
             -v "${{ github.workspace }}/pstop_c":/workspace \
             pstop_c-build:ci \
-            bash -c 'scripts/run-coverage.sh --html'
+            bash -c 'scripts/run-coverage.sh --html \
+              && COVFILE=build/pstop.cov covsrc -q | tee build/coverage-summary.txt'
+
+      - name: Publish coverage summary
+        if: always()
+        run: |
+          summary="pstop_c/build/coverage-summary.txt"
+          {
+            echo '## pstop_c coverage'
+            echo
+            if [[ -s "${summary}" ]]; then
+              echo '```'
+              cat "${summary}"
+              echo '```'
+            else
+              echo '_No coverage summary produced — see job logs._'
+            fi
+            echo
+            echo 'Full HTML report: download the `pstop_c-coverage-html` artifact below.'
+          } >> "${GITHUB_STEP_SUMMARY}"
 
       - name: Upload coverage HTML report
         uses: actions/upload-artifact@v4
