@@ -4,11 +4,11 @@ cmake_minimum_required(VERSION 3.14)
 project(PSTOPCore C)
 
 include(FetchContent)
-FetchContent_Declare(unity
+fetchcontent_declare(unity
   GIT_REPOSITORY https://github.com/ThrowTheSwitch/Unity.git
   GIT_TAG        v2.6.0
 )
-FetchContent_MakeAvailable(unity)
+fetchcontent_makeavailable(unity)
 
 # Test sources include the header as <unity/unity.h>; upstream Unity ships
 # it as src/unity.h. Stage a unity/ subdir in the build tree so the existing

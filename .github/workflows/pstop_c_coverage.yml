@@ -5,12 +5,12 @@ on:
   push:
     branches: [main]
     paths:
-      - 'pstop_c/**'
-      - '.github/workflows/pstop_c_coverage.yml'
+      - pstop_c/**
+      - .github/workflows/pstop_c_coverage.yml
   pull_request:
     paths:
-      - 'pstop_c/**'
-      - '.github/workflows/pstop_c_coverage.yml'
+      - pstop_c/**
+      - .github/workflows/pstop_c_coverage.yml
 
 jobs:
   bullseye_coverage:

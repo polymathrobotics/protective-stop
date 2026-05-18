@@ -5,12 +5,12 @@ on:
   push:
     branches: [main]
     paths:
-      - 'pstop_c/**'
-      - '.github/workflows/pstop_c_build.yml'
+      - pstop_c/**
+      - .github/workflows/pstop_c_build.yml
   pull_request:
     paths:
-      - 'pstop_c/**'
-      - '.github/workflows/pstop_c_build.yml'
+      - pstop_c/**
+      - .github/workflows/pstop_c_build.yml
 
 jobs:
   build_and_test:
