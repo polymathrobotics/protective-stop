@@ -38,7 +38,8 @@ jobs:
             -v "${{ github.workspace }}/pstop_c":/workspace \
             pstop_c-build:ci \
             bash -c 'scripts/run-coverage.sh --html \
-              && COVFILE=build/pstop.cov covsrc -q | tee build/coverage-summary.txt'
+              && cd build \
+              && COVFILE=pstop.cov covsrc -q | tee coverage-summary.txt'
 
       - name: Publish coverage summary
         if: always()
