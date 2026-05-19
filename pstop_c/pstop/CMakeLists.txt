@@ -10,9 +10,8 @@ fetchcontent_declare(unity
 )
 fetchcontent_makeavailable(unity)
 
-# Test sources include the header as <unity/unity.h>; upstream Unity ships
-# it as src/unity.h. Stage a unity/ subdir in the build tree so the existing
-# include path resolves without touching every test file.
+# Tests #include <unity/unity.h>; upstream ships it as src/unity.h.
+# Stage a unity/ subdir so the path resolves.
 set(_unity_compat_dir "${CMAKE_BINARY_DIR}/unity_compat/unity")
 file(MAKE_DIRECTORY "${_unity_compat_dir}")
 foreach(_h unity.h unity_internals.h)

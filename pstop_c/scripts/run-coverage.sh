@@ -2,17 +2,12 @@
 # SPDX-FileCopyrightText: 2026 Polymath Robotics, Inc.
 # SPDX-License-Identifier: Apache-2.0
 #
-# Configure + build pstop_c with BullseyeCoverage instrumentation, run the
-# Unity test suite, and produce a covsrc summary (default) or an HTML report
-# (--html). Used by devs locally and by .github/workflows/pstop_c_coverage.yml.
-#
-# Build artifacts land in pstop_c/build/ — the same dir the regular build
-# uses, but the coverage targets force `cmake --build --clean-first` so a
-# stale non-instrumented tree gets rebuilt safely.
+# Build pstop_c with BullseyeCoverage and produce a covsrc summary or
+# (with --html) a covhtml report at build/coverage-html/.
 #
 # Usage:
 #   scripts/run-coverage.sh           # covsrc summary
-#   scripts/run-coverage.sh --html    # covsrc + HTML report at build/coverage-html/
+#   scripts/run-coverage.sh --html    # HTML report
 
 set -euo pipefail
 
@@ -46,9 +41,7 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 pstop_c_dir="$(cd "${script_dir}/.." && pwd)"
 build_dir="${pstop_c_dir}/build"
 
-# Belt-and-suspenders: the CMake target also runs `cov01 --off` on success,
-# but a build failure mid-target would leave cov01 in the "on" state. This
-# trap guarantees we restore the user's Bullseye state on any exit path.
+# Restore cov01 state if a build failure aborts the CMake target mid-flight.
 trap 'cov01 --off >/dev/null 2>&1 || true' EXIT
 
 cmake -S "${pstop_c_dir}" -B "${build_dir}" -DPSTOP_ENABLE_COVERAGE=ON
