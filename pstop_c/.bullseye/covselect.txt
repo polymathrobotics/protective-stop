@@ -1,26 +1,3 @@
-# SPDX-FileCopyrightText: 2026 Polymath Robotics, Inc.
-# SPDX-License-Identifier: Apache-2.0
-#
-# BullseyeCoverage region selections for pstop_c.
-#
-# Imported via `covselect --import` in the `coverage` CMake target. Note that
-# Bullseye's --import APPENDS, so the target runs `covselect --deleteAll`
-# first before importing this file.
-#
-# Region syntax (per Bullseye docs):
-#   - Trailing `/` matches a directory and all its subdirectories.
-#   - Leading `!` marks an exclusion.
-#   - `**/` matches one-or-more intermediate directory components (it does
-#     NOT match zero components, which is why `!_deps/` is plain — the
-#     stored path is `_deps/unity-src/src/unity.c` with nothing before it).
-#   - `#` lines and blank lines are ignored.
-#
-# Stored paths are relative to CMAKE_BINARY_DIR (where the compiler runs).
-# Library sources sit above that dir (e.g. `../pstop/src/...`), so `**/`
-# correctly matches the `../` prefix. FetchContent stages Unity inside the
-# build dir at `_deps/unity-src/...`, so its path starts at root — hence
-# the unprefixed `!_deps/`.
-
 # Instrumented: the two libraries under test.
 **/pstop/src/
 **/transport/src/
