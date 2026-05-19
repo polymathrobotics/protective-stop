@@ -4,7 +4,15 @@ name: ROS2 Build and Test
 on:
   push:
     branches: [main]
+    paths:
+      - protective_stop_msg/**
+      - protective_stop_node/**
+      - .github/workflows/build.yml
   pull_request:
+    paths:
+      - protective_stop_msg/**
+      - protective_stop_node/**
+      - .github/workflows/build.yml
 
 jobs:
   build_and_test_ros2:
