@@ -75,10 +75,13 @@ make
 
 ### Code coverage (BullseyeCoverage)
 
-Coverage is opt-in and requires BullseyeCoverage. From `pstop_c/`, either run on the host (Bullseye installed locally):
+Coverage is opt-in and requires BullseyeCoverage to be installed and licensed on the host. From `pstop_c/`:
 
 ```bash
 scripts/run-coverage.sh           # covsrc summary
 scripts/run-coverage.sh --html    # HTML report at build/coverage-html/
 ```
 
+CI runs the same flow on every PR via `.github/workflows/pstop_c_coverage.yml`, installing Bullseye on the runner using a license key stored in the `BULLSEYE_LICENSE_KEY` repo secret. The summary is published to the Actions run page and the full HTML report is uploaded as the `pstop_c-coverage-html` artifact.
+
+Only the `pstop` and `transport_udp` libraries are instrumented; tests, example apps, and the fetched Unity dependency are excluded via `pstop_c/.bullseye/covselect.txt`.

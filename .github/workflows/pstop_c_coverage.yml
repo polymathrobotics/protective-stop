@@ -15,31 +15,34 @@ on:
 jobs:
   bullseye_coverage:
     runs-on: ubuntu-latest
+    env:
+      BULLSEYE_VERSION: 9.25.2
+      BULLSEYE_PREFIX: /opt/BullseyeCoverage
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Build pstop_c image with BullseyeCoverage
-        uses: docker/build-push-action@v5
-        with:
-          context: pstop_c
-          file: pstop_c/Containerfile
-          tags: pstop_c-build:ci
-          load: true
-          secrets: |
-            bullseye_license_key=${{ secrets.BULLSEYE_LICENSE_KEY }}
+      - name: Install BullseyeCoverage
+        env:
+          BULLSEYE_LICENSE_KEY: ${{ secrets.BULLSEYE_LICENSE_KEY }}
+        run: |
+          set -eu
+          curl -fsSL \
+            "https://www.bullseye.com/download/BullseyeCoverage-${BULLSEYE_VERSION}-Linux-x64.tar.xz" \
+            | tar -xJf - -C /tmp
+          sudo "/tmp/BullseyeCoverage-${BULLSEYE_VERSION}/install" \
+            --prefix "${BULLSEYE_PREFIX}" \
+            --key "${BULLSEYE_LICENSE_KEY}" \
+            --search "$PATH" \
+            --quiet
+          rm -rf "/tmp/BullseyeCoverage-${BULLSEYE_VERSION}"
+          echo "${BULLSEYE_PREFIX}/bin" >> "${GITHUB_PATH}"
 
       - name: Run coverage build + HTML report
+        working-directory: pstop_c
         run: |
-          docker run --rm \
-            --user "$(id -u):$(id -g)" \
-            -v "${{ github.workspace }}/pstop_c":/workspace \
-            pstop_c-build:ci \
-            bash -c 'scripts/run-coverage.sh --html \
-              && cd build \
-              && COVFILE=pstop.cov covsrc -q | tee coverage-summary.txt'
+          scripts/run-coverage.sh --html
+          cd build
+          COVFILE=pstop.cov covsrc -q | tee coverage-summary.txt
 
       - name: Publish coverage summary
         if: always()
