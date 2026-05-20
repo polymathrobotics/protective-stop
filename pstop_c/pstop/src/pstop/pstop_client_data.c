@@ -18,6 +18,7 @@ pstop_client_init(pstop_client_data_t *client)
     client->missed_heartbeats_counter = 0U;
     client->client_state = PSTOP_CLIENT_UNKNOWN;
     client->local_client_id = next_client_id++;
+    client->is_stop_only = 1;
 }
 
 void

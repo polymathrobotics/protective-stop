@@ -15,8 +15,15 @@ static
 pstop_error_t
 add_new_client(pstop_machine_t *machine, const device_id_t *id, pstop_client_data_t **client)
 {
+    operator_details_t details;
+    operator_detail_init(&details);
+
     // no client found, can we add it?
-    if(!machine->application->operator_allowed_cb(id)) {
+    if(machine->application->operator_details_cb != NULL) {
+        details = machine->application->operator_details_cb(id);
+    }
+
+    if(!details.allowed) {
         // This ID is not allowed
         *client = NULL;
         return PSTOP_OPERATOR_NOT_ALLOWED;
@@ -28,6 +35,9 @@ add_new_client(pstop_machine_t *machine, const device_id_t *id, pstop_client_dat
     if(*client == NULL) {
         return PSTOP_OUT_OF_OPERATOR_SPACE;
     }
+
+    (*client)->is_stop_only = details.stop_only;
+    (*client)->client_data.heartbeat_ms = details.heartbeat_ms;
 
     return PSTOP_OK;
 }
@@ -123,10 +133,12 @@ handle_need_stop(pstop_machine_t *machine, pstop_client_data_t *client, pstop_ms
     }
     else {
         if(machine->robot_state.client_stop_id == 0U) {
-            // we have a new client that sent us a STOP message.
-            machine->robot_state.robot_state = ROBOT_STATE_STOPPED;
-            machine->robot_state.client_stop_id = client->local_client_id;
-            machine->robot_state.restart_state = ROBOT_RESTART_STATE_STOP_RECEIVED;
+            if(client->is_stop_only == 0) {
+                // we have a new client that sent us a STOP message.
+                machine->robot_state.robot_state = ROBOT_STATE_STOPPED;
+                machine->robot_state.client_stop_id = client->local_client_id;
+                machine->robot_state.restart_state = ROBOT_RESTART_STATE_STOP_RECEIVED;
+            }
         }
     }
 }
@@ -148,9 +160,11 @@ handle_stop_msg(pstop_machine_t *machine, pstop_client_data_t *client, const pst
     }
 
     if(machine->robot_state.client_stop_id == 0U) {
-        machine->robot_state.robot_state = ROBOT_STATE_STOPPED;
-        machine->robot_state.client_stop_id = client->local_client_id;
-        machine->robot_state.restart_state = ROBOT_RESTART_STATE_STOP_RECEIVED;
+        if(client->is_stop_only == 0) {
+            machine->robot_state.robot_state = ROBOT_STATE_STOPPED;
+            machine->robot_state.client_stop_id = client->local_client_id;
+            machine->robot_state.restart_state = ROBOT_RESTART_STATE_STOP_RECEIVED;
+        }
     }
 
     machine->application->status_cb(PSTOP_STATUS_STOP);

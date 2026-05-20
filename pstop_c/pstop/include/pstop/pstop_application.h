@@ -15,7 +15,20 @@ typedef enum {
     PSTOP_STATUS_STOP = 1
 } pstop_status_message_t;
 
-typedef int      (* is_operator_allowed_t)(const device_id_t *device_id);
+typedef struct {
+
+    int allowed;
+
+    uint64_t heartbeat_ms;
+
+    int stop_only;
+
+} operator_details_t;
+
+void operator_detail_init(operator_details_t *oper);
+
+typedef operator_details_t (* get_operator_details_t)(const device_id_t *device_id);
+
 typedef int      (* pstop_status_t)(pstop_status_message_t status);
 
 typedef void     (* log_message_t)(pstop_error_t error, const char *message);
@@ -42,12 +55,11 @@ typedef struct pstop_application_t {
     device_id_t machine_device_id;
 
     /**
-     * Simple access control to determine if an operator
-     * is allowed to connect to this machine.
-     *
-     * @Return 1 if operator is allowed, 0 otherwise
+     * Callback to return details for a specified operator.
+     * Details determine if the operator is allowed and
+     * certain features of the operator.
      */
-    is_operator_allowed_t operator_allowed_cb;
+    get_operator_details_t operator_details_cb;
 
     /**
      * Notifies the underlying hardware about the status of this PSTOP.

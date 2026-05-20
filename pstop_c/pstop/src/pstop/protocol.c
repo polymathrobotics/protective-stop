@@ -27,7 +27,15 @@ protocol_handle_message(pstop_machine_t *machine, const pstop_msg_t *req, pstop_
         return PSTOP_ERROR_INVALID_ID;
     }
 
-    if(!machine->application->operator_allowed_cb(&(req->id))) {
+    operator_details_t details;
+    operator_detail_init(&details);
+
+    // no client found, can we add it?
+    if(machine->application->operator_details_cb != NULL) {
+        details = machine->application->operator_details_cb((&req->id));
+    }
+
+    if(!details.allowed) {
         return PSTOP_OPERATOR_NOT_ALLOWED;
     }
 
@@ -67,6 +75,7 @@ protocol_handle_message(pstop_machine_t *machine, const pstop_msg_t *req, pstop_
     resp->stamp = now;
     resp->received_counter = req->counter;
     resp->received_stamp = req->stamp;
+    resp->heartbeat_timeout = client->client_data.heartbeat_ms;
     device_id_copy(&(resp->id), &(machine->application->machine_device_id));
     device_id_copy(&(resp->receiver_id), &(req->id));
 

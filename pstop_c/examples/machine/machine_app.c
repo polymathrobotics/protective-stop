@@ -19,9 +19,15 @@ pstop_machine_t machine;
 
 udp_transport_data_t udp_transport;
 
-int is_operator_allowed(const device_id_t *device_id)
+operator_details_t
+is_operator_allowed(const device_id_t *device_id)
 {
-    return 1;
+    operator_details_t details;
+    details.allowed = 1;
+    details.stop_only = 0;
+    details.heartbeat_ms = 500U;
+
+    return details;
 }
 
 pstop_status_message_t lastStatus = 0;
@@ -59,7 +65,7 @@ main(int argc, char *argv[])
     pstop_application_init(&pstop_app);
 
     pstop_app.app_config.default_timeout_ms = 1000U;
-    pstop_app.operator_allowed_cb = is_operator_allowed;
+    pstop_app.operator_details_cb = is_operator_allowed;
     pstop_app.status_cb = robot_status;
 
     machine_init(&machine, &pstop_app, pstop_clients, MAX_CLIENTS);

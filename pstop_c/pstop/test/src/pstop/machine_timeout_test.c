@@ -20,10 +20,16 @@ get_time(void)
 static int operator_allowed_flag;
 
 static
-int
+operator_details_t
 is_operator_allowed(const device_id_t *id)
 {
-    return operator_allowed_flag;
+    operator_details_t details;
+
+    details.allowed = operator_allowed_flag;
+    details.stop_only = 1;
+    details.heartbeat_ms = 500U;
+
+    return details;
 }
 
 static pstop_status_message_t lastStatus = PSTOP_STATUS_OK;
@@ -51,7 +57,7 @@ static
 pstop_application_t pstop_app = {
     .env.get_time_cb = get_time,
     .machine_device_id.data = 1236,
-    .operator_allowed_cb = is_operator_allowed,
+    .operator_details_cb = is_operator_allowed,
     .status_cb = robot_status,
     .log_message_cb = log_error,
     .app_config.default_timeout_ms = 60U,

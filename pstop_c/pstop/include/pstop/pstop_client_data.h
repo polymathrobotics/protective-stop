@@ -27,6 +27,9 @@ typedef struct {
 
     protocol_data_t client_data;
 
+    // is this client a stop-only operator?
+    int is_stop_only;
+
     // approx how far off is the client's clock from this clock
     // compare the incoming pstop_msg.stamp to this clock.
     // Ignoring network transit time
