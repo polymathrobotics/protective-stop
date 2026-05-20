@@ -14,6 +14,14 @@ no_log(pstop_error_t /* error */, const char * /* message */)
 }
 
 void
+operator_detail_init(operator_details_t *oper)
+{
+    oper->allowed = 1;
+    oper->heartbeat_ms = 1000U;
+    oper->stop_only = 1;
+}
+
+void
 pstop_application_config_init(pstop_application_config_t *config)
 {
     config->default_timeout_ms = 100U;
@@ -25,7 +33,7 @@ void
 pstop_application_init(pstop_application_t *app)
 {
     pstop_os_env_init(&app->env);
-    app->operator_allowed_cb = NULL;
+    app->operator_details_cb = NULL;
     app->status_cb = NULL;
     app->log_message_cb = no_log;
     pstop_application_config_init(&app->app_config);

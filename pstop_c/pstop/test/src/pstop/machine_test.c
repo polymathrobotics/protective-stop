@@ -17,13 +17,13 @@ get_time(void)
     return current_time++;
 }
 
-static int operator_allowed_flag;
+static operator_details_t details;
 
 static
-int
+operator_details_t
 is_operator_allowed(const device_id_t *id)
 {
-    return operator_allowed_flag;
+    return details;
 }
 
 static pstop_status_message_t lastStatus = PSTOP_STATUS_OK;
@@ -51,7 +51,7 @@ static
 pstop_application_t pstop_app = {
     .env.get_time_cb = get_time,
     .machine_device_id.data = 1236,
-    .operator_allowed_cb = is_operator_allowed,
+    .operator_details_cb = is_operator_allowed,
     .status_cb = robot_status,
     .log_message_cb = log_error,
     .app_config.default_timeout_ms = 60U,
@@ -88,7 +88,9 @@ test_new_client_operator_not_allowed(void)
     msg.heartbeat_timeout = 50U;
     msg.message = PSTOP_MESSAGE_BOND;
 
-    operator_allowed_flag = 0;
+    details.allowed = 0;
+    details.stop_only = 0;
+    details.heartbeat_ms = 500U;
     TEST_ASSERT_EQUAL(PSTOP_OPERATOR_NOT_ALLOWED, machine.handle_machine_message_cb(&machine, &msg, &resp));
 }
 
@@ -110,7 +112,9 @@ test_new_client_operator_allowed(void)
     pstop_msg_t resp;
     pstop_message_init(&resp);
 
-    operator_allowed_flag = 1;
+    details.allowed = 1;
+    details.stop_only = 0;
+    details.heartbeat_ms = 500U;
     current_time = 100U;
 
     TEST_ASSERT_EQUAL(PSTOP_OK, machine.handle_machine_message_cb(&machine, &msg, &resp));
@@ -133,7 +137,9 @@ client_send_ok(pstop_machine_t *machine, uint32_t device_id, uint8_t respMsg)
     pstop_msg_t resp;
     pstop_message_init(&resp);
 
-    operator_allowed_flag = 1;
+    details.allowed = 1;
+    details.stop_only = 0;
+    details.heartbeat_ms = 500U;
     current_time = 100U;
 
     TEST_ASSERT_EQUAL(PSTOP_OK, machine->handle_machine_message_cb(machine, &msg, &resp));
@@ -155,7 +161,9 @@ bond_client(pstop_machine_t *machine, uint32_t device_id)
     pstop_msg_t resp;
     pstop_message_init(&resp);
 
-    operator_allowed_flag = 1;
+    details.allowed = 1;
+    details.stop_only = 0;
+    details.heartbeat_ms = 500U;
     current_time = 100U;
 
     msg.message = PSTOP_MESSAGE_BOND;
@@ -207,7 +215,9 @@ test_bond_unbond(void)
     pstop_msg_t resp;
     pstop_message_init(&resp);
 
-    operator_allowed_flag = 1;
+    details.allowed = 1;
+    details.stop_only = 0;
+    details.heartbeat_ms = 500U;
     current_time = 100U;
 
     msg.message = PSTOP_MESSAGE_BOND;
@@ -243,7 +253,9 @@ test_bond_ok(void)
     pstop_msg_t resp;
     pstop_message_init(&resp);
 
-    operator_allowed_flag = 1;
+    details.allowed = 1;
+    details.stop_only = 0;
+    details.heartbeat_ms = 500U;
     current_time = 100U;
 
     msg.message = PSTOP_MESSAGE_BOND;
@@ -272,7 +284,9 @@ test_bond_bond(void)
     pstop_msg_t resp;
     pstop_message_init(&resp);
 
-    operator_allowed_flag = 1;
+    details.allowed = 1;
+    details.stop_only = 0;
+    details.heartbeat_ms = 500U;
     current_time = 100U;
 
     msg.message = PSTOP_MESSAGE_BOND;
@@ -304,7 +318,9 @@ test_bond_ok_stop(void)
     pstop_msg_t resp;
     pstop_message_init(&resp);
 
-    operator_allowed_flag = 1;
+    details.allowed = 1;
+    details.stop_only = 0;
+    details.heartbeat_ms = 500U;
     current_time = 100U;
 
     robot_status_counter = 0;
@@ -348,7 +364,9 @@ test_bond_stop_ok(void)
     pstop_msg_t resp;
     pstop_message_init(&resp);
 
-    operator_allowed_flag = 1;
+    details.allowed = 1;
+    details.stop_only = 0;
+    details.heartbeat_ms = 500U;
     current_time = 100U;
 
     robot_status_counter = 0;
@@ -378,6 +396,52 @@ test_bond_stop_ok(void)
 
 static
 void
+test_bond_stop_ok_stop_only_operator(void)
+{
+    pstop_machine_t machine;
+
+    machine_init(&machine, &pstop_app, pstop_clients, MAX_CLIENTS);
+
+    device_id_t id;
+    pstop_msg_t msg;
+    init_client(&id, &msg, 1234);
+
+    pstop_msg_t resp;
+    pstop_message_init(&resp);
+
+    details.allowed = 1;
+    details.stop_only = 1;
+    details.heartbeat_ms = 500U;
+    current_time = 100U;
+
+    robot_status_counter = 0;
+
+    msg.message = PSTOP_MESSAGE_BOND;
+    TEST_ASSERT_EQUAL(PSTOP_OK, machine.handle_machine_message_cb(&machine, &msg, &resp));
+    TEST_ASSERT_EQUAL(PSTOP_MESSAGE_BOND, resp.message);
+
+    TEST_ASSERT_EQUAL(0, robot_status_counter);
+
+    msg.message = PSTOP_MESSAGE_STOP;
+    TEST_ASSERT_EQUAL(PSTOP_OK, machine.handle_machine_message_cb(&machine, &msg, &resp));
+    TEST_ASSERT_EQUAL(PSTOP_MESSAGE_STOP, resp.message);
+
+    // stop-only operator can't transition to OK state
+    msg.message = PSTOP_MESSAGE_OK;
+    TEST_ASSERT_EQUAL(PSTOP_OK, machine.handle_machine_message_cb(&machine, &msg, &resp));
+    TEST_ASSERT_EQUAL(PSTOP_MESSAGE_OK, resp.message);
+
+    msg.message = PSTOP_MESSAGE_STOP;
+    TEST_ASSERT_EQUAL(PSTOP_OK, machine.handle_machine_message_cb(&machine, &msg, &resp));
+    TEST_ASSERT_EQUAL(PSTOP_MESSAGE_STOP, resp.message);
+
+    msg.message = PSTOP_MESSAGE_OK;
+    TEST_ASSERT_EQUAL(PSTOP_OK, machine.handle_machine_message_cb(&machine, &msg, &resp));
+    TEST_ASSERT_EQUAL(PSTOP_MESSAGE_STOP, resp.message);
+}
+
+static
+void
 test_2_clients(void)
 {
     pstop_machine_t machine;
@@ -393,7 +457,9 @@ test_2_clients(void)
     pstop_msg_t resp;
     pstop_message_init(&resp);
 
-    operator_allowed_flag = 1;
+    details.allowed = 1;
+    details.stop_only = 0;
+    details.heartbeat_ms = 500U;
     current_time = 100U;
 
     robot_status_counter = 0;
@@ -435,7 +501,9 @@ test_2_clients_stop_unbond(void)
     pstop_msg_t resp;
     pstop_message_init(&resp);
 
-    operator_allowed_flag = 1;
+    details.allowed = 1;
+    details.stop_only = 0;
+    details.heartbeat_ms = 500U;
     current_time = 100U;
 
     robot_status_counter = 0;
@@ -486,4 +554,5 @@ main_machine_test(void)
     RUN_TEST(test_2_clients_stop_unbond);
     RUN_TEST(test_bond_ok);
     RUN_TEST(test_bond_stop_ok);
+    RUN_TEST(test_bond_stop_ok_stop_only_operator);
 }
