@@ -3,3 +3,6 @@ __pycache__
 .pytest_cache
 node_modules
 /.ruff.toml
+*/build/
+*/build-cov/
+*.cov

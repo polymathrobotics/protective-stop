@@ -1,0 +1,28 @@
+---
+name: pstop_c build and test
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - pstop_c/**
+      - .github/workflows/pstop_c_build.yml
+  pull_request:
+    paths:
+      - pstop_c/**
+      - .github/workflows/pstop_c_build.yml
+
+jobs:
+  build_and_test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        run: cmake -S pstop_c -B pstop_c/build
+
+      - name: Build
+        run: cmake --build pstop_c/build --parallel
+
+      - name: Run Unity tests
+        run: pstop_c/build/pstop/pstop_test

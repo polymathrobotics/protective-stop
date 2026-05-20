@@ -1,0 +1,70 @@
+---
+name: pstop_c coverage
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - pstop_c/**
+      - .github/workflows/pstop_c_coverage.yml
+  pull_request:
+    paths:
+      - pstop_c/**
+      - .github/workflows/pstop_c_coverage.yml
+
+jobs:
+  bullseye_coverage:
+    runs-on: ubuntu-latest
+    env:
+      BULLSEYE_VERSION: 9.25.2
+      BULLSEYE_PREFIX: /opt/BullseyeCoverage
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install BullseyeCoverage
+        env:
+          BULLSEYE_LICENSE_KEY: ${{ secrets.BULLSEYE_LICENSE_KEY }}
+        run: |
+          set -eu
+          curl -fsSL \
+            "https://www.bullseye.com/download/BullseyeCoverage-${BULLSEYE_VERSION}-Linux-x64.tar.xz" \
+            | tar -xJf - -C /tmp
+          sudo "/tmp/BullseyeCoverage-${BULLSEYE_VERSION}/install" \
+            --prefix "${BULLSEYE_PREFIX}" \
+            --key "${BULLSEYE_LICENSE_KEY}" \
+            --search "$PATH" \
+            --quiet
+          rm -rf "/tmp/BullseyeCoverage-${BULLSEYE_VERSION}"
+          echo "${BULLSEYE_PREFIX}/bin" >> "${GITHUB_PATH}"
+
+      - name: Run coverage build + HTML report
+        working-directory: pstop_c
+        run: |
+          scripts/run-coverage.sh --html
+          cd build
+          COVFILE=pstop.cov covsrc -q | tee coverage-summary.txt
+
+      - name: Publish coverage summary
+        if: always()
+        run: |
+          summary="pstop_c/build/coverage-summary.txt"
+          {
+            echo '## pstop_c coverage'
+            echo
+            if [[ -s "${summary}" ]]; then
+              echo '```'
+              cat "${summary}"
+              echo '```'
+            else
+              echo '_No coverage summary produced — see job logs._'
+            fi
+            echo
+            echo 'Full HTML report: download the `pstop_c-coverage-html` artifact below.'
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Upload coverage HTML report
+        uses: actions/upload-artifact@v4
+        with:
+          name: pstop_c-coverage-html
+          path: pstop_c/build/coverage-html
+          if-no-files-found: error

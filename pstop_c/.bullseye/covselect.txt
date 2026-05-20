@@ -1,0 +1,8 @@
+# Instrumented: the two libraries under test.
+**/pstop/src/
+**/transport/src/
+
+# Not instrumented: tests, example apps, and fetched third-party (Unity).
+!**/pstop/test/
+!**/examples/
+!_deps/

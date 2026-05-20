@@ -1,9 +1,29 @@
 # SPDX-FileCopyrightText: 2026 Polymath Robotics, Inc.
 # SPDX-License-Identifier: Apache-2.0
-cmake_minimum_required(VERSION 3.12)
+cmake_minimum_required(VERSION 3.14)
 project(PSTOPCore C)
 
-find_package(unity REQUIRED)
+include(FetchContent)
+fetchcontent_declare(unity
+  GIT_REPOSITORY https://github.com/ThrowTheSwitch/Unity.git
+  GIT_TAG        v2.6.0
+)
+fetchcontent_makeavailable(unity)
+
+# Tests #include <unity/unity.h>; upstream ships it as src/unity.h.
+# Stage a unity/ subdir so the path resolves.
+set(_unity_compat_dir "${CMAKE_BINARY_DIR}/unity_compat/unity")
+file(MAKE_DIRECTORY "${_unity_compat_dir}")
+foreach(_h unity.h unity_internals.h)
+  configure_file(
+    "${unity_SOURCE_DIR}/src/${_h}"
+    "${_unity_compat_dir}/${_h}"
+    COPYONLY
+  )
+endforeach()
+target_include_directories(unity INTERFACE
+  $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}/unity_compat>
+)
 
 add_library(pstop
   src/pstop/checksum.c

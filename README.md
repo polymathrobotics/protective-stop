@@ -72,3 +72,14 @@ make
 
 ./pstop/pstop_test
 ```
+
+### Code coverage (BullseyeCoverage)
+
+Bullseye code coverage runs against every PR that touches pstop_c. Currently there's no gate on coverage %. TODO: enable
+
+Convenience scripts are provided to run bullseye on your local machine. From `pstop_c/`:
+
+```bash
+scripts/run-coverage.sh           # covsrc summary
+scripts/run-coverage.sh --html    # HTML report at build/coverage-html/
+```
