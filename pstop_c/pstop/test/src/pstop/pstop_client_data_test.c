@@ -8,15 +8,11 @@
 
 #include <unity/unity.h>
 
-#include "pstop/test_utils.h"
-
 static
 void
 assert_empty_client(pstop_client_data_t *client)
 {
-    for(int i = 0; i < DEVICE_ID_LENGTH; ++i) {
-        TEST_ASSERT_EQUAL(0U, client->client_data.client_id.data[i]);
-    }
+    TEST_ASSERT_EQUAL(0U, client->client_data.client_id.data);
     TEST_ASSERT_EQUAL(0U, client->client_data.last_timestamp);
     TEST_ASSERT_EQUAL(0U, client->client_data.heartbeat_ms);
     TEST_ASSERT_EQUAL(0U, client->client_data.msg_counter);
@@ -94,10 +90,10 @@ test_remove_client(void)
     TEST_ASSERT_EQUAL(0U, pstop_client_num_active(&clients));
 
     device_id_t c1_id;
-    device_id_set_str(&c1_id, "test");
+    c1_id.data = 1234;
 
     device_id_t c2_id;
-    device_id_set_str(&c2_id, "test2");
+    c2_id.data = 1236;
     pstop_client_data_t *c1 = pstop_client_get_free_client(&clients);
     pstop_client_data_t *c2 = pstop_client_get_free_client(&clients);
 

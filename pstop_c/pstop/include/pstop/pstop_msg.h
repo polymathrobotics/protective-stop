@@ -6,6 +6,7 @@
 
 #include <stdint.h>
 
+#include "pstop/config.h"
 #include "pstop/device_id.h"
 #include "pstop/error.h"
 
@@ -16,8 +17,6 @@ typedef uint8_t message_type_t;
 #define PSTOP_MESSAGE_BOND 2U
 #define PSTOP_MESSAGE_UNBOND 3U
 #define PSTOP_MESSAGE_UNKNOWN 0x0FU
-
-#define PSTOP_MESSAGE_SIZE 64U
 
 /**
  * A PSTOP message object. With enough information

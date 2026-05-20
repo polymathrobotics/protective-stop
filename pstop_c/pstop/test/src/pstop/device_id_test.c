@@ -6,21 +6,15 @@
 
 #include <unity/unity.h>
 
-#include "pstop/test_utils.h"
-
 static
 void
 test_device_init(void)
 {
     device_id_t device;
-    for(int i = 0; i < DEVICE_ID_LENGTH; ++i) {
-        device.data[i] = i;
-    }
+    device.data = 0x00010203U;
 
     device_id_init(&device);
-    for(int i = 0; i < DEVICE_ID_LENGTH; ++i) {
-        TEST_ASSERT_EQUAL(device.data[i], 0U);
-    }
+    TEST_ASSERT_EQUAL(device.data, 0x00000000U);
 }
 
 static
@@ -28,13 +22,13 @@ void
 test_device_cmp(void)
 {
     device_id_t lhs;
-    device_id_set_str(&lhs, "testing");
+    lhs.data = 0x01020304U;
 
     device_id_t rhs;
-    device_id_set_str(&rhs, "testing");
+    rhs.data = 0x01020304U;
 
     TEST_ASSERT_EQUAL(0, device_id_cmp(&lhs, &rhs));
-    device_id_set_str(&rhs, "test");
+    rhs.data = 0x01020305U;
     TEST_ASSERT_NOT_EQUAL(0, device_id_cmp(&lhs, &rhs));
 }
 

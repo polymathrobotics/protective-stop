@@ -7,8 +7,6 @@
 
 #include "pstop/checksum.h"
 
-#include "pstop/test_utils.h"
-
 static uint64_t current_time;
 
 static
@@ -48,10 +46,13 @@ log_error(pstop_error_t error, const char *message)
 
 }
 
+#define MACHINE_ID 1236
+#define PSTOP_ID 1234
+
 static
 pstop_application_t pstop_app = {
     .env.get_time_cb = get_time,
-    .machine_device_id.data = "testing",
+    .machine_device_id.data = MACHINE_ID,
     .operator_allowed_cb = is_operator_allowed,
     .status_cb = robot_status,
     .log_message_cb = log_error,
@@ -91,7 +92,7 @@ test_protocol_invalid_receiver_id(void)
     pstop_msg_t resp;
     pstop_message_init(&req);
     pstop_message_init(&resp);
-    device_id_set_str(&req.receiver_id, "incorrect");
+    req.receiver_id.data = 4567;
 
     TEST_ASSERT_EQUAL(PSTOP_ERROR_INVALID_ID, machine.handle_protocol_message_cb(&machine, &req, &resp));
 }
@@ -109,7 +110,7 @@ test_protocol_operator_not_allowed(void)
     pstop_msg_t resp;
     pstop_message_init(&req);
     pstop_message_init(&resp);
-    device_id_set_str(&req.receiver_id, "testing");
+    req.receiver_id.data = MACHINE_ID;
 
     TEST_ASSERT_EQUAL(PSTOP_OPERATOR_NOT_ALLOWED, machine.handle_protocol_message_cb(&machine, &req, &resp));
 }
@@ -128,8 +129,8 @@ test_protocol_bond_request(void)
     req.message = PSTOP_MESSAGE_BOND;
     req.counter = 10;
     req.stamp = 100;
-    device_id_set_str(&req.id, "client1");
-    device_id_set_str(&req.receiver_id, "testing");
+    req.id.data = PSTOP_ID;
+    req.receiver_id.data = MACHINE_ID;
     req.received_counter = 0U;
     req.received_stamp = 0U;
 
@@ -159,11 +160,11 @@ test_protocol_invalid_counter(void)
     req.message = PSTOP_MESSAGE_BOND;
     req.counter = 10;
     req.stamp = 100;
-    device_id_set_str(&req.id, "client1");
+    req.id.data = PSTOP_ID;
+    req.receiver_id.data = MACHINE_ID;
 
     pstop_msg_t resp;
     pstop_message_init(&resp);
-    device_id_set_str(&req.receiver_id, "testing");
 
     // setup client with BOND message
     TEST_ASSERT_EQUAL(PSTOP_OK, machine.handle_protocol_message_cb(&machine, &req, &resp));
@@ -188,11 +189,11 @@ test_protocol_bond_invalid_timestamp(void)
     req.message = PSTOP_MESSAGE_BOND;
     req.counter = 10;
     req.stamp = 100;
-    device_id_set_str(&req.id, "client1");
+    req.id.data = PSTOP_ID;
+    req.receiver_id.data = MACHINE_ID;
 
     pstop_msg_t resp;
     pstop_message_init(&resp);
-    device_id_set_str(&req.receiver_id, "testing");
 
     // setup client with BOND message
     current_time = 100;// move clock forward to 100. Next message of 90 will be in the past.
@@ -219,11 +220,11 @@ test_protocol_bond_missed_too_many_messages(void)
     req.message = PSTOP_MESSAGE_BOND;
     req.counter = 10;
     req.stamp = 100;
-    device_id_set_str(&req.id, "client1");
+    req.id.data = PSTOP_ID;
+    req.receiver_id.data = MACHINE_ID;
 
     pstop_msg_t resp;
     pstop_message_init(&resp);
-    device_id_set_str(&req.receiver_id, "testing");
 
     // setup client with BOND message
     current_time = 100;// move clock forward to 100. Next message of 90 will be in the past.
@@ -250,11 +251,11 @@ test_protocol_bond_invalid_echo_counter(void)
     req.message = PSTOP_MESSAGE_BOND;
     req.counter = 10;
     req.stamp = 100;
-    device_id_set_str(&req.id, "client1");
+    req.id.data = PSTOP_ID;
+    req.receiver_id.data = MACHINE_ID;
 
     pstop_msg_t resp;
     pstop_message_init(&resp);
-    device_id_set_str(&req.receiver_id, "testing");
 
     // setup client with BOND message
     current_time = 100;// move clock forward to 100. Next message of 90 will be in the past.

@@ -7,7 +7,6 @@
 #include <unity/unity.h>
 
 #include "pstop/time.h"
-#include "pstop/test_utils.h"
 
 static uint64_t current_time;
 
@@ -51,7 +50,7 @@ log_error(pstop_error_t error, const char *message)
 static
 pstop_application_t pstop_app = {
     .env.get_time_cb = get_time,
-    .machine_device_id.data = "testing",
+    .machine_device_id.data = 1236,
     .operator_allowed_cb = is_operator_allowed,
     .status_cb = robot_status,
     .log_message_cb = log_error,
@@ -66,9 +65,9 @@ static pstop_client_data_t pstop_clients[MAX_CLIENTS];
 
 static
 void
-init_client(device_id_t *id1, pstop_msg_t *msg, const char *id)
+init_client(device_id_t *id1, pstop_msg_t *msg, uint32_t id)
 {
-    device_id_set_str(id1, id);
+    id1->data = id;
     device_id_copy(&(msg->id), id1);
 }
 
@@ -82,7 +81,7 @@ test_bond_timeout(void)
 
     device_id_t id;
     pstop_msg_t msg;
-    init_client(&id, &msg, "test1");
+    init_client(&id, &msg, 1234);
 
     pstop_msg_t resp;
     pstop_message_init(&resp);
@@ -119,7 +118,7 @@ test_bond_stop_timeout(void)
 
     device_id_t id;
     pstop_msg_t msg;
-    init_client(&id, &msg, "test1");
+    init_client(&id, &msg, 1234);
 
     pstop_msg_t resp;
     pstop_message_init(&resp);
@@ -154,7 +153,7 @@ test_bond_stop_timeout_2_missed_timeouts(void)
 
     device_id_t id;
     pstop_msg_t msg;
-    init_client(&id, &msg, "test1");
+    init_client(&id, &msg, 1234);
 
     pstop_msg_t resp;
     pstop_message_init(&resp);

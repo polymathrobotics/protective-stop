@@ -52,7 +52,7 @@ add_executable(pstop_test
   test/src/pstop/pstop_client_data_test.c
   test/src/pstop/pstop_msg_test.c
 
-  test/src/pstop/test_utils.c
+  #test/src/pstop/test_utils.c
 
   test/src/pstop/main.c
 )

@@ -7,7 +7,6 @@
 #include <unity/unity.h>
 
 #include "pstop/time.h"
-#include "pstop/test_utils.h"
 
 static uint64_t current_time;
 
@@ -51,7 +50,7 @@ log_error(pstop_error_t error, const char *message)
 static
 pstop_application_t pstop_app = {
     .env.get_time_cb = get_time,
-    .machine_device_id.data = "testing",
+    .machine_device_id.data = 1236,
     .operator_allowed_cb = is_operator_allowed,
     .status_cb = robot_status,
     .log_message_cb = log_error,
@@ -66,9 +65,9 @@ static pstop_client_data_t pstop_clients[MAX_CLIENTS];
 
 static
 void
-init_client(device_id_t *id1, pstop_msg_t *msg, const char *id)
+init_client(device_id_t *id1, pstop_msg_t *msg, uint32_t id)
 {
-    device_id_set_str(id1, id);
+    id1->data = id;
     device_id_copy(&(msg->id), id1);
 }
 
@@ -102,7 +101,7 @@ test_new_client_operator_allowed(void)
     machine_init(&machine, &pstop_app, pstop_clients, MAX_CLIENTS);
 
     device_id_t id;
-    device_id_set_str(&id, "test");
+    id.data = 1234;
 
     pstop_msg_t msg;
     msg.message = PSTOP_MESSAGE_BOND;
@@ -122,10 +121,10 @@ test_new_client_operator_allowed(void)
 
 static
 pstop_client_data_t *
-client_send_ok(pstop_machine_t *machine, const char *device_id, uint8_t respMsg)
+client_send_ok(pstop_machine_t *machine, uint32_t device_id, uint8_t respMsg)
 {
     device_id_t id;
-    device_id_set_str(&id, device_id);
+    id.data = device_id;
 
     pstop_msg_t msg;
     msg.message = PSTOP_MESSAGE_OK;
@@ -146,7 +145,7 @@ client_send_ok(pstop_machine_t *machine, const char *device_id, uint8_t respMsg)
 
 static
 pstop_client_data_t *
-bond_client(pstop_machine_t *machine, const char *device_id)
+bond_client(pstop_machine_t *machine, uint32_t device_id)
 {
     device_id_t id;
     pstop_msg_t msg;
@@ -176,7 +175,7 @@ test_bond_req_bond_resp(void)
     machine_init(&machine, &pstop_app, pstop_clients, MAX_CLIENTS);
 
     // BOND => BOND
-    pstop_client_data_t *client = bond_client(&machine, "test");
+    pstop_client_data_t *client = bond_client(&machine, 1234);
     TEST_ASSERT_NOT_NULL(client);
 }
 
@@ -189,7 +188,7 @@ test_ok_req_unbond_resp(void)
     machine_init(&machine, &pstop_app, pstop_clients, MAX_CLIENTS);
 
     // OK => UNBOND
-    pstop_client_data_t *client = client_send_ok(&machine, "test", PSTOP_MESSAGE_UNBOND);
+    pstop_client_data_t *client = client_send_ok(&machine, 1234, PSTOP_MESSAGE_UNBOND);
 }
 
 static
@@ -203,7 +202,7 @@ test_bond_unbond(void)
     device_id_t id;
     pstop_msg_t msg;
 
-    init_client(&id, &msg, "test");
+    init_client(&id, &msg, 1234);
 
     pstop_msg_t resp;
     pstop_message_init(&resp);
@@ -239,7 +238,7 @@ test_bond_ok(void)
     device_id_t id;
     pstop_msg_t msg;
 
-    init_client(&id, &msg, "test");
+    init_client(&id, &msg, 1234);
 
     pstop_msg_t resp;
     pstop_message_init(&resp);
@@ -268,7 +267,7 @@ test_bond_bond(void)
     device_id_t id;
     pstop_msg_t msg;
 
-    init_client(&id, &msg, "test");
+    init_client(&id, &msg, 1234);
 
     pstop_msg_t resp;
     pstop_message_init(&resp);
@@ -296,7 +295,7 @@ test_bond_ok_stop(void)
     machine_init(&machine, &pstop_app, pstop_clients, MAX_CLIENTS);
 
     device_id_t id;
-    device_id_set_str(&id, "test");
+    id.data = 1234;
 
     pstop_msg_t msg;
     msg.message = PSTOP_MESSAGE_BOND;
@@ -344,7 +343,7 @@ test_bond_stop_ok(void)
 
     device_id_t id;
     pstop_msg_t msg;
-    init_client(&id, &msg, "test1");
+    init_client(&id, &msg, 1234);
 
     pstop_msg_t resp;
     pstop_message_init(&resp);
@@ -388,8 +387,8 @@ test_2_clients(void)
     device_id_t id1, id2;
     pstop_msg_t msg1, msg2;
 
-    init_client(&id1, &msg1, "test1");
-    init_client(&id2, &msg2, "test2");
+    init_client(&id1, &msg1, 1234);
+    init_client(&id2, &msg2, 1235);
 
     pstop_msg_t resp;
     pstop_message_init(&resp);
@@ -430,8 +429,8 @@ test_2_clients_stop_unbond(void)
     device_id_t id1, id2;
     pstop_msg_t msg1, msg2;
 
-    init_client(&id1, &msg1, "test1");
-    init_client(&id2, &msg2, "test2");
+    init_client(&id1, &msg1, 1234);
+    init_client(&id2, &msg2, 1235);
 
     pstop_msg_t resp;
     pstop_message_init(&resp);
