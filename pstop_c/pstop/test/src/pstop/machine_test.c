@@ -429,7 +429,7 @@ test_bond_stop_ok_stop_only_operator(void)
     // stop-only operator can't transition to OK state
     msg.message = PSTOP_MESSAGE_OK;
     TEST_ASSERT_EQUAL(PSTOP_OK, machine.handle_machine_message_cb(&machine, &msg, &resp));
-    TEST_ASSERT_EQUAL(PSTOP_MESSAGE_OK, resp.message);
+    TEST_ASSERT_EQUAL(PSTOP_MESSAGE_STOP, resp.message);
 
     msg.message = PSTOP_MESSAGE_STOP;
     TEST_ASSERT_EQUAL(PSTOP_OK, machine.handle_machine_message_cb(&machine, &msg, &resp));
