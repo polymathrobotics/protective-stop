@@ -157,22 +157,16 @@ main(int argc, char *argv[])
     pstop_os_env_init(&env);
 
     device_id_t machine_uuid = {
-        .data = {
-            0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
-            0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0xFF
-        }
+        .data = 0x01020304U
     };
     device_id_copy(&(machine.client_id), &machine_uuid);
 
     device_id_t this_uuid = {
-        .data = {
-            0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
-            0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0xFF
-        }
+        .data = 0x01020300U
     };
-    this_uuid.data[15] = (uint8_t)(uuid_byte & 0xFFU);
+    this_uuid.data |= (uuid_byte & 0xFFU);
 
-    fprintf(stderr, "uuid=%d\n", this_uuid.data[15]);
+    fprintf(stderr, "uuid=%d\n", this_uuid.data);
     send_bond(&udp_transport, &env, &machine, &this_uuid);
 
     sleep_ms(750);

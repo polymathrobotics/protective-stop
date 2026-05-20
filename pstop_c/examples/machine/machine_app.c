@@ -75,10 +75,7 @@ main(int argc, char *argv[])
     }
 
     device_id_t machine_uuid = {
-        .data = {
-            0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
-            0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0xFF
-        }
+        .data = 0x01020304U
     };
     device_id_copy(&(machine.application->machine_device_id), &machine_uuid);
 
@@ -97,7 +94,7 @@ main(int argc, char *argv[])
             //dump_bytes(reqbytes);
             pstop_message_decode(&req_msg, reqbytes);
 
-            fprintf(stderr, "Got message: %d from %d\n", req_msg.message, req_msg.id.data[15]);
+            fprintf(stderr, "Got message: %d from %X\n", req_msg.message, req_msg.id.data);
             pstop_error_t error = machine.handle_protocol_message_cb(&machine, &req_msg, &resp_msg);
             if(error != PSTOP_OK) {
                 fprintf(stderr, "Invalid request: %d\n", (int)error);

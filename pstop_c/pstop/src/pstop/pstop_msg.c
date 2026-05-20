@@ -12,7 +12,7 @@
 void
 pstop_message_init(pstop_msg_t *msg)
 {
-    msg->version = 0x0U;
+    msg->version = PSTOP_VERSION;
     msg->stamp = 0U;
     msg->received_stamp = 0U;
     device_id_init(&(msg->id));
@@ -30,22 +30,6 @@ int
 is_message_type_valid(uint8_t message)
 {
     return (message >= PSTOP_MESSAGE_OK) && (message <= PSTOP_MESSAGE_UNBOND);
-}
-
-static
-void
-read_device_uuid(device_id_t *id, const uint8_t *data, size_t *pos)
-{
-    memcpy(&(id->data), data + *pos, DEVICE_ID_LENGTH);
-    *pos = *pos + 16U;
-}
-
-static
-void
-write_device_uuid(const device_id_t *id, uint8_t *data, size_t *pos)
-{
-    memcpy(data + *pos, &(id->data), DEVICE_ID_LENGTH);
-    *pos = *pos + 16U;
 }
 
 static
@@ -131,6 +115,28 @@ write_uint64(uint64_t value, uint8_t *data, size_t *pos)
 #endif
 }
 
+static
+void
+read_device_id(device_id_t *device_id, const uint8_t *data, size_t *pos)
+{
+#if PSTOP_VERSION == 0x00
+    device_id->data = read_uint32(data, pos);
+#else
+#   error "Unsupported PSTOP_VERSION"
+#endif
+}
+
+static
+void
+write_device_id(const device_id_t *device_id, uint8_t *data, size_t *pos)
+{
+#if PSTOP_VERSION == 0x00
+    write_uint32(device_id->data, data, pos);
+#else
+#   error "Unsupported PSTOP_VERSION"
+#endif
+}
+
 pstop_error_t
 pstop_is_message_valid(const pstop_msg_t *msg)
 {
@@ -149,8 +155,8 @@ pstop_message_decode(pstop_msg_t *msg, const uint8_t *data)
     msg->message = read_uint8(data, &pos);
     msg->stamp = read_uint64(data, &pos);
     msg->received_stamp = read_uint64(data, &pos);
-    read_device_uuid(&msg->id, data, &pos);
-    read_device_uuid(&msg->receiver_id, data, &pos);
+    read_device_id(&(msg->id), data, &pos);
+    read_device_id(&(msg->receiver_id), data, &pos);
     msg->heartbeat_timeout = read_uint32(data, &pos);
     msg->counter = read_uint32(data, &pos);
     msg->received_counter = read_uint32(data, &pos);
@@ -166,8 +172,8 @@ pstop_message_encode(const pstop_msg_t *msg, uint8_t *data)
     write_uint8(msg->message, data, &pos);
     write_uint64(msg->stamp, data, &pos);
     write_uint64(msg->received_stamp, data, &pos);
-    write_device_uuid(&msg->id, data, &pos);
-    write_device_uuid(&msg->receiver_id, data, &pos);
+    write_device_id(&(msg->id), data, &pos);
+    write_device_id(&(msg->receiver_id), data, &pos);
     write_uint32(msg->heartbeat_timeout, data, &pos);
     write_uint32(msg->counter, data, &pos);
     write_uint32(msg->received_counter, data, &pos);
