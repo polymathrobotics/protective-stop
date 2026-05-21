@@ -27,13 +27,8 @@ protocol_handle_message(pstop_machine_t *machine, const pstop_msg_t *req, pstop_
         return PSTOP_ERROR_INVALID_ID;
     }
 
-    operator_details_t details;
-    operator_detail_init(&details);
-
     // no client found, can we add it?
-    if(machine->application->operator_details_cb != NULL) {
-        details = machine->application->operator_details_cb((&req->id));
-    }
+    operator_details_t details = machine->application->operator_details_cb((&req->id));
 
     if(!details.allowed) {
         return PSTOP_OPERATOR_NOT_ALLOWED;
