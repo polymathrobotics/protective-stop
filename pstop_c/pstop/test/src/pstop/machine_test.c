@@ -96,6 +96,82 @@ test_new_client_operator_not_allowed(void)
 
 static
 void
+test_new_client_no_more_clients(void)
+{
+    pstop_machine_t machine;
+
+    machine_init(&machine, &pstop_app, pstop_clients, MAX_CLIENTS);
+
+    pstop_msg_t resp;
+    pstop_message_init(&resp);
+
+    details.allowed = 1;
+    details.stop_only = 0;
+    details.heartbeat_ms = 500U;
+    current_time = 100U;
+
+    robot_status_counter = 0;
+
+    device_id_t id;
+    pstop_msg_t msg;
+
+    // bond first client
+    {
+        init_client(&id, &msg, 1234);
+        msg.message = PSTOP_MESSAGE_BOND;
+        TEST_ASSERT_EQUAL(PSTOP_OK, machine.handle_machine_message_cb(&machine, &msg, &resp));
+        TEST_ASSERT_EQUAL(PSTOP_MESSAGE_BOND, resp.message);
+    }
+    // bond second client
+    {
+        init_client(&id, &msg, 1235);
+        msg.message = PSTOP_MESSAGE_BOND;
+        TEST_ASSERT_EQUAL(PSTOP_OK, machine.handle_machine_message_cb(&machine, &msg, &resp));
+        TEST_ASSERT_EQUAL(PSTOP_MESSAGE_BOND, resp.message);
+    }
+
+    // no more room for this client
+    {
+        init_client(&id, &msg, 1236);
+        msg.message = PSTOP_MESSAGE_BOND;
+        TEST_ASSERT_EQUAL(PSTOP_OUT_OF_OPERATOR_SPACE, machine.handle_machine_message_cb(&machine, &msg, &resp));
+    }
+}
+
+static
+void
+test_handle_mssage_null_resp(void)
+{
+    pstop_machine_t machine;
+
+    machine_init(&machine, &pstop_app, pstop_clients, MAX_CLIENTS);
+
+    pstop_msg_t msg;
+    pstop_message_init(&msg);
+
+    TEST_ASSERT_EQUAL(PSTOP_FATAL, machine.handle_machine_message_cb(&machine, &msg, NULL));
+}
+
+static
+void
+test_handle_mssage_invalid_message(void)
+{
+    pstop_machine_t machine;
+
+    machine_init(&machine, &pstop_app, pstop_clients, MAX_CLIENTS);
+
+    pstop_msg_t msg;
+    pstop_message_init(&msg);
+    msg.message = PSTOP_MESSAGE_UNKNOWN;
+
+    pstop_msg_t resp;
+    pstop_message_init(&resp);
+
+    TEST_ASSERT_EQUAL(PSTOP_MESSAGE_TYPE_INVALID, machine.handle_machine_message_cb(&machine, &msg, &resp));
+}
+
+static
+void
 test_new_client_operator_allowed(void)
 {
     pstop_machine_t machine;
@@ -394,6 +470,98 @@ test_bond_stop_ok(void)
     TEST_ASSERT_EQUAL(PSTOP_MESSAGE_OK, resp.message);
 }
 
+/**
+ * Bond a client, then send stop. Verify that the stop state
+ * is no attached to that client. Send another stop. Should be the same.
+ * Then send OK to signal that the operator is ready.
+ */
+static
+void
+test_bond_stop_stop_ok(void)
+{
+    pstop_machine_t machine;
+
+    machine_init(&machine, &pstop_app, pstop_clients, MAX_CLIENTS);
+
+    device_id_t id;
+    pstop_msg_t msg;
+    init_client(&id, &msg, 1234);
+
+    pstop_msg_t resp;
+    pstop_message_init(&resp);
+
+    details.allowed = 1;
+    details.stop_only = 0;
+    details.heartbeat_ms = 500U;
+    current_time = 100U;
+
+    robot_status_counter = 0;
+
+    msg.message = PSTOP_MESSAGE_BOND;
+    TEST_ASSERT_EQUAL(PSTOP_OK, machine.handle_machine_message_cb(&machine, &msg, &resp));
+    TEST_ASSERT_EQUAL(PSTOP_MESSAGE_BOND, resp.message);
+    TEST_ASSERT_EQUAL(ROBOT_RESTART_STATE_NEED_STOP, machine.robot_state.restart_state);
+
+    TEST_ASSERT_EQUAL(0, robot_status_counter);
+
+    msg.message = PSTOP_MESSAGE_STOP;
+    TEST_ASSERT_EQUAL(PSTOP_OK, machine.handle_machine_message_cb(&machine, &msg, &resp));
+    TEST_ASSERT_EQUAL(PSTOP_MESSAGE_STOP, resp.message);
+    TEST_ASSERT_EQUAL(ROBOT_RESTART_STATE_STOP_RECEIVED, machine.robot_state.restart_state);
+    TEST_ASSERT_EQUAL(machine.robot_state.client_stop_id, pstop_clients[0].local_client_id);
+
+    // send STOP again.
+    msg.message = PSTOP_MESSAGE_STOP;
+    TEST_ASSERT_EQUAL(PSTOP_OK, machine.handle_machine_message_cb(&machine, &msg, &resp));
+    TEST_ASSERT_EQUAL(PSTOP_MESSAGE_STOP, resp.message);
+    TEST_ASSERT_EQUAL(ROBOT_RESTART_STATE_STOP_RECEIVED, machine.robot_state.restart_state);
+
+    // And one more time.
+    msg.message = PSTOP_MESSAGE_STOP;
+    TEST_ASSERT_EQUAL(PSTOP_OK, machine.handle_machine_message_cb(&machine, &msg, &resp));
+    TEST_ASSERT_EQUAL(PSTOP_MESSAGE_STOP, resp.message);
+    TEST_ASSERT_EQUAL(ROBOT_RESTART_STATE_STOP_RECEIVED, machine.robot_state.restart_state);
+
+    msg.message = PSTOP_MESSAGE_OK;
+    TEST_ASSERT_EQUAL(PSTOP_OK, machine.handle_machine_message_cb(&machine, &msg, &resp));
+    TEST_ASSERT_EQUAL(PSTOP_MESSAGE_OK, resp.message);
+    TEST_ASSERT_EQUAL(ROBOT_RESTART_STATE_OK, machine.robot_state.restart_state);
+    TEST_ASSERT_EQUAL(0U, machine.robot_state.client_stop_id);
+}
+
+/**
+ * Send STOP message for an unbonded client.
+ * Should respond with UNBOND
+ */
+static
+void
+test_unbonded_stop(void)
+{
+    pstop_machine_t machine;
+
+    machine_init(&machine, &pstop_app, pstop_clients, MAX_CLIENTS);
+
+    device_id_t id;
+    pstop_msg_t msg;
+    init_client(&id, &msg, 1234);
+
+    pstop_msg_t resp;
+    pstop_message_init(&resp);
+
+    details.allowed = 1;
+    details.stop_only = 0;
+    details.heartbeat_ms = 500U;
+    current_time = 100U;
+
+    robot_status_counter = 0;
+
+    msg.message = PSTOP_MESSAGE_STOP;
+    TEST_ASSERT_EQUAL(PSTOP_OK, machine.handle_machine_message_cb(&machine, &msg, &resp));
+    TEST_ASSERT_EQUAL(PSTOP_MESSAGE_UNBOND, resp.message);
+
+    TEST_ASSERT_EQUAL(0, robot_status_counter);
+}
+
 static
 void
 test_bond_stop_ok_stop_only_operator(void)
@@ -542,14 +710,19 @@ main_machine_test(void)
 {
     UnitySetTestFile("machine_test.c");
 
+    RUN_TEST(test_handle_mssage_null_resp);
     RUN_TEST(test_new_client_operator_not_allowed);
     RUN_TEST(test_new_client_operator_allowed);
+    RUN_TEST(test_new_client_no_more_clients);
+    RUN_TEST(test_handle_mssage_invalid_message);
 
     RUN_TEST(test_bond_req_bond_resp);
     RUN_TEST(test_ok_req_unbond_resp);
     RUN_TEST(test_bond_unbond);
     RUN_TEST(test_bond_bond);
     RUN_TEST(test_bond_ok_stop);
+    RUN_TEST(test_bond_stop_stop_ok);
+    RUN_TEST(test_unbonded_stop);
     RUN_TEST(test_2_clients);
     RUN_TEST(test_2_clients_stop_unbond);
     RUN_TEST(test_bond_ok);

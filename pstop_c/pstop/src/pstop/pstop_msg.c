@@ -29,7 +29,7 @@ static
 int
 is_message_type_valid(uint8_t message)
 {
-    return (message >= PSTOP_MESSAGE_OK) && (message <= PSTOP_MESSAGE_UNBOND);
+    return (message <= PSTOP_MESSAGE_UNBOND);
 }
 
 static

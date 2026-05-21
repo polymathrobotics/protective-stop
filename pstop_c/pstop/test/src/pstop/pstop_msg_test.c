@@ -70,6 +70,27 @@ encode_pstop_msg()
     TEST_ASSERT_EQUAL_UINT8_ARRAY(PSTOP_MSG_BYTES, bytes, PSTOP_MESSAGE_SIZE);
 }
 
+static
+void
+is_pstop_message_valid()
+{
+    pstop_msg_t msg;
+    msg.message = PSTOP_MESSAGE_OK;
+    TEST_ASSERT_EQUAL(PSTOP_OK, pstop_is_message_valid(&msg));
+
+    msg.message = PSTOP_MESSAGE_STOP;
+    TEST_ASSERT_EQUAL(PSTOP_OK, pstop_is_message_valid(&msg));
+
+    msg.message = PSTOP_MESSAGE_BOND;
+    TEST_ASSERT_EQUAL(PSTOP_OK, pstop_is_message_valid(&msg));
+
+    msg.message = PSTOP_MESSAGE_UNBOND;
+    TEST_ASSERT_EQUAL(PSTOP_OK, pstop_is_message_valid(&msg));
+
+    msg.message = PSTOP_MESSAGE_UNKNOWN;
+    TEST_ASSERT_EQUAL(PSTOP_MESSAGE_TYPE_INVALID, pstop_is_message_valid(&msg));
+}
+
 void
 main_pstop_msg_test(void)
 {
@@ -77,4 +98,5 @@ main_pstop_msg_test(void)
 
     RUN_TEST(decode_pstop_msg);
     RUN_TEST(encode_pstop_msg);
+    RUN_TEST(is_pstop_message_valid);
 }

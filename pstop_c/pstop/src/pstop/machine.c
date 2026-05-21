@@ -147,11 +147,6 @@ static
 pstop_error_t
 handle_stop_msg(pstop_machine_t *machine, pstop_client_data_t *client, const pstop_msg_t *msg, pstop_msg_t *resp)
 {
-    if(client->client_state != PSTOP_CLIENT_BONDED) {
-        resp->message = PSTOP_MESSAGE_UNBOND;
-        return PSTOP_OK;
-    }
-
     resp->message = PSTOP_MESSAGE_STOP;
 
     // do we need a stop/ok cycle?

@@ -32,6 +32,17 @@ test_device_cmp(void)
     TEST_ASSERT_NOT_EQUAL(0, device_id_cmp(&lhs, &rhs));
 }
 
+#if PSTOP_VERSION == 0x00U
+static
+void
+test_device_id_set(void)
+{
+    device_id_t id;
+    device_id_set(&id, 1234);
+    TEST_ASSERT_EQUAL(1234, id.data);
+}
+#endif
+
 void
 main_device_id_test(void)
 {
@@ -39,4 +50,7 @@ main_device_id_test(void)
 
     RUN_TEST(test_device_init);
     RUN_TEST(test_device_cmp);
+#if PSTOP_VERSION == 0x00U
+    RUN_TEST(test_device_id_set);
+#endif
 }
