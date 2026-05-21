@@ -26,7 +26,7 @@ is_operator_allowed(const device_id_t *id)
     operator_details_t details;
 
     details.allowed = operator_allowed_flag;
-    details.stop_only = 1;
+    details.stop_only = 0;
     details.heartbeat_ms = 500U;
 
     return details;
@@ -75,6 +75,52 @@ init_client(device_id_t *id1, pstop_msg_t *msg, uint32_t id)
 {
     id1->data = id;
     device_id_copy(&(msg->id), id1);
+}
+
+static
+void
+test_bond_no_timeout(void)
+{
+    pstop_machine_t machine;
+
+    machine_init(&machine, &pstop_app, pstop_clients, MAX_CLIENTS);
+
+    device_id_t id;
+    pstop_msg_t msg;
+    init_client(&id, &msg, 1234);
+
+    pstop_msg_t resp;
+    pstop_message_init(&resp);
+
+    operator_allowed_flag = 1;
+    current_time = 100U;
+
+    robot_status_counter = 0;
+
+    msg.message = PSTOP_MESSAGE_BOND;
+    TEST_ASSERT_EQUAL(PSTOP_OK, machine.handle_machine_message_cb(&machine, &msg, &resp));
+    TEST_ASSERT_EQUAL(PSTOP_MESSAGE_BOND, resp.message);
+
+    msg.message = PSTOP_MESSAGE_STOP;
+    TEST_ASSERT_EQUAL(PSTOP_OK, machine.handle_machine_message_cb(&machine, &msg, &resp));
+    TEST_ASSERT_EQUAL(PSTOP_MESSAGE_STOP, resp.message);
+
+    msg.message = PSTOP_MESSAGE_OK;
+    TEST_ASSERT_EQUAL(PSTOP_OK, machine.handle_machine_message_cb(&machine, &msg, &resp));
+    TEST_ASSERT_EQUAL(PSTOP_MESSAGE_OK, resp.message);
+    TEST_ASSERT_EQUAL(PSTOP_STATUS_OK, lastStatus);
+
+    current_time = 150U; // no timeout yet!
+    TEST_ASSERT_EQUAL(PSTOP_OK, machine.check_heartbeats_cb(&machine));
+    TEST_ASSERT_EQUAL(PSTOP_STATUS_OK, lastStatus);
+
+    current_time = 170U; // now a timeout!
+    TEST_ASSERT_EQUAL(PSTOP_MISSED_HEARTBEATS, machine.check_heartbeats_cb(&machine));
+    TEST_ASSERT_EQUAL(PSTOP_CLIENT_UNKNOWN, pstop_clients[0].client_state);
+    TEST_ASSERT_EQUAL(PSTOP_STATUS_STOP, lastStatus);
+
+    // after the previous timeout that client is marked as UNKNOWN so no more clients connected
+    TEST_ASSERT_EQUAL(PSTOP_OK, machine.check_heartbeats_cb(&machine));
 }
 
 static
@@ -191,6 +237,7 @@ main_machine_timeout_test(void)
 {
     UnitySetTestFile("machine_timeout_test.c");
 
+    RUN_TEST(test_bond_no_timeout);
     RUN_TEST(test_bond_timeout);
     RUN_TEST(test_bond_stop_timeout);
     RUN_TEST(test_bond_stop_timeout_2_missed_timeouts);
