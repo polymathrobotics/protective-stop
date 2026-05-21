@@ -75,13 +75,14 @@ protocol_handle_message(pstop_machine_t *machine, const pstop_msg_t *req, pstop_
     resp->stamp = now;
     resp->received_counter = req->counter;
     resp->received_stamp = req->stamp;
-    resp->heartbeat_timeout = client->client_data.heartbeat_ms;
+    resp->heartbeat_timeout = 0U;
     device_id_copy(&(resp->id), &(machine->application->machine_device_id));
     device_id_copy(&(resp->receiver_id), &(req->id));
 
     // null client will happen on unbond
     if(client != NULL) {
         resp->counter = client->client_data.msg_counter + 1U;
+        resp->heartbeat_timeout = client->client_data.heartbeat_ms;
         client->client_data.msg_counter++;
         client->client_data.last_counter = req->counter;
         client->client_data.last_timestamp = now;
