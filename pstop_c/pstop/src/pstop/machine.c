@@ -92,12 +92,11 @@ handle_ok_msg(pstop_machine_t *machine, pstop_client_data_t *client, const pstop
     }
 
     // this isn't the client that requested the STOP
-    if(machine->robot_state.client_stop_id != 0U) {
-        if(machine->robot_state.client_stop_id != client->local_client_id) {
-            resp->message = PSTOP_MESSAGE_STOP;
-            return PSTOP_OK;
-        }
+    if(machine->robot_state.client_stop_id != client->local_client_id) {
+        resp->message = PSTOP_MESSAGE_STOP;
+        return PSTOP_OK;
     }
+
     // either this is the client that started the STOP/OK cycle or we're in a
     // normal case where STOP/OK has already finished.
     machine->robot_state.robot_state = ROBOT_STATE_OK;
