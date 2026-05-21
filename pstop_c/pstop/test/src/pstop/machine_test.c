@@ -472,7 +472,7 @@ test_bond_stop_ok(void)
 
 /**
  * Bond a client, then send stop. Verify that the stop state
- * is no attached to that client. Send another stop. Should be the same.
+ * is not attached to that client. Send another stop. Should be the same.
  * Then send OK to signal that the operator is ready.
  */
 static
@@ -526,7 +526,7 @@ test_bond_stop_stop_ok(void)
     TEST_ASSERT_EQUAL(PSTOP_OK, machine.handle_machine_message_cb(&machine, &msg, &resp));
     TEST_ASSERT_EQUAL(PSTOP_MESSAGE_OK, resp.message);
     TEST_ASSERT_EQUAL(ROBOT_RESTART_STATE_OK, machine.robot_state.restart_state);
-    TEST_ASSERT_EQUAL(0U, machine.robot_state.client_stop_id);
+    TEST_ASSERT_EQUAL(machine.robot_state.client_stop_id, pstop_clients[0].local_client_id);
 }
 
 /**
@@ -648,8 +648,24 @@ test_2_clients(void)
 
     // second node sends OK, should reply stop
     msg2.message = PSTOP_MESSAGE_OK;
+
     TEST_ASSERT_EQUAL(PSTOP_OK, machine.handle_machine_message_cb(&machine, &msg2, &resp));
     TEST_ASSERT_EQUAL(PSTOP_MESSAGE_STOP, resp.message);
+
+    // first node sends OK, should reply OK
+    msg1.message = PSTOP_MESSAGE_OK;
+    TEST_ASSERT_EQUAL(PSTOP_OK, machine.handle_machine_message_cb(&machine, &msg1, &resp));
+    TEST_ASSERT_EQUAL(PSTOP_MESSAGE_OK, resp.message);
+    TEST_ASSERT_EQUAL(PSTOP_STATUS_OK, lastStatus);
+
+    // now unbond first client
+    msg1.message = PSTOP_MESSAGE_UNBOND;
+    TEST_ASSERT_EQUAL(PSTOP_OK, machine.handle_machine_message_cb(&machine, &msg1, &resp));
+    TEST_ASSERT_EQUAL(PSTOP_MESSAGE_UNBOND, resp.message);
+    TEST_ASSERT_EQUAL(ROBOT_RESTART_STATE_NEED_STOP, machine.robot_state.restart_state);
+    TEST_ASSERT_EQUAL(0U, machine.robot_state.client_stop_id);
+    TEST_ASSERT_EQUAL(ROBOT_STATE_STOPPED, machine.robot_state.robot_state);
+    TEST_ASSERT_EQUAL(PSTOP_STATUS_STOP, lastStatus);
 }
 
 static
@@ -689,11 +705,17 @@ test_2_clients_stop_unbond(void)
     msg1.message = PSTOP_MESSAGE_STOP;
     TEST_ASSERT_EQUAL(PSTOP_OK, machine.handle_machine_message_cb(&machine, &msg1, &resp));
     TEST_ASSERT_EQUAL(PSTOP_MESSAGE_STOP, resp.message);
+    TEST_ASSERT_EQUAL(ROBOT_RESTART_STATE_STOP_RECEIVED, machine.robot_state.restart_state);
+    TEST_ASSERT_EQUAL(machine.robot_state.client_stop_id, pstop_clients[0].local_client_id);
 
     // then first node sends unbond
     msg1.message = PSTOP_MESSAGE_UNBOND;
     TEST_ASSERT_EQUAL(PSTOP_OK, machine.handle_machine_message_cb(&machine, &msg1, &resp));
     TEST_ASSERT_EQUAL(PSTOP_MESSAGE_UNBOND, resp.message);
+    TEST_ASSERT_EQUAL(ROBOT_RESTART_STATE_NEED_STOP, machine.robot_state.restart_state);
+    TEST_ASSERT_EQUAL(0U, machine.robot_state.client_stop_id);
+    TEST_ASSERT_EQUAL(ROBOT_STATE_STOPPED, machine.robot_state.robot_state);
+    TEST_ASSERT_EQUAL(1U, pstop_client_num_active(&(machine.pstops)));
 
     // second node sends STOP, then OK
     msg2.message = PSTOP_MESSAGE_STOP;

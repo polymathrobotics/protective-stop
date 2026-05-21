@@ -15,13 +15,8 @@ static
 pstop_error_t
 add_new_client(pstop_machine_t *machine, const device_id_t *id, pstop_client_data_t **client)
 {
-    operator_details_t details;
-    operator_detail_init(&details);
-
     // no client found, can we add it?
-    if(machine->application->operator_details_cb != NULL) {
-        details = machine->application->operator_details_cb(id);
-    }
+    operator_details_t details = machine->application->operator_details_cb(id);
 
     if(!details.allowed) {
         // This ID is not allowed
@@ -91,11 +86,6 @@ static
 pstop_error_t
 handle_ok_msg(pstop_machine_t *machine, pstop_client_data_t *client, const pstop_msg_t *msg, pstop_msg_t *resp)
 {
-    if(client->client_state != PSTOP_CLIENT_BONDED) {
-        resp->message = PSTOP_MESSAGE_UNBOND;
-        return PSTOP_OK;
-    }
-
     if(machine->robot_state.restart_state == ROBOT_RESTART_STATE_NEED_STOP) {
         resp->message = PSTOP_MESSAGE_STOP;
         return PSTOP_OK;
@@ -112,7 +102,7 @@ handle_ok_msg(pstop_machine_t *machine, pstop_client_data_t *client, const pstop
     // normal case where STOP/OK has already finished.
     machine->robot_state.robot_state = ROBOT_STATE_OK;
     machine->robot_state.restart_state = ROBOT_RESTART_STATE_OK;
-    machine->robot_state.client_stop_id = 0U;
+    //machine->robot_state.client_stop_id = 0U;
 
     resp->message = PSTOP_MESSAGE_OK;
 
@@ -122,39 +112,14 @@ handle_ok_msg(pstop_machine_t *machine, pstop_client_data_t *client, const pstop
 }
 
 static
-void
-handle_need_stop(pstop_machine_t *machine, pstop_client_data_t *client, pstop_msg_t *resp)
-{
-    // if another node already started the stop/ok cycle then we'll expect that
-    // node to send us the OK.
-    if(machine->robot_state.client_stop_id == client->local_client_id) {
-        machine->robot_state.robot_state = ROBOT_STATE_STOPPED;
-        machine->robot_state.restart_state = ROBOT_RESTART_STATE_STOP_RECEIVED;
-    }
-    else {
-        if(machine->robot_state.client_stop_id == 0U) {
-            if(client->is_stop_only == 0) {
-                // we have a new client that sent us a STOP message.
-                machine->robot_state.robot_state = ROBOT_STATE_STOPPED;
-                machine->robot_state.client_stop_id = client->local_client_id;
-                machine->robot_state.restart_state = ROBOT_RESTART_STATE_STOP_RECEIVED;
-            }
-        }
-    }
-}
-
-static
 pstop_error_t
 handle_stop_msg(pstop_machine_t *machine, pstop_client_data_t *client, const pstop_msg_t *msg, pstop_msg_t *resp)
 {
     resp->message = PSTOP_MESSAGE_STOP;
 
-    // do we need a stop/ok cycle?
-    if(machine->robot_state.restart_state == ROBOT_RESTART_STATE_NEED_STOP) {
-        handle_need_stop(machine, client, resp);
-    }
-
+    // if we're waiting for any client to initiate the stop/ok cycle
     if(machine->robot_state.client_stop_id == 0U) {
+        // but don't allow stop/ok cycle from stop-only clients
         if(client->is_stop_only == 0) {
             machine->robot_state.robot_state = ROBOT_STATE_STOPPED;
             machine->robot_state.client_stop_id = client->local_client_id;
@@ -251,9 +216,7 @@ static
 void
 machine_notify_hal(pstop_machine_t *machine, pstop_status_message_t status)
 {
-    if(machine->application->status_cb != NULL) {
-        machine->application->status_cb(status);
-    }
+    machine->application->status_cb(status);
 }
 
 static

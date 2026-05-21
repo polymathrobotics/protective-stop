@@ -11,6 +11,7 @@ extern void main_pstop_msg_test(void);
 extern void main_machine_test(void);
 extern void main_machine_timeout_test(void);
 extern void main_protocol_test(void);
+extern void main_pstop_application_test(void);
 
 void setUp(void) {}
 
@@ -23,11 +24,12 @@ main(void)
 
     main_device_id_test();
     main_endian_test();
-    main_pstop_client_test();
-    main_pstop_msg_test();
     main_machine_test();
     main_machine_timeout_test();
     main_protocol_test();
+    main_pstop_application_test();
+    main_pstop_client_test();
+    main_pstop_msg_test();
 
     return UNITY_END();
 }
