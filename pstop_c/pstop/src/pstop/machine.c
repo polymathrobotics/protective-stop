@@ -93,7 +93,13 @@ handle_ok_msg(pstop_machine_t *machine, pstop_client_data_t *client, const pstop
 
     // this isn't the client that requested the STOP
     if(machine->robot_state.client_stop_id != client->local_client_id) {
-        resp->message = PSTOP_MESSAGE_STOP;
+        if(machine->robot_state.robot_state == ROBOT_STATE_OK) {
+            resp->message = PSTOP_MESSAGE_OK;
+        }
+        else {
+            resp->message = PSTOP_MESSAGE_STOP;
+        }
+
         return PSTOP_OK;
     }
 
@@ -123,6 +129,18 @@ handle_stop_msg(pstop_machine_t *machine, pstop_client_data_t *client, const pst
             machine->robot_state.robot_state = ROBOT_STATE_STOPPED;
             machine->robot_state.client_stop_id = client->local_client_id;
             machine->robot_state.restart_state = ROBOT_RESTART_STATE_STOP_RECEIVED;
+        }
+    }
+    else {
+        // another client has taken control of this machine
+        // but this new client wants to stop it.
+        machine->robot_state.robot_state = ROBOT_STATE_STOPPED;
+        if(client->is_stop_only == 0) {
+            machine->robot_state.client_stop_id = client->local_client_id;
+            machine->robot_state.restart_state = ROBOT_RESTART_STATE_STOP_RECEIVED;
+        }
+        else {
+            machine->robot_state.client_stop_id = 0U;
         }
     }
 
