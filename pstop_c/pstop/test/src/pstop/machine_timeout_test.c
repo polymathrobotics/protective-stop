@@ -48,7 +48,7 @@ robot_status(pstop_status_message_t status)
 
 static
 void
-log_error(pstop_error_t error, const char *message)
+log_error(uint64_t timestamp, const device_id_t *client, uint8_t message, pstop_error_t error)
 {
 
 }

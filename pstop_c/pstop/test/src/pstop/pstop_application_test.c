@@ -5,6 +5,8 @@
 
 #include <unity/unity.h>
 
+#include "pstop/pstop_msg.h"
+
 static
 void
 test_init(void)
@@ -18,7 +20,9 @@ test_init(void)
     TEST_ASSERT_NOT_NULL(app.env.get_time_cb);
     TEST_ASSERT_TRUE(app.env.get_time_cb() > 0U);
 
-    app.log_message_cb(PSTOP_OK, "no error");
+    device_id_t id;
+
+    app.log_message_cb(12345, &id, PSTOP_MESSAGE_BOND, PSTOP_OK);
 
     operator_details_t details;
     operator_detail_init(&details);

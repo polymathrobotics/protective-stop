@@ -175,6 +175,25 @@ handle_unbond_msg(pstop_machine_t *machine, pstop_client_data_t *client, const p
 
 static
 pstop_error_t
+dispatch_message(pstop_machine_t *machine, pstop_client_data_t *client , const pstop_msg_t *req, pstop_msg_t *resp)
+{
+    switch(req->message) {
+    case PSTOP_MESSAGE_BOND:
+        return handle_bond_msg(machine, client, req, resp);
+    case PSTOP_MESSAGE_UNBOND:
+        return handle_unbond_msg(machine, client, req, resp);
+    case PSTOP_MESSAGE_OK:
+        return handle_ok_msg(machine, client, req, resp);
+    default:
+        break;
+    }
+
+    // by default we'll assume any invalid message means stop
+    return handle_stop_msg(machine, client, req, resp);
+}
+
+static
+pstop_error_t
 machine_handle_message(pstop_machine_t *machine, const pstop_msg_t *req, pstop_msg_t *resp)
 {
     // validate we have a response message
@@ -190,6 +209,8 @@ machine_handle_message(pstop_machine_t *machine, const pstop_msg_t *req, pstop_m
 
     resp->heartbeat_timeout = machine->application->app_config.default_timeout_ms;
 
+    uint64_t now = machine->application->env.get_time_cb();
+
     // can we find this client?
     pstop_client_data_t *client = pstop_client_get(&(machine->pstops), &(req->id));
     if(client == NULL) {
@@ -197,6 +218,7 @@ machine_handle_message(pstop_machine_t *machine, const pstop_msg_t *req, pstop_m
         if(req->message != PSTOP_MESSAGE_BOND) {
             // send back UNBOND message
             resp->message = PSTOP_MESSAGE_UNBOND;
+            machine->application->log_message_cb(now, &(req->id), req->message, PSTOP_NOT_BOND_MESSAGE);
             return PSTOP_OK;
         }
         // can we add this new client?
@@ -204,6 +226,7 @@ machine_handle_message(pstop_machine_t *machine, const pstop_msg_t *req, pstop_m
         if(result != PSTOP_OK) {
             // send back UNBOND message
             resp->message = PSTOP_MESSAGE_UNBOND;
+            machine->application->log_message_cb(now, &(req->id), req->message, result);
 
             return result;
         }
@@ -211,22 +234,16 @@ machine_handle_message(pstop_machine_t *machine, const pstop_msg_t *req, pstop_m
         init_new_client(machine->application, client, req);
     }
 
-    uint64_t now = machine->application->env.get_time_cb();
     client->client_data.last_timestamp = now;
 
-    switch(req->message) {
-    case PSTOP_MESSAGE_BOND:
-        return handle_bond_msg(machine, client, req, resp);
-    case PSTOP_MESSAGE_UNBOND:
-        return handle_unbond_msg(machine, client, req, resp);
-    case PSTOP_MESSAGE_OK:
-        return handle_ok_msg(machine, client, req, resp);
-    default:
-        break;
+    result = dispatch_message(machine, client, req, resp);
+
+    if(client->last_message != req->message) {
+        client->last_message = req->message;
+        machine->application->log_message_cb(now, &(req->id), req->message, result);
     }
 
-    // by default we'll assume any invalid message means stop
-    return handle_stop_msg(machine, client, req, resp);
+    return result;
 }
 
 static
@@ -272,6 +289,7 @@ machine_check_heartbeats(pstop_machine_t *machine)
         if(client->missed_heartbeats_counter >= machine->application->app_config.max_missed_heartbeats) {
             // trigger a stop!
             client->client_state = PSTOP_CLIENT_UNKNOWN;
+            machine->application->log_message_cb(now, &(client->client_data.client_id), PSTOP_MESSAGE_UNKNOWN, PSTOP_MISSED_HEARTBEATS);
             needsStop = 1;
         }
     }

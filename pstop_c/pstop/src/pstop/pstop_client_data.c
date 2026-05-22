@@ -14,6 +14,7 @@ pstop_client_init(pstop_client_data_t *client)
 {
     protocol_data_init(&(client->client_data));
     client->clock_drift = 0U;
+    client->last_message = 0U;
     client->lost_message_counter = 0U;
     client->missed_heartbeats_counter = 0U;
     client->client_state = PSTOP_CLIENT_UNKNOWN;

@@ -8,7 +8,7 @@
 
 static
 void
-no_log(pstop_error_t /* error */, const char * /* message */)
+no_log(uint64_t /* timestamp */, const device_id_t * /* client */, uint8_t /* message */, pstop_error_t /* error */)
 {
 
 }
