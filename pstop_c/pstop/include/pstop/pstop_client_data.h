@@ -27,6 +27,8 @@ typedef struct {
 
     protocol_data_t client_data;
 
+    uint8_t last_message;
+
     // is this client a stop-only operator?
     int is_stop_only;
 

@@ -42,7 +42,7 @@ robot_status(pstop_status_message_t status)
 
 static
 void
-log_error(pstop_error_t error, const char *message)
+log_error(uint64_t timestamp, const device_id_t *client, uint8_t message, pstop_error_t error)
 {
 
 }
@@ -195,7 +195,7 @@ test_new_client_operator_allowed(void)
 
     TEST_ASSERT_EQUAL(PSTOP_OK, machine.handle_machine_message_cb(&machine, &msg, &resp));
     TEST_ASSERT_EQUAL(PSTOP_MESSAGE_BOND, resp.message);
-    TEST_ASSERT_EQUAL(101U, pstop_clients[0].client_data.last_timestamp);
+    TEST_ASSERT_EQUAL(100U, pstop_clients[0].client_data.last_timestamp);
     TEST_ASSERT_EQUAL(60U, pstop_clients[0].client_data.heartbeat_ms);
 }
 

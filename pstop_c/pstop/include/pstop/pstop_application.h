@@ -31,7 +31,7 @@ typedef operator_details_t (* get_operator_details_t)(const device_id_t *device_
 
 typedef int      (* pstop_status_t)(pstop_status_message_t status);
 
-typedef void     (* log_message_t)(pstop_error_t error, const char *message);
+typedef void     (* log_message_t)(uint64_t timestamp, const device_id_t *client, uint8_t message, pstop_error_t error);
 
 typedef struct {
     /**
