@@ -45,7 +45,6 @@ init_new_client(pstop_application_t *application, pstop_client_data_t *client, c
 
     device_id_copy(&(client->client_data.client_id), &(msg->id));
     client->client_data.last_timestamp = now;
-    client->client_data.heartbeat_ms = application->app_config.default_timeout_ms;
     client->client_data.msg_counter = 0U;
     client->client_data.last_counter = 0U;
 
@@ -207,7 +206,6 @@ machine_handle_message(pstop_machine_t *machine, const pstop_msg_t *req, pstop_m
        return result;
     }
 
-    resp->heartbeat_timeout = machine->application->app_config.default_timeout_ms;
 
     uint64_t now = machine->application->env.get_time_cb();
 
@@ -218,6 +216,7 @@ machine_handle_message(pstop_machine_t *machine, const pstop_msg_t *req, pstop_m
         if(req->message != PSTOP_MESSAGE_BOND) {
             // send back UNBOND message
             resp->message = PSTOP_MESSAGE_UNBOND;
+            resp->heartbeat_timeout = 0U;
             machine->application->log_message_cb(now, &(req->id), req->message, PSTOP_NOT_BOND_MESSAGE);
             return PSTOP_OK;
         }
@@ -226,6 +225,7 @@ machine_handle_message(pstop_machine_t *machine, const pstop_msg_t *req, pstop_m
         if(result != PSTOP_OK) {
             // send back UNBOND message
             resp->message = PSTOP_MESSAGE_UNBOND;
+            resp->heartbeat_timeout = 0U;
             machine->application->log_message_cb(now, &(req->id), req->message, result);
 
             return result;
@@ -233,6 +233,7 @@ machine_handle_message(pstop_machine_t *machine, const pstop_msg_t *req, pstop_m
         // brand new client, let's initialize it
         init_new_client(machine->application, client, req);
     }
+    resp->heartbeat_timeout = client->client_data.heartbeat_ms;
 
     client->client_data.last_timestamp = now;
 

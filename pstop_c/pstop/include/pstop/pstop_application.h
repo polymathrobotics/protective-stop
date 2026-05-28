@@ -34,10 +34,6 @@ typedef int      (* pstop_status_t)(pstop_status_message_t status);
 typedef void     (* log_message_t)(uint64_t timestamp, const device_id_t *client, uint8_t message, pstop_error_t error);
 
 typedef struct {
-    /**
-     * Default timeout for all new clients.
-     */
-    uint64_t default_timeout_ms;
 
     uint16_t max_lost_messages;
 

@@ -62,7 +62,6 @@ pstop_application_t pstop_app = {
     .operator_details_cb = is_operator_allowed,
     .status_cb = robot_status,
     .log_message_cb = log_error,
-    .app_config.default_timeout_ms = 60U,
     .app_config.max_lost_messages = 1U,
     .app_config.max_missed_heartbeats = 1U
 };

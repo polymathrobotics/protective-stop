@@ -54,7 +54,6 @@ pstop_application_t pstop_app = {
     .operator_details_cb = is_operator_allowed,
     .status_cb = robot_status,
     .log_message_cb = log_error,
-    .app_config.default_timeout_ms = 60U,
     .app_config.max_lost_messages = 1U,
     .app_config.max_missed_heartbeats = 1U
 };
@@ -85,7 +84,6 @@ test_new_client_operator_not_allowed_req_3_11(void)
     pstop_msg_t resp;
     pstop_message_init(&resp);
 
-    msg.heartbeat_timeout = 50U;
     msg.message = PSTOP_MESSAGE_BOND;
 
     details.allowed = 0;
@@ -93,6 +91,7 @@ test_new_client_operator_not_allowed_req_3_11(void)
     details.heartbeat_ms = 500U;
     TEST_ASSERT_EQUAL(PSTOP_OPERATOR_NOT_ALLOWED, machine.handle_machine_message_cb(&machine, &msg, &resp));
     TEST_ASSERT_EQUAL(PSTOP_MESSAGE_UNBOND, resp.message);
+    TEST_ASSERT_EQUAL(0U, resp.heartbeat_timeout);
 }
 
 static
@@ -122,6 +121,7 @@ test_new_client_no_more_clients_req_3_10(void)
         msg.message = PSTOP_MESSAGE_BOND;
         TEST_ASSERT_EQUAL(PSTOP_OK, machine.handle_machine_message_cb(&machine, &msg, &resp));
         TEST_ASSERT_EQUAL(PSTOP_MESSAGE_BOND, resp.message);
+        TEST_ASSERT_EQUAL(500U, resp.heartbeat_timeout);
     }
     // bond second client
     {
@@ -129,6 +129,7 @@ test_new_client_no_more_clients_req_3_10(void)
         msg.message = PSTOP_MESSAGE_BOND;
         TEST_ASSERT_EQUAL(PSTOP_OK, machine.handle_machine_message_cb(&machine, &msg, &resp));
         TEST_ASSERT_EQUAL(PSTOP_MESSAGE_BOND, resp.message);
+        TEST_ASSERT_EQUAL(500U, resp.heartbeat_timeout);
     }
 
     // no more room for this client
@@ -137,6 +138,7 @@ test_new_client_no_more_clients_req_3_10(void)
         msg.message = PSTOP_MESSAGE_BOND;
         TEST_ASSERT_EQUAL(PSTOP_OUT_OF_OPERATOR_SPACE, machine.handle_machine_message_cb(&machine, &msg, &resp));
         TEST_ASSERT_EQUAL(PSTOP_MESSAGE_UNBOND, resp.message);
+        TEST_ASSERT_EQUAL(0U, resp.heartbeat_timeout);
     }
 }
 
@@ -198,7 +200,8 @@ test_new_client_operator_allowed(void)
     TEST_ASSERT_EQUAL(PSTOP_OK, machine.handle_machine_message_cb(&machine, &msg, &resp));
     TEST_ASSERT_EQUAL(PSTOP_MESSAGE_BOND, resp.message);
     TEST_ASSERT_EQUAL(100U, pstop_clients[0].client_data.last_timestamp);
-    TEST_ASSERT_EQUAL(60U, pstop_clients[0].client_data.heartbeat_ms);
+    TEST_ASSERT_EQUAL(500U, pstop_clients[0].client_data.heartbeat_ms);
+    TEST_ASSERT_EQUAL(500U, resp.heartbeat_timeout);
 }
 
 static
@@ -562,6 +565,34 @@ test_unbonded_stop(void)
     TEST_ASSERT_EQUAL(PSTOP_MESSAGE_UNBOND, resp.message);
 
     TEST_ASSERT_EQUAL(0, robot_status_counter);
+}
+
+static
+void
+test_heartbeat_timeout(void)
+{
+    pstop_machine_t machine;
+
+    machine_init(&machine, &pstop_app, pstop_clients, MAX_CLIENTS);
+
+    device_id_t id;
+    pstop_msg_t msg;
+    init_client(&id, &msg, 1234);
+
+    pstop_msg_t resp;
+    pstop_message_init(&resp);
+
+    details.allowed = 1;
+    details.stop_only = 0;
+    details.heartbeat_ms = 500U;
+    current_time = 100U;
+
+    robot_status_counter = 0;
+
+    msg.message = PSTOP_MESSAGE_BOND;
+    TEST_ASSERT_EQUAL(PSTOP_OK, machine.handle_machine_message_cb(&machine, &msg, &resp));
+    TEST_ASSERT_EQUAL(PSTOP_MESSAGE_BOND, resp.message);
+    TEST_ASSERT_EQUAL(500U, resp.heartbeat_timeout);
 }
 
 static
@@ -988,6 +1019,7 @@ main_machine_test(void)
     RUN_TEST(test_new_client_operator_allowed);
     RUN_TEST(test_new_client_no_more_clients_req_3_10);
     RUN_TEST(test_handle_mssage_invalid_message);
+    RUN_TEST(test_heartbeat_timeout);
     RUN_TEST(test_2_clients_unbond_before_ok);
     RUN_TEST(test_bond_req_bond_resp);
     RUN_TEST(test_ok_req_unbond_resp);
