@@ -2,7 +2,6 @@
 // SPDX-FileCopyrightText: 2026 Polymath Robotics, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
-#include <stdio.h>
 #include <stdlib.h>
 
 #include "pstop/protocol.h"
@@ -47,7 +46,10 @@ protocol_handle_message(pstop_machine_t *machine, const pstop_msg_t *req, pstop_
         if(req->stamp <= client->client_data.last_timestamp) {
             return PSTOP_MSG_OUT_OF_ORDER;
         }
-        if(req->received_counter != client->client_data.msg_counter) {
+        if(req->received_counter > client->client_data.msg_counter) {
+            return PSTOP_MSG_OUT_OF_ORDER;
+        }
+        if((client->client_data.msg_counter - req->received_counter) > machine->application->app_config.max_lost_messages) {
             return PSTOP_MSG_LOST;
         }
     }
