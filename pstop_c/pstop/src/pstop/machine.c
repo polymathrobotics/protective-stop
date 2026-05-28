@@ -2,8 +2,6 @@
 // SPDX-FileCopyrightText: 2026 Polymath Robotics, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
-#include <stdio.h>
-
 #include <stddef.h>
 
 #include "pstop/machine.h"
@@ -296,7 +294,6 @@ machine_check_heartbeats(pstop_machine_t *machine)
     }
 
     if(needsStop != 0) {
-        fprintf(stderr, "Hearbeat failure!\n");
         machine_stop_robot(machine);
         return PSTOP_MISSED_HEARTBEATS;
     }
