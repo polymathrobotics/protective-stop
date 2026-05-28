@@ -16,7 +16,6 @@ assert_empty_client(pstop_client_data_t *client)
     TEST_ASSERT_EQUAL(0U, client->client_data.last_timestamp);
     TEST_ASSERT_EQUAL(0U, client->client_data.heartbeat_ms);
     TEST_ASSERT_EQUAL(0U, client->client_data.msg_counter);
-    TEST_ASSERT_EQUAL(0U, client->clock_drift);
 }
 
 static

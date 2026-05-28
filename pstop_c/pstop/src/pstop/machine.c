@@ -44,14 +44,7 @@ init_new_client(pstop_application_t *application, pstop_client_data_t *client, c
     device_id_copy(&(client->client_data.client_id), &(msg->id));
     client->client_data.last_timestamp = now;
     client->client_data.msg_counter = 0U;
-    client->client_data.last_counter = 0U;
-
-    if(now >= msg->stamp) {
-        client->clock_drift = (int64_t)(now - msg->stamp);
-    }
-    else {
-        client->clock_drift = -(int64_t)(msg->stamp - now);
-    }
+    client->client_data.last_sent_counter = 0U;
 }
 
 static

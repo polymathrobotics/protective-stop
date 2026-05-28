@@ -12,7 +12,7 @@ typedef struct {
 
     device_id_t client_id;
 
-    // last time we've heard from this client
+    // last time we've sent a message to the client
     uint64_t last_timestamp;
 
     // how frequently we should ping this client
@@ -21,7 +21,7 @@ typedef struct {
     // the counter indicating each message we are sending
     uint32_t msg_counter;
 
-    uint32_t last_counter;
+    uint32_t last_sent_counter;
 
 } protocol_data_t;
 

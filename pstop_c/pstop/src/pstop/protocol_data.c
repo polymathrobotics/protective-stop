@@ -11,5 +11,5 @@ protocol_data_init(protocol_data_t *client)
     client->last_timestamp = 0U;
     client->heartbeat_ms = 0U;
     client->msg_counter = 0U;
-    client->last_counter = 0U;
+    client->last_sent_counter = 0U;
 }
