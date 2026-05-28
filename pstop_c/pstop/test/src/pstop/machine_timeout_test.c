@@ -27,7 +27,7 @@ is_operator_allowed(const device_id_t *id)
 
     details.allowed = operator_allowed_flag;
     details.stop_only = 0;
-    details.heartbeat_ms = 500U;
+    details.heartbeat_ms = 60U;
 
     return details;
 }
@@ -60,7 +60,6 @@ pstop_application_t pstop_app = {
     .operator_details_cb = is_operator_allowed,
     .status_cb = robot_status,
     .log_message_cb = log_error,
-    .app_config.default_timeout_ms = 60U,
     .app_config.max_lost_messages = 1U,
     .app_config.max_missed_heartbeats = 1U
 };
