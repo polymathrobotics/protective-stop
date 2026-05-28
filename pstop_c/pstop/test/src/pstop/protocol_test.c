@@ -394,6 +394,39 @@ test_protocol_bond_missing_sent_messages(void)
     TEST_ASSERT_EQUAL(PSTOP_MESSAGE_STOP, resp.message);
 }
 
+static
+void
+test_protocol_bond_received_counter_invalid(void)
+{
+    pstop_machine_t machine;
+    pstop_app.app_config.max_lost_messages = 1;
+    machine_init(&machine, &pstop_app, pstop_clients, MAX_CLIENTS);
+
+    operator_allowed_flag = 1;
+
+    pstop_msg_t req;
+    pstop_message_init(&req);
+    req.message = PSTOP_MESSAGE_BOND;
+    req.counter = 10;
+    req.stamp = 100;
+    req.id.data = PSTOP_ID;
+    req.receiver_id.data = MACHINE_ID;
+
+    pstop_msg_t resp;
+    pstop_message_init(&resp);
+
+    // setup client with BOND message
+    current_time = 100;// move clock forward to 100. Next message of 90 will be in the past.
+    TEST_ASSERT_EQUAL(PSTOP_OK, machine.handle_protocol_message_cb(&machine, &req, &resp));
+    TEST_ASSERT_EQUAL(1U, resp.counter);
+
+    req.message = PSTOP_MESSAGE_OK;
+    req.counter = 11;
+    req.stamp = 110;
+    req.received_counter = 10; // bigger than the current msg counter
+    TEST_ASSERT_EQUAL(PSTOP_MSG_OUT_OF_ORDER, machine.handle_protocol_message_cb(&machine, &req, &resp));
+}
+
 void
 main_protocol_test(void)
 {
@@ -410,4 +443,5 @@ main_protocol_test(void)
     RUN_TEST(test_protocol_bond_missed_too_many_messages);
     RUN_TEST(test_protocol_bond_invalid_echo_counter);
     RUN_TEST(test_protocol_bond_missing_sent_messages);
+    RUN_TEST(test_protocol_bond_received_counter_invalid);
 }
