@@ -32,11 +32,6 @@ typedef struct {
     // is this client a stop-only operator?
     int is_stop_only;
 
-    // approx how far off is the client's clock from this clock
-    // compare the incoming pstop_msg.stamp to this clock.
-    // Ignoring network transit time
-    int32_t clock_drift;
-
     // how many messages have we lost so far?
     uint16_t lost_message_counter;
 

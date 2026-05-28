@@ -13,6 +13,51 @@ is_checksum_valid(const pstop_msg_t *req)
     return req->checksum == req->calculated_checksum;
 }
 
+static
+pstop_error_t
+check_counter(const pstop_application_config_t *app_config, const pstop_client_data_t *client, const pstop_msg_t *req)
+{
+    if(req->counter <= client->client_data.last_sent_counter) {
+        return PSTOP_MSG_OUT_OF_ORDER;
+    }
+    if((req->counter - client->client_data.last_sent_counter) > app_config->max_lost_messages) {
+        return PSTOP_MSG_LOST;
+    }
+    if(req->received_counter > client->client_data.msg_counter) {
+        return PSTOP_MSG_OUT_OF_ORDER;
+    }
+    if((client->client_data.msg_counter - req->received_counter) > app_config->max_lost_messages) {
+        return PSTOP_MSG_LOST;
+    }
+
+    return PSTOP_OK;
+}
+
+static
+pstop_error_t
+check_timestamp(const pstop_application_config_t *app_config, const protocol_data_t *client, const pstop_msg_t *req)
+{
+    if(req->received_stamp == client->last_timestamp) {
+        return PSTOP_OK;
+    }
+
+    // did the other end miss a message?
+    if(req->received_stamp < client->last_timestamp) {
+        uint64_t diff = client->last_timestamp - req->received_stamp;
+
+        uint16_t missed = (uint16_t)(diff / client->heartbeat_ms);
+
+        if(missed > app_config->max_missed_heartbeats) {
+            return PSTOP_MSG_LOST;
+        }
+    }
+    else {
+        return PSTOP_MSG_OUT_OF_ORDER;
+    }
+
+    return PSTOP_OK;
+}
+
 pstop_error_t
 protocol_handle_message(pstop_machine_t *machine, const pstop_msg_t *req, pstop_msg_t *resp)
 {
@@ -37,20 +82,14 @@ protocol_handle_message(pstop_machine_t *machine, const pstop_msg_t *req, pstop_
 
     // if we've already seen this client, then validate the counter/timestamps
     if(client != NULL) {
-        if(req->counter <= client->client_data.last_counter) {
-            return PSTOP_MSG_OUT_OF_ORDER;
+        pstop_error_t err = check_counter(&(machine->application->app_config), client, req);
+        if(err != PSTOP_OK) {
+            return err;
         }
-        if((req->counter - client->client_data.last_counter) > machine->application->app_config.max_lost_messages) {
-            return PSTOP_MSG_LOST;
-        }
-        if(req->stamp <= client->client_data.last_timestamp) {
-            return PSTOP_MSG_OUT_OF_ORDER;
-        }
-        if(req->received_counter > client->client_data.msg_counter) {
-            return PSTOP_MSG_OUT_OF_ORDER;
-        }
-        if((client->client_data.msg_counter - req->received_counter) > machine->application->app_config.max_lost_messages) {
-            return PSTOP_MSG_LOST;
+
+        err = check_timestamp(&(machine->application->app_config), &(client->client_data), req);
+        if(err != PSTOP_OK) {
+            return err;
         }
     }
 
@@ -81,7 +120,7 @@ protocol_handle_message(pstop_machine_t *machine, const pstop_msg_t *req, pstop_
         resp->counter = client->client_data.msg_counter + 1U;
         resp->heartbeat_timeout = client->client_data.heartbeat_ms;
         client->client_data.msg_counter++;
-        client->client_data.last_counter = req->counter;
+        client->client_data.last_sent_counter = req->counter;
         client->client_data.last_timestamp = now;
     }
 
