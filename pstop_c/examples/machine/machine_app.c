@@ -33,7 +33,7 @@ is_operator_allowed(const device_id_t *device_id)
 pstop_status_message_t lastStatus = 0;
 
 static
-int
+void
 robot_status(pstop_status_message_t status)
 {
     if(lastStatus != status) {
@@ -45,8 +45,6 @@ robot_status(pstop_status_message_t status)
         }
         lastStatus = status;
     }
-
-    return 0;
 }
 
 void

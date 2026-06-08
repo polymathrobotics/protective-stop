@@ -30,14 +30,12 @@ static pstop_status_message_t last_status = PSTOP_STATUS_OK;
 static int robot_status_counter = 0;
 
 static
-int
+void
 robot_status(pstop_status_message_t status)
 {
     last_status = status;
 
     robot_status_counter++;
-
-    return 0;
 }
 
 static

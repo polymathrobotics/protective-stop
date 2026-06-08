@@ -35,14 +35,12 @@ static pstop_status_message_t lastStatus = PSTOP_STATUS_OK;
 static int robot_status_counter = 0;
 
 static
-int
+void
 robot_status(pstop_status_message_t status)
 {
     lastStatus = status;
 
     robot_status_counter++;
-
-    return 0;
 }
 
 static
@@ -62,8 +60,8 @@ pstop_application_t pstop_app = {
     .operator_details_cb = is_operator_allowed,
     .status_cb = robot_status,
     .log_message_cb = log_error,
-    .app_config.max_lost_messages = 1U,
-    .app_config.max_missed_heartbeats = 1U
+    .app_config.max_lost_messages = 0U,
+    .app_config.max_missed_heartbeats = 0U
 };
 
 #define MAX_CLIENTS 2U
@@ -256,6 +254,8 @@ void
 test_protocol_bond_invalid_timestamp(void)
 {
     pstop_machine_t machine;
+    pstop_app.app_config.max_lost_messages = 0U;
+    pstop_app.app_config.max_missed_heartbeats = 0U;
     machine_init(&machine, &pstop_app, pstop_clients, MAX_CLIENTS);
 
     operator_allowed_flag = 1;
@@ -279,6 +279,7 @@ test_protocol_bond_invalid_timestamp(void)
     req.message = PSTOP_MESSAGE_OK;
     req.counter = 11;
     req.received_stamp = resp.stamp + 1U;
+    req.received_counter = resp.counter;
     req.stamp = 90;
     TEST_ASSERT_EQUAL(PSTOP_MSG_OUT_OF_ORDER, machine.handle_protocol_message_cb(&machine, &req, &resp));
 }
@@ -442,14 +443,14 @@ test_protocol_bond_missing_sent_messages(void)
     pstop_message_init(&resp);
 
     // setup client with BOND message
-    current_time = 100;// move clock forward to 100. Next message of 90 will be in the past.
+    current_time = 100;
     TEST_ASSERT_EQUAL(PSTOP_OK, machine.handle_protocol_message_cb(&machine, &req, &resp));
     TEST_ASSERT_EQUAL(1U, resp.counter);
 
     req.message = PSTOP_MESSAGE_OK;
     req.counter = 11;
     req.stamp = 110;
-    req.received_counter = 0; // we didn't the previous mssage
+    req.received_counter = 0; // we didn't receive the previous mssage
     TEST_ASSERT_EQUAL(PSTOP_OK, machine.handle_protocol_message_cb(&machine, &req, &resp));
     TEST_ASSERT_EQUAL(2U, resp.counter);
     TEST_ASSERT_EQUAL(PSTOP_MESSAGE_STOP, resp.message);
@@ -457,7 +458,7 @@ test_protocol_bond_missing_sent_messages(void)
     req.message = PSTOP_MESSAGE_OK;
     req.counter = 12;
     req.stamp = 120;
-    req.received_counter = 0; // we didn't the previous mssage
+    req.received_counter = 0; // we didn't receive the previous mssage
     TEST_ASSERT_EQUAL(PSTOP_MSG_LOST, machine.handle_protocol_message_cb(&machine, &req, &resp));
     TEST_ASSERT_EQUAL(2U, resp.counter);
     TEST_ASSERT_EQUAL(PSTOP_MESSAGE_STOP, resp.message);

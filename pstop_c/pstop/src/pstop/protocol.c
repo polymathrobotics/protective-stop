@@ -20,13 +20,13 @@ check_counter(const pstop_application_config_t *app_config, const pstop_client_d
     if(req->counter <= client->client_data.last_sent_counter) {
         return PSTOP_MSG_OUT_OF_ORDER;
     }
-    if((req->counter - client->client_data.last_sent_counter) > app_config->max_lost_messages) {
+    if((req->counter - client->client_data.last_sent_counter) > (app_config->max_lost_messages + 1U)) {
         return PSTOP_MSG_LOST;
     }
     if(req->received_counter > client->client_data.msg_counter) {
         return PSTOP_MSG_OUT_OF_ORDER;
     }
-    if((client->client_data.msg_counter - req->received_counter) > app_config->max_lost_messages) {
+    if((client->client_data.msg_counter - req->received_counter) >= (app_config->max_lost_messages + 1U)) {
         return PSTOP_MSG_LOST;
     }
 
@@ -47,7 +47,7 @@ check_timestamp(const pstop_application_config_t *app_config, const protocol_dat
 
         uint16_t missed = (uint16_t)(diff / client->heartbeat_ms);
 
-        if(missed > app_config->max_missed_heartbeats) {
+        if(missed >= (app_config->max_missed_heartbeats + 1U)) {
             return PSTOP_MSG_LOST;
         }
     }

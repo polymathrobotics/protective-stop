@@ -6,6 +6,9 @@
 
 #include <stdint.h>
 
+/**
+ * A callback to return the current time in milliseconds.
+ */
 typedef uint64_t (* get_current_time_t)(void);
 
 typedef struct pstop_os_env_t {
