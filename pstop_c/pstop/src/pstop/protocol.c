@@ -92,6 +92,12 @@ protocol_handle_message(pstop_machine_t *machine, const pstop_msg_t *req, pstop_
             return err;
         }
     }
+    else {
+        // for brand new clients these values must be 0
+        if((req->received_counter != 0U) || (req->received_stamp != 0U)) {
+            return PSTOP_INVALID_BOND_REQUEST;
+        }
+    }
 
     // now send the message to the machine for pstop handling.
     // This function will create a new client if necessary

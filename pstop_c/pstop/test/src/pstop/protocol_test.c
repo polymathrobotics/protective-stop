@@ -72,7 +72,7 @@ static pstop_client_data_t pstop_clients[MAX_CLIENTS];
 
 static
 void
-test_protocol_invalid_checksum(void)
+test_protocol_invalid_checksum_req_2_01(void)
 {
     pstop_machine_t machine;
     machine_init(&machine, &pstop_app, pstop_clients, MAX_CLIENTS);
@@ -82,13 +82,14 @@ test_protocol_invalid_checksum(void)
     pstop_message_init(&req);
     pstop_message_init(&resp);
     req.checksum = 10U;
+    req.calculated_checksum = 14U; // calculated by pstop_message_decode
 
     TEST_ASSERT_EQUAL(PSTOP_MSG_INVALID_CHECKSUM, machine.handle_protocol_message_cb(&machine, &req, &resp));
 }
 
 static
 void
-test_protocol_invalid_receiver_id(void)
+test_protocol_invalid_receiver_id_req_2_07(void)
 {
     pstop_machine_t machine;
     machine_init(&machine, &pstop_app, pstop_clients, MAX_CLIENTS);
@@ -97,7 +98,7 @@ test_protocol_invalid_receiver_id(void)
     pstop_msg_t resp;
     pstop_message_init(&req);
     pstop_message_init(&resp);
-    req.receiver_id.data = 4567;
+    req.receiver_id.data = 4567; // doesn't match the machine ID
 
     TEST_ASSERT_EQUAL(PSTOP_ERROR_INVALID_ID, machine.handle_protocol_message_cb(&machine, &req, &resp));
 }
@@ -198,7 +199,7 @@ test_protocol_bond_then_unbond(void)
 
 static
 void
-test_protocol_invalid_message(void)
+test_protocol_invalid_message_req_2_08(void)
 {
     pstop_machine_t machine;
     machine_init(&machine, &pstop_app, pstop_clients, MAX_CLIENTS);
@@ -303,7 +304,7 @@ test_protocol_bond_correct_timestamp(void)
     pstop_message_init(&resp);
 
     // setup client with BOND message
-    current_time = 100;// move clock forward to 100. Next message of 90 will be in the past.
+    current_time = 100;
     TEST_ASSERT_EQUAL(PSTOP_OK, machine.handle_protocol_message_cb(&machine, &req, &resp));
     TEST_ASSERT_EQUAL(1U, resp.counter);
 
@@ -495,17 +496,72 @@ test_protocol_bond_received_counter_invalid(void)
     TEST_ASSERT_EQUAL(PSTOP_MSG_OUT_OF_ORDER, machine.handle_protocol_message_cb(&machine, &req, &resp));
 }
 
+static
+void
+test_protocol_new_client_invalid_received_counter_req_4_05(void)
+{
+    pstop_machine_t machine;
+    pstop_app.app_config.max_lost_messages = 1;
+    machine_init(&machine, &pstop_app, pstop_clients, MAX_CLIENTS);
+
+    operator_allowed_flag = 1;
+
+    pstop_msg_t req;
+    pstop_message_init(&req);
+    req.message = PSTOP_MESSAGE_BOND;
+    req.counter = 10;
+    req.received_counter = 2;
+    req.stamp = 100;
+    req.id.data = PSTOP_ID;
+    req.receiver_id.data = MACHINE_ID;
+
+    pstop_msg_t resp;
+    pstop_message_init(&resp);
+
+    // setup client with BOND message
+    current_time = 100;
+    TEST_ASSERT_EQUAL(PSTOP_INVALID_BOND_REQUEST, machine.handle_protocol_message_cb(&machine, &req, &resp));
+}
+
+static
+void
+test_protocol_new_client_invalid_received_counter_req_4_06(void)
+{
+    pstop_machine_t machine;
+    pstop_app.app_config.max_lost_messages = 1;
+    machine_init(&machine, &pstop_app, pstop_clients, MAX_CLIENTS);
+
+    operator_allowed_flag = 1;
+
+    pstop_msg_t req;
+    pstop_message_init(&req);
+    req.message = PSTOP_MESSAGE_BOND;
+    req.counter = 10;
+    req.received_counter = 0;
+    req.received_stamp = 4;
+    req.stamp = 100;
+    req.id.data = PSTOP_ID;
+    req.receiver_id.data = MACHINE_ID;
+
+    pstop_msg_t resp;
+    pstop_message_init(&resp);
+
+    // setup client with BOND message
+    current_time = 100;
+    TEST_ASSERT_EQUAL(PSTOP_INVALID_BOND_REQUEST, machine.handle_protocol_message_cb(&machine, &req, &resp));
+}
+
 void
 main_protocol_test(void)
 {
     UnitySetTestFile("protocol_test.c");
 
-    RUN_TEST(test_protocol_invalid_checksum);
-    RUN_TEST(test_protocol_invalid_receiver_id);
+    RUN_TEST(test_protocol_invalid_checksum_req_2_01);
+    RUN_TEST(test_protocol_invalid_receiver_id_req_2_07);
     RUN_TEST(test_protocol_operator_not_allowed);
     RUN_TEST(test_protocol_bond_request);
     RUN_TEST(test_protocol_bond_then_unbond);
-    RUN_TEST(test_protocol_invalid_message);
+    RUN_TEST(test_protocol_invalid_message_req_2_08);
     RUN_TEST(test_protocol_invalid_counter);
     RUN_TEST(test_protocol_bond_invalid_timestamp);
     RUN_TEST(test_protocol_bond_correct_timestamp);
@@ -514,4 +570,6 @@ main_protocol_test(void)
     RUN_TEST(test_protocol_bond_invalid_echo_counter);
     RUN_TEST(test_protocol_bond_missing_sent_messages);
     RUN_TEST(test_protocol_bond_received_counter_invalid);
+    RUN_TEST(test_protocol_new_client_invalid_received_counter_req_4_05);
+    RUN_TEST(test_protocol_new_client_invalid_received_counter_req_4_06);
 }
