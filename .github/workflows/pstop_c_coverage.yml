@@ -26,9 +26,14 @@ jobs:
           BULLSEYE_LICENSE_KEY: ${{ secrets.BULLSEYE_LICENSE_KEY }}
         run: |
           set -eu
+          tarball="/tmp/BullseyeCoverage-${BULLSEYE_VERSION}-Linux-x64.tar.xz"
           curl -fsSL \
-            "https://www.bullseye.com/download/BullseyeCoverage-${BULLSEYE_VERSION}-Linux-x64.tar.xz" \
-            | tar -xJf - -C /tmp
+            "https://www.bullseye.com/download-archive/${BULLSEYE_VERSION%.*}/BullseyeCoverage-${BULLSEYE_VERSION}-Linux-x64.tar.xz" \
+            -o "${tarball}"
+          # Fail loudly if we somehow fetched anything instead of an xz archive.
+          xz -t "${tarball}"
+          tar -xJf "${tarball}" -C /tmp
+          rm -f "${tarball}"
           sudo "/tmp/BullseyeCoverage-${BULLSEYE_VERSION}/install" \
             --prefix "${BULLSEYE_PREFIX}" \
             --key "${BULLSEYE_LICENSE_KEY}" \
