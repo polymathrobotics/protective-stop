@@ -84,7 +84,7 @@ test_new_client_operator_not_allowed_req_3_11(void)
 
     msg.message = PSTOP_MESSAGE_BOND;
 
-    details.allowed = 0;
+    details.allowed = false;
     details.stop_only = 0;
     details.heartbeat_ms = 500U;
     TEST_ASSERT_EQUAL(PSTOP_OPERATOR_NOT_ALLOWED, machine.handle_machine_message_cb(&machine, &msg, &resp));
@@ -103,7 +103,7 @@ test_new_client_no_more_clients_req_3_10(void)
     pstop_msg_t resp;
     pstop_message_init(&resp);
 
-    details.allowed = 1;
+    details.allowed = true;
     details.stop_only = 0;
     details.heartbeat_ms = 500U;
     current_time = 100U;
@@ -190,7 +190,7 @@ test_new_client_operator_allowed(void)
     pstop_msg_t resp;
     pstop_message_init(&resp);
 
-    details.allowed = 1;
+    details.allowed = true;
     details.stop_only = 0;
     details.heartbeat_ms = 500U;
     current_time = 100U;
@@ -216,7 +216,7 @@ client_send_ok(pstop_machine_t *machine, uint32_t device_id, uint8_t respMsg)
     pstop_msg_t resp;
     pstop_message_init(&resp);
 
-    details.allowed = 1;
+    details.allowed = true;
     details.stop_only = 0;
     details.heartbeat_ms = 500U;
     current_time = 100U;
@@ -240,7 +240,7 @@ bond_client(pstop_machine_t *machine, uint32_t device_id)
     pstop_msg_t resp;
     pstop_message_init(&resp);
 
-    details.allowed = 1;
+    details.allowed = true;
     details.stop_only = 0;
     details.heartbeat_ms = 500U;
     current_time = 100U;
@@ -294,7 +294,7 @@ test_bond_unbond(void)
     pstop_msg_t resp;
     pstop_message_init(&resp);
 
-    details.allowed = 1;
+    details.allowed = true;
     details.stop_only = 0;
     details.heartbeat_ms = 500U;
     current_time = 100U;
@@ -332,7 +332,7 @@ test_bond_ok(void)
     pstop_msg_t resp;
     pstop_message_init(&resp);
 
-    details.allowed = 1;
+    details.allowed = true;
     details.stop_only = 0;
     details.heartbeat_ms = 500U;
     current_time = 100U;
@@ -363,7 +363,7 @@ test_bond_bond(void)
     pstop_msg_t resp;
     pstop_message_init(&resp);
 
-    details.allowed = 1;
+    details.allowed = true;
     details.stop_only = 0;
     details.heartbeat_ms = 500U;
     current_time = 100U;
@@ -397,7 +397,7 @@ test_bond_ok_stop(void)
     pstop_msg_t resp;
     pstop_message_init(&resp);
 
-    details.allowed = 1;
+    details.allowed = true;
     details.stop_only = 0;
     details.heartbeat_ms = 500U;
     current_time = 100U;
@@ -443,7 +443,7 @@ test_bond_stop_ok(void)
     pstop_msg_t resp;
     pstop_message_init(&resp);
 
-    details.allowed = 1;
+    details.allowed = true;
     details.stop_only = 0;
     details.heartbeat_ms = 500U;
     current_time = 100U;
@@ -493,7 +493,7 @@ test_bond_stop_stop_ok(void)
     pstop_msg_t resp;
     pstop_message_init(&resp);
 
-    details.allowed = 1;
+    details.allowed = true;
     details.stop_only = 0;
     details.heartbeat_ms = 500U;
     current_time = 100U;
@@ -551,7 +551,7 @@ test_unbonded_stop(void)
     pstop_msg_t resp;
     pstop_message_init(&resp);
 
-    details.allowed = 1;
+    details.allowed = true;
     details.stop_only = 0;
     details.heartbeat_ms = 500U;
     current_time = 100U;
@@ -580,7 +580,7 @@ test_heartbeat_timeout(void)
     pstop_msg_t resp;
     pstop_message_init(&resp);
 
-    details.allowed = 1;
+    details.allowed = true;
     details.stop_only = 0;
     details.heartbeat_ms = 500U;
     current_time = 100U;
@@ -608,7 +608,7 @@ test_bond_stop_ok_stop_only_operator(void)
     pstop_msg_t resp;
     pstop_message_init(&resp);
 
-    details.allowed = 1;
+    details.allowed = true;
     details.stop_only = 1;
     details.heartbeat_ms = 500U;
     current_time = 100U;
@@ -656,7 +656,7 @@ test_2_clients(void)
     pstop_msg_t resp;
     pstop_message_init(&resp);
 
-    details.allowed = 1;
+    details.allowed = true;
     details.stop_only = 0;
     details.heartbeat_ms = 500U;
     current_time = 100U;
@@ -716,7 +716,7 @@ test_2_clients_unbond_before_ok(void)
     pstop_msg_t resp;
     pstop_message_init(&resp);
 
-    details.allowed = 1;
+    details.allowed = true;
     details.stop_only = 0;
     details.heartbeat_ms = 500U;
     current_time = 100U;
@@ -765,7 +765,7 @@ test_2_clients_unbond_second(void)
     pstop_msg_t resp;
     pstop_message_init(&resp);
 
-    details.allowed = 1;
+    details.allowed = true;
     details.stop_only = 0;
     details.heartbeat_ms = 500U;
     current_time = 100U;
@@ -822,7 +822,7 @@ test_2_clients_stop_unbond(void)
     pstop_msg_t resp;
     pstop_message_init(&resp);
 
-    details.allowed = 1;
+    details.allowed = true;
     details.stop_only = 0;
     details.heartbeat_ms = 500U;
     current_time = 100U;
@@ -892,7 +892,7 @@ test_2_clients_stop_ok(void)
     pstop_msg_t resp;
     pstop_message_init(&resp);
 
-    details.allowed = 1;
+    details.allowed = true;
     details.stop_only = 0;
     details.heartbeat_ms = 500U;
     current_time = 100U;
@@ -957,7 +957,7 @@ test_2_clients_stop_only_stop(void)
     pstop_msg_t resp;
     pstop_message_init(&resp);
 
-    details.allowed = 1;
+    details.allowed = true;
     details.stop_only = 0;
     details.heartbeat_ms = 500U;
     current_time = 100U;

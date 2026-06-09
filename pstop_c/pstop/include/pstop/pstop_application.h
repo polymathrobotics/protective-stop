@@ -5,6 +5,7 @@
 #define PSTOP_PSTOP_APPLICATION_H
 
 #include <stdint.h>
+#include <stdbool.h>
 
 #include "pstop/error.h"
 #include "pstop/device_id.h"
@@ -20,7 +21,7 @@ typedef struct {
     /**
      * Is this device_id allowed?
      */
-    int allowed;
+    bool allowed;
 
     /**
      * The heartbeat time for this device_id in milliseconds.
@@ -30,7 +31,7 @@ typedef struct {
     /**
      * Is this device_id a stop-only (can't transition to OK) operator?
      */
-    int stop_only;
+    bool stop_only;
 
 } operator_details_t;
 

@@ -16,9 +16,9 @@ no_log(uint64_t /* timestamp */, const device_id_t * /* client */, uint8_t /* me
 void
 operator_detail_init(operator_details_t *oper)
 {
-    oper->allowed = 1;
+    oper->allowed = true;
     oper->heartbeat_ms = 1000U;
-    oper->stop_only = 1;
+    oper->stop_only = true;
 }
 
 void

@@ -5,6 +5,7 @@
 #define PSTOP_PSTOP_CLIENT_DATA_H
 
 #include <stdint.h>
+#include <stdbool.h>
 
 #include "pstop/device_id.h"
 #include "pstop/constants.h"
@@ -30,7 +31,7 @@ typedef struct {
     uint8_t last_message;
 
     // is this client a stop-only operator?
-    int is_stop_only;
+    bool is_stop_only;
 
     // how many messages have we lost so far?
     uint16_t lost_message_counter;
