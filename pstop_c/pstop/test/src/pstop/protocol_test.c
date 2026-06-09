@@ -103,6 +103,40 @@ test_protocol_invalid_receiver_id_req_2_07(void)
 
 static
 void
+test_protocol_out_of_order_message_req_2_02(void)
+{
+    pstop_machine_t machine;
+    machine_init(&machine, &pstop_app, pstop_clients, MAX_CLIENTS);
+
+    pstop_msg_t req;
+    pstop_message_init(&req);
+    req.message = PSTOP_MESSAGE_BOND;
+    req.counter = 10;
+    req.stamp = 100;
+    req.id.data = PSTOP_ID;
+    req.receiver_id.data = MACHINE_ID;
+    req.received_counter = 0U;
+    req.received_stamp = 0U;
+
+    pstop_msg_t resp;
+    pstop_message_init(&resp);
+
+    operator_allowed_flag = true;
+
+    // succesfull bond
+    TEST_ASSERT_EQUAL(PSTOP_OK, machine.handle_protocol_message_cb(&machine, &req, &resp));
+
+    // now send message with counter that is old
+    req.message = PSTOP_MESSAGE_STOP;
+    req.counter = 8;
+    req.stamp = 110;
+    req.received_counter = resp.counter;
+    req.received_stamp = resp.stamp;
+    TEST_ASSERT_EQUAL(PSTOP_MSG_OUT_OF_ORDER, machine.handle_protocol_message_cb(&machine, &req, &resp));
+}
+
+static
+void
 test_protocol_operator_not_allowed(void)
 {
     pstop_machine_t machine;
@@ -559,6 +593,7 @@ main_protocol_test(void)
 
     RUN_TEST(test_protocol_invalid_checksum_req_2_01);
     RUN_TEST(test_protocol_invalid_receiver_id_req_2_07);
+    RUN_TEST(test_protocol_out_of_order_message_req_2_02);
     RUN_TEST(test_protocol_operator_not_allowed);
     RUN_TEST(test_protocol_bond_request);
     RUN_TEST(test_protocol_bond_then_unbond);
