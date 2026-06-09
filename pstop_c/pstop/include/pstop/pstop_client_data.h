@@ -51,31 +51,46 @@ typedef struct {
 } pstop_clients_t;
 
 /**
- * Initialize the pstop_client_data_t structure to default values.
+ * @brief Initialize the pstop_client_data_t structure to default values.
+ *
+ * @param client The client data to initialize.
  */
 void pstop_client_init(pstop_client_data_t *client);
 
 /**
- * Initializes a pstop_clients object to default values.
+ * @brief Initializes a pstop_clients object to default values.
+ *
+ * @param clients The collection of clients to initialize
  */
 void pstop_clients_init(pstop_clients_t *clients);
 
-uint16_t pstop_client_num_active(pstop_clients_t *clients);
+/**
+ * @brief Returns the number of active clients.
+ *
+ * @param clients The collection of clients.
+ * @return The number of currently active clients.
+ */
+uint16_t pstop_client_num_active(const pstop_clients_t *clients);
 
 /**
- * Returns an empty pstop_client if one is available
+ * @brief Returns an empty pstop_client if one is available
  *
- * @Return the client data if successful, NULL if no space available.
+ * @return the client data if successful, NULL if no space available.
  */
 pstop_client_data_t *pstop_client_get_free_client(pstop_clients_t *clients);
 
+/**
+ * @brief Deactivates this client.
+ *
+ * @param clients The collection of clients.
+ */
 void pstop_client_deactivate(pstop_client_data_t *client);
 
 /**
- * Finds the specified pstop client by device ID.
+ * @brief Finds the specified pstop client by device ID.
  *
- * @Return the requsted client if found or NULL if not found.
+ * @return the requsted client if found or NULL if not found.
  */
-pstop_client_data_t *pstop_client_get(pstop_clients_t *clients, const device_id_t *client_id);
+pstop_client_data_t *pstop_client_get(const pstop_clients_t *clients, const device_id_t *client_id);
 
 #endif /* PSTOP_PSTOP_CLIENT_DATA_H */

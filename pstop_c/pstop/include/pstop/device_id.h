@@ -18,23 +18,38 @@ typedef struct {
 } device_id_t;
 
 /**
- * Initializes the specified device to 0.
+ * @brief Initializes the specified device to an empty ID.
+ *
+ * @param device_id The device_id to initialize.
  */
 void device_id_init(device_id_t *device_id);
 
 /**
- * Copies the device ID from id to device_id.
+ * @brief Copies the device ID from id to device_id.
+ *
+ * @param device_id The device ID to set
+ * @param id The device ID to copy
  */
 void device_id_copy(device_id_t *device_id, const device_id_t *id);
 
 /**
- * Compares two device ids.
+ * @brief Compares two device ids.
  *
- * @Return 0 if lhs == rhs. Otherwise returns non-zero.
+ * @param lhs The left-hand side of the comparision
+ * @param rhs The right-hand side of the comparision
+ *
+ * @return 0 if lhs == rhs. Otherwise returns non-zero.
  */
 int device_id_cmp(const device_id_t *lhs, const device_id_t *rhs);
 
 #if PSTOP_VERSION == 0x00
+
+/**
+ * @brief Utility function to set a device ID from a uint32_t
+ *
+ * @param device_id The device ID to set
+ * @param id The integer value to copy
+ */
 void device_id_set(device_id_t *device_id, uint32_t id);
 #endif
 
