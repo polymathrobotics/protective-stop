@@ -16,7 +16,7 @@ get_time(void)
     return current_time++;
 }
 
-static int operator_allowed_flag;
+static bool operator_allowed_flag;
 
 static
 operator_details_t
@@ -25,7 +25,7 @@ is_operator_allowed(const device_id_t *id)
     operator_details_t details;
 
     details.allowed = operator_allowed_flag;
-    details.stop_only = 1;
+    details.stop_only = true;
     details.heartbeat_ms = 500U;
 
     return details;
@@ -108,7 +108,7 @@ test_protocol_operator_not_allowed(void)
     pstop_machine_t machine;
     machine_init(&machine, &pstop_app, pstop_clients, MAX_CLIENTS);
 
-    operator_allowed_flag = 0;
+    operator_allowed_flag = false;
 
     pstop_msg_t req;
     pstop_msg_t resp;
@@ -126,7 +126,7 @@ test_protocol_bond_request(void)
     pstop_machine_t machine;
     machine_init(&machine, &pstop_app, pstop_clients, MAX_CLIENTS);
 
-    operator_allowed_flag = 1;
+    operator_allowed_flag = true;
 
     pstop_msg_t req;
     pstop_message_init(&req);
@@ -157,7 +157,7 @@ test_protocol_bond_then_unbond(void)
     pstop_machine_t machine;
     machine_init(&machine, &pstop_app, pstop_clients, MAX_CLIENTS);
 
-    operator_allowed_flag = 1;
+    operator_allowed_flag = true;
     current_time = 10;
 
     pstop_msg_t req;
@@ -202,7 +202,7 @@ test_protocol_invalid_message_req_2_08(void)
     pstop_machine_t machine;
     machine_init(&machine, &pstop_app, pstop_clients, MAX_CLIENTS);
 
-    operator_allowed_flag = 1;
+    operator_allowed_flag = true;
 
     pstop_msg_t req;
     pstop_message_init(&req);
@@ -227,7 +227,7 @@ test_protocol_invalid_counter(void)
     pstop_machine_t machine;
     machine_init(&machine, &pstop_app, pstop_clients, MAX_CLIENTS);
 
-    operator_allowed_flag = 1;
+    operator_allowed_flag = true;
 
     pstop_msg_t req;
     pstop_message_init(&req);
@@ -258,7 +258,7 @@ test_protocol_bond_invalid_timestamp(void)
     pstop_app.app_config.max_missed_heartbeats = 0U;
     machine_init(&machine, &pstop_app, pstop_clients, MAX_CLIENTS);
 
-    operator_allowed_flag = 1;
+    operator_allowed_flag = true;
 
     pstop_msg_t req;
     pstop_message_init(&req);
@@ -291,7 +291,7 @@ test_protocol_bond_correct_timestamp(void)
     pstop_machine_t machine;
     machine_init(&machine, &pstop_app, pstop_clients, MAX_CLIENTS);
 
-    operator_allowed_flag = 1;
+    operator_allowed_flag = true;
 
     pstop_msg_t req;
     pstop_message_init(&req);
@@ -324,7 +324,7 @@ test_protocol_bond_missed_message_timestamps(void)
     pstop_machine_t machine;
     machine_init(&machine, &pstop_app, pstop_clients, MAX_CLIENTS);
 
-    operator_allowed_flag = 1;
+    operator_allowed_flag = true;
 
     pstop_msg_t req;
     pstop_message_init(&req);
@@ -359,7 +359,7 @@ test_protocol_bond_missed_too_many_messages(void)
     pstop_machine_t machine;
     machine_init(&machine, &pstop_app, pstop_clients, MAX_CLIENTS);
 
-    operator_allowed_flag = 1;
+    operator_allowed_flag = true;
 
     pstop_msg_t req;
     pstop_message_init(&req);
@@ -390,7 +390,7 @@ test_protocol_bond_invalid_echo_counter(void)
     pstop_machine_t machine;
     machine_init(&machine, &pstop_app, pstop_clients, MAX_CLIENTS);
 
-    operator_allowed_flag = 1;
+    operator_allowed_flag = true;
 
     pstop_msg_t req;
     pstop_message_init(&req);
@@ -429,7 +429,7 @@ test_protocol_bond_missing_sent_messages(void)
     pstop_app.app_config.max_lost_messages = 1;
     machine_init(&machine, &pstop_app, pstop_clients, MAX_CLIENTS);
 
-    operator_allowed_flag = 1;
+    operator_allowed_flag = true;
 
     pstop_msg_t req;
     pstop_message_init(&req);
@@ -472,7 +472,7 @@ test_protocol_bond_received_counter_invalid(void)
     pstop_app.app_config.max_lost_messages = 1;
     machine_init(&machine, &pstop_app, pstop_clients, MAX_CLIENTS);
 
-    operator_allowed_flag = 1;
+    operator_allowed_flag = true;
 
     pstop_msg_t req;
     pstop_message_init(&req);
@@ -505,7 +505,7 @@ test_protocol_new_client_invalid_received_counter_req_4_05(void)
     pstop_app.app_config.max_lost_messages = 1;
     machine_init(&machine, &pstop_app, pstop_clients, MAX_CLIENTS);
 
-    operator_allowed_flag = 1;
+    operator_allowed_flag = true;
 
     pstop_msg_t req;
     pstop_message_init(&req);
@@ -532,7 +532,7 @@ test_protocol_new_client_invalid_received_counter_req_4_06(void)
     pstop_app.app_config.max_lost_messages = 1;
     machine_init(&machine, &pstop_app, pstop_clients, MAX_CLIENTS);
 
-    operator_allowed_flag = 1;
+    operator_allowed_flag = true;
 
     pstop_msg_t req;
     pstop_message_init(&req);

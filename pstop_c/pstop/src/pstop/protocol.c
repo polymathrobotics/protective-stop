@@ -74,7 +74,7 @@ protocol_handle_message(pstop_machine_t *machine, const pstop_msg_t *req, pstop_
     // no client found, can we add it?
     operator_details_t details = machine->application->operator_details_cb((&req->id));
 
-    if(!details.allowed) {
+    if(details.allowed == false) {
         return PSTOP_OPERATOR_NOT_ALLOWED;
     }
 

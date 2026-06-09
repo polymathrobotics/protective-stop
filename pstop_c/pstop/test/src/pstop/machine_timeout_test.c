@@ -17,7 +17,7 @@ get_time(void)
     return current_time++;
 }
 
-static int operator_allowed_flag;
+static bool operator_allowed_flag;
 
 static
 operator_details_t
@@ -26,7 +26,7 @@ is_operator_allowed(const device_id_t *id)
     operator_details_t details;
 
     details.allowed = operator_allowed_flag;
-    details.stop_only = 0;
+    details.stop_only = false;
     details.heartbeat_ms = 60U;
 
     return details;
@@ -89,7 +89,7 @@ test_bond_no_timeout(void)
     pstop_msg_t resp;
     pstop_message_init(&resp);
 
-    operator_allowed_flag = 1;
+    operator_allowed_flag = true;
     current_time = 100U;
 
     robot_status_counter = 0;
@@ -135,7 +135,7 @@ test_bond_timeout(void)
     pstop_msg_t resp;
     pstop_message_init(&resp);
 
-    operator_allowed_flag = 1;
+    operator_allowed_flag = true;
     current_time = 100U;
 
     robot_status_counter = 0;
@@ -172,7 +172,7 @@ test_bond_stop_timeout(void)
     pstop_msg_t resp;
     pstop_message_init(&resp);
 
-    operator_allowed_flag = 1;
+    operator_allowed_flag = true;
     current_time = 100U;
 
     robot_status_counter = 0;
@@ -207,7 +207,7 @@ test_bond_stop_timeout_2_missed_timeouts(void)
     pstop_msg_t resp;
     pstop_message_init(&resp);
 
-    operator_allowed_flag = 1;
+    operator_allowed_flag = true;
     current_time = 100U;
 
     robot_status_counter = 0;

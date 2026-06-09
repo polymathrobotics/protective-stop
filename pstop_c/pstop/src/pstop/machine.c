@@ -16,7 +16,7 @@ add_new_client(pstop_machine_t *machine, const device_id_t *id, pstop_client_dat
     // no client found, can we add it?
     operator_details_t details = machine->application->operator_details_cb(id);
 
-    if(!details.allowed) {
+    if(details.allowed == false) {
         // This ID is not allowed
         *client = NULL;
         return PSTOP_OPERATOR_NOT_ALLOWED;
@@ -115,7 +115,7 @@ handle_stop_msg(pstop_machine_t *machine, pstop_client_data_t *client, const pst
     // if we're waiting for any client to initiate the stop/ok cycle
     if(machine->robot_state.client_stop_id == 0U) {
         // but don't allow stop/ok cycle from stop-only clients
-        if(client->is_stop_only == 0) {
+        if(client->is_stop_only == false) {
             machine->robot_state.robot_state = ROBOT_STATE_STOPPED;
             machine->robot_state.client_stop_id = client->local_client_id;
             machine->robot_state.restart_state = ROBOT_RESTART_STATE_STOP_RECEIVED;
@@ -125,7 +125,7 @@ handle_stop_msg(pstop_machine_t *machine, pstop_client_data_t *client, const pst
         // another client has taken control of this machine
         // but this new client wants to stop it.
         machine->robot_state.robot_state = ROBOT_STATE_STOPPED;
-        if(client->is_stop_only == 0) {
+        if(client->is_stop_only == false) {
             machine->robot_state.client_stop_id = client->local_client_id;
             machine->robot_state.restart_state = ROBOT_RESTART_STATE_STOP_RECEIVED;
         }
@@ -196,7 +196,6 @@ machine_handle_message(pstop_machine_t *machine, const pstop_msg_t *req, pstop_m
     if(result != PSTOP_OK) {
        return result;
     }
-
 
     uint64_t now = machine->application->env.get_time_cb();
 
