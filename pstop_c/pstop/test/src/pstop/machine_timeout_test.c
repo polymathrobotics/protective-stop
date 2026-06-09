@@ -159,7 +159,7 @@ test_bond_timeout(void)
 // client has been bonded and started the stop/ok cycle but timesout before OK
 static
 void
-test_bond_stop_timeout(void)
+test_bond_stop_timeout_req_3_05(void)
 {
     pstop_machine_t machine;
 
@@ -184,9 +184,14 @@ test_bond_stop_timeout(void)
     msg.message = PSTOP_MESSAGE_STOP;
     TEST_ASSERT_EQUAL(PSTOP_OK, machine.handle_machine_message_cb(&machine, &msg, &resp));
     TEST_ASSERT_EQUAL(PSTOP_MESSAGE_STOP, resp.message);
+    TEST_ASSERT_EQUAL(ROBOT_RESTART_STATE_STOP_RECEIVED, machine.robot_state.restart_state);
+    TEST_ASSERT_EQUAL(machine.robot_state.client_stop_id, pstop_clients[0].local_client_id);
 
     current_time = 170U; // now a timeout!
     TEST_ASSERT_EQUAL(PSTOP_MISSED_HEARTBEATS, machine.check_heartbeats_cb(&machine));
+    TEST_ASSERT_EQUAL(machine.robot_state.client_stop_id, 0);
+    TEST_ASSERT_EQUAL(ROBOT_RESTART_STATE_NEED_STOP, machine.robot_state.restart_state);
+    TEST_ASSERT_EQUAL(ROBOT_STATE_STOPPED, lastStatus);
 }
 
 static
@@ -236,6 +241,6 @@ main_machine_timeout_test(void)
 
     RUN_TEST(test_bond_no_timeout);
     RUN_TEST(test_bond_timeout);
-    RUN_TEST(test_bond_stop_timeout);
+    RUN_TEST(test_bond_stop_timeout_req_3_05);
     RUN_TEST(test_bond_stop_timeout_2_missed_timeouts);
 }

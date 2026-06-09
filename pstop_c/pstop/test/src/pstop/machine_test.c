@@ -203,11 +203,47 @@ test_new_client_operator_allowed(void)
 }
 
 static
-pstop_client_data_t *
-client_send_ok(pstop_machine_t *machine, uint32_t device_id, uint8_t respMsg)
+void
+test_bond_req_bond_resp_req_3_12(void)
 {
+    pstop_machine_t machine;
+
+    machine_init(&machine, &pstop_app, pstop_clients, MAX_CLIENTS);
+
     device_id_t id;
-    id.data = device_id;
+    pstop_msg_t msg;
+
+    init_client(&id, &msg, 1234);
+
+    pstop_msg_t resp;
+    pstop_message_init(&resp);
+
+    details.allowed = true;
+    details.stop_only = 0;
+    details.heartbeat_ms = 500U;
+    current_time = 100U;
+
+    msg.message = PSTOP_MESSAGE_BOND;
+    TEST_ASSERT_EQUAL(PSTOP_OK, machine.handle_machine_message_cb(&machine, &msg, &resp));
+
+    TEST_ASSERT_EQUAL(PSTOP_MESSAGE_BOND, resp.message);
+
+    pstop_client_data_t *client = pstop_client_get(&(machine.pstops), &id);
+
+    TEST_ASSERT_NOT_NULL(client);
+}
+
+static
+void
+test_ok_req_unbond_resp_req_3_03(void)
+{
+    pstop_machine_t machine;
+
+    machine_init(&machine, &pstop_app, pstop_clients, MAX_CLIENTS);
+
+    // OK => UNBOND
+    device_id_t id;
+    id.data = 1234;
 
     pstop_msg_t msg;
     msg.message = PSTOP_MESSAGE_OK;
@@ -221,61 +257,10 @@ client_send_ok(pstop_machine_t *machine, uint32_t device_id, uint8_t respMsg)
     details.heartbeat_ms = 500U;
     current_time = 100U;
 
-    TEST_ASSERT_EQUAL(PSTOP_OK, machine->handle_machine_message_cb(machine, &msg, &resp));
+    // client isn't bonded so can only send BOND messages
+    TEST_ASSERT_EQUAL(PSTOP_OK, machine.handle_machine_message_cb(&machine, &msg, &resp));
 
-    TEST_ASSERT_EQUAL(respMsg, resp.message);
-
-    return pstop_client_get(&(machine->pstops), &id);
-}
-
-static
-pstop_client_data_t *
-bond_client(pstop_machine_t *machine, uint32_t device_id)
-{
-    device_id_t id;
-    pstop_msg_t msg;
-
-    init_client(&id, &msg, device_id);
-
-    pstop_msg_t resp;
-    pstop_message_init(&resp);
-
-    details.allowed = true;
-    details.stop_only = 0;
-    details.heartbeat_ms = 500U;
-    current_time = 100U;
-
-    msg.message = PSTOP_MESSAGE_BOND;
-    TEST_ASSERT_EQUAL(PSTOP_OK, machine->handle_machine_message_cb(machine, &msg, &resp));
-
-    TEST_ASSERT_EQUAL(PSTOP_MESSAGE_BOND, resp.message);
-
-    return pstop_client_get(&(machine->pstops), &id);
-}
-
-static
-void
-test_bond_req_bond_resp(void)
-{
-    pstop_machine_t machine;
-
-    machine_init(&machine, &pstop_app, pstop_clients, MAX_CLIENTS);
-
-    // BOND => BOND
-    pstop_client_data_t *client = bond_client(&machine, 1234);
-    TEST_ASSERT_NOT_NULL(client);
-}
-
-static
-void
-test_ok_req_unbond_resp(void)
-{
-    pstop_machine_t machine;
-
-    machine_init(&machine, &pstop_app, pstop_clients, MAX_CLIENTS);
-
-    // OK => UNBOND
-    pstop_client_data_t *client = client_send_ok(&machine, 1234, PSTOP_MESSAGE_UNBOND);
+    TEST_ASSERT_EQUAL(PSTOP_MESSAGE_UNBOND, resp.message);
 }
 
 static
@@ -381,7 +366,7 @@ test_bond_bond(void)
 
 static
 void
-test_bond_ok_stop(void)
+test_bond_ok_stop_req_3_17(void)
 {
     pstop_machine_t machine;
 
@@ -430,7 +415,7 @@ test_bond_ok_stop(void)
 
 static
 void
-test_bond_stop_ok(void)
+test_bond_stop_ok_req_3_04(void)
 {
     pstop_machine_t machine;
 
@@ -473,14 +458,14 @@ test_bond_stop_ok(void)
     TEST_ASSERT_EQUAL(PSTOP_MESSAGE_OK, resp.message);
 }
 
-/**
+/*
  * Bond a client, then send stop. Verify that the stop state
  * is not attached to that client. Send another stop. Should be the same.
  * Then send OK to signal that the operator is ready.
  */
 static
 void
-test_bond_stop_stop_ok(void)
+test_bond_stop_stop_ok_req_3_08(void)
 {
     pstop_machine_t machine;
 
@@ -530,6 +515,17 @@ test_bond_stop_stop_ok(void)
     TEST_ASSERT_EQUAL(PSTOP_MESSAGE_OK, resp.message);
     TEST_ASSERT_EQUAL(ROBOT_RESTART_STATE_OK, machine.robot_state.restart_state);
     TEST_ASSERT_EQUAL(machine.robot_state.client_stop_id, pstop_clients[0].local_client_id);
+    TEST_ASSERT_EQUAL(ROBOT_STATE_OK, last_status);
+
+    TEST_ASSERT_EQUAL(1U, pstop_client_num_active(&(machine.pstops)));
+
+    // last client is unbonding
+    msg.message = PSTOP_MESSAGE_UNBOND;
+    TEST_ASSERT_EQUAL(PSTOP_OK, machine.handle_machine_message_cb(&machine, &msg, &resp));
+    TEST_ASSERT_EQUAL(PSTOP_MESSAGE_UNBOND, resp.message);
+    TEST_ASSERT_EQUAL(ROBOT_STATE_STOPPED, last_status);
+
+    TEST_ASSERT_EQUAL(0U, pstop_client_num_active(&(machine.pstops)));
 }
 
 /**
@@ -1019,18 +1015,18 @@ main_machine_test(void)
     RUN_TEST(test_handle_mssage_invalid_message);
     RUN_TEST(test_heartbeat_timeout);
     RUN_TEST(test_2_clients_unbond_before_ok);
-    RUN_TEST(test_bond_req_bond_resp);
-    RUN_TEST(test_ok_req_unbond_resp);
+    RUN_TEST(test_bond_req_bond_resp_req_3_12);
+    RUN_TEST(test_ok_req_unbond_resp_req_3_03);
     RUN_TEST(test_bond_unbond);
     RUN_TEST(test_bond_bond);
-    RUN_TEST(test_bond_ok_stop);
-    RUN_TEST(test_bond_stop_stop_ok);
+    RUN_TEST(test_bond_ok_stop_req_3_17);
+    RUN_TEST(test_bond_stop_stop_ok_req_3_08);
     RUN_TEST(test_unbonded_stop);
     RUN_TEST(test_2_clients);
     RUN_TEST(test_2_clients_unbond_second);
     RUN_TEST(test_2_clients_stop_unbond);
     RUN_TEST(test_bond_ok);
-    RUN_TEST(test_bond_stop_ok);
+    RUN_TEST(test_bond_stop_ok_req_3_04);
     RUN_TEST(test_bond_stop_ok_stop_only_operator);
     RUN_TEST(test_2_clients_stop_ok);
     RUN_TEST(test_2_clients_stop_only_stop);
