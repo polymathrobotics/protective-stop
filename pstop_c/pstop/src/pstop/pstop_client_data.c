@@ -30,7 +30,7 @@ pstop_clients_init(pstop_clients_t *clients)
 }
 
 uint16_t
-pstop_client_num_active(pstop_clients_t *clients)
+pstop_client_num_active(const pstop_clients_t *clients)
 {
     uint16_t count = 0U;
 
@@ -71,7 +71,7 @@ pstop_client_deactivate(pstop_client_data_t *client)
 }
 
 pstop_client_data_t *
-pstop_client_get(pstop_clients_t *clients, const device_id_t *client_id)
+pstop_client_get(const pstop_clients_t *clients, const device_id_t *client_id)
 {
     for(uint16_t i = 0U; i < clients->max_clients; ++i) {
         if(clients->clients[i].client_state != PSTOP_CLIENT_UNKNOWN) {

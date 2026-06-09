@@ -76,6 +76,10 @@ typedef struct {
      */
     uint16_t checksum;
 
+    /**
+     * The checksum that is calculated when a PSTOP message
+     * is decoded from an array of bytes
+     */
     uint16_t calculated_checksum;
 
 } pstop_msg_t;
@@ -84,10 +88,28 @@ void pstop_message_init(pstop_msg_t *msg);
 
 pstop_error_t pstop_is_message_valid(const pstop_msg_t *msg);
 
-/**
- * Network encoding/decoding functions
- */
+ /**
+  * @brief Deserialize a message from an array of bytes.
+  *
+  * The data is expected to be in little-endian byte order and
+  * must be big enough to hold an entire pstop message: PSTOP_MESSAGE_SIZE
+  * bytes. No bounds checking is done.
+  *
+  * @param msg The message to populate
+  * @param data An array of bytes that contains the pstop message data.
+  */
 void pstop_message_decode(pstop_msg_t *msg, const uint8_t *data);
+
+/**
+ * @brief Serialize a pstop message to an array of bytes.
+ *
+ * The data will be in little-endian byte order. The data array must be
+ * big enough to hold an entire pstop message. This will be
+ * PSTOP_MESSAGE_SIZE bytes.
+ *
+ * @param msg The message to serialize
+ * @param data The array of bytes to hold the serialized message.
+ */
 void pstop_message_encode(const pstop_msg_t *msg, uint8_t *data);
 
 #endif /* PSTOP_PSTOP_MSG_H */
