@@ -64,7 +64,7 @@ pstop_application_t pstop_app = {
 
 #define MAX_CLIENTS 2U
 
-static pstop_client_data_t pstop_clients[MAX_CLIENTS];
+static pstop_remote_data_t pstop_clients[MAX_CLIENTS];
 
 static
 void
@@ -113,7 +113,7 @@ test_bond_no_timeout(void)
 
     current_time = 170U; // now a timeout!
     TEST_ASSERT_EQUAL(PSTOP_MISSED_HEARTBEATS, machine.check_heartbeats_cb(&machine));
-    TEST_ASSERT_EQUAL(PSTOP_CLIENT_UNKNOWN, pstop_clients[0].client_state);
+    TEST_ASSERT_EQUAL(PSTOP_REMOTE_UNKNOWN, pstop_clients[0].remote_state);
     TEST_ASSERT_EQUAL(PSTOP_STATUS_STOP, lastStatus);
 
     // after the previous timeout that client is marked as UNKNOWN so no more clients connected
@@ -149,7 +149,7 @@ test_bond_timeout(void)
 
     current_time = 170U; // now a timeout!
     TEST_ASSERT_EQUAL(PSTOP_MISSED_HEARTBEATS, machine.check_heartbeats_cb(&machine));
-    TEST_ASSERT_EQUAL(PSTOP_CLIENT_UNKNOWN, pstop_clients[0].client_state);
+    TEST_ASSERT_EQUAL(PSTOP_REMOTE_UNKNOWN, pstop_clients[0].remote_state);
     TEST_ASSERT_EQUAL(PSTOP_STATUS_STOP, lastStatus);
 
     // after the previous timeout that client is marked as UNKNOWN so no more clients connected
@@ -185,11 +185,11 @@ test_bond_stop_timeout_req_3_05(void)
     TEST_ASSERT_EQUAL(PSTOP_OK, machine.handle_machine_message_cb(&machine, &msg, &resp));
     TEST_ASSERT_EQUAL(PSTOP_MESSAGE_STOP, resp.message);
     TEST_ASSERT_EQUAL(ROBOT_RESTART_STATE_STOP_RECEIVED, machine.robot_state.restart_state);
-    TEST_ASSERT_EQUAL(machine.robot_state.client_stop_id, pstop_clients[0].local_client_id);
+    TEST_ASSERT_EQUAL(machine.robot_state.remote_stop_id, pstop_clients[0].local_remote_id);
 
     current_time = 170U; // now a timeout!
     TEST_ASSERT_EQUAL(PSTOP_MISSED_HEARTBEATS, machine.check_heartbeats_cb(&machine));
-    TEST_ASSERT_EQUAL(machine.robot_state.client_stop_id, 0);
+    TEST_ASSERT_EQUAL(machine.robot_state.remote_stop_id, 0);
     TEST_ASSERT_EQUAL(ROBOT_RESTART_STATE_NEED_STOP, machine.robot_state.restart_state);
     TEST_ASSERT_EQUAL(ROBOT_STATE_STOPPED, lastStatus);
 }

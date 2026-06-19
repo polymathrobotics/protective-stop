@@ -74,7 +74,7 @@ send_msg(udp_transport_data_t *transport, pstop_os_env_t *env, protocol_data_t *
 
     req_msg.message = msg;
     device_id_copy(&req_msg.id, uuid);
-    device_id_copy(&req_msg.receiver_id, &(machine->client_id));
+    device_id_copy(&req_msg.receiver_id, &(machine->remote_id));
     req_msg.counter = machine->msg_counter + 1U;
     req_msg.received_counter = machine->last_sent_counter;
     req_msg.received_stamp = machine->last_timestamp;
@@ -159,7 +159,7 @@ main(int argc, char *argv[])
     device_id_t machine_uuid = {
         .data = 0x01020304U
     };
-    device_id_copy(&(machine.client_id), &machine_uuid);
+    device_id_copy(&(machine.remote_id), &machine_uuid);
 
     device_id_t this_uuid = {
         .data = 0x01020300U

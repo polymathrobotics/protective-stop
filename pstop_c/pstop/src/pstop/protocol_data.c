@@ -5,11 +5,11 @@
 #include "pstop/protocol_data.h"
 
 void
-protocol_data_init(protocol_data_t *client)
+protocol_data_init(protocol_data_t *remote)
 {
-    device_id_init(&(client->client_id));
-    client->last_timestamp = 0U;
-    client->heartbeat_ms = 0U;
-    client->msg_counter = 0U;
-    client->last_sent_counter = 0U;
+    device_id_init(&(remote->remote_id));
+    remote->last_timestamp = 0U;
+    remote->heartbeat_ms = 0U;
+    remote->msg_counter = 0U;
+    remote->last_sent_counter = 0U;
 }

@@ -34,7 +34,7 @@ add_library(pstop
   src/pstop/protocol.c
   src/pstop/protocol_data.c
   src/pstop/pstop_application.c
-  src/pstop/pstop_client_data.c
+  src/pstop/pstop_remote_data.c
   src/pstop/pstop_msg.c
   src/pstop/time.c
 )
@@ -50,7 +50,7 @@ add_executable(pstop_test
   test/src/pstop/machine_timeout_test.c
   test/src/pstop/protocol_test.c
   test/src/pstop/pstop_application_test.c
-  test/src/pstop/pstop_client_data_test.c
+  test/src/pstop/pstop_remote_data_test.c
   test/src/pstop/pstop_msg_test.c
 
   #test/src/pstop/test_utils.c

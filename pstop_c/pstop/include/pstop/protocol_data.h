@@ -10,7 +10,7 @@
 
 typedef struct {
 
-    device_id_t client_id;
+    device_id_t remote_id;
 
     // last time we've sent a message to the client
     uint64_t last_timestamp;
@@ -25,6 +25,6 @@ typedef struct {
 
 } protocol_data_t;
 
-void protocol_data_init(protocol_data_t *client);
+void protocol_data_init(protocol_data_t *remote);
 
 #endif /* PSTOP_PROTOCOL_DATA_H */
