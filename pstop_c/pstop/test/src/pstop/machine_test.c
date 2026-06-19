@@ -235,7 +235,7 @@ test_bond_req_bond_resp_req_3_12(void)
 
 static
 void
-test_ok_req_unbond_resp_req_3_03(void)
+test_ok_not_bonded_req_3_03(void)
 {
     pstop_machine_t machine;
 
@@ -433,29 +433,36 @@ test_bond_stop_ok_req_3_04(void)
     details.heartbeat_ms = 500U;
     current_time = 100U;
 
+    last_status = PSTOP_STATUS_STOP;
     robot_status_counter = 0;
 
     msg.message = PSTOP_MESSAGE_BOND;
     TEST_ASSERT_EQUAL(PSTOP_OK, machine.handle_machine_message_cb(&machine, &msg, &resp));
     TEST_ASSERT_EQUAL(PSTOP_MESSAGE_BOND, resp.message);
+    TEST_ASSERT_EQUAL(PSTOP_STATUS_STOP, last_status);
 
     TEST_ASSERT_EQUAL(0, robot_status_counter);
 
+    // haven't received the stop message, so still in stopped state
+    msg.message = PSTOP_MESSAGE_OK;
+    TEST_ASSERT_EQUAL(PSTOP_OK, machine.handle_machine_message_cb(&machine, &msg, &resp));
+    TEST_ASSERT_EQUAL(PSTOP_MESSAGE_STOP, resp.message);
+    TEST_ASSERT_EQUAL(PSTOP_STATUS_STOP, last_status);
+
     msg.message = PSTOP_MESSAGE_STOP;
     TEST_ASSERT_EQUAL(PSTOP_OK, machine.handle_machine_message_cb(&machine, &msg, &resp));
     TEST_ASSERT_EQUAL(PSTOP_MESSAGE_STOP, resp.message);
+    TEST_ASSERT_EQUAL(PSTOP_STATUS_STOP, last_status);
+
+    msg.message = PSTOP_MESSAGE_STOP;
+    TEST_ASSERT_EQUAL(PSTOP_OK, machine.handle_machine_message_cb(&machine, &msg, &resp));
+    TEST_ASSERT_EQUAL(PSTOP_MESSAGE_STOP, resp.message);
+    TEST_ASSERT_EQUAL(PSTOP_STATUS_STOP, last_status);
 
     msg.message = PSTOP_MESSAGE_OK;
     TEST_ASSERT_EQUAL(PSTOP_OK, machine.handle_machine_message_cb(&machine, &msg, &resp));
     TEST_ASSERT_EQUAL(PSTOP_MESSAGE_OK, resp.message);
-
-    msg.message = PSTOP_MESSAGE_STOP;
-    TEST_ASSERT_EQUAL(PSTOP_OK, machine.handle_machine_message_cb(&machine, &msg, &resp));
-    TEST_ASSERT_EQUAL(PSTOP_MESSAGE_STOP, resp.message);
-
-    msg.message = PSTOP_MESSAGE_OK;
-    TEST_ASSERT_EQUAL(PSTOP_OK, machine.handle_machine_message_cb(&machine, &msg, &resp));
-    TEST_ASSERT_EQUAL(PSTOP_MESSAGE_OK, resp.message);
+    TEST_ASSERT_EQUAL(PSTOP_STATUS_OK, last_status);
 }
 
 /*
@@ -1016,7 +1023,7 @@ main_machine_test(void)
     RUN_TEST(test_heartbeat_timeout);
     RUN_TEST(test_2_clients_unbond_before_ok);
     RUN_TEST(test_bond_req_bond_resp_req_3_12);
-    RUN_TEST(test_ok_req_unbond_resp_req_3_03);
+    RUN_TEST(test_ok_not_bonded_req_3_03);
     RUN_TEST(test_bond_unbond);
     RUN_TEST(test_bond_bond);
     RUN_TEST(test_bond_ok_stop_req_3_17);
