@@ -13,7 +13,7 @@ pstop_application_t pstop_app;
 
 #define MAX_CLIENTS 3U
 
-pstop_client_data_t pstop_clients[MAX_CLIENTS];
+pstop_remote_data_t pstop_clients[MAX_CLIENTS];
 
 pstop_machine_t machine;
 

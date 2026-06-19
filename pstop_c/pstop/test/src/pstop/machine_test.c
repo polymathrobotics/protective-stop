@@ -58,7 +58,7 @@ pstop_application_t pstop_app = {
 
 #define MAX_CLIENTS 2U
 
-static pstop_client_data_t pstop_clients[MAX_CLIENTS];
+static pstop_remote_data_t pstop_clients[MAX_CLIENTS];
 
 static
 void
@@ -197,8 +197,8 @@ test_new_client_operator_allowed(void)
 
     TEST_ASSERT_EQUAL(PSTOP_OK, machine.handle_machine_message_cb(&machine, &msg, &resp));
     TEST_ASSERT_EQUAL(PSTOP_MESSAGE_BOND, resp.message);
-    TEST_ASSERT_EQUAL(100U, pstop_clients[0].client_data.last_timestamp);
-    TEST_ASSERT_EQUAL(500U, pstop_clients[0].client_data.heartbeat_ms);
+    TEST_ASSERT_EQUAL(100U, pstop_clients[0].remote_data.last_timestamp);
+    TEST_ASSERT_EQUAL(500U, pstop_clients[0].remote_data.heartbeat_ms);
     TEST_ASSERT_EQUAL(500U, resp.heartbeat_timeout);
 }
 
@@ -228,7 +228,7 @@ test_bond_req_bond_resp_req_3_12(void)
 
     TEST_ASSERT_EQUAL(PSTOP_MESSAGE_BOND, resp.message);
 
-    pstop_client_data_t *client = pstop_client_get(&(machine.pstops), &id);
+    pstop_remote_data_t *client = pstop_remote_get(&(machine.remotes), &id);
 
     TEST_ASSERT_NOT_NULL(client);
 }
@@ -287,15 +287,15 @@ test_bond_unbond(void)
     msg.message = PSTOP_MESSAGE_BOND;
     TEST_ASSERT_EQUAL(PSTOP_OK, machine.handle_machine_message_cb(&machine, &msg, &resp));
     TEST_ASSERT_EQUAL(PSTOP_MESSAGE_BOND, resp.message);
-    TEST_ASSERT_NOT_NULL(pstop_client_get(&(machine.pstops), &id));
+    TEST_ASSERT_NOT_NULL(pstop_remote_get(&(machine.remotes), &id));
 
     msg.message = PSTOP_MESSAGE_UNBOND;
     pstop_message_init(&resp);
 
     TEST_ASSERT_EQUAL(PSTOP_OK, machine.handle_machine_message_cb(&machine, &msg, &resp));
     TEST_ASSERT_EQUAL(PSTOP_MESSAGE_UNBOND, resp.message);
-    TEST_ASSERT_NULL(pstop_client_get(&(machine.pstops), &id));
-    TEST_ASSERT_EQUAL(0U, pstop_client_num_active(&(machine.pstops)));
+    TEST_ASSERT_NULL(pstop_remote_get(&(machine.remotes), &id));
+    TEST_ASSERT_EQUAL(0U, pstop_remote_num_active(&(machine.remotes)));
     TEST_ASSERT_EQUAL(PSTOP_STATUS_STOP, last_status);
 }
 
@@ -356,7 +356,7 @@ test_bond_bond(void)
     msg.message = PSTOP_MESSAGE_BOND;
     TEST_ASSERT_EQUAL(PSTOP_OK, machine.handle_machine_message_cb(&machine, &msg, &resp));
     TEST_ASSERT_EQUAL(PSTOP_MESSAGE_BOND, resp.message);
-    TEST_ASSERT_NOT_NULL(pstop_client_get(&(machine.pstops), &id));
+    TEST_ASSERT_NOT_NULL(pstop_remote_get(&(machine.remotes), &id));
 
     // already bonded, don't rebond
     msg.message = PSTOP_MESSAGE_BOND;
@@ -503,7 +503,7 @@ test_bond_stop_stop_ok_req_3_08(void)
     TEST_ASSERT_EQUAL(PSTOP_OK, machine.handle_machine_message_cb(&machine, &msg, &resp));
     TEST_ASSERT_EQUAL(PSTOP_MESSAGE_STOP, resp.message);
     TEST_ASSERT_EQUAL(ROBOT_RESTART_STATE_STOP_RECEIVED, machine.robot_state.restart_state);
-    TEST_ASSERT_EQUAL(machine.robot_state.client_stop_id, pstop_clients[0].local_client_id);
+    TEST_ASSERT_EQUAL(machine.robot_state.remote_stop_id, pstop_clients[0].local_remote_id);
 
     // send STOP again.
     msg.message = PSTOP_MESSAGE_STOP;
@@ -521,10 +521,10 @@ test_bond_stop_stop_ok_req_3_08(void)
     TEST_ASSERT_EQUAL(PSTOP_OK, machine.handle_machine_message_cb(&machine, &msg, &resp));
     TEST_ASSERT_EQUAL(PSTOP_MESSAGE_OK, resp.message);
     TEST_ASSERT_EQUAL(ROBOT_RESTART_STATE_OK, machine.robot_state.restart_state);
-    TEST_ASSERT_EQUAL(machine.robot_state.client_stop_id, pstop_clients[0].local_client_id);
+    TEST_ASSERT_EQUAL(machine.robot_state.remote_stop_id, pstop_clients[0].local_remote_id);
     TEST_ASSERT_EQUAL(ROBOT_STATE_OK, last_status);
 
-    TEST_ASSERT_EQUAL(1U, pstop_client_num_active(&(machine.pstops)));
+    TEST_ASSERT_EQUAL(1U, pstop_remote_num_active(&(machine.remotes)));
 
     // last client is unbonding
     msg.message = PSTOP_MESSAGE_UNBOND;
@@ -532,7 +532,7 @@ test_bond_stop_stop_ok_req_3_08(void)
     TEST_ASSERT_EQUAL(PSTOP_MESSAGE_UNBOND, resp.message);
     TEST_ASSERT_EQUAL(ROBOT_STATE_STOPPED, last_status);
 
-    TEST_ASSERT_EQUAL(0U, pstop_client_num_active(&(machine.pstops)));
+    TEST_ASSERT_EQUAL(0U, pstop_remote_num_active(&(machine.remotes)));
 }
 
 /**
@@ -697,7 +697,7 @@ test_2_clients(void)
     TEST_ASSERT_EQUAL(PSTOP_OK, machine.handle_machine_message_cb(&machine, &msg1, &resp));
     TEST_ASSERT_EQUAL(PSTOP_MESSAGE_UNBOND, resp.message);
     TEST_ASSERT_EQUAL(ROBOT_RESTART_STATE_NEED_STOP, machine.robot_state.restart_state);
-    TEST_ASSERT_EQUAL(0U, machine.robot_state.client_stop_id);
+    TEST_ASSERT_EQUAL(0U, machine.robot_state.remote_stop_id);
     TEST_ASSERT_EQUAL(ROBOT_STATE_STOPPED, machine.robot_state.robot_state);
     TEST_ASSERT_EQUAL(PSTOP_STATUS_STOP, last_status);
 }
@@ -746,7 +746,7 @@ test_2_clients_unbond_before_ok(void)
     TEST_ASSERT_EQUAL(PSTOP_MESSAGE_UNBOND, resp.message);
 
     TEST_ASSERT_EQUAL(ROBOT_RESTART_STATE_NEED_STOP, machine.robot_state.restart_state);
-    TEST_ASSERT_EQUAL(0U, machine.robot_state.client_stop_id);
+    TEST_ASSERT_EQUAL(0U, machine.robot_state.remote_stop_id);
     TEST_ASSERT_EQUAL(ROBOT_STATE_STOPPED, machine.robot_state.robot_state);
     TEST_ASSERT_EQUAL(PSTOP_STATUS_STOP, last_status);
 }
@@ -793,7 +793,7 @@ test_2_clients_unbond_second(void)
     msg1.message = PSTOP_MESSAGE_OK;
     TEST_ASSERT_EQUAL(PSTOP_OK, machine.handle_machine_message_cb(&machine, &msg1, &resp));
     TEST_ASSERT_EQUAL(PSTOP_MESSAGE_OK, resp.message);
-    TEST_ASSERT_EQUAL(machine.robot_state.client_stop_id, pstop_clients[0].local_client_id);
+    TEST_ASSERT_EQUAL(machine.robot_state.remote_stop_id, pstop_clients[0].local_remote_id);
     TEST_ASSERT_EQUAL(ROBOT_RESTART_STATE_OK, machine.robot_state.restart_state);
     TEST_ASSERT_EQUAL(ROBOT_STATE_OK, machine.robot_state.robot_state);
     TEST_ASSERT_EQUAL(PSTOP_STATUS_OK, last_status);
@@ -804,7 +804,7 @@ test_2_clients_unbond_second(void)
     TEST_ASSERT_EQUAL(PSTOP_MESSAGE_UNBOND, resp.message);
     TEST_ASSERT_EQUAL(PSTOP_STATUS_OK, last_status);
     TEST_ASSERT_EQUAL(ROBOT_RESTART_STATE_OK, machine.robot_state.restart_state);
-    TEST_ASSERT_EQUAL(machine.robot_state.client_stop_id, pstop_clients[0].local_client_id);
+    TEST_ASSERT_EQUAL(machine.robot_state.remote_stop_id, pstop_clients[0].local_remote_id);
     TEST_ASSERT_EQUAL(ROBOT_STATE_OK, machine.robot_state.robot_state);
 }
 
@@ -846,12 +846,12 @@ test_2_clients_stop_unbond(void)
     TEST_ASSERT_EQUAL(PSTOP_OK, machine.handle_machine_message_cb(&machine, &msg1, &resp));
     TEST_ASSERT_EQUAL(PSTOP_MESSAGE_STOP, resp.message);
     TEST_ASSERT_EQUAL(ROBOT_RESTART_STATE_STOP_RECEIVED, machine.robot_state.restart_state);
-    TEST_ASSERT_EQUAL(machine.robot_state.client_stop_id, pstop_clients[0].local_client_id);
+    TEST_ASSERT_EQUAL(machine.robot_state.remote_stop_id, pstop_clients[0].local_remote_id);
 
     // then OK. It's in control
     msg1.message = PSTOP_MESSAGE_OK;
     TEST_ASSERT_EQUAL(PSTOP_OK, machine.handle_machine_message_cb(&machine, &msg1, &resp));
-    TEST_ASSERT_EQUAL(machine.robot_state.client_stop_id, pstop_clients[0].local_client_id);
+    TEST_ASSERT_EQUAL(machine.robot_state.remote_stop_id, pstop_clients[0].local_remote_id);
     TEST_ASSERT_EQUAL(ROBOT_STATE_OK, machine.robot_state.robot_state);
     TEST_ASSERT_EQUAL(PSTOP_STATUS_OK, last_status);
 
@@ -860,16 +860,16 @@ test_2_clients_stop_unbond(void)
     TEST_ASSERT_EQUAL(PSTOP_OK, machine.handle_machine_message_cb(&machine, &msg1, &resp));
     TEST_ASSERT_EQUAL(PSTOP_MESSAGE_UNBOND, resp.message);
     TEST_ASSERT_EQUAL(ROBOT_RESTART_STATE_NEED_STOP, machine.robot_state.restart_state);
-    TEST_ASSERT_EQUAL(0U, machine.robot_state.client_stop_id);
+    TEST_ASSERT_EQUAL(0U, machine.robot_state.remote_stop_id);
     TEST_ASSERT_EQUAL(ROBOT_STATE_STOPPED, machine.robot_state.robot_state);
-    TEST_ASSERT_EQUAL(1U, pstop_client_num_active(&(machine.pstops)));
+    TEST_ASSERT_EQUAL(1U, pstop_remote_num_active(&(machine.remotes)));
     TEST_ASSERT_EQUAL(PSTOP_STATUS_STOP, last_status);
 
     // second node sends STOP, then OK
     msg2.message = PSTOP_MESSAGE_STOP;
     TEST_ASSERT_EQUAL(PSTOP_OK, machine.handle_machine_message_cb(&machine, &msg2, &resp));
     TEST_ASSERT_EQUAL(PSTOP_MESSAGE_STOP, resp.message);
-    TEST_ASSERT_EQUAL(machine.robot_state.client_stop_id, pstop_clients[1].local_client_id);
+    TEST_ASSERT_EQUAL(machine.robot_state.remote_stop_id, pstop_clients[1].local_remote_id);
 
     msg2.message = PSTOP_MESSAGE_OK;
     TEST_ASSERT_EQUAL(PSTOP_OK, machine.handle_machine_message_cb(&machine, &msg2, &resp));
@@ -916,13 +916,13 @@ test_2_clients_stop_ok(void)
     TEST_ASSERT_EQUAL(PSTOP_OK, machine.handle_machine_message_cb(&machine, &msg1, &resp));
     TEST_ASSERT_EQUAL(PSTOP_MESSAGE_STOP, resp.message);
     TEST_ASSERT_EQUAL(ROBOT_RESTART_STATE_STOP_RECEIVED, machine.robot_state.restart_state);
-    TEST_ASSERT_EQUAL(machine.robot_state.client_stop_id, pstop_clients[0].local_client_id);
+    TEST_ASSERT_EQUAL(machine.robot_state.remote_stop_id, pstop_clients[0].local_remote_id);
 
     // second node sends OK. Should respond with stop
     msg2.message = PSTOP_MESSAGE_OK;
     TEST_ASSERT_EQUAL(PSTOP_OK, machine.handle_machine_message_cb(&machine, &msg2, &resp));
     TEST_ASSERT_EQUAL(PSTOP_MESSAGE_STOP, resp.message);
-    TEST_ASSERT_EQUAL(machine.robot_state.client_stop_id, pstop_clients[0].local_client_id);
+    TEST_ASSERT_EQUAL(machine.robot_state.remote_stop_id, pstop_clients[0].local_remote_id);
     TEST_ASSERT_EQUAL(ROBOT_STATE_STOPPED, machine.robot_state.robot_state);
     TEST_ASSERT_EQUAL(PSTOP_STATUS_STOP, last_status);
 
@@ -930,7 +930,7 @@ test_2_clients_stop_ok(void)
     msg1.message = PSTOP_MESSAGE_OK;
     TEST_ASSERT_EQUAL(PSTOP_OK, machine.handle_machine_message_cb(&machine, &msg1, &resp));
     TEST_ASSERT_EQUAL(PSTOP_MESSAGE_OK, resp.message);
-    TEST_ASSERT_EQUAL(machine.robot_state.client_stop_id, pstop_clients[0].local_client_id);
+    TEST_ASSERT_EQUAL(machine.robot_state.remote_stop_id, pstop_clients[0].local_remote_id);
     TEST_ASSERT_EQUAL(ROBOT_STATE_OK, machine.robot_state.robot_state);
     TEST_ASSERT_EQUAL(PSTOP_STATUS_OK, last_status);
 
@@ -938,7 +938,7 @@ test_2_clients_stop_ok(void)
     msg2.message = PSTOP_MESSAGE_OK;
     TEST_ASSERT_EQUAL(PSTOP_OK, machine.handle_machine_message_cb(&machine, &msg2, &resp));
     TEST_ASSERT_EQUAL(PSTOP_MESSAGE_OK, resp.message);
-    TEST_ASSERT_EQUAL(machine.robot_state.client_stop_id, pstop_clients[0].local_client_id);
+    TEST_ASSERT_EQUAL(machine.robot_state.remote_stop_id, pstop_clients[0].local_remote_id);
     TEST_ASSERT_EQUAL(ROBOT_STATE_OK, machine.robot_state.robot_state);
     TEST_ASSERT_EQUAL(PSTOP_STATUS_OK, last_status);
 }
@@ -983,13 +983,13 @@ test_2_clients_stop_only_stop(void)
     TEST_ASSERT_EQUAL(PSTOP_OK, machine.handle_machine_message_cb(&machine, &msg1, &resp));
     TEST_ASSERT_EQUAL(PSTOP_MESSAGE_STOP, resp.message);
     TEST_ASSERT_EQUAL(ROBOT_RESTART_STATE_STOP_RECEIVED, machine.robot_state.restart_state);
-    TEST_ASSERT_EQUAL(machine.robot_state.client_stop_id, pstop_clients[0].local_client_id);
+    TEST_ASSERT_EQUAL(machine.robot_state.remote_stop_id, pstop_clients[0].local_remote_id);
 
     // first node sends OK. it's in control
     msg1.message = PSTOP_MESSAGE_OK;
     TEST_ASSERT_EQUAL(PSTOP_OK, machine.handle_machine_message_cb(&machine, &msg1, &resp));
     TEST_ASSERT_EQUAL(PSTOP_MESSAGE_OK, resp.message);
-    TEST_ASSERT_EQUAL(machine.robot_state.client_stop_id, pstop_clients[0].local_client_id);
+    TEST_ASSERT_EQUAL(machine.robot_state.remote_stop_id, pstop_clients[0].local_remote_id);
     TEST_ASSERT_EQUAL(ROBOT_STATE_OK, machine.robot_state.robot_state);
     TEST_ASSERT_EQUAL(PSTOP_STATUS_OK, last_status);
 
@@ -997,7 +997,7 @@ test_2_clients_stop_only_stop(void)
     msg2.message = PSTOP_MESSAGE_STOP;
     TEST_ASSERT_EQUAL(PSTOP_OK, machine.handle_machine_message_cb(&machine, &msg2, &resp));
     TEST_ASSERT_EQUAL(PSTOP_MESSAGE_STOP, resp.message);
-    TEST_ASSERT_EQUAL(machine.robot_state.client_stop_id, 0U);
+    TEST_ASSERT_EQUAL(machine.robot_state.remote_stop_id, 0U);
     TEST_ASSERT_EQUAL(ROBOT_STATE_STOPPED, machine.robot_state.robot_state);
     TEST_ASSERT_EQUAL(PSTOP_STATUS_STOP, last_status);
 
@@ -1005,7 +1005,7 @@ test_2_clients_stop_only_stop(void)
     msg2.message = PSTOP_MESSAGE_OK;
     TEST_ASSERT_EQUAL(PSTOP_OK, machine.handle_machine_message_cb(&machine, &msg2, &resp));
     TEST_ASSERT_EQUAL(PSTOP_MESSAGE_STOP, resp.message);
-    TEST_ASSERT_EQUAL(machine.robot_state.client_stop_id, 0U);
+    TEST_ASSERT_EQUAL(machine.robot_state.remote_stop_id, 0U);
     TEST_ASSERT_EQUAL(ROBOT_STATE_STOPPED, machine.robot_state.robot_state);
     TEST_ASSERT_EQUAL(PSTOP_STATUS_STOP, last_status);
 }

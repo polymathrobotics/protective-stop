@@ -15,18 +15,18 @@ is_checksum_valid(const pstop_msg_t *req)
 
 static
 pstop_error_t
-check_counter(const pstop_application_config_t *app_config, const pstop_client_data_t *client, const pstop_msg_t *req)
+check_counter(const pstop_application_config_t *app_config, const pstop_remote_data_t *client, const pstop_msg_t *req)
 {
-    if(req->counter <= client->client_data.last_sent_counter) {
+    if(req->counter <= client->remote_data.last_sent_counter) {
         return PSTOP_MSG_OUT_OF_ORDER;
     }
-    if((req->counter - client->client_data.last_sent_counter) > (app_config->max_lost_messages + 1U)) {
+    if((req->counter - client->remote_data.last_sent_counter) > (app_config->max_lost_messages + 1U)) {
         return PSTOP_MSG_LOST;
     }
-    if(req->received_counter > client->client_data.msg_counter) {
+    if(req->received_counter > client->remote_data.msg_counter) {
         return PSTOP_MSG_OUT_OF_ORDER;
     }
-    if((client->client_data.msg_counter - req->received_counter) >= (app_config->max_lost_messages + 1U)) {
+    if((client->remote_data.msg_counter - req->received_counter) >= (app_config->max_lost_messages + 1U)) {
         return PSTOP_MSG_LOST;
     }
 
@@ -78,7 +78,7 @@ protocol_handle_message(pstop_machine_t *machine, const pstop_msg_t *req, pstop_
         return PSTOP_OPERATOR_NOT_ALLOWED;
     }
 
-    pstop_client_data_t *client = pstop_client_get(&(machine->pstops), &(req->id));
+    pstop_remote_data_t *client = pstop_remote_get(&(machine->remotes), &(req->id));
 
     // if we've already seen this client, then validate the counter/timestamps
     if(client != NULL) {
@@ -87,7 +87,7 @@ protocol_handle_message(pstop_machine_t *machine, const pstop_msg_t *req, pstop_
             return err;
         }
 
-        err = check_timestamp(&(machine->application->app_config), &(client->client_data), req);
+        err = check_timestamp(&(machine->application->app_config), &(client->remote_data), req);
         if(err != PSTOP_OK) {
             return err;
         }
@@ -108,7 +108,7 @@ protocol_handle_message(pstop_machine_t *machine, const pstop_msg_t *req, pstop_
     }
 
     // add in response black channel values
-    client = pstop_client_get(&(machine->pstops), &(req->id));
+    client = pstop_remote_get(&(machine->remotes), &(req->id));
 
     uint64_t now = machine->application->env.get_time_cb();
 
@@ -123,11 +123,11 @@ protocol_handle_message(pstop_machine_t *machine, const pstop_msg_t *req, pstop_
 
     // null client will happen on unbond
     if(client != NULL) {
-        resp->counter = client->client_data.msg_counter + 1U;
-        resp->heartbeat_timeout = client->client_data.heartbeat_ms;
-        client->client_data.msg_counter++;
-        client->client_data.last_sent_counter = req->counter;
-        client->client_data.last_timestamp = now;
+        resp->counter = client->remote_data.msg_counter + 1U;
+        resp->heartbeat_timeout = client->remote_data.heartbeat_ms;
+        client->remote_data.msg_counter++;
+        client->remote_data.last_sent_counter = req->counter;
+        client->remote_data.last_timestamp = now;
     }
 
     return PSTOP_OK;

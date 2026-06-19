@@ -66,7 +66,7 @@ pstop_application_t pstop_app = {
 
 #define MAX_CLIENTS 2U
 
-static pstop_client_data_t pstop_clients[MAX_CLIENTS];
+static pstop_remote_data_t pstop_clients[MAX_CLIENTS];
 
 static
 void

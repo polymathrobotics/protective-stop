@@ -7,7 +7,7 @@
 #include "pstop/pstop_msg.h"
 #include "pstop/error.h"
 #include "pstop/pstop_application.h"
-#include "pstop/pstop_client_data.h"
+#include "pstop/pstop_remote_data.h"
 
 typedef struct pstop_machine_t pstop_machine_t;
 
@@ -49,7 +49,7 @@ typedef struct {
      * 0 if robot is not stopped or if applicaton just started
      * Or the client ID that has started the stop/ok cycle to get robot moving.
      */
-    uint32_t client_stop_id;
+    uint32_t remote_stop_id;
 
     /**
      * 0 = everything is OK
@@ -67,7 +67,7 @@ typedef struct pstop_machine_t {
 
     pstop_check_heartbeats_t check_heartbeats_cb;
 
-    pstop_clients_t pstops;
+    pstop_remotes_t remotes;
 
     pstop_application_t *application;
 
@@ -75,7 +75,7 @@ typedef struct pstop_machine_t {
 
 } pstop_machine_t;
 
-void machine_init(pstop_machine_t *machine, pstop_application_t *app, pstop_client_data_t *clients, uint16_t max_clients);
+void machine_init(pstop_machine_t *machine, pstop_application_t *app, pstop_remote_data_t *remotes, uint16_t max_remotes);
 
 void machine_stop_robot(pstop_machine_t *machine);
 
