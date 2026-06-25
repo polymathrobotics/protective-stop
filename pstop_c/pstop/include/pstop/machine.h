@@ -77,6 +77,10 @@ typedef struct pstop_machine_t {
 
 void machine_init(pstop_machine_t *machine, pstop_application_t *app, pstop_remote_data_t *remotes, uint16_t max_remotes);
 
+pstop_error_t machine_process_message(pstop_machine_t *machine, const pstop_msg_t *req, pstop_msg_t *resp);
+
+pstop_error_t machine_validate_heartbeats(pstop_machine_t *machine);
+
 void machine_stop_robot(pstop_machine_t *machine);
 
 #endif /* PSTOP_MACHINE_H */

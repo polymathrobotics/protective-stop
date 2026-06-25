@@ -32,4 +32,6 @@ typedef struct pstop_os_env_t {
  */
 void pstop_os_env_init(pstop_os_env_t *env);
 
+void pstop_os_env_set_time_cb(pstop_os_env_t *env, get_current_time_t time_cb);
+
 #endif /* PSTOP_OS_H */

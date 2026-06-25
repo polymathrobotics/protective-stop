@@ -14,11 +14,17 @@ no_log(uint64_t /* timestamp */, const device_id_t * /* client */, uint8_t /* me
 }
 
 void
-operator_detail_init(operator_details_t *oper)
+remote_detail_init(remote_details_t *oper)
 {
-    oper->allowed = true;
-    oper->heartbeat_ms = 1000U;
-    oper->stop_only = true;
+    remote_detail_set(oper, true, 1000U, true);
+}
+
+void
+remote_detail_set(remote_details_t *oper, bool is_allowed, uint64_t heartbeat_ms, bool is_stop_only)
+{
+    oper->allowed = is_allowed;
+    oper->heartbeat_ms = heartbeat_ms;
+    oper->stop_only = is_stop_only;
 }
 
 void
@@ -32,7 +38,7 @@ void
 pstop_application_init(pstop_application_t *app)
 {
     pstop_os_env_init(&app->env);
-    app->operator_details_cb = NULL;
+    app->remote_details_cb = NULL;
     app->status_cb = NULL;
     app->log_message_cb = no_log;
     pstop_application_config_init(&app->app_config);

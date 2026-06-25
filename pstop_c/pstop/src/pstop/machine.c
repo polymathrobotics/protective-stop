@@ -13,7 +13,7 @@ pstop_error_t
 add_new_client(pstop_machine_t *machine, const device_id_t *id, pstop_remote_data_t **client)
 {
     // no client found, can we add it?
-    operator_details_t details = machine->application->operator_details_cb(id);
+    remote_details_t details = machine->application->remote_details_cb(id);
 
     if(details.allowed == false) {
         // This ID is not allowed
@@ -316,6 +316,18 @@ machine_init(pstop_machine_t *machine, pstop_application_t *app, pstop_remote_da
     machine->robot_state.robot_state = ROBOT_STATE_STOPPED;
 
     pstop_remotes_init(&(machine->remotes));
+}
+
+pstop_error_t
+machine_process_message(pstop_machine_t *machine, const pstop_msg_t *req, pstop_msg_t *resp)
+{
+    return machine->handle_protocol_message_cb(machine, req, resp);
+}
+
+pstop_error_t
+machine_validate_heartbeats(pstop_machine_t *machine)
+{
+    return machine->check_heartbeats_cb(machine);
 }
 
 void

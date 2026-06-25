@@ -14,7 +14,7 @@ test_init(void)
     pstop_application_t app;
     pstop_application_init(&app);
 
-    TEST_ASSERT_NULL(app.operator_details_cb);
+    TEST_ASSERT_NULL(app.remote_details_cb);
     TEST_ASSERT_NULL(app.status_cb);
     TEST_ASSERT_NOT_NULL(app.log_message_cb);
     TEST_ASSERT_NOT_NULL(app.env.get_time_cb);
@@ -24,8 +24,8 @@ test_init(void)
 
     app.log_message_cb(12345, &id, PSTOP_MESSAGE_BOND, PSTOP_OK);
 
-    operator_details_t details;
-    operator_detail_init(&details);
+    remote_details_t details;
+    remote_detail_init(&details);
     TEST_ASSERT_EQUAL(1, details.stop_only);
     TEST_ASSERT_EQUAL(1, details.allowed);
 }
