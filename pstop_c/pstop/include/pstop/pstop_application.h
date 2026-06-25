@@ -33,12 +33,14 @@ typedef struct {
      */
     bool stop_only;
 
-} operator_details_t;
+} remote_details_t;
+
+void remote_detail_set(remote_details_t *oper, bool is_allowed, uint64_t heartbeat_ms, bool is_stop_only);
 
 /**
  * Utility function to default initialize an operator.
  */
-void operator_detail_init(operator_details_t *oper);
+void remote_detail_init(remote_details_t *oper);
 
 /**
  * @brief A callback that will return operator details for the given device_id.
@@ -48,9 +50,9 @@ void operator_detail_init(operator_details_t *oper);
  *
  * @param device_id A client device_id
  *
- * @return an operator details struct with details for the specified device_id.
+ * @return the remote details for the specified device_id.
  */
-typedef operator_details_t (* get_operator_details_t)(const device_id_t *device_id);
+typedef remote_details_t (* get_remote_details_t)(const device_id_t *device_id);
 
 /**
  * @brief A callback that is called by the pstop library to indicate the status of the machine.
@@ -102,11 +104,11 @@ typedef struct pstop_application_t {
     device_id_t machine_device_id;
 
     /**
-     * Callback to return details for a specified operator.
+     * Callback to return details for a specified remote.
      * Details determine if the operator is allowed and
      * certain features of the operator.
      */
-    get_operator_details_t operator_details_cb;
+    get_remote_details_t remote_details_cb;
 
     /**
      * Notifies the underlying hardware about the status of this PSTOP.

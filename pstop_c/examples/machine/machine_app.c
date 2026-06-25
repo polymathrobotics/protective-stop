@@ -19,31 +19,29 @@ pstop_machine_t machine;
 
 udp_transport_data_t udp_transport;
 
-operator_details_t
+remote_details_t
 is_operator_allowed(const device_id_t *device_id)
 {
-    operator_details_t details;
-    details.allowed = 1;
-    details.stop_only = 0;
-    details.heartbeat_ms = 1000U;
+    remote_details_t details;
+    remote_detail_set(&details, true, 1000U, false);
 
     return details;
 }
 
-pstop_status_message_t lastStatus = 0;
+pstop_status_message_t last_status = 0;
 
 static
 void
 robot_status(pstop_status_message_t status)
 {
-    if(lastStatus != status) {
+    if(last_status != status) {
         if(status == PSTOP_STATUS_OK) {
             fprintf(stderr, "Robot Status = OK\n");
         }
         else {
             fprintf(stderr, "Robot Status = STOP\n");
         }
-        lastStatus = status;
+        last_status = status;
     }
 }
 
@@ -61,6 +59,7 @@ static const char * const STOP_STR = "STOP";
 static const char * const BOND_STR = "BOND";
 static const char * const UNBOND_STR = "UNBOND";
 static const char * const UNKNOWN_STR = "UNKNOWN";
+
 static
 const char *
 get_message_str(uint8_t message)
@@ -93,7 +92,7 @@ main(int argc, char *argv[])
     pstop_application_init(&pstop_app);
 
     pstop_app.log_message_cb = simple_log;
-    pstop_app.operator_details_cb = is_operator_allowed;
+    pstop_app.remote_details_cb = is_operator_allowed;
     pstop_app.status_cb = robot_status;
 
     machine_init(&machine, &pstop_app, pstop_clients, MAX_CLIENTS);
@@ -129,7 +128,7 @@ main(int argc, char *argv[])
             pstop_message_decode(&req_msg, reqbytes);
 
             fprintf(stderr, "Got message: %d from %X\n", req_msg.message, req_msg.id.data);
-            pstop_error_t error = machine.handle_protocol_message_cb(&machine, &req_msg, &resp_msg);
+            pstop_error_t error = machine_process_message(&machine, &req_msg, &resp_msg);
             if(error != PSTOP_OK) {
                 fprintf(stderr, "Invalid request: %d\n", (int)error);
                 continue;
@@ -138,7 +137,7 @@ main(int argc, char *argv[])
             pstop_message_encode(&resp_msg, respbytes);
             transport_udp_write(&udp_transport, respbytes, PSTOP_MESSAGE_SIZE, (struct sockaddr_in *)&client);
         }
-        machine.check_heartbeats_cb(&machine);
+        machine_validate_heartbeats(&machine);
     }
 
     transport_udp_close(&udp_transport);

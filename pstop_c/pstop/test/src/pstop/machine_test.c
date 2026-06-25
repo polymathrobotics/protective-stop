@@ -17,10 +17,10 @@ get_time(void)
     return current_time++;
 }
 
-static operator_details_t details;
+static remote_details_t details;
 
 static
-operator_details_t
+remote_details_t
 is_operator_allowed(const device_id_t *id)
 {
     return details;
@@ -49,7 +49,7 @@ static
 pstop_application_t pstop_app = {
     .env.get_time_cb = get_time,
     .machine_device_id.data = 1236,
-    .operator_details_cb = is_operator_allowed,
+    .remote_details_cb = is_operator_allowed,
     .status_cb = robot_status,
     .log_message_cb = log_error,
     .app_config.max_lost_messages = 1U,
