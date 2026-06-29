@@ -6,7 +6,7 @@
 
 #include "pstop/checksum.h"
 
-static const uint16_t POLY = 0x1021U;
+static const uint16_t POLY = 0x8D95U;
 
 uint16_t
 checksum_crc16(const uint8_t *data, size_t data_length)
