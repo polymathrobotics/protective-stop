@@ -91,9 +91,9 @@ main(int argc, char *argv[])
     transport_udp_init(&udp_transport);
     pstop_application_init(&pstop_app);
 
-    pstop_app.log_message_cb = simple_log;
-    pstop_app.remote_details_cb = is_operator_allowed;
-    pstop_app.status_cb = robot_status;
+    pstop_application_set_log_cb(&pstop_app, simple_log);
+    pstop_application_set_remote_cb(&pstop_app, is_operator_allowed);
+    pstop_application_set_hardware_status_cb(&pstop_app, robot_status);
 
     machine_init(&machine, &pstop_app, pstop_clients, MAX_CLIENTS);
 
@@ -107,10 +107,11 @@ main(int argc, char *argv[])
         return -1;
     }
 
-    device_id_t machine_uuid = {
+    device_id_t machine_id = {
         .data = 0x01020304U
     };
-    device_id_copy(&(machine.application->machine_device_id), &machine_uuid);
+    pstop_application_set_machine_id(&pstop_app, &machine_id);
+    //device_id_copy(&(machine.application->machine_device_id), &machine_uuid);
 
     uint8_t reqbytes[PSTOP_MESSAGE_SIZE];
     uint8_t respbytes[PSTOP_MESSAGE_SIZE];
