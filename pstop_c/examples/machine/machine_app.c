@@ -111,7 +111,6 @@ main(int argc, char *argv[])
         .data = 0x01020304U
     };
     pstop_application_set_machine_id(&pstop_app, &machine_id);
-    //device_id_copy(&(machine.application->machine_device_id), &machine_uuid);
 
     uint8_t reqbytes[PSTOP_MESSAGE_SIZE];
     uint8_t respbytes[PSTOP_MESSAGE_SIZE];
