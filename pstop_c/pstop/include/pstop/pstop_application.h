@@ -126,4 +126,16 @@ typedef struct pstop_application_t {
 
 void pstop_application_init(pstop_application_t *app);
 
+void pstop_application_set_time_cb(pstop_application_t *app, get_current_time_t time_cb);
+
+void pstop_application_set_machine_id(pstop_application_t *app, const device_id_t *machine_id);
+
+void pstop_application_set_remote_cb(pstop_application_t *app, get_remote_details_t remote_cb);
+
+void pstop_application_set_hardware_status_cb(pstop_application_t *app, pstop_status_t status_cb);
+
+void pstop_application_set_log_cb(pstop_application_t *app, log_message_t log_cb);
+
+void pstop_application_set_protocol_limits(pstop_application_t *app, uint16_t max_lost_messages, uint16_t max_missed_heartbeats);
+
 #endif /* PSTOP_PSTOP_APPLICATION_H */
