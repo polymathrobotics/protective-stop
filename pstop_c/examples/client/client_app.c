@@ -67,19 +67,14 @@ send_msg(udp_transport_data_t *transport, pstop_os_env_t *env, protocol_data_t *
     pstop_msg_t req_msg;
     pstop_msg_t resp_msg;
 
-    pstop_message_init(&req_msg);
     pstop_message_init(&resp_msg);
 
     uint64_t now = env->get_time_cb();
 
-    req_msg.message = msg;
-    device_id_copy(&req_msg.id, uuid);
-    device_id_copy(&req_msg.receiver_id, &(machine->remote_id));
-    req_msg.counter = machine->msg_counter + 1U;
-    req_msg.received_counter = machine->last_sent_counter;
-    req_msg.received_stamp = machine->last_timestamp;
-    req_msg.stamp = now;
-    req_msg.checksum = 0x00U;
+    pstop_create_generic_message(&req_msg, msg,
+        now, machine->last_timestamp,
+        uuid, &(machine->remote_id),
+        machine->msg_counter + 1U, machine->last_sent_counter);
 
     machine->msg_counter++;
     pstop_message_encode(&req_msg, reqbytes);

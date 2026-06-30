@@ -86,6 +86,36 @@ typedef struct {
 
 void pstop_message_init(pstop_msg_t *msg);
 
+uint8_t pstop_message_get_message(const pstop_msg_t *msg);
+uint64_t pstop_message_get_stamp(const pstop_msg_t *msg);
+uint32_t pstop_message_get_counter(const pstop_msg_t *msg);
+
+void pstop_create_generic_message(pstop_msg_t *msg,
+    uint8_t message,
+    uint64_t timestamp, uint64_t received_timestamp,
+    const device_id_t *this_id, const device_id_t *target_id,
+    uint32_t counter, uint32_t received_counter);
+
+void pstop_create_bond_message(pstop_msg_t *msg,
+    uint64_t timestamp,
+    const device_id_t *this_id, const device_id_t *target_id,
+    uint32_t counter);
+
+void pstop_create_ok_message(pstop_msg_t *msg,
+    uint64_t timestamp, uint64_t received_timestamp,
+    const device_id_t *this_id, const device_id_t *target_id,
+    uint32_t counter, uint32_t received_counter);
+
+void pstop_create_stop_message(pstop_msg_t *msg,
+    uint64_t timestamp, uint64_t received_timestamp,
+    const device_id_t *this_id, const device_id_t *target_id,
+    uint32_t counter, uint32_t received_counter);
+
+void pstop_create_unbond_message(pstop_msg_t *msg,
+    uint64_t timestamp, uint64_t received_timestamp,
+    const device_id_t *this_id, const device_id_t *target_id,
+    uint32_t counter, uint32_t received_counter);
+
 pstop_error_t pstop_is_message_valid(const pstop_msg_t *msg);
 
  /**
