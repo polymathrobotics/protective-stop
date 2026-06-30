@@ -137,6 +137,80 @@ write_device_id(const device_id_t *device_id, uint8_t *data, size_t *pos)
 #endif
 }
 
+uint8_t
+pstop_message_get_message(const pstop_msg_t *msg)
+{
+    return msg->message;
+}
+
+uint64_t
+pstop_message_get_stamp(const pstop_msg_t *msg)
+{
+    return msg->stamp;
+}
+
+uint32_t
+pstop_message_get_counter(const pstop_msg_t *msg)
+{
+    return msg->counter;
+}
+
+void
+pstop_create_generic_message(pstop_msg_t *msg,
+    uint8_t message,
+    uint64_t timestamp, uint64_t received_timestamp,
+    const device_id_t *this_id, const device_id_t *target_id,
+    uint32_t counter, uint32_t received_counter)
+{
+    msg->version = PSTOP_VERSION;
+    msg->message = message;
+    msg->stamp = timestamp;
+    msg->received_stamp = received_timestamp;
+    device_id_copy(&(msg->id), this_id);
+    device_id_copy(&(msg->receiver_id), target_id);
+    msg->heartbeat_timeout = 0U;
+    msg->counter = counter;
+    msg->received_counter = received_counter;
+    msg->checksum = 0U;
+    msg->calculated_checksum = 0U;
+}
+
+void
+pstop_create_bond_message(pstop_msg_t *msg,
+    uint64_t timestamp,
+    const device_id_t *this_id, const device_id_t *target_id,
+    uint32_t counter)
+{
+    pstop_create_generic_message(msg, PSTOP_MESSAGE_BOND, timestamp, 0U, this_id, target_id, counter, 0U);
+}
+
+void
+pstop_create_ok_message(pstop_msg_t *msg,
+    uint64_t timestamp, uint64_t received_timestamp,
+    const device_id_t *this_id, const device_id_t *target_id,
+    uint32_t counter, uint32_t received_counter)
+{
+    pstop_create_generic_message(msg, PSTOP_MESSAGE_OK, timestamp, received_timestamp, this_id, target_id, counter, received_counter);
+}
+
+void
+pstop_create_stop_message(pstop_msg_t *msg,
+    uint64_t timestamp, uint64_t received_timestamp,
+    const device_id_t *this_id, const device_id_t *target_id,
+    uint32_t counter, uint32_t received_counter)
+{
+    pstop_create_generic_message(msg, PSTOP_MESSAGE_STOP, timestamp, received_timestamp, this_id, target_id, counter, received_counter);
+}
+
+void
+pstop_create_unbond_message(pstop_msg_t *msg,
+    uint64_t timestamp, uint64_t received_timestamp,
+    const device_id_t *this_id, const device_id_t *target_id,
+    uint32_t counter, uint32_t received_counter)
+{
+    pstop_create_generic_message(msg, PSTOP_MESSAGE_UNBOND, timestamp, received_timestamp, this_id, target_id, counter, received_counter);
+}
+
 pstop_error_t
 pstop_is_message_valid(const pstop_msg_t *msg)
 {
