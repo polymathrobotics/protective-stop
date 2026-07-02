@@ -181,7 +181,6 @@ dispatch_message(pstop_machine_t *machine, pstop_remote_data_t *client , const p
     return handle_stop_msg(machine, client, req, resp);
 }
 
-static
 pstop_error_t
 machine_handle_message(pstop_machine_t *machine, const pstop_msg_t *req, pstop_msg_t *resp)
 {
@@ -303,10 +302,6 @@ machine_check_heartbeats(pstop_machine_t *machine)
 void
 machine_init(pstop_machine_t *machine, pstop_application_t *app, pstop_remote_data_t *remotes, uint16_t max_remotes)
 {
-    machine->handle_machine_message_cb = machine_handle_message;
-    machine->handle_protocol_message_cb = protocol_handle_message;
-    machine->check_heartbeats_cb = machine_check_heartbeats;
-
     machine->application = app;
     machine->remotes.remotes = remotes;
     machine->remotes.max_remotes = max_remotes;
@@ -321,13 +316,13 @@ machine_init(pstop_machine_t *machine, pstop_application_t *app, pstop_remote_da
 pstop_error_t
 machine_process_message(pstop_machine_t *machine, const pstop_msg_t *req, pstop_msg_t *resp)
 {
-    return machine->handle_protocol_message_cb(machine, req, resp);
+    return protocol_handle_message(machine, req, resp);
 }
 
 pstop_error_t
 machine_validate_heartbeats(pstop_machine_t *machine)
 {
-    return machine->check_heartbeats_cb(machine);
+    return machine_check_heartbeats(machine);
 }
 
 void
