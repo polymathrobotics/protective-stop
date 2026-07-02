@@ -61,12 +61,6 @@ typedef struct {
 
 typedef struct pstop_machine_t {
 
-    protocol_handle_message_t handle_protocol_message_cb;
-
-    machine_handle_message_t handle_machine_message_cb;
-
-    pstop_check_heartbeats_t check_heartbeats_cb;
-
     pstop_remotes_t remotes;
 
     pstop_application_t *application;
@@ -76,6 +70,8 @@ typedef struct pstop_machine_t {
 } pstop_machine_t;
 
 void machine_init(pstop_machine_t *machine, pstop_application_t *app, pstop_remote_data_t *remotes, uint16_t max_remotes);
+
+pstop_error_t machine_handle_message(pstop_machine_t *machine, const pstop_msg_t *req, pstop_msg_t *resp);
 
 pstop_error_t machine_process_message(pstop_machine_t *machine, const pstop_msg_t *req, pstop_msg_t *resp);
 

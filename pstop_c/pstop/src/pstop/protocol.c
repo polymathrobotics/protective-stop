@@ -101,7 +101,7 @@ protocol_handle_message(pstop_machine_t *machine, const pstop_msg_t *req, pstop_
 
     // now send the message to the machine for pstop handling.
     // This function will create a new client if necessary
-    pstop_error_t result = machine->handle_machine_message_cb(machine, req, resp);
+    pstop_error_t result = machine_handle_message(machine, req, resp);
 
     if(result != PSTOP_OK) {
         return result;

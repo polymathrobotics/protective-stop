@@ -95,29 +95,29 @@ test_bond_no_timeout(void)
     robot_status_counter = 0;
 
     msg.message = PSTOP_MESSAGE_BOND;
-    TEST_ASSERT_EQUAL(PSTOP_OK, machine.handle_machine_message_cb(&machine, &msg, &resp));
+    TEST_ASSERT_EQUAL(PSTOP_OK, machine_handle_message(&machine, &msg, &resp));
     TEST_ASSERT_EQUAL(PSTOP_MESSAGE_BOND, resp.message);
 
     msg.message = PSTOP_MESSAGE_STOP;
-    TEST_ASSERT_EQUAL(PSTOP_OK, machine.handle_machine_message_cb(&machine, &msg, &resp));
+    TEST_ASSERT_EQUAL(PSTOP_OK, machine_handle_message(&machine, &msg, &resp));
     TEST_ASSERT_EQUAL(PSTOP_MESSAGE_STOP, resp.message);
 
     msg.message = PSTOP_MESSAGE_OK;
-    TEST_ASSERT_EQUAL(PSTOP_OK, machine.handle_machine_message_cb(&machine, &msg, &resp));
+    TEST_ASSERT_EQUAL(PSTOP_OK, machine_handle_message(&machine, &msg, &resp));
     TEST_ASSERT_EQUAL(PSTOP_MESSAGE_OK, resp.message);
     TEST_ASSERT_EQUAL(PSTOP_STATUS_OK, lastStatus);
 
     current_time = 150U; // no timeout yet!
-    TEST_ASSERT_EQUAL(PSTOP_OK, machine.check_heartbeats_cb(&machine));
+    TEST_ASSERT_EQUAL(PSTOP_OK, machine_validate_heartbeats(&machine));
     TEST_ASSERT_EQUAL(PSTOP_STATUS_OK, lastStatus);
 
     current_time = 170U; // now a timeout!
-    TEST_ASSERT_EQUAL(PSTOP_MISSED_HEARTBEATS, machine.check_heartbeats_cb(&machine));
+    TEST_ASSERT_EQUAL(PSTOP_MISSED_HEARTBEATS, machine_validate_heartbeats(&machine));
     TEST_ASSERT_EQUAL(PSTOP_REMOTE_UNKNOWN, pstop_clients[0].remote_state);
     TEST_ASSERT_EQUAL(PSTOP_STATUS_STOP, lastStatus);
 
     // after the previous timeout that client is marked as UNKNOWN so no more clients connected
-    TEST_ASSERT_EQUAL(PSTOP_OK, machine.check_heartbeats_cb(&machine));
+    TEST_ASSERT_EQUAL(PSTOP_OK, machine_validate_heartbeats(&machine));
 }
 
 static
@@ -141,19 +141,19 @@ test_bond_timeout(void)
     robot_status_counter = 0;
 
     msg.message = PSTOP_MESSAGE_BOND;
-    TEST_ASSERT_EQUAL(PSTOP_OK, machine.handle_machine_message_cb(&machine, &msg, &resp));
+    TEST_ASSERT_EQUAL(PSTOP_OK, machine_handle_message(&machine, &msg, &resp));
     TEST_ASSERT_EQUAL(PSTOP_MESSAGE_BOND, resp.message);
 
     current_time = 150U; // no timeout yet!
-    TEST_ASSERT_EQUAL(PSTOP_OK, machine.check_heartbeats_cb(&machine));
+    TEST_ASSERT_EQUAL(PSTOP_OK, machine_validate_heartbeats(&machine));
 
     current_time = 170U; // now a timeout!
-    TEST_ASSERT_EQUAL(PSTOP_MISSED_HEARTBEATS, machine.check_heartbeats_cb(&machine));
+    TEST_ASSERT_EQUAL(PSTOP_MISSED_HEARTBEATS, machine_validate_heartbeats(&machine));
     TEST_ASSERT_EQUAL(PSTOP_REMOTE_UNKNOWN, pstop_clients[0].remote_state);
     TEST_ASSERT_EQUAL(PSTOP_STATUS_STOP, lastStatus);
 
     // after the previous timeout that client is marked as UNKNOWN so no more clients connected
-    TEST_ASSERT_EQUAL(PSTOP_OK, machine.check_heartbeats_cb(&machine));
+    TEST_ASSERT_EQUAL(PSTOP_OK, machine_validate_heartbeats(&machine));
 }
 
 // client has been bonded and started the stop/ok cycle but timesout before OK
@@ -178,17 +178,17 @@ test_bond_stop_timeout_req_3_05(void)
     robot_status_counter = 0;
 
     msg.message = PSTOP_MESSAGE_BOND;
-    TEST_ASSERT_EQUAL(PSTOP_OK, machine.handle_machine_message_cb(&machine, &msg, &resp));
+    TEST_ASSERT_EQUAL(PSTOP_OK, machine_handle_message(&machine, &msg, &resp));
     TEST_ASSERT_EQUAL(PSTOP_MESSAGE_BOND, resp.message);
 
     msg.message = PSTOP_MESSAGE_STOP;
-    TEST_ASSERT_EQUAL(PSTOP_OK, machine.handle_machine_message_cb(&machine, &msg, &resp));
+    TEST_ASSERT_EQUAL(PSTOP_OK, machine_handle_message(&machine, &msg, &resp));
     TEST_ASSERT_EQUAL(PSTOP_MESSAGE_STOP, resp.message);
     TEST_ASSERT_EQUAL(ROBOT_RESTART_STATE_STOP_RECEIVED, machine.robot_state.restart_state);
     TEST_ASSERT_EQUAL(machine.robot_state.remote_stop_id, pstop_clients[0].local_remote_id);
 
     current_time = 170U; // now a timeout!
-    TEST_ASSERT_EQUAL(PSTOP_MISSED_HEARTBEATS, machine.check_heartbeats_cb(&machine));
+    TEST_ASSERT_EQUAL(PSTOP_MISSED_HEARTBEATS, machine_validate_heartbeats(&machine));
     TEST_ASSERT_EQUAL(machine.robot_state.remote_stop_id, 0);
     TEST_ASSERT_EQUAL(ROBOT_RESTART_STATE_NEED_STOP, machine.robot_state.restart_state);
     TEST_ASSERT_EQUAL(ROBOT_STATE_STOPPED, lastStatus);
@@ -218,18 +218,18 @@ test_bond_stop_timeout_2_missed_timeouts(void)
     robot_status_counter = 0;
 
     msg.message = PSTOP_MESSAGE_BOND;
-    TEST_ASSERT_EQUAL(PSTOP_OK, machine.handle_machine_message_cb(&machine, &msg, &resp));
+    TEST_ASSERT_EQUAL(PSTOP_OK, machine_handle_message(&machine, &msg, &resp));
     TEST_ASSERT_EQUAL(PSTOP_MESSAGE_BOND, resp.message);
 
     msg.message = PSTOP_MESSAGE_STOP;
-    TEST_ASSERT_EQUAL(PSTOP_OK, machine.handle_machine_message_cb(&machine, &msg, &resp));
+    TEST_ASSERT_EQUAL(PSTOP_OK, machine_handle_message(&machine, &msg, &resp));
     TEST_ASSERT_EQUAL(PSTOP_MESSAGE_STOP, resp.message);
 
     current_time = 170U; // now a missed heartbeat
-    TEST_ASSERT_EQUAL(PSTOP_OK, machine.check_heartbeats_cb(&machine));
+    TEST_ASSERT_EQUAL(PSTOP_OK, machine_validate_heartbeats(&machine));
 
     current_time = 222U; // now two missed heartbeats
-    TEST_ASSERT_EQUAL(PSTOP_MISSED_HEARTBEATS, machine.check_heartbeats_cb(&machine));
+    TEST_ASSERT_EQUAL(PSTOP_MISSED_HEARTBEATS, machine_validate_heartbeats(&machine));
     TEST_ASSERT_EQUAL(ROBOT_STATE_STOPPED, machine.robot_state.robot_state);
     TEST_ASSERT_EQUAL(ROBOT_RESTART_STATE_NEED_STOP, machine.robot_state.restart_state);
 }

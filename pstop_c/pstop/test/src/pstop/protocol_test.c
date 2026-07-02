@@ -82,7 +82,7 @@ test_protocol_invalid_checksum_req_2_01(void)
     req.checksum = 10U;
     req.calculated_checksum = 14U; // calculated by pstop_message_decode
 
-    TEST_ASSERT_EQUAL(PSTOP_MSG_INVALID_CHECKSUM, machine.handle_protocol_message_cb(&machine, &req, &resp));
+    TEST_ASSERT_EQUAL(PSTOP_MSG_INVALID_CHECKSUM, machine_process_message(&machine, &req, &resp));
 }
 
 static
@@ -98,7 +98,7 @@ test_protocol_invalid_receiver_id_req_2_07(void)
     pstop_message_init(&resp);
     req.receiver_id.data = 4567; // doesn't match the machine ID
 
-    TEST_ASSERT_EQUAL(PSTOP_ERROR_INVALID_ID, machine.handle_protocol_message_cb(&machine, &req, &resp));
+    TEST_ASSERT_EQUAL(PSTOP_ERROR_INVALID_ID, machine_process_message(&machine, &req, &resp));
 }
 
 static
@@ -124,7 +124,7 @@ test_protocol_out_of_order_message_req_2_02(void)
     operator_allowed_flag = true;
 
     // succesfull bond
-    TEST_ASSERT_EQUAL(PSTOP_OK, machine.handle_protocol_message_cb(&machine, &req, &resp));
+    TEST_ASSERT_EQUAL(PSTOP_OK, machine_process_message(&machine, &req, &resp));
 
     // now send message with counter that is old
     req.message = PSTOP_MESSAGE_STOP;
@@ -132,7 +132,7 @@ test_protocol_out_of_order_message_req_2_02(void)
     req.stamp = 110;
     req.received_counter = resp.counter;
     req.received_stamp = resp.stamp;
-    TEST_ASSERT_EQUAL(PSTOP_MSG_OUT_OF_ORDER, machine.handle_protocol_message_cb(&machine, &req, &resp));
+    TEST_ASSERT_EQUAL(PSTOP_MSG_OUT_OF_ORDER, machine_process_message(&machine, &req, &resp));
 }
 
 static
@@ -150,7 +150,7 @@ test_protocol_operator_not_allowed_req_2_06(void)
     pstop_message_init(&resp);
     req.receiver_id.data = MACHINE_ID;
 
-    TEST_ASSERT_EQUAL(PSTOP_OPERATOR_NOT_ALLOWED, machine.handle_protocol_message_cb(&machine, &req, &resp));
+    TEST_ASSERT_EQUAL(PSTOP_OPERATOR_NOT_ALLOWED, machine_process_message(&machine, &req, &resp));
 }
 
 static
@@ -175,7 +175,7 @@ test_protocol_bond_request(void)
     pstop_msg_t resp;
     pstop_message_init(&resp);
 
-    TEST_ASSERT_EQUAL(PSTOP_OK, machine.handle_protocol_message_cb(&machine, &req, &resp));
+    TEST_ASSERT_EQUAL(PSTOP_OK, machine_process_message(&machine, &req, &resp));
     TEST_ASSERT_EQUAL(PSTOP_MESSAGE_BOND, resp.message);
     TEST_ASSERT_EQUAL(1U, resp.counter);
     TEST_ASSERT_EQUAL(10, resp.received_counter);
@@ -207,7 +207,7 @@ test_protocol_bond_then_unbond(void)
     pstop_msg_t resp;
     pstop_message_init(&resp);
 
-    TEST_ASSERT_EQUAL(PSTOP_OK, machine.handle_protocol_message_cb(&machine, &req, &resp));
+    TEST_ASSERT_EQUAL(PSTOP_OK, machine_process_message(&machine, &req, &resp));
     TEST_ASSERT_EQUAL(PSTOP_MESSAGE_BOND, resp.message);
     TEST_ASSERT_EQUAL(1U, resp.counter);
     TEST_ASSERT_EQUAL(10, resp.received_counter);
@@ -225,7 +225,7 @@ test_protocol_bond_then_unbond(void)
     req.received_counter = 1;
     req.received_stamp = 12;
     pstop_message_init(&resp);
-    TEST_ASSERT_EQUAL(PSTOP_OK, machine.handle_protocol_message_cb(&machine, &req, &resp));
+    TEST_ASSERT_EQUAL(PSTOP_OK, machine_process_message(&machine, &req, &resp));
     TEST_ASSERT_EQUAL(PSTOP_MESSAGE_UNBOND, resp.message);
 }
 
@@ -251,7 +251,7 @@ test_protocol_invalid_message_req_2_08(void)
     pstop_msg_t resp;
     pstop_message_init(&resp);
 
-    TEST_ASSERT_EQUAL(PSTOP_MESSAGE_TYPE_INVALID, machine.handle_protocol_message_cb(&machine, &req, &resp));
+    TEST_ASSERT_EQUAL(PSTOP_MESSAGE_TYPE_INVALID, machine_process_message(&machine, &req, &resp));
 }
 
 static
@@ -275,12 +275,12 @@ test_protocol_invalid_counter(void)
     pstop_message_init(&resp);
 
     // setup client with BOND message
-    TEST_ASSERT_EQUAL(PSTOP_OK, machine.handle_protocol_message_cb(&machine, &req, &resp));
+    TEST_ASSERT_EQUAL(PSTOP_OK, machine_process_message(&machine, &req, &resp));
     TEST_ASSERT_EQUAL(1U, resp.counter);
 
     req.message = PSTOP_MESSAGE_OK;
     req.counter = 9;
-    TEST_ASSERT_EQUAL(PSTOP_MSG_OUT_OF_ORDER, machine.handle_protocol_message_cb(&machine, &req, &resp));
+    TEST_ASSERT_EQUAL(PSTOP_MSG_OUT_OF_ORDER, machine_process_message(&machine, &req, &resp));
 }
 
 static
@@ -304,7 +304,7 @@ test_protocol_lost_messages_req_2_03(void)
     pstop_message_init(&resp);
 
     // setup client with BOND message
-    TEST_ASSERT_EQUAL(PSTOP_OK, machine.handle_protocol_message_cb(&machine, &req, &resp));
+    TEST_ASSERT_EQUAL(PSTOP_OK, machine_process_message(&machine, &req, &resp));
     TEST_ASSERT_EQUAL(1U, resp.counter);
 
     req.message = PSTOP_MESSAGE_STOP;
@@ -314,7 +314,7 @@ test_protocol_lost_messages_req_2_03(void)
     req.receiver_id.data = MACHINE_ID;
     req.received_counter = resp.counter;
     req.received_stamp = resp.stamp;
-    TEST_ASSERT_EQUAL(PSTOP_MSG_LOST, machine.handle_protocol_message_cb(&machine, &req, &resp));
+    TEST_ASSERT_EQUAL(PSTOP_MSG_LOST, machine_process_message(&machine, &req, &resp));
 }
 
 static
@@ -341,7 +341,7 @@ test_protocol_bond_invalid_timestamp(void)
 
     // setup client with BOND message
     current_time = 100;// move clock forward to 100. Next message of 90 will be in the past.
-    TEST_ASSERT_EQUAL(PSTOP_OK, machine.handle_protocol_message_cb(&machine, &req, &resp));
+    TEST_ASSERT_EQUAL(PSTOP_OK, machine_process_message(&machine, &req, &resp));
     TEST_ASSERT_EQUAL(1U, resp.counter);
 
     req.message = PSTOP_MESSAGE_OK;
@@ -349,7 +349,7 @@ test_protocol_bond_invalid_timestamp(void)
     req.received_stamp = resp.stamp + 1U;
     req.received_counter = resp.counter;
     req.stamp = 90;
-    TEST_ASSERT_EQUAL(PSTOP_MSG_OUT_OF_ORDER, machine.handle_protocol_message_cb(&machine, &req, &resp));
+    TEST_ASSERT_EQUAL(PSTOP_MSG_OUT_OF_ORDER, machine_process_message(&machine, &req, &resp));
 }
 
 static
@@ -374,7 +374,7 @@ test_protocol_bond_correct_timestamp(void)
 
     // setup client with BOND message
     current_time = 100;
-    TEST_ASSERT_EQUAL(PSTOP_OK, machine.handle_protocol_message_cb(&machine, &req, &resp));
+    TEST_ASSERT_EQUAL(PSTOP_OK, machine_process_message(&machine, &req, &resp));
     TEST_ASSERT_EQUAL(1U, resp.counter);
 
     req.message = PSTOP_MESSAGE_OK;
@@ -382,7 +382,7 @@ test_protocol_bond_correct_timestamp(void)
     req.received_stamp = resp.stamp;
     req.received_counter = resp.counter;
     req.stamp = 110;
-    TEST_ASSERT_EQUAL(PSTOP_OK, machine.handle_protocol_message_cb(&machine, &req, &resp));
+    TEST_ASSERT_EQUAL(PSTOP_OK, machine_process_message(&machine, &req, &resp));
 }
 
 static
@@ -407,7 +407,7 @@ test_protocol_bond_missed_message_timestamps(void)
 
     // setup client with BOND message
     current_time = 5000;
-    TEST_ASSERT_EQUAL(PSTOP_OK, machine.handle_protocol_message_cb(&machine, &req, &resp));
+    TEST_ASSERT_EQUAL(PSTOP_OK, machine_process_message(&machine, &req, &resp));
     TEST_ASSERT_EQUAL(1U, resp.counter);
     TEST_ASSERT_EQUAL(5002, resp.stamp);
     TEST_ASSERT_EQUAL(5000, resp.received_stamp);
@@ -417,7 +417,7 @@ test_protocol_bond_missed_message_timestamps(void)
     req.received_stamp = 1000;
     req.received_counter = resp.counter;
     req.stamp = 5010;
-    TEST_ASSERT_EQUAL(PSTOP_MSG_LOST, machine.handle_protocol_message_cb(&machine, &req, &resp));
+    TEST_ASSERT_EQUAL(PSTOP_MSG_LOST, machine_process_message(&machine, &req, &resp));
 }
 
 static
@@ -442,13 +442,13 @@ test_protocol_bond_missed_too_many_messages(void)
 
     // setup client with BOND message
     current_time = 100;// move clock forward to 100. Next message of 90 will be in the past.
-    TEST_ASSERT_EQUAL(PSTOP_OK, machine.handle_protocol_message_cb(&machine, &req, &resp));
+    TEST_ASSERT_EQUAL(PSTOP_OK, machine_process_message(&machine, &req, &resp));
     TEST_ASSERT_EQUAL(1U, resp.counter);
 
     req.message = PSTOP_MESSAGE_OK;
     req.counter = 12; // missed message 11
     req.stamp = 110;
-    TEST_ASSERT_EQUAL(PSTOP_MSG_LOST, machine.handle_protocol_message_cb(&machine, &req, &resp));
+    TEST_ASSERT_EQUAL(PSTOP_MSG_LOST, machine_process_message(&machine, &req, &resp));
 }
 
 static
@@ -473,20 +473,20 @@ test_protocol_bond_invalid_echo_counter(void)
 
     // setup client with BOND message
     current_time = 100;
-    TEST_ASSERT_EQUAL(PSTOP_OK, machine.handle_protocol_message_cb(&machine, &req, &resp));
+    TEST_ASSERT_EQUAL(PSTOP_OK, machine_process_message(&machine, &req, &resp));
     TEST_ASSERT_EQUAL(1U, resp.counter);
 
     req.message = PSTOP_MESSAGE_OK;
     req.counter = 11;
     req.stamp = 110;
     req.received_counter = 1;
-    TEST_ASSERT_EQUAL(PSTOP_OK, machine.handle_protocol_message_cb(&machine, &req, &resp));
+    TEST_ASSERT_EQUAL(PSTOP_OK, machine_process_message(&machine, &req, &resp));
 
     req.message = PSTOP_MESSAGE_OK;
     req.counter = 12;
     req.stamp = 120;
     req.received_counter = 0;
-    TEST_ASSERT_EQUAL(PSTOP_MSG_LOST, machine.handle_protocol_message_cb(&machine, &req, &resp));
+    TEST_ASSERT_EQUAL(PSTOP_MSG_LOST, machine_process_message(&machine, &req, &resp));
 }
 
 static
@@ -512,14 +512,14 @@ test_protocol_bond_missing_sent_messages(void)
 
     // setup client with BOND message
     current_time = 100;
-    TEST_ASSERT_EQUAL(PSTOP_OK, machine.handle_protocol_message_cb(&machine, &req, &resp));
+    TEST_ASSERT_EQUAL(PSTOP_OK, machine_process_message(&machine, &req, &resp));
     TEST_ASSERT_EQUAL(1U, resp.counter);
 
     req.message = PSTOP_MESSAGE_OK;
     req.counter = 11;
     req.stamp = 110;
     req.received_counter = 0; // we didn't receive the previous mssage
-    TEST_ASSERT_EQUAL(PSTOP_OK, machine.handle_protocol_message_cb(&machine, &req, &resp));
+    TEST_ASSERT_EQUAL(PSTOP_OK, machine_process_message(&machine, &req, &resp));
     TEST_ASSERT_EQUAL(2U, resp.counter);
     TEST_ASSERT_EQUAL(PSTOP_MESSAGE_STOP, resp.message);
 
@@ -527,7 +527,7 @@ test_protocol_bond_missing_sent_messages(void)
     req.counter = 12;
     req.stamp = 120;
     req.received_counter = 0; // we didn't receive the previous mssage
-    TEST_ASSERT_EQUAL(PSTOP_MSG_LOST, machine.handle_protocol_message_cb(&machine, &req, &resp));
+    TEST_ASSERT_EQUAL(PSTOP_MSG_LOST, machine_process_message(&machine, &req, &resp));
     TEST_ASSERT_EQUAL(2U, resp.counter);
     TEST_ASSERT_EQUAL(PSTOP_MESSAGE_STOP, resp.message);
 }
@@ -555,14 +555,14 @@ test_protocol_bond_received_counter_invalid(void)
 
     // setup client with BOND message
     current_time = 100;// move clock forward to 100. Next message of 90 will be in the past.
-    TEST_ASSERT_EQUAL(PSTOP_OK, machine.handle_protocol_message_cb(&machine, &req, &resp));
+    TEST_ASSERT_EQUAL(PSTOP_OK, machine_process_message(&machine, &req, &resp));
     TEST_ASSERT_EQUAL(1U, resp.counter);
 
     req.message = PSTOP_MESSAGE_OK;
     req.counter = 11;
     req.stamp = 110;
     req.received_counter = 10; // bigger than the current msg counter
-    TEST_ASSERT_EQUAL(PSTOP_MSG_OUT_OF_ORDER, machine.handle_protocol_message_cb(&machine, &req, &resp));
+    TEST_ASSERT_EQUAL(PSTOP_MSG_OUT_OF_ORDER, machine_process_message(&machine, &req, &resp));
 }
 
 static
@@ -589,7 +589,7 @@ test_protocol_new_client_invalid_received_counter_req_4_05(void)
 
     // setup client with BOND message
     current_time = 100;
-    TEST_ASSERT_EQUAL(PSTOP_INVALID_BOND_REQUEST, machine.handle_protocol_message_cb(&machine, &req, &resp));
+    TEST_ASSERT_EQUAL(PSTOP_INVALID_BOND_REQUEST, machine_process_message(&machine, &req, &resp));
 }
 
 static
@@ -617,7 +617,7 @@ test_protocol_new_client_invalid_received_counter_req_4_06(void)
 
     // setup client with BOND message
     current_time = 100;
-    TEST_ASSERT_EQUAL(PSTOP_INVALID_BOND_REQUEST, machine.handle_protocol_message_cb(&machine, &req, &resp));
+    TEST_ASSERT_EQUAL(PSTOP_INVALID_BOND_REQUEST, machine_process_message(&machine, &req, &resp));
 }
 
 void
