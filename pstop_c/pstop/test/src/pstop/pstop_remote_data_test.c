@@ -117,6 +117,7 @@ test_remove_client(void)
     TEST_ASSERT_EQUAL(0U, pstop_remote_num_active(&clients));
 }
 
+static
 void
 test_num_stopped(void)
 {
