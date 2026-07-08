@@ -32,8 +32,8 @@ decode_pstop_msg()
     pstop_msg_t msg;
     pstop_message_decode(&msg, PSTOP_MSG_BYTES);
     TEST_ASSERT_EQUAL(0x00U, msg.version);
-    TEST_ASSERT_EQUAL(0x02U, msg.message);
-    TEST_ASSERT_EQUAL(0x0807060504030201U, msg.stamp);
+    TEST_ASSERT_EQUAL(0x02U, pstop_message_get_message(&msg));
+    TEST_ASSERT_EQUAL(0x0807060504030201U,pstop_message_get_stamp(&msg));
     TEST_ASSERT_EQUAL(0x1817161514131211U, msg.received_stamp);
 
     device_id_t id;
@@ -44,7 +44,7 @@ decode_pstop_msg()
     id.data = 0x33323130U;
     TEST_ASSERT_EQUAL(0, device_id_cmp(&id, &msg.receiver_id));
     TEST_ASSERT_EQUAL(0x43424140U, msg.heartbeat_timeout);
-    TEST_ASSERT_EQUAL(0x53525150U, msg.counter);
+    TEST_ASSERT_EQUAL(0x53525150U, pstop_message_get_counter(&msg));
     TEST_ASSERT_EQUAL(0x63626160U, msg.received_counter);
     TEST_ASSERT_EQUAL(0xF942U, msg.checksum);
 }
@@ -91,6 +91,86 @@ is_pstop_message_valid()
     TEST_ASSERT_EQUAL(PSTOP_MESSAGE_TYPE_INVALID, pstop_is_message_valid(&msg));
 }
 
+static
+void
+create_bond_message(void)
+{
+    device_id_t this_id;
+    this_id.data = 0x123456U;
+    device_id_t target_id;
+    target_id.data = 0x345678U;
+
+    pstop_msg_t msg;
+    pstop_create_bond_message(&msg, 123545, &this_id, &target_id, 50);
+    TEST_ASSERT_EQUAL(PSTOP_MESSAGE_BOND, msg.message);
+    TEST_ASSERT_EQUAL(123545, msg.stamp);
+    TEST_ASSERT_EQUAL(0U, msg.received_stamp);
+    TEST_ASSERT_EQUAL(0U, msg.received_counter);
+    TEST_ASSERT_EQUAL(50U, msg.counter);
+    TEST_ASSERT_EQUAL(0, device_id_cmp(&this_id, &(msg.id)));
+    TEST_ASSERT_EQUAL(0, device_id_cmp(&target_id, &(msg.receiver_id)));
+}
+
+static
+void
+create_ok_message(void)
+{
+    device_id_t this_id;
+    this_id.data = 0x123456U;
+    device_id_t target_id;
+    target_id.data = 0x345678U;
+
+    pstop_msg_t msg;
+    pstop_create_ok_message(&msg, 123545, 123300, &this_id, &target_id, 50, 49);
+    TEST_ASSERT_EQUAL(PSTOP_MESSAGE_OK, msg.message);
+    TEST_ASSERT_EQUAL(123545U, msg.stamp);
+    TEST_ASSERT_EQUAL(123300U, msg.received_stamp);
+    TEST_ASSERT_EQUAL(49U, msg.received_counter);
+    TEST_ASSERT_EQUAL(50U, msg.counter);
+    TEST_ASSERT_EQUAL(0, device_id_cmp(&this_id, &(msg.id)));
+    TEST_ASSERT_EQUAL(0, device_id_cmp(&target_id, &(msg.receiver_id)));
+}
+
+static
+void
+create_stop_message(void)
+{
+    device_id_t this_id;
+    this_id.data = 0x123456U;
+    device_id_t target_id;
+    target_id.data = 0x345678U;
+
+    pstop_msg_t msg;
+    pstop_create_stop_message(&msg, 123545, 123300, &this_id, &target_id, 50, 49);
+    TEST_ASSERT_EQUAL(PSTOP_MESSAGE_STOP, msg.message);
+    TEST_ASSERT_EQUAL(123545U, msg.stamp);
+    TEST_ASSERT_EQUAL(123300U, msg.received_stamp);
+    TEST_ASSERT_EQUAL(49U, msg.received_counter);
+    TEST_ASSERT_EQUAL(50U, msg.counter);
+    TEST_ASSERT_EQUAL(0, device_id_cmp(&this_id, &(msg.id)));
+    TEST_ASSERT_EQUAL(0, device_id_cmp(&target_id, &(msg.receiver_id)));
+}
+
+static
+void
+create_unbond_message(void)
+{
+    device_id_t this_id;
+    this_id.data = 0x123456U;
+    device_id_t target_id;
+    target_id.data = 0x345678U;
+
+    pstop_msg_t msg;
+    pstop_create_unbond_message(&msg, 123545, 123300, &this_id, &target_id, 50, 49);
+    TEST_ASSERT_EQUAL(PSTOP_MESSAGE_UNBOND, msg.message);
+    TEST_ASSERT_EQUAL(123545U, msg.stamp);
+    TEST_ASSERT_EQUAL(123300U, msg.received_stamp);
+    TEST_ASSERT_EQUAL(49U, msg.received_counter);
+    TEST_ASSERT_EQUAL(50U, msg.counter);
+    TEST_ASSERT_EQUAL(0, device_id_cmp(&this_id, &(msg.id)));
+    TEST_ASSERT_EQUAL(0, device_id_cmp(&target_id, &(msg.receiver_id)));
+}
+
 void
 main_pstop_msg_test(void)
 {
@@ -99,4 +179,8 @@ main_pstop_msg_test(void)
     RUN_TEST(decode_pstop_msg);
     RUN_TEST(encode_pstop_msg);
     RUN_TEST(is_pstop_message_valid);
+    RUN_TEST(create_bond_message);
+    RUN_TEST(create_ok_message);
+    RUN_TEST(create_stop_message);
+    RUN_TEST(create_unbond_message);
 }
