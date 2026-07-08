@@ -934,13 +934,22 @@ test_2_clients_stop_ok(void)
     TEST_ASSERT_EQUAL(ROBOT_STATE_OK, machine.robot_state.robot_state);
     TEST_ASSERT_EQUAL(PSTOP_STATUS_OK, last_status);
 
-    // second node sends OK. Should respond with OK since first node is in control
+    // second node sends stop. Machine will stop, but first node is still in control
+    msg2.message = PSTOP_MESSAGE_STOP;
+    TEST_ASSERT_EQUAL(PSTOP_OK, machine_handle_message(&machine, &msg2, &resp));
+    TEST_ASSERT_EQUAL(PSTOP_MESSAGE_STOP, resp.message);
+    TEST_ASSERT_EQUAL(machine.robot_state.remote_stop_id, pstop_clients[0].local_remote_id);
+    TEST_ASSERT_EQUAL(ROBOT_STATE_STOPPED, machine.robot_state.robot_state);
+    TEST_ASSERT_EQUAL(PSTOP_STATUS_STOP, last_status);
+
+    // second node sends OK. Should respond with STOP since the previous stop kicked the machine
+    // into needing the stop/ok sequence.
     msg2.message = PSTOP_MESSAGE_OK;
     TEST_ASSERT_EQUAL(PSTOP_OK, machine_handle_message(&machine, &msg2, &resp));
-    TEST_ASSERT_EQUAL(PSTOP_MESSAGE_OK, resp.message);
+    TEST_ASSERT_EQUAL(PSTOP_MESSAGE_STOP, resp.message);
     TEST_ASSERT_EQUAL(machine.robot_state.remote_stop_id, pstop_clients[0].local_remote_id);
-    TEST_ASSERT_EQUAL(ROBOT_STATE_OK, machine.robot_state.robot_state);
-    TEST_ASSERT_EQUAL(PSTOP_STATUS_OK, last_status);
+    TEST_ASSERT_EQUAL(ROBOT_STATE_STOPPED, machine.robot_state.robot_state);
+    TEST_ASSERT_EQUAL(PSTOP_STATUS_STOP, last_status);
 }
 
 static
@@ -997,7 +1006,7 @@ test_2_clients_stop_only_stop(void)
     msg2.message = PSTOP_MESSAGE_STOP;
     TEST_ASSERT_EQUAL(PSTOP_OK, machine_handle_message(&machine, &msg2, &resp));
     TEST_ASSERT_EQUAL(PSTOP_MESSAGE_STOP, resp.message);
-    TEST_ASSERT_EQUAL(machine.robot_state.remote_stop_id, 0U);
+    TEST_ASSERT_EQUAL(machine.robot_state.remote_stop_id, pstop_clients[0].local_remote_id);
     TEST_ASSERT_EQUAL(ROBOT_STATE_STOPPED, machine.robot_state.robot_state);
     TEST_ASSERT_EQUAL(PSTOP_STATUS_STOP, last_status);
 
@@ -1005,7 +1014,7 @@ test_2_clients_stop_only_stop(void)
     msg2.message = PSTOP_MESSAGE_OK;
     TEST_ASSERT_EQUAL(PSTOP_OK, machine_handle_message(&machine, &msg2, &resp));
     TEST_ASSERT_EQUAL(PSTOP_MESSAGE_STOP, resp.message);
-    TEST_ASSERT_EQUAL(machine.robot_state.remote_stop_id, 0U);
+    TEST_ASSERT_EQUAL(machine.robot_state.remote_stop_id, pstop_clients[0].local_remote_id);
     TEST_ASSERT_EQUAL(ROBOT_STATE_STOPPED, machine.robot_state.robot_state);
     TEST_ASSERT_EQUAL(PSTOP_STATUS_STOP, last_status);
 }
