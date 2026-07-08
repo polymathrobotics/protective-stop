@@ -9,6 +9,13 @@
 
 static
 void
+print_log(uint64_t /* timestamp */, const device_id_t * /* client */, uint8_t /* message */, pstop_error_t /* error */)
+{
+
+}
+
+static
+void
 test_init(void)
 {
     pstop_application_t app;
@@ -21,8 +28,15 @@ test_init(void)
     TEST_ASSERT_TRUE(app.env.get_time_cb() > 0U);
 
     device_id_t id;
+    id.data = 0x12345;
 
     app.log_message_cb(12345, &id, PSTOP_MESSAGE_BOND, PSTOP_OK);
+
+    pstop_application_set_log_cb(&app, print_log);
+    TEST_ASSERT_EQUAL(print_log, app.log_message_cb);
+
+    pstop_application_set_machine_id(&app, &id);
+    TEST_ASSERT_EQUAL(0U, device_id_cmp(&id, &(app.machine_device_id)));
 
     remote_details_t details;
     remote_detail_init(&details);

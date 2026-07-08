@@ -27,21 +27,22 @@ remote_detail_set(remote_details_t *oper, bool is_allowed, uint64_t heartbeat_ms
     oper->stop_only = is_stop_only;
 }
 
+static
 void
-pstop_application_config_init(pstop_application_config_t *config)
+pstop_application_config_init(pstop_application_config_t *config, uint16_t max_lost_messages, uint16_t max_missed_heartbeats)
 {
-    config->max_lost_messages = 0U;
-    config->max_missed_heartbeats = 0U;
+    config->max_lost_messages = max_lost_messages;
+    config->max_missed_heartbeats = max_missed_heartbeats;
 }
 
 void
 pstop_application_init(pstop_application_t *app)
 {
     pstop_os_env_init(&app->env);
-    app->remote_details_cb = NULL;
-    app->status_cb = NULL;
-    app->log_message_cb = no_log;
-    pstop_application_config_init(&app->app_config);
+    pstop_application_set_remote_cb(app, NULL);
+    pstop_application_set_hardware_status_cb(app, NULL);
+    pstop_application_set_log_cb(app, NULL);
+    pstop_application_set_protocol_limits(app, 0U, 0U);
 }
 
 void
@@ -82,6 +83,5 @@ pstop_application_set_log_cb(pstop_application_t *app, log_message_t log_cb)
 void
 pstop_application_set_protocol_limits(pstop_application_t *app, uint16_t max_lost_messages, uint16_t max_missed_heartbeats)
 {
-    app->app_config.max_lost_messages = max_lost_messages;
-    app->app_config.max_missed_heartbeats = max_missed_heartbeats;
+    pstop_application_config_init(&(app->app_config), max_lost_messages, max_missed_heartbeats);
 }
