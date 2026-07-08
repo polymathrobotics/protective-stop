@@ -15,9 +15,8 @@ typedef enum {
 
     PSTOP_REMOTE_INITING = 0,
     PSTOP_REMOTE_BONDED = 1,
-    PSTOP_REMOTE_UNBONDED = 2,
+    PSTOP_REMOTE_OK = 2,
     PSTOP_REMOTE_STOPPED = 3,
-    PSTOP_REMOTE_FAILURE = 4,
     PSTOP_REMOTE_UNKNOWN = 255
 
 } pstop_remote_state_t;
@@ -85,6 +84,8 @@ pstop_remote_data_t *pstop_remote_get_free_remote(pstop_remotes_t *remotes);
  * @param remotes The collection of remotes.
  */
 void pstop_remote_deactivate(pstop_remote_data_t *remote);
+
+uint16_t pstop_remote_num_stopped(const pstop_remotes_t *remotes);
 
 /**
  * @brief Finds the specified pstop remote by device ID.

@@ -75,20 +75,17 @@ static
 pstop_error_t
 handle_ok_msg(pstop_machine_t *machine, pstop_remote_data_t *client, const pstop_msg_t *msg, pstop_msg_t *resp)
 {
+    client->remote_state = PSTOP_REMOTE_OK;
+
     if(machine->robot_state.restart_state == ROBOT_RESTART_STATE_NEED_STOP) {
         resp->message = PSTOP_MESSAGE_STOP;
         return PSTOP_OK;
     }
 
-    // this isn't the client that requested the STOP
-    if(machine->robot_state.remote_stop_id != client->local_remote_id) {
-        if(machine->robot_state.robot_state == ROBOT_STATE_OK) {
-            resp->message = PSTOP_MESSAGE_OK;
-        }
-        else {
-            resp->message = PSTOP_MESSAGE_STOP;
-        }
-
+    // if any remotes are stopped then let's stay stopped
+    if(pstop_remote_num_stopped(&(machine->remotes)) != 0U) {
+        resp->message = PSTOP_MESSAGE_STOP;
+        machine->application->status_cb(PSTOP_STATUS_STOP);
         return PSTOP_OK;
     }
 
@@ -110,29 +107,24 @@ pstop_error_t
 handle_stop_msg(pstop_machine_t *machine, pstop_remote_data_t *client, const pstop_msg_t *msg, pstop_msg_t *resp)
 {
     resp->message = PSTOP_MESSAGE_STOP;
+    client->remote_state = PSTOP_REMOTE_STOPPED;
 
     // if we're waiting for any client to initiate the stop/ok cycle
     if(machine->robot_state.remote_stop_id == 0U) {
         // but don't allow stop/ok cycle from stop-only clients
         if(client->is_stop_only == false) {
-            machine->robot_state.robot_state = ROBOT_STATE_STOPPED;
             machine->robot_state.remote_stop_id = client->local_remote_id;
             machine->robot_state.restart_state = ROBOT_RESTART_STATE_STOP_RECEIVED;
         }
     }
     else {
-        // another client has taken control of this machine
-        // but this new client wants to stop it.
-        machine->robot_state.robot_state = ROBOT_STATE_STOPPED;
-        if(client->is_stop_only == false) {
-            machine->robot_state.remote_stop_id = client->local_remote_id;
-            machine->robot_state.restart_state = ROBOT_RESTART_STATE_STOP_RECEIVED;
-        }
-        else {
-            machine->robot_state.remote_stop_id = 0U;
+        // if someone else stops then we'll need the stop/ok sequence from the
+        // original pstop
+        if(machine->robot_state.remote_stop_id != client->local_remote_id) {
+            machine->robot_state.restart_state = ROBOT_RESTART_STATE_NEED_STOP;
         }
     }
-
+    machine->robot_state.robot_state = ROBOT_STATE_STOPPED;
     machine->application->status_cb(PSTOP_STATUS_STOP);
 
     return PSTOP_OK;

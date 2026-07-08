@@ -70,6 +70,20 @@ pstop_remote_deactivate(pstop_remote_data_t *remote)
     remote->remote_state = PSTOP_REMOTE_UNKNOWN;
 }
 
+uint16_t
+pstop_remote_num_stopped(const pstop_remotes_t *remotes)
+{
+    uint16_t count = 0U;
+
+    for(uint16_t i = 0U; i < remotes->max_remotes; ++i) {
+        if(remotes->remotes[i].remote_state == PSTOP_REMOTE_STOPPED) {
+            count++;
+        }
+    }
+
+    return count;
+}
+
 pstop_remote_data_t *
 pstop_remote_get(const pstop_remotes_t *remotes, const device_id_t *remote_id)
 {

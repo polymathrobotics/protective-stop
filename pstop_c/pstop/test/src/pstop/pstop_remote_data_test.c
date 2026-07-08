@@ -118,6 +118,26 @@ test_remove_client(void)
 }
 
 void
+test_num_stopped(void)
+{
+    pstop_remote_data_t client_data[2];
+    pstop_remotes_t clients = {
+        .remotes = client_data,
+        .max_remotes = 2
+    };
+
+    pstop_remotes_init(&clients);
+
+    TEST_ASSERT_EQUAL(0U, pstop_remote_num_stopped(&clients));
+    pstop_remote_data_t *c1 = pstop_remote_get_free_remote(&clients);
+
+    c1->remote_state = PSTOP_REMOTE_STOPPED;
+    TEST_ASSERT_EQUAL(1U, pstop_remote_num_stopped(&clients));
+    pstop_remote_deactivate(c1);
+    TEST_ASSERT_EQUAL(0U, pstop_remote_num_stopped(&clients));
+}
+
+void
 main_pstop_client_test(void)
 {
     UnitySetTestFile("pstop_remote_test.c");
@@ -126,4 +146,5 @@ main_pstop_client_test(void)
     RUN_TEST(test_clients_init);
     RUN_TEST(test_get_free_client);
     RUN_TEST(test_remove_client);
+    RUN_TEST(test_num_stopped);
 }
