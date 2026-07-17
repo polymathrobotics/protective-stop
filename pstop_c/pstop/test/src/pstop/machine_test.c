@@ -644,6 +644,116 @@ test_bond_stop_ok_stop_only_operator(void)
 
 static
 void
+test_bond_after_bond_req_3_24(void)
+{
+    pstop_machine_t machine;
+
+    machine_init(&machine, &pstop_app, pstop_clients, MAX_CLIENTS);
+
+    device_id_t id;
+    pstop_msg_t msg;
+    init_client(&id, &msg, 1234);
+
+    pstop_msg_t resp;
+    pstop_message_init(&resp);
+
+    details.allowed = true;
+    details.stop_only = 0;
+    details.heartbeat_ms = 500U;
+    current_time = 100U;
+
+    robot_status_counter = 0;
+
+    msg.message = PSTOP_MESSAGE_BOND;
+    TEST_ASSERT_EQUAL(PSTOP_OK, machine_handle_message(&machine, &msg, &resp));
+    TEST_ASSERT_EQUAL(PSTOP_MESSAGE_BOND, resp.message);
+    TEST_ASSERT_EQUAL(100U, pstop_clients[0].remote_data.last_timestamp);
+
+    TEST_ASSERT_EQUAL(0, robot_status_counter);
+
+    msg.message = PSTOP_MESSAGE_BOND;
+    TEST_ASSERT_EQUAL(PSTOP_OK, machine_handle_message(&machine, &msg, &resp));
+    TEST_ASSERT_EQUAL(PSTOP_MESSAGE_BOND, resp.message);
+
+    TEST_ASSERT_EQUAL(0, robot_status_counter);
+    TEST_ASSERT_NOT_EQUAL(100U, pstop_clients[0].remote_data.last_timestamp);
+}
+
+static
+void
+test_bond_after_stop_ok_sequence_req_3_03(void)
+{
+    pstop_machine_t machine;
+
+    machine_init(&machine, &pstop_app, pstop_clients, MAX_CLIENTS);
+
+    device_id_t id;
+    pstop_msg_t msg;
+    init_client(&id, &msg, 1234);
+
+    pstop_msg_t resp;
+    pstop_message_init(&resp);
+
+    details.allowed = true;
+    details.stop_only = 0;
+    details.heartbeat_ms = 500U;
+    current_time = 100U;
+
+    robot_status_counter = 0;
+
+    msg.message = PSTOP_MESSAGE_BOND;
+    TEST_ASSERT_EQUAL(PSTOP_OK, machine_handle_message(&machine, &msg, &resp));
+    TEST_ASSERT_EQUAL(PSTOP_MESSAGE_BOND, resp.message);
+    TEST_ASSERT_EQUAL(100U, pstop_clients[0].remote_data.last_timestamp);
+
+    TEST_ASSERT_EQUAL(0, robot_status_counter);
+
+    msg.message = PSTOP_MESSAGE_STOP;
+    TEST_ASSERT_EQUAL(PSTOP_OK, machine_handle_message(&machine, &msg, &resp));
+    TEST_ASSERT_EQUAL(PSTOP_MESSAGE_STOP, resp.message);
+    TEST_ASSERT_EQUAL(1, robot_status_counter);
+    TEST_ASSERT_EQUAL(PSTOP_STATUS_STOP, last_status);
+
+    msg.message = PSTOP_MESSAGE_OK;
+    TEST_ASSERT_EQUAL(PSTOP_OK, machine_handle_message(&machine, &msg, &resp));
+    TEST_ASSERT_EQUAL(PSTOP_MESSAGE_OK, resp.message);
+    TEST_ASSERT_EQUAL(2, robot_status_counter);
+    TEST_ASSERT_EQUAL(PSTOP_STATUS_OK, last_status);
+    TEST_ASSERT_EQUAL(PSTOP_REMOTE_OK, pstop_clients[0].remote_state);
+
+    // this remote has control
+    TEST_ASSERT_EQUAL(machine.robot_state.remote_stop_id, pstop_clients[0].local_remote_id);
+
+    // this is a problem and should stop machine
+    msg.message = PSTOP_MESSAGE_BOND;
+    TEST_ASSERT_EQUAL(PSTOP_OK, machine_handle_message(&machine, &msg, &resp));
+    TEST_ASSERT_EQUAL(PSTOP_MESSAGE_STOP, resp.message);
+    TEST_ASSERT_EQUAL(ROBOT_RESTART_STATE_NEED_STOP, machine.robot_state.restart_state);
+    TEST_ASSERT_EQUAL(machine.robot_state.remote_stop_id, pstop_clients[0].local_remote_id);
+    TEST_ASSERT_EQUAL(3, robot_status_counter);
+    TEST_ASSERT_EQUAL(PSTOP_STATUS_STOP, last_status);
+
+    // now do stop/ok sequence to get moving again
+    msg.message = PSTOP_MESSAGE_STOP;
+    TEST_ASSERT_EQUAL(PSTOP_OK, machine_handle_message(&machine, &msg, &resp));
+    TEST_ASSERT_EQUAL(PSTOP_MESSAGE_STOP, resp.message);
+    TEST_ASSERT_EQUAL(ROBOT_RESTART_STATE_STOP_RECEIVED, machine.robot_state.restart_state);
+    TEST_ASSERT_EQUAL(4, robot_status_counter);
+    TEST_ASSERT_EQUAL(PSTOP_STATUS_STOP, last_status);
+
+    msg.message = PSTOP_MESSAGE_OK;
+    TEST_ASSERT_EQUAL(PSTOP_OK, machine_handle_message(&machine, &msg, &resp));
+    TEST_ASSERT_EQUAL(PSTOP_MESSAGE_OK, resp.message);
+    TEST_ASSERT_EQUAL(5, robot_status_counter);
+    TEST_ASSERT_EQUAL(PSTOP_STATUS_OK, last_status);
+    TEST_ASSERT_EQUAL(PSTOP_REMOTE_OK, pstop_clients[0].remote_state);
+
+    // this remote has control
+    TEST_ASSERT_EQUAL(machine.robot_state.remote_stop_id, pstop_clients[0].local_remote_id);
+}
+
+static
+void
 test_2_clients(void)
 {
     pstop_machine_t machine;
@@ -1042,6 +1152,8 @@ main_machine_test(void)
     RUN_TEST(test_2_clients_unbond_second);
     RUN_TEST(test_2_clients_stop_unbond);
     RUN_TEST(test_bond_ok);
+    RUN_TEST(test_bond_after_bond_req_3_24);
+    RUN_TEST(test_bond_after_stop_ok_sequence_req_3_03);
     RUN_TEST(test_bond_stop_ok_req_3_04);
     RUN_TEST(test_bond_stop_ok_stop_only_operator);
     RUN_TEST(test_2_clients_stop_ok);
