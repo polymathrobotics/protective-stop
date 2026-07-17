@@ -687,9 +687,10 @@ test_bond_after_stop_ok_sequence_req_3_03(void)
 
     machine_init(&machine, &pstop_app, pstop_clients, MAX_CLIENTS);
 
-    device_id_t id;
-    pstop_msg_t msg;
+    device_id_t id, id2;
+    pstop_msg_t msg, msg2;
     init_client(&id, &msg, 1234);
+    init_client(&id2, &msg2, 1235);
 
     pstop_msg_t resp;
     pstop_message_init(&resp);
@@ -723,6 +724,12 @@ test_bond_after_stop_ok_sequence_req_3_03(void)
 
     // this remote has control
     TEST_ASSERT_EQUAL(machine.robot_state.remote_stop_id, pstop_clients[0].local_remote_id);
+
+    // bond from new clients is still OK
+    msg2.message = PSTOP_MESSAGE_BOND;
+    TEST_ASSERT_EQUAL(PSTOP_OK, machine_handle_message(&machine, &msg2, &resp));
+    TEST_ASSERT_EQUAL(PSTOP_MESSAGE_BOND, resp.message);
+    TEST_ASSERT_EQUAL(PSTOP_STATUS_OK, last_status);
 
     // this is a problem and should stop machine
     msg.message = PSTOP_MESSAGE_BOND;
