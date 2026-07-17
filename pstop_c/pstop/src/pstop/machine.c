@@ -56,6 +56,15 @@ handle_bond_msg(pstop_machine_t *machine, pstop_remote_data_t *client, const pst
         return PSTOP_OK;
     }
 
+    if(client->remote_state == PSTOP_REMOTE_OK) {
+        machine->robot_state.restart_state = ROBOT_RESTART_STATE_NEED_STOP;
+        machine->robot_state.robot_state = ROBOT_STATE_STOPPED;
+        machine->application->status_cb(PSTOP_STATUS_STOP);
+
+        resp->message = PSTOP_MESSAGE_STOP;
+        return PSTOP_OK;
+    }
+
     client->remote_state = PSTOP_REMOTE_BONDED;
 
     if(pstop_remote_num_active(&(machine->remotes)) == 1U) {
@@ -123,7 +132,11 @@ handle_stop_msg(pstop_machine_t *machine, pstop_remote_data_t *client, const pst
         if(machine->robot_state.remote_stop_id != client->local_remote_id) {
             machine->robot_state.restart_state = ROBOT_RESTART_STATE_NEED_STOP;
         }
+        else {
+            machine->robot_state.restart_state = ROBOT_RESTART_STATE_STOP_RECEIVED;
+        }
     }
+
     machine->robot_state.robot_state = ROBOT_STATE_STOPPED;
     machine->application->status_cb(PSTOP_STATUS_STOP);
 
