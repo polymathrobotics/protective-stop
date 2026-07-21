@@ -109,8 +109,6 @@ counter) is still useful for unrelated memory issues. The "60-90 s"
 timing was actually the v15.25 `bc_clear` overflow firing at the
 2-min healthy timer — the timing matched coincidentally.
 
-
-
 ## Symptom in detail
 
 What we observe, deterministically, on every fresh boot once Tailscale
@@ -122,12 +120,12 @@ registers and the WG peer table is populated:
    the WG netif at 5–19 ms RTT, normal `coord/derp` keepalives, normal
    admin UI responses.
 3. ~T+60–90 s: silently, all of:
-   - `tailscale ping 100.97.180.43` from host returns `no answer`
-   - `curl http://10.42.0.80/` over USB-NCM hangs (connect succeeds,
+   + `tailscale ping 100.97.180.43` from host returns `no answer`
+   + `curl http://10.42.0.80/` over USB-NCM hangs (connect succeeds,
      read times out)
-   - `curl http://10.42.0.1/` from chip side (pstop UDP) `EAGAIN`s
+   + `curl http://10.42.0.1/` from chip side (pstop UDP) `EAGAIN`s
      repeatedly
-   - UART log goes quiet (no microlink log lines)
+   + UART log goes quiet (no microlink log lines)
 4. ~T+150–180 s: liveness watchdog (`net_liveness_task` in `main.c`)
    notices no INET_PING progress for 60 s past its 90 s grace, calls
    `abort()`, system reboots, cycle repeats.
@@ -158,9 +156,11 @@ than anything else: a single shared resource starves, and every netif
 that needs it stalls together.
 
 **The fix is one line:**
+
 ```
 CONFIG_LWIP_PBUF_POOL_SIZE=64
 ```
+
 in `examples/dual_core_safety/sdkconfig.defaults`. Costs ~3 KB of
 internal RAM (we have plenty of headroom on the S3).
 
@@ -233,19 +233,19 @@ state machine) — try the pbuf fix first.
 These mitigations are committed and help, but aren't enough on their
 own:
 
-- `bf499bd`: `wifi_idle_init()` doesn't call `esp_wifi_start()` →
++ `bf499bd`: `wifi_idle_init()` doesn't call `esp_wifi_start()` →
   eliminated the WiFi scan storm (hundreds of "Haven't to connect to a
   suitable AP" logs/sec that were lwip-starving by themselves).
-- `0471d8c`: `DERP_CONNECT_FAIL_CLEANUP()` macro on every DERP connect
++ `0471d8c`: `DERP_CONNECT_FAIL_CLEANUP()` macro on every DERP connect
   failure path → plugs the obvious mbedTLS leak (hypothesis #3 covers
   the *non-obvious* paths still potentially leaking).
-- `8bb88e9`: `[TIMING-DERP]` logs at every connect phase → makes wedge
++ `8bb88e9`: `[TIMING-DERP]` logs at every connect phase → makes wedge
   bisection possible from UART alone.
-- `ml_coord.c`: 2 s `vTaskDelay` before signalling `ML_EVT_DERP_CONNECT_REQ`
++ `ml_coord.c`: 2 s `vTaskDelay` before signalling `ML_EVT_DERP_CONNECT_REQ`
   → staggers DERP connect after peer-list ingestion settles. Helped
   measurably with the cold-start phase but doesn't address the steady-state
   wedge.
-- `sdkconfig.defaults`: `CONFIG_LWIP_TCP_RECVMBOX_SIZE=32` (was 6) →
++ `sdkconfig.defaults`: `CONFIG_LWIP_TCP_RECVMBOX_SIZE=32` (was 6) →
   bigger TCP RX backlog per socket; helped DERP HTTP-upgrade success
   rate from ~50% to ~95% on cold boot.
 

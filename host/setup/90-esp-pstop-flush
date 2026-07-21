@@ -1,4 +1,6 @@
 #!/bin/sh
+# SPDX-FileCopyrightText: 2026 Polymath Robotics
+# SPDX-License-Identifier: Apache-2.0
 # NetworkManager dispatcher: clear stale ARP/neighbor cache when the pstop
 # tether comes up, so the host doesn't sit on an INCOMPLETE neighbor from a
 # previous boot (one half of the "needs a power cycle" symptom).

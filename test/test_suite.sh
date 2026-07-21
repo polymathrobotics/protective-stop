@@ -1,4 +1,6 @@
 #!/bin/bash
+# SPDX-FileCopyrightText: 2026 Polymath Robotics
+# SPDX-License-Identifier: Apache-2.0
 # Comprehensive test suite for v15.2 dual_core_safety
 # Assumes chip is at 10.42.0.80 with ts_boot=0 (Tailscale paused at boot)
 

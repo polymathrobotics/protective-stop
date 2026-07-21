@@ -13,12 +13,11 @@ from launch import LaunchDescription
 from launch.actions import IncludeLaunchDescription
 from launch.substitutions import PathSubstitution
 from launch_ros.substitutions import FindPackageShare
-from rcl_interfaces.srv import SetParameters
-
 from protective_stop_msg.srv import ProtectiveStop as ProtectiveStopSrv
 from protective_stop_node.models import PStopRemoteStatusEnum
 from protective_stop_node.test_utils.base_test import BaseTestProtectiveStopNode
 from protective_stop_node.test_utils.helpers import build_pstop_message
+from rcl_interfaces.srv import SetParameters
 
 machine_uuid = 'machine-uuid'
 TEST_HEARTBEAT_TIMEOUT_S = 0.1

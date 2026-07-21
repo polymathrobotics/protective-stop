@@ -6,13 +6,13 @@ import unittest
 import uuid
 
 import rclpy
-
 from protective_stop_msg.msg import (
     ProtectiveStop,
     ProtectiveStopDebug,
     ProtectiveStopHeartbeat,
 )
 from protective_stop_msg.srv import ProtectiveStop as ProtectiveStopSrv
+
 from protective_stop_node.protective_stop_node import (
     PROTECTIVE_STOP_DEBUG_TOPIC,
     PROTECTIVE_STOP_HB_TOPIC,

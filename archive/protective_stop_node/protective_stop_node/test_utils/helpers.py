@@ -3,7 +3,6 @@
 import time
 
 from builtin_interfaces.msg import Time
-
 from protective_stop_msg.msg import ProtectiveStop
 
 PSTOP_MESSAGE_VERSION = 0

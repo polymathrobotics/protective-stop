@@ -1,4 +1,6 @@
 #!/bin/bash
+# SPDX-FileCopyrightText: 2026 Polymath Robotics
+# SPDX-License-Identifier: Apache-2.0
 # Long-soak logger. Records every state.json sample with timestamp.
 # Detects:
 #  - wedge (unreach)

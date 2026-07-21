@@ -1,4 +1,6 @@
 #!/bin/bash
+# SPDX-FileCopyrightText: 2026 Polymath Robotics
+# SPDX-License-Identifier: Apache-2.0
 # MISRA C:2012 check for the pstop firmware we own, using the free cppcheck
 # misra addon. Covers firmware/main + firmware/components/dcs_support.
 # EXCLUDES components/pstop/upstream (certified pstop_c, checked upstream) and

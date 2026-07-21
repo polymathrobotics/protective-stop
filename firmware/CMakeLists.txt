@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Polymath Robotics
+# SPDX-License-Identifier: Apache-2.0
 cmake_minimum_required(VERSION 3.16)
 
 # *** REQUIRES ESP-IDF v5.5 OR NEWER. ***

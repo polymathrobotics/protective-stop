@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Polymath Robotics
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * @file nacl_box.h
  * @brief Minimal NaCl crypto_box implementation for Tailscale challenge response
@@ -8,8 +11,8 @@
 #ifndef _NACL_BOX_H_
 #define _NACL_BOX_H_
 
-#include <stdint.h>
 #include <stddef.h>
+#include <stdint.h>
 
 #define NACL_BOX_NONCEBYTES 24
 #define NACL_BOX_MACBYTES 16
@@ -29,11 +32,13 @@
  * @param sender_sk Sender's secret key (32 bytes)
  * @return 0 on success, -1 on failure
  */
-int nacl_box(uint8_t *ciphertext,
-             const uint8_t *plaintext, size_t plaintext_len,
-             const uint8_t *nonce,
-             const uint8_t *recipient_pk,
-             const uint8_t *sender_sk);
+int nacl_box(
+  uint8_t * ciphertext,
+  const uint8_t * plaintext,
+  size_t plaintext_len,
+  const uint8_t * nonce,
+  const uint8_t * recipient_pk,
+  const uint8_t * sender_sk);
 
 /**
  * @brief Compute shared secret for NaCl box (HSalsa20 of X25519 result)
@@ -43,9 +48,7 @@ int nacl_box(uint8_t *ciphertext,
  * @param sender_sk Sender's secret key
  * @return 0 on success, -1 on failure
  */
-int nacl_box_beforenm(uint8_t *shared_key,
-                      const uint8_t *recipient_pk,
-                      const uint8_t *sender_sk);
+int nacl_box_beforenm(uint8_t * shared_key, const uint8_t * recipient_pk, const uint8_t * sender_sk);
 
 /**
  * @brief Encrypt using precomputed shared key
@@ -57,10 +60,12 @@ int nacl_box_beforenm(uint8_t *shared_key,
  * @param shared_key Precomputed shared key from nacl_box_beforenm
  * @return 0 on success, -1 on failure
  */
-int nacl_box_afternm(uint8_t *ciphertext,
-                     const uint8_t *plaintext, size_t plaintext_len,
-                     const uint8_t *nonce,
-                     const uint8_t *shared_key);
+int nacl_box_afternm(
+  uint8_t * ciphertext,
+  const uint8_t * plaintext,
+  size_t plaintext_len,
+  const uint8_t * nonce,
+  const uint8_t * shared_key);
 
 /**
  * @brief Decrypt a message using NaCl crypto_box_open
@@ -75,11 +80,13 @@ int nacl_box_afternm(uint8_t *ciphertext,
  * @param recipient_sk Recipient's secret key (32 bytes)
  * @return 0 on success, -1 on MAC verification failure
  */
-int nacl_box_open(uint8_t *plaintext,
-                  const uint8_t *ciphertext, size_t ciphertext_len,
-                  const uint8_t *nonce,
-                  const uint8_t *sender_pk,
-                  const uint8_t *recipient_sk);
+int nacl_box_open(
+  uint8_t * plaintext,
+  const uint8_t * ciphertext,
+  size_t ciphertext_len,
+  const uint8_t * nonce,
+  const uint8_t * sender_pk,
+  const uint8_t * recipient_sk);
 
 /**
  * @brief Decrypt using precomputed shared key
@@ -91,9 +98,11 @@ int nacl_box_open(uint8_t *plaintext,
  * @param shared_key Precomputed shared key from nacl_box_beforenm
  * @return 0 on success, -1 on MAC verification failure
  */
-int nacl_box_open_afternm(uint8_t *plaintext,
-                          const uint8_t *ciphertext, size_t ciphertext_len,
-                          const uint8_t *nonce,
-                          const uint8_t *shared_key);
+int nacl_box_open_afternm(
+  uint8_t * plaintext,
+  const uint8_t * ciphertext,
+  size_t ciphertext_len,
+  const uint8_t * nonce,
+  const uint8_t * shared_key);
 
 #endif /* _NACL_BOX_H_ */

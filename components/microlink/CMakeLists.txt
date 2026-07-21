@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Polymath Robotics
+# SPDX-License-Identifier: Apache-2.0
 set(SRCS
     "src/microlink.c"
     "src/ml_coord.c"

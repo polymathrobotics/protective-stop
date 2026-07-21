@@ -30,10 +30,12 @@ black-channel protocol:
 
 - The machine echoes the remote's own data back every reply
   (`pstop_c/.../protocol.c:118-119`):
+
   ```c
   resp->received_counter = req->counter;   // remote's counter, echoed
   resp->received_stamp   = req->stamp;     // remote's stamp, echoed
   ```
+
 - The machine also *validates* the reverse direction — it checks that the
   remote correctly echoed the machine's counter/stamp, with bounded loss and
   monotonic time (`protocol.c:26-46`: `MSG_LOST`, `OUT_OF_ORDER`).

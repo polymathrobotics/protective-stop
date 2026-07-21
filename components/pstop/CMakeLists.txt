@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Polymath Robotics
+# SPDX-License-Identifier: Apache-2.0
 # ESP-IDF component wrapper for polymathrobotics/protective-stop's pstop_c.
 #
 # The certified pstop_c library lives at the repo-root `pstop_c/` folder

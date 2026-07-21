@@ -168,7 +168,7 @@ down WiFi auto-enables (`active_iface=3`, yellow) and carries Tailscale.
 appearing minutes after boot promotes Ethernet on the next tick — simulate by
 keeping Ethernet unplugged at boot (fails over to USB/WiFi) then plugging it in.
 
-3. **Pass:** correct tier order (USB before WiFi), both-direction switching,
+1. **Pass:** correct tier order (USB before WiFi), both-direction switching,
    fresh DHCP on Ethernet return, `mm=0` throughout, no reboot. The asymmetric
    up/down hysteresis must hold (no churn on a quick re-plug), a link-local
    `169.254.x` lease must NOT count as usable, and **a tier enabled by the admin
@@ -180,9 +180,11 @@ keeping Ethernet unplugged at boot (fails over to USB/WiFi) then plugging it in.
 shows under sustained mixed-fault load. This is the branch's overall stability
 gate.
 1. Bring the chip up with Tailscale on and pstop flowing, then run the harness:
+
    ```sh
    python3 tools/chaos_soak.py [duration_seconds]
    ```
+
    It probes reachability + `/state.json` telemetry while injecting reboots,
    Ethernet drops, WiFi failover, and USB + WireGuard toggles, then reports ping
    success rate, RTT, `pstop_mismatch`, and crash count.
@@ -190,20 +192,22 @@ gate.
    > boots (`DCS_SAFETY_MAX_RAPID_BOOTS=3`, clears after 120 s stable uptime) and
    > will roll firmware back on a crash-loop. The harness already paces them.
 2. **Pass:** **zero unexpected reboots/crashes**, `pstop_mismatch` bounded, the
-   chip **recovers from every injected chaos event** (each Ethernet drop /
+chip **recovers from every injected chaos event** (each Ethernet drop /
    failover / toggle returns to a reachable, pstop-flowing state), and a **high
-   pstop reply rate** (~99 %+) overall.
+pstop reply rate** (~99 %+) overall.
 
 ---
 
 ## Debugging a crash (no UART adapter needed)
 Console/panic output goes to UART0 (GPIO43/44), which isn't wired on this bench.
 Use the chip's **built-in USB-JTAG** instead for full backtraces:
+
 ```sh
 openocd -f board/esp32s3-builtin.cfg &                 # GDB server on :3333
 xtensa-esp32s3-elf-gdb -batch -x catch.gdb build/microlink_dual_core_safety.elf
 # catch.gdb: target remote :3333; break esp_panic_handler; break abort; continue
 ```
+
 On a panic the breakpoint halts the chip *before* it reboots → `bt` /
 `thread apply all bt` show the faulting task. To reproduce a full-Tailscale-only
 crash, temporarily set `DCS_DEBUG_FORCE_FULL_TS` in `dcs_support.c` to bypass the
@@ -211,16 +215,16 @@ boot-count `derp_only` ladder (revert before commit). Note: once the app's USB-N
 tether (TinyUSB) is active the USB-JTAG is replaced — reflash via OTA then.
 
 ## Troubleshooting (lessons from the bench)
-- **`4WAY_HANDSHAKE_TIMEOUT` at workable signal (e.g. -71 dBm) with a known-good
++ **`4WAY_HANDSHAKE_TIMEOUT` at workable signal (e.g. -71 dBm) with a known-good
   PSK** points to the **station's RX buffering/config**, not the AP or the
   password. On this board it was an over-trimmed WiFi buffer config
   (`static_rx=4`) starving the RX ring and dropping EAPOL frames — restoring the
   stock `WIFI_INIT_CONFIG_DEFAULT()` buffers fixed association. Validate the PSK
   independently on a laptop first (`nmcli device wifi connect <ssid> password
   <pw>`, then revert) before suspecting credentials.
-- **OTA over Ethernet occasionally returns `curl: HTTP 000`** — this is a
++ **OTA over Ethernet occasionally returns `curl: HTTP 000`** — this is a
   transient; just retry the upload.
-- **Space reboots > ~120 s apart.** The safety layer counts rapid boots
++ **Space reboots > ~120 s apart.** The safety layer counts rapid boots
   (`DCS_SAFETY_MAX_RAPID_BOOTS=3`, clears after 120 s stable uptime) and will
   roll firmware back if it sees a crash-loop — back-to-back manual reboots can
   trip a false rollback.

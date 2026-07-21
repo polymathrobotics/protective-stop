@@ -4,13 +4,12 @@ from enum import Enum
 from typing import Optional
 
 from builtin_interfaces.msg import Time as TimeMsg
-from pydantic import BaseModel, Field, root_validator, validator
-from rclpy.time import Time
-
 from protective_stop_msg.msg import (
     ProtectiveStopDebugRemote,
     ProtectiveStopStatus,
 )
+from pydantic import BaseModel, Field, root_validator, validator
+from rclpy.time import Time
 
 
 class Ros2Time(BaseModel):

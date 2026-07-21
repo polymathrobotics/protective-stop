@@ -1,4 +1,6 @@
 #!/bin/bash
+# SPDX-FileCopyrightText: 2026 Polymath Robotics
+# SPDX-License-Identifier: Apache-2.0
 # pstop chaos ladder — sweeps impairments through tools/pstop_chaos_proxy.py.
 # Emits phase-stamped chip samples to chaos.csv and phase markers to
 # phases.log (both next to this script); machine transitions land in the

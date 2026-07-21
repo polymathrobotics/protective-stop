@@ -11,7 +11,6 @@ from launch import LaunchDescription
 from launch.actions import IncludeLaunchDescription
 from launch.substitutions import PathSubstitution
 from launch_ros.substitutions import FindPackageShare
-
 from protective_stop_node.test_utils.base_test import BaseTestProtectiveStopNode
 
 """

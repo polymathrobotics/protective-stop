@@ -82,25 +82,32 @@ silence.**
 ## Quickstart
 
 **Remote firmware**
+
 ```sh
 cp firmware/sdkconfig.credentials.example firmware/sdkconfig.credentials   # WiFi + Tailscale creds
 cd firmware && source ~/esp-idf-5.5/export.sh && idf.py build
 ```
+
 First flash is over the wire (hold **BOOT**, tap **RST** for ROM download
 mode, since TinyUSB owns USB-OTG at runtime):
+
 ```sh
 idf.py -p /dev/ttyACM0 flash
 ```
+
 Every update after that is over the network:
+
 ```sh
 curl -u admin:<pw> --data-binary @build/pstop_remote.bin http://<chip>/admin/api/ota
 ```
 
 **Machine (robot host)** — needs only `cc` + `make`, no ESP-IDF:
+
 ```sh
 cd host && make && ./machine_app_runner machine.toml     # listens on 0.0.0.0:8890
 curl -X POST "http://<chip>/api/pstop_peer?ip=<machine-ip>&port=8890"
 ```
+
 Arm by pressing and holding the switch ≥0.5 s, then releasing.
 
 ## Key facts

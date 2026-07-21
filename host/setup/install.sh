@@ -1,4 +1,6 @@
 #!/bin/bash
+# SPDX-FileCopyrightText: 2026 Polymath Robotics
+# SPDX-License-Identifier: Apache-2.0
 # Install the host-side USB-NCM stability config for the pstop tether.
 # Pure host config — no device reflash. Idempotent.
 set -e

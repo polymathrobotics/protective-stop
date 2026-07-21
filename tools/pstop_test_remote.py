@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: 2026 Polymath Robotics
+# SPDX-License-Identifier: Apache-2.0
 """Scripted pstop remote for machine-side policy testing.
 
 Speaks the pstop_c wire protocol (40-byte messages, CRC16 poly 0x8D95,
@@ -27,10 +29,10 @@ import time
 
 PSTOP_VERSION = 0x00
 MSG_OK, MSG_STOP, MSG_BOND, MSG_UNBOND = 0, 1, 2, 3
-NAMES = {0: "OK", 1: "STOP", 2: "BOND", 3: "UNBOND"}
+NAMES = {0: 'OK', 1: 'STOP', 2: 'BOND', 3: 'UNBOND'}
 SIZE = 40
 
-REMOTE_ID = 0x01020381          # distinct from the chip's 0x01020380
+REMOTE_ID = 0x01020381  # distinct from the chip's 0x01020380
 MACHINE_ID = 0x01020304
 HEARTBEAT_MS = 1000
 
@@ -47,19 +49,27 @@ def crc16(data: bytes) -> int:
 
 def encode(message, stamp, received_stamp, counter, received_counter):
     body = struct.pack(
-        "<BBQQIIIII",
-        PSTOP_VERSION, message, stamp, received_stamp,
-        REMOTE_ID, MACHINE_ID, HEARTBEAT_MS, counter, received_counter)
-    return body + struct.pack("<H", crc16(body))
+        '<BBQQIIIII',
+        PSTOP_VERSION,
+        message,
+        stamp,
+        received_stamp,
+        REMOTE_ID,
+        MACHINE_ID,
+        HEARTBEAT_MS,
+        counter,
+        received_counter,
+    )
+    return body + struct.pack('<H', crc16(body))
 
 
 def decode(data):
-    (version, message, stamp, received_stamp, sender, receiver,
-     hb, counter, received_counter) = struct.unpack("<BBQQIIIII", data[:38])
-    (checksum,) = struct.unpack("<H", data[38:40])
+    (version, message, stamp, received_stamp, sender, receiver, hb, counter, received_counter) = struct.unpack(
+        '<BBQQIIIII', data[:38]
+    )
+    (checksum,) = struct.unpack('<H', data[38:40])
     ok = checksum == crc16(data[:38])
-    return dict(message=message, stamp=stamp, counter=counter,
-                received_counter=received_counter, crc_ok=ok)
+    return dict(message=message, stamp=stamp, counter=counter, received_counter=received_counter, crc_ok=ok)
 
 
 class Remote:
@@ -77,16 +87,15 @@ class Remote:
     def xfer(self, message):
         """Send one message, return the machine's reply dict or None."""
         self.counter += 1
-        pkt = encode(message, self.now_ms(), self.last_rx_stamp,
-                     self.counter, self.last_rx_counter)
+        pkt = encode(message, self.now_ms(), self.last_rx_stamp, self.counter, self.last_rx_counter)
         self.sock.send(pkt)
         try:
             reply = decode(self.sock.recv(SIZE))
         except socket.timeout:
             return None
-        if reply["crc_ok"]:
-            self.last_rx_counter = reply["counter"]
-            self.last_rx_stamp = reply["stamp"]
+        if reply['crc_ok']:
+            self.last_rx_counter = reply['counter']
+            self.last_rx_stamp = reply['stamp']
         return reply
 
     def bond(self):
@@ -103,11 +112,11 @@ class Remote:
                 reply = decode(self.sock.recv(SIZE))
             except socket.timeout:
                 continue
-            if reply["crc_ok"] and reply["message"] == MSG_BOND:
-                self.last_rx_counter = reply["counter"]
-                self.last_rx_stamp = reply["stamp"]
+            if reply['crc_ok'] and reply['message'] == MSG_BOND:
+                self.last_rx_counter = reply['counter']
+                self.last_rx_stamp = reply['stamp']
                 return True
-            time.sleep(2.5)   # let the machine age out stale state
+            time.sleep(2.5)  # let the machine age out stale state
         return False
 
     def stream(self, message, duration_s):
@@ -123,52 +132,48 @@ class Remote:
 
 
 def expect(cond, label):
-    print(f"  {'PASS' if cond else 'FAIL'}: {label}")
+    print(f'  {"PASS" if cond else "FAIL"}: {label}')
     return bool(cond)
 
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--host", default="127.0.0.1")
-    ap.add_argument("--port", type=int, default=8893)
+    ap.add_argument('--host', default='127.0.0.1')
+    ap.add_argument('--port', type=int, default=8893)
     args = ap.parse_args()
 
     r = Remote(args.host, args.port)
     ok = True
 
-    print("1. bond + OK stream (machine must stay STOP / NEED_STOP)")
+    print('1. bond + OK stream (machine must stay STOP / NEED_STOP)')
     if not r.bond():
-        sys.exit("bond failed — is machine_app_runner listening?")
+        sys.exit('bond failed — is machine_app_runner listening?')
     last = r.stream(MSG_OK, 1.5)
-    ok &= expect(last and last["message"] == MSG_STOP,
-                 "OK stream answered with STOP before any arming cycle")
+    ok &= expect(last and last['message'] == MSG_STOP, 'OK stream answered with STOP before any arming cycle')
 
-    print("2. blip: STOP 200 ms then OK (must be VETOED)")
+    print('2. blip: STOP 200 ms then OK (must be VETOED)')
     r.stream(MSG_STOP, 0.2)
     last = r.stream(MSG_OK, 1.5)
-    ok &= expect(last and last["message"] == MSG_STOP,
-                 "short STOP->OK did not arm (replies stay STOP)")
+    ok &= expect(last and last['message'] == MSG_STOP, 'short STOP->OK did not arm (replies stay STOP)')
 
-    print("3. press: STOP 800 ms then OK (must ARM)")
+    print('3. press: STOP 800 ms then OK (must ARM)')
     r.stream(MSG_STOP, 0.8)
     last = r.stream(MSG_OK, 1.5)
-    ok &= expect(last and last["message"] == MSG_OK,
-                 "held STOP->OK armed (replies turn OK)")
+    ok &= expect(last and last['message'] == MSG_OK, 'held STOP->OK armed (replies turn OK)')
 
-    print("4. blip while armed: robot stops, short release must NOT re-arm")
+    print('4. blip while armed: robot stops, short release must NOT re-arm')
     r.stream(MSG_STOP, 0.2)
     last = r.stream(MSG_OK, 1.5)
-    ok &= expect(last and last["message"] == MSG_STOP,
-                 "blip stopped the robot and the release was vetoed")
+    ok &= expect(last and last['message'] == MSG_STOP, 'blip stopped the robot and the release was vetoed')
 
-    print("5. press again (must re-arm)")
+    print('5. press again (must re-arm)')
     r.stream(MSG_STOP, 0.8)
     last = r.stream(MSG_OK, 1.5)
-    ok &= expect(last and last["message"] == MSG_OK, "re-armed after veto")
+    ok &= expect(last and last['message'] == MSG_OK, 're-armed after veto')
 
-    print("ALL PASS" if ok else "FAILURES PRESENT")
+    print('ALL PASS' if ok else 'FAILURES PRESENT')
     sys.exit(0 if ok else 1)
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()

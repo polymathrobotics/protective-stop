@@ -160,3 +160,11 @@ CONFIG_ESP_COREDUMP_DATA_FORMAT_ELF=y
 CONFIG_ESP_COREDUMP_CHECKSUM_CRC32=y
 CONFIG_ESP_COREDUMP_CHECK_BOOT=y
 CONFIG_ESP_COREDUMP_MAX_TASKS_NUM=64
+
+# Fleet coordination / OTA. 100.92.1.78 is the central server that updates and
+# coordinates the pstops; it is baked into every build as a permanently-allowed,
+# non-removable allowlist peer (CONFIG_ML_FLEET_SERVER_IP, enforced in
+# ml_config_httpd.c). Fleet OTA polls the same host. The API key is a secret and
+# lives in sdkconfig.credentials (CONFIG_ML_OTA_API_KEY), never committed.
+CONFIG_ML_FLEET_SERVER_IP="100.92.1.78"
+CONFIG_ML_OTA_BACKEND_URL="http://100.92.1.78"

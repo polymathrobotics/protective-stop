@@ -5,11 +5,6 @@ import traceback
 from functools import partial
 
 import rclpy
-from rcl_interfaces.msg import ParameterDescriptor, SetParametersResult
-from rclpy.duration import Duration
-from rclpy.lifecycle import LifecycleNode, State, TransitionCallbackReturn
-from termcolor import colored
-
 from protective_stop_msg.msg import (
     ProtectiveStop,
     ProtectiveStopDebug,
@@ -19,6 +14,11 @@ from protective_stop_msg.msg import (
 from protective_stop_msg.srv import (
     ProtectiveStop as ProtectiveStopSrv,
 )
+from rcl_interfaces.msg import ParameterDescriptor, SetParametersResult
+from rclpy.duration import Duration
+from rclpy.lifecycle import LifecycleNode, State, TransitionCallbackReturn
+from termcolor import colored
+
 from protective_stop_node.models import (
     ConnectionStatus,
     PStopModel,

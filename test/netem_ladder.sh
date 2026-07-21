@@ -1,4 +1,6 @@
 #!/bin/bash
+# SPDX-FileCopyrightText: 2026 Polymath Robotics
+# SPDX-License-Identifier: Apache-2.0
 # WG/Tailscale-layer chaos v2 — self-installing, self-verifying, self-arming.
 #   - (re)installs tc scaffolding at start (the tether iface loses qdiscs on
 #     every chip reboot/USB re-enumeration)

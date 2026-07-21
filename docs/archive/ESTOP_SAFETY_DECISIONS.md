@@ -70,10 +70,12 @@ long harnesses + the pulldown RC need margin. Currently `ESTOP_SETTLE_US = 10`.
 
 **Context:** replace the bypassable `closed ? OK : STOP` branch with a value
 that *is* the safety state. Proposed (per core):
+
 ```
 each bit b in the tick's burst:  acc ^= (challenge_b ^ echo_b)   // 0 iff equal
 fault if acc != seed at end of tick      // any miscompare ever → non-zero, sticky
 ```
+
 `OK` is emitted only when `acc == seed` AND the freshness counter (B2) advanced.
 
 **Options:**

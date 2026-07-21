@@ -45,6 +45,7 @@ curl -m 120 -u admin:microlink \
 ```
 
 Expected response:
+
 ```json
 {"ok":true,"message":"Firmware updated. Rebooting..."}
 ```

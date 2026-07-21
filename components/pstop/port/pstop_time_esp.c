@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Polymath Robotics
+// SPDX-License-Identifier: Apache-2.0
+
 /* SPDX-License-Identifier: Apache-2.0
  *
  * ESP-IDF port of pstop's time_get_now().
@@ -15,9 +18,10 @@
  * heartbeat clock wants.
  */
 
-#include "pstop/time.h"
 #include "esp_timer.h"
+#include "pstop/time.h"
 
-uint64_t time_get_now(void) {
-    return (uint64_t)(esp_timer_get_time() / 1000);
+uint64_t time_get_now(void)
+{
+  return (uint64_t)(esp_timer_get_time() / 1000);
 }

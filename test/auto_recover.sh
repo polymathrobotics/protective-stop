@@ -1,4 +1,6 @@
 #!/bin/bash
+# SPDX-FileCopyrightText: 2026 Polymath Robotics
+# SPDX-License-Identifier: Apache-2.0
 # LEGACY bench script (v15 era) — prefer docs/RECOVERY_PLAYBOOK.md patterns.
 # Auto-recovery: detect when chip re-enumerates, then either OTA (if 4001)
 # or esptool-flash (if 1001 ROM mode). Either way push the current build.

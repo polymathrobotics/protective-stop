@@ -55,7 +55,7 @@ with append-only versioning, so no NVS-format break.
 - **NVS peer *cache* stays 64** (`CONFIG_ML_NVS_MAX_PEERS`): 128 entries
   (11.8 KB blob) can't safely coexist with a populated allowlist in the
   24 KB NVS partition. Growing the partition moves `ota_0` → full reflash
-  + NVS wipe + re-provisioning — a flash-layout breaking change deferred
+  - NVS wipe + re-provisioning — a flash-layout breaking change deferred
   to a hardware/major revision. The cache is only a boot accelerator;
   the control plane repopulates the rest.
 - **WG sessions stay lazy** (peers added passive, sessions form on peer

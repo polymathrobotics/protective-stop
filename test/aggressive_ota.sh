@@ -1,4 +1,6 @@
 #!/bin/bash
+# SPDX-FileCopyrightText: 2026 Polymath Robotics
+# SPDX-License-Identifier: Apache-2.0
 # LEGACY bench script (v15 era) — prefer docs/RECOVERY_PLAYBOOK.md patterns.
 # Wait for chip to be reachable + ml=3 or 4, then immediately pause Tailscale and OTA
 # Usage: [CHIP=<chip-ip>] ./aggressive_ota.sh

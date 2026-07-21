@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: 2026 Polymath Robotics
+# SPDX-License-Identifier: Apache-2.0
 """DISCO-storm injector — synthetic large-tailnet load for peer-scaling tests.
 
 Fires well-formed but UNKNOWN-key DISCO ping packets at the chip's WG UDP
@@ -24,10 +26,9 @@ protocol conformance.
 import argparse
 import os
 import socket
-import struct
 import time
 
-DISCO_MAGIC = b"TS\x9a\x8b\xc4\xd5"   # 6-byte magic (matches DISCO_MAGIC)
+DISCO_MAGIC = b'TS\x9a\x8b\xc4\xd5'  # 6-byte magic (matches DISCO_MAGIC)
 
 
 def make_ping(seq: int) -> bytes:
@@ -35,16 +36,16 @@ def make_ping(seq: int) -> bytes:
     # Random key+nonce+body: format-valid, decrypt-invalid = one box-open.
     key = os.urandom(32)
     nonce = os.urandom(24)
-    body = os.urandom(40)          # would-be encrypted ping payload
+    body = os.urandom(40)  # would-be encrypted ping payload
     return DISCO_MAGIC + key + nonce + body
 
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--host", required=True)
-    ap.add_argument("--port", type=int, default=51820)
-    ap.add_argument("--pps", type=int, default=40, help="packets per second")
-    ap.add_argument("--secs", type=int, default=300)
+    ap.add_argument('--host', required=True)
+    ap.add_argument('--port', type=int, default=51820)
+    ap.add_argument('--pps', type=int, default=40, help='packets per second')
+    ap.add_argument('--secs', type=int, default=300)
     args = ap.parse_args()
 
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -56,10 +57,10 @@ def main():
         s.sendto(make_ping(n), dest)
         n += 1
         if n % args.pps == 0:
-            print(f"sent {n} disco pings ({args.pps}/s)", flush=True)
+            print(f'sent {n} disco pings ({args.pps}/s)', flush=True)
         time.sleep(interval)
-    print(f"done: {n} packets over {args.secs}s")
+    print(f'done: {n} packets over {args.secs}s')
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()

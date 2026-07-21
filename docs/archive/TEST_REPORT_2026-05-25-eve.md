@@ -162,6 +162,7 @@ itself adds 3 root routes, and dual_core_safety registers 9.
 26 routes vs 24 slots → the last one (pstop_peer) was the casualty.
 
 Fix in dual_core_safety/main/main.c:
+
 ```c
 cfg.max_user_uri_handlers = 16;   // was default 8
 ```
@@ -256,21 +257,26 @@ and address the exact failure mode of this session.
    Hold BOOT, tap RESET (or unplug+replug while holding BOOT).
    Chip should come up as `303a:1001` on `/dev/ttyACM0` (or wherever
    the ROM device lands). Then:
-   ```sh
+
+```sh
    cd examples/dual_core_safety
    source ~/esp-idf-5.5/export.sh
    idf.py -p /dev/ttyACM0 erase-flash
    idf.py -p /dev/ttyACM0 flash
    ```
-   `erase-flash` is the important step — it nukes the otadata
+
+`erase-flash` is the important step — it nukes the otadata
    partition, clearing both partitions' invalid flags. After the
    subsequent `flash` the chip should come up cleanly on v15.3.3
    with `ts_boot_en` defaulted to false.
 
-3. **First-boot verification once the chip is up:**
+1. **First-boot verification once the chip is up:**
+
    ```sh
-   curl -s http://10.42.0.80/state.json | jq '{ts:.ts_boot_en, bc:.boot_count, fw:"v15.3.3"}'
+curl -s http://10.42.0.80/state.json | jq '{ts:.ts_boot_en, bc:.boot_count, fw:"v15.3.3"}'
+
    ```
+
    `ts_boot_en` should be 0 (default). `boot_count` should be 0.
-   Then re-run `/tmp/test_suite.sh` to confirm all the v15.3.1
+Then re-run `/tmp/test_suite.sh` to confirm all the v15.3.1
    passes still pass against v15.3.3.

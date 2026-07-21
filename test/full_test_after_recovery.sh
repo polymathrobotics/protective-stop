@@ -1,4 +1,6 @@
 #!/bin/bash
+# SPDX-FileCopyrightText: 2026 Polymath Robotics
+# SPDX-License-Identifier: Apache-2.0
 # Full test suite to run AFTER chip recovery (post-brick), per user's
 # original ask:
 #   - "test all features that have been worked on"

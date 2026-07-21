@@ -51,7 +51,7 @@ ordinary upstream outages, and a false fire feeds the boot-count → OTA-rollbac
 ## HIGH — concurrency / lifecycle
 
 - [ ] **H8 — unsynchronized `vTaskSuspend(g_dcs_wg_handle)`.** The shutdown hook + api_usb_enable
-  + boot-finalize all suspend ml_wg_mgr with no coordination with `LOCK_TCPIP_CORE()`, which
+  - boot-finalize all suspend ml_wg_mgr with no coordination with `LOCK_TCPIP_CORE()`, which
   wg_mgr holds across decrypt/ip_input/periodic. Suspend mid-critical-section freezes the lwIP
   core lock for the whole system → restart hang/panic (the documented "panic in the 500ms
   window"). Plus `g_dcs_wg_handle` is cached once and never revalidated → suspend-on-freed-TCB

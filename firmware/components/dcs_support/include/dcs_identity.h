@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Polymath Robotics
+// SPDX-License-Identifier: Apache-2.0
+
 #pragma once
 
 #include <stdint.h>
@@ -21,4 +24,4 @@
 uint32_t dcs_identity_device_id(void);
 
 /* "pstop-01xxxxxx" — Tailscale node hostname matching the device ID. */
-const char *dcs_identity_hostname(void);
+const char * dcs_identity_hostname(void);

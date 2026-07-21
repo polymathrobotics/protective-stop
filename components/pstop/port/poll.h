@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Polymath Robotics
+// SPDX-License-Identifier: Apache-2.0
+
 /* SPDX-License-Identifier: Apache-2.0
  *
  * Shim header so upstream's transport/include/transport/udp/udp_transport.h

@@ -364,6 +364,16 @@ menu "MicroLink V2 Configuration"
 
     menu "Fleet OTA Updates"
 
+        config ML_FLEET_SERVER_IP
+            string "Fleet coordination server VPN IP"
+            default "100.92.1.78"
+            help
+                Tailscale VPN IP of the central server that updates and
+                coordinates the fleet. This peer is PERMANENTLY allowed and
+                cannot be removed from the runtime allowlist — it must always
+                be reachable. Every other peer remains user-removable. Leave
+                empty only to disable the permanent-allow behavior.
+
         config ML_OTA_BACKEND_URL
             string "OTA backend URL"
             default ""
