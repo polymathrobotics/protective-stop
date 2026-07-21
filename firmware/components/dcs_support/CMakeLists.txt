@@ -1,6 +1,7 @@
 idf_component_register(
     SRCS
         "src/dcs_support.c"
+        "src/dcs_identity.c"
         "src/dcs_nvs.c"
         "src/dcs_safety.c"
         "src/dcs_boot.c"

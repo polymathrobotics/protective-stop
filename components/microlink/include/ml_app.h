@@ -58,6 +58,10 @@ typedef struct {
     ml_app_alt_network_fn_t try_alt_network;  /* Optional. See typedef above. */
     uint32_t alt_network_timeout_ms;          /* Timeout passed to try_alt_network.
                                                  0 = use ml_app default (5000 ms). */
+    const char *device_name;                  /* Tailscale node hostname. NULL/""
+                                                 = Kconfig CONFIG_ML_DEVICE_NAME.
+                                                 Must outlive ml_app_start (point
+                                                 at a static/const buffer). */
 } ml_app_config_t;
 
 #define ML_APP_CONFIG_DEFAULT() { \
@@ -71,6 +75,7 @@ typedef struct {
     .http_priority = 10,           \
     .try_alt_network = NULL,       \
     .alt_network_timeout_ms = 0,   \
+    .device_name = NULL,           \
 }
 
 /**

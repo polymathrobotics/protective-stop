@@ -31,24 +31,40 @@ degrades to "no message," which is a stop.
 pstop traffic rides Tailscale/WireGuard with automatic uplink failover
 (Ethernet → USB-NCM → WiFi) and DERP relay fallback; egress is pinned to
 the tunnel so a downed VPN fails safe rather than leaking plaintext. The
-machine wrapper adds a minimum-hold arming policy so an electrical blip
-can never perform the arming gesture.
+remote establishes the link itself — it homes its DERP connection on the
+machine's region and initiates the handshake, so no manual `tailscale ping`
+from the robot side is ever needed, and it re-establishes on its own after
+either end reboots. The machine wrapper adds a minimum-hold arming policy
+so an electrical blip can never perform the arming gesture.
 
+```mermaid
+flowchart LR
+    subgraph REMOTE["REMOTE — ESP32-S3 · firmware/"]
+        direction TB
+        SW["DPST E-stop switch<br/>pole1 GPIO39▸loopA▸GPIO40<br/>pole2 GPIO41▸loopB▸GPIO42"]
+        C0["core 0<br/>read loopA · build + encode"]
+        C1["core 1<br/>read loopB · build + encode"]
+        CMP{"comparator<br/>memcmp — transmit<br/>only on byte-match"}
+        SW --> C0 --> CMP
+        SW --> C1 --> CMP
+    end
+
+    NET(["Tailscale / WireGuard<br/>direct path · DERP relay fallback<br/>egress pinned to tunnel"])
+
+    subgraph MACHINE["MACHINE — robot host · host/"]
+        direction TB
+        WRAP["machine_app_runner<br/>machine.toml · min-hold arming<br/>status latch + anomaly log"]
+        LIB["pstop_c machine lib<br/>certified · UNMODIFIED<br/>bond · counters · CRC · timeout"]
+        STOP["heartbeat says STOP<br/>— or stops arriving —<br/>▶ robot stops"]
+        WRAP --> LIB --> STOP
+    end
+
+    CMP -->|"10 Hz pstop over UDP"| NET --> WRAP
 ```
-        REMOTE (ESP32-S3, firmware/)                 MACHINE (robot host, host/)
- ┌──────────────────────────────────────┐     ┌────────────────────────────────────┐
- │ DPST E-stop switch                    │     │ machine_app_runner (wrapper)       │
- │  pole1 GPIO39▶loopA▶GPIO40  core 0    │     │  ├ machine.toml, min-hold arming   │
- │  pole2 GPIO41▶loopB▶GPIO42  core 1    │     │  └ status latch + anomaly log      │
- │        ▼ verdict+encode (×2)          │ 10Hz│ pstop_c machine lib (certified,    │
- │  ┌─────────────────────────┐  pstop   │ UDP │ UNMODIFIED): bond / counters /     │
- │  │ comparator: memcmp, tx   ├──────────┼─────┼▶ CRC / heartbeat-timeout → STOP    │
- │  │ only on byte-match       │          │     └────────────────────────────────────┘
- │  └─────────────────────────┘          │              ▲ Tailscale / WireGuard
- │ WS2812 status ring · OTA+rollback ·    │              │ (direct, DERP fallback)
- │ net supervisor · watchdogs · microlink├──────────────┘
- └──────────────────────────────────────┘
-```
+
+Every failure mode — loop fault, core disagreement, stalled task, dropped
+link — degrades to *no message*, and no message is a stop. **Fail-safe by
+silence.**
 
 ## Repo layout
 
@@ -95,8 +111,12 @@ Arm by pressing and holding the switch ≥0.5 s, then releasing.
   transmission until the loops settle at boot — an EMC blip can't arm.
 - **Interfaces:** Ethernet > USB-NCM > WiFi, 1 Hz supervised failover.
   128-peer Tailscale capacity, priority-peer latency isolation.
+- **Identity:** each remote derives a stable per-unit ID from its MAC —
+  Tailscale node `pstop-01xxxxxx` matches its pstop device ID `0x01xxxxxx`;
+  the node record and VPN IP persist across reboot/OTA.
 - **Recovery:** task watchdog → network-liveness watchdog → crash counter
-  → OTA rollback, all button-free.
+  → OTA rollback, all button-free. Transport self-heals a lost link with
+  no operator action.
 - **Status ring:** yellow = no machine · blue = bonded · green = armed ·
   red = STOP · purple = lockstep mismatch.
 
@@ -110,7 +130,12 @@ chaos), and `./tools/misra_check.sh` (free-cppcheck MISRA C:2012 over the
 code we own; `pstop_c` excluded — see `docs/MISRA_COMPLIANCE_2026-07-21.md`).
 
 Validated across USB / Ethernet / WiFi (soaks + impairment ladders, zero
-false stops, zero crashes) and on a live 128-peer tailnet. See
+false stops, zero crashes), on a live 128-peer tailnet, and on a live
+two-site rig against a geographically remote machine. In that run a full
+blackhole of the direct WireGuard path was carried by DERP with **zero
+gap and zero rebonds**, any single-path failure left the heartbeat intact,
+and a total link loss degraded to STOP with **~3–6 s autonomous recovery**.
+See `docs/TWO_SITE_FAILOVER_2026-07-21.md`,
 `docs/TRANSPORT_TEST_REPORT_2026-07-20.md`,
 `docs/CHAOS_RESULTS_2026-07-20.md`, and
 `docs/FAILOVER_AND_ARMING_DESIGN_2026-07-21.md`.

@@ -3,7 +3,7 @@
 #
 # Every value below maps to a parameter the upstream pstop_c machine library
 # exposes (or a knob in the transport/watchdog shell around it). The library
-# itself (pstop_c/) is never modified — this file just feeds
+# itself (components/pstop/upstream/) is never modified — this file just feeds
 # it. Edit freely and re-run; the runner prints the resolved config at startup.
 #
 #   ./machine_app_runner                 # uses ./machine.toml
@@ -78,20 +78,25 @@ min_stop_ms = 500
 # -----------------------------------------------------------------------------
 # Per-remote operator entries (repeatable). Each maps a remote UUID
 # (pstop_msg.id) to its operator_details_t in the library:
-#   device_id    : the remote's UUID. The pstop remote firmware uses
-#                  DEVICE_ID_THIS = 0x01020380 (see main.c).
+#   device_id    : the remote's UUID. Each pstop remote now derives a UNIQUE
+#                  per-unit ID from its eFuse MAC: 0x01xxxxxx, where xxxxxx is
+#                  the low 24 bits of the MAC. It is printed at boot
+#                  ("device_id=0x01xxxxxx") and shown on the admin page, and it
+#                  matches the remote's Tailscale node name "pstop-01xxxxxx".
+#                  To pin a specific remote, copy its value into an entry below.
 #   heartbeat_ms : how often this remote must check in (0 => default above).
 #   stop_only    : true => this remote may STOP the machine but never arm it OK.
 #   allowed      : false => the machine rejects this remote's bonds outright.
 #
-# With allow_unlisted = true these are optional overrides. With
-# allow_unlisted = false, ONLY listed+allowed remotes can bond.
+# With allow_unlisted = true (above) any per-unit ID is accepted and these
+# entries are optional overrides — the simplest setup for a mixed fleet. With
+# allow_unlisted = false, list every remote's exact 0x01xxxxxx ID here.
 # -----------------------------------------------------------------------------
-[[operator]]
-device_id    = 0x01020380   # the ESP32 pstop remote
-heartbeat_ms = 1000
-stop_only    = false
-allowed      = true
+# [[operator]]
+# device_id    = 0x01xxxxxx   # a specific pstop remote (see its boot log)
+# heartbeat_ms = 1000
+# stop_only    = false
+# allowed      = true
 
 # Example second remote (commented out) — uncomment to test multi-remote /
 # stop-only behavior:

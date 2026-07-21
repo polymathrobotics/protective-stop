@@ -1060,7 +1060,8 @@ ml_app_t *ml_app_start(const ml_app_config_t *cfg) {
     uint8_t max_peers = cfg->max_peers ? cfg->max_peers : CONFIG_ML_MAX_PEERS;
     microlink_config_t ml_cfg = {
         .auth_key = CONFIG_ML_TAILSCALE_AUTH_KEY,
-        .device_name = CONFIG_ML_DEVICE_NAME,
+        .device_name = (cfg->device_name && cfg->device_name[0])
+                       ? cfg->device_name : CONFIG_ML_DEVICE_NAME,
         .enable_derp = cfg->enable_derp,
         .enable_stun = cfg->enable_stun,
         .enable_disco = cfg->enable_disco,

@@ -36,6 +36,7 @@
 #include "esp_rom_sys.h"
 
 #include "dcs_support.h"
+#include "dcs_identity.h"
 #include "pstop/pstop_msg.h"
 #include "pstop/protocol_data.h"
 
@@ -56,10 +57,11 @@
 /* Local UDP source port. */
 #define PSTOP_LOCAL_PORT       8891
 
-/* Device IDs — wire format expects 32-bit IDs. The chip's is fixed at build
- * time; the machine's is whatever machine_app_runner.c uses (default in
- * upstream is 0x01020304). */
-#define DEVICE_ID_THIS         0x01020380u
+/* Device IDs — wire format expects 32-bit IDs. The chip's ID is per-unit,
+ * derived from the eFuse MAC (dcs_identity_device_id(), 0x01xxxxxx) so it is
+ * unique per remote and matches the Tailscale node name "pstop-01xxxxxx". The
+ * machine must accept it (allow_unlisted or an [[operator]] entry). The
+ * machine's own ID is whatever machine_app_runner.c uses (upstream 0x01020304). */
 #define DEVICE_ID_MACHINE      0x01020304u
 
 #define HEARTBEAT_TIMEOUT_MS   1000u
@@ -297,7 +299,7 @@ static void core_task(void *arg) {
         pstop_msg_t msg;
         pstop_message_init(&msg);
         msg.message           = verdict;
-        msg.id.data           = DEVICE_ID_THIS;
+        msg.id.data           = dcs_identity_device_id();
         msg.receiver_id.data  = DEVICE_ID_MACHINE;
         msg.stamp             = in.stamp_ms;
         msg.received_stamp    = in.received_stamp;
@@ -455,7 +457,7 @@ static void bond_with_retry(protocol_data_t *pd) {
         pstop_msg_t req;
         pstop_message_init(&req);
         req.message           = PSTOP_MESSAGE_BOND;
-        req.id.data           = DEVICE_ID_THIS;
+        req.id.data           = dcs_identity_device_id();
         req.receiver_id.data  = pd->remote_id.data;
         req.stamp             = (uint64_t)(esp_timer_get_time() / 1000);
         req.counter           = counter;
@@ -469,6 +471,9 @@ static void bond_with_retry(protocol_data_t *pd) {
 
         if (!send_encoded(req_bytes)) {
             ESP_LOGW(TAG, "BOND sendto failed (errno=%d) — retrying", errno);
+            /* No WG route to the machine (errno 128 = ENOTCONN). Keep the
+             * transport driving a re-handshake while we back off. */
+            dcs_notify_priority_health(false);
             vTaskDelay(pdMS_TO_TICKS(BOND_RECV_TIMEOUT_MS));
             continue;
         }
@@ -478,6 +483,7 @@ static void bond_with_retry(protocol_data_t *pd) {
             /* The 5 s wait IS the backoff — no extra delay, just loop back
              * and try again. */
             ESP_LOGW(TAG, "BOND no response in %dms — retrying", BOND_RECV_TIMEOUT_MS);
+            dcs_notify_priority_health(false);
             continue;
         }
         ESP_LOGI(TAG, "BOND ok: machine counter=%lu stamp=%llu",
@@ -487,6 +493,7 @@ static void bond_with_retry(protocol_data_t *pd) {
         pd->last_timestamp    = resp.stamp;
         pd->msg_counter       = counter + 1u; /* next counter for the first OK heartbeat */
         atomic_store(&g_dcs_pstop_last_msg, resp.message);
+        dcs_notify_priority_health(true);   /* bonded — link is live again */
         return;
     }
 }
@@ -613,6 +620,7 @@ static void comparator_task(void *arg) {
              * Draining re-syncs pd.last_sent_counter to the newest reply
              * within one tick. */
             pstop_msg_t resp;
+            uint32_t replies_before = replies;
             bool got = recv_with_timeout(&resp, 50);
             while (got) {
                 pd.last_sent_counter = resp.counter;
@@ -628,6 +636,11 @@ static void comparator_task(void *arg) {
                     }
                 }
                 got = recv_with_timeout(&resp, 0);   /* non-blocking drain */
+            }
+            /* Replies are flowing — tell the transport the priority link is
+             * healthy so it leaves the (working) session alone. */
+            if (replies > replies_before) {
+                dcs_notify_priority_health(true);
             }
         }
 
@@ -652,6 +665,11 @@ static void comparator_task(void *arg) {
                      (unsigned long long)(now_ms - last_reply_ms));
             extern atomic_uint_fast32_t g_dcs_pstop_rebonds;
             atomic_fetch_add(&g_dcs_pstop_rebonds, 1);
+            /* Link is dead. Tell the transport now so its priority-peer wake
+             * forces a fresh WG handshake in parallel with the (blocking) bond
+             * — critical when the far peer restarted and left us on a zombie
+             * session that wireguardif_peer_is_up() still reports as up. */
+            dcs_notify_priority_health(false);
             bond_with_retry(&pd);
             last_reply_ms = (uint64_t)(esp_timer_get_time() / 1000);
             next = xTaskGetTickCount();   /* re-align cadence after blocking bond */

@@ -382,6 +382,22 @@ struct microlink_s {
     volatile microlink_state_t state;
     volatile uint32_t vpn_ip;
 
+    /* Priority-peer application-level health, set by the app (pstop layer) via
+     * microlink_notify_priority_health(): true while heartbeat replies flow,
+     * false when they stop. The wg_mgr priority wake uses this to detect a
+     * "zombie" WG session — the local keypair still reads up, but the peer
+     * forgot us after a restart, so wireguardif_peer_is_up() reports a session
+     * that no longer carries traffic. On false the wake forces a fresh 1-RTT
+     * handshake. Defaults true so non-pstop users see no behaviour change. */
+    volatile bool priority_link_healthy;
+
+    /* DERP region of the priority peer, learned from the netmap. microlink
+     * holds ONE DERP connection and a DERP server only delivers to peers
+     * connected to it, so the chip homes its connection on THIS region (and
+     * reports it as PreferredDERP) to guarantee it can relay to the machine.
+     * 0 = not yet known → fall back to ML_DERP_REGION. */
+    volatile uint16_t priority_peer_region;
+
     /* Event group (cross-task synchronization) */
     EventGroupHandle_t events;
 

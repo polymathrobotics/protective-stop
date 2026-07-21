@@ -179,6 +179,7 @@ microlink_t *microlink_init(const microlink_config_t *config) {
     ml->config.enable_derp = true;  /* Always need DERP for relay */
 
     ml->state = ML_STATE_IDLE;
+    ml->priority_link_healthy = true;   /* until the app says otherwise */
     ml->coord_sock = -1;
     ml->disco_sock4 = -1;
     ml->disco_sock6 = -1;
@@ -601,6 +602,12 @@ bool microlink_is_connected(const microlink_t *ml) {
 
 uint32_t microlink_get_vpn_ip(const microlink_t *ml) {
     return ml ? ml->vpn_ip : 0;
+}
+
+void microlink_notify_priority_health(microlink_t *ml, bool healthy) {
+    if (ml) {
+        ml->priority_link_healthy = healthy;
+    }
 }
 
 int microlink_get_peer_count(const microlink_t *ml) {

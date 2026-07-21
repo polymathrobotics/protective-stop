@@ -135,6 +135,16 @@ void dcs_publish_pstop_peer(uint32_t peer_ip, uint16_t peer_port);
 void dcs_get_initial_pstop_peer(uint32_t *peer_ip, uint16_t *peer_port);
 
 /**
+ * @brief Tell the transport whether the pstop link to the machine is alive.
+ *
+ * Thin wrapper over microlink_notify_priority_health(). Call with true on every
+ * machine reply and false when the reply-loss watchdog / bond retries fire, so
+ * the transport can force a fresh WireGuard handshake the moment the link dies
+ * instead of waiting out a stale session. No-op before the transport is up.
+ */
+void dcs_notify_priority_health(bool healthy);
+
+/**
  * @brief Current Tailscale VPN IP (host byte order), 0 until registered.
  * Used by main.c to source-bind the pstop socket when the peer is a
  * Tailscale address, pinning egress to the WG netif.

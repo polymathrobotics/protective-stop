@@ -7,6 +7,7 @@
 
 #include "dcs_support.h"
 #include "dcs_internal.h"
+#include "dcs_identity.h"
 
 #include <stdatomic.h>
 #include <string.h>
@@ -164,6 +165,12 @@ dcs_boot_state_t dcs_support_init(void) {
     /* ml_app config — same defaults as the pre-refactor main.c. */
     ml_app_config_t cfg = ML_APP_CONFIG_DEFAULT();
     cfg.max_peers              = 128;  /* PSRAM-backed; load paths budgeted */
+    /* Register on the tailnet as "pstop-01xxxxxx", matching the black-channel
+     * device ID (dcs_identity_*). Stable per unit; static buffer, safe to hold. */
+    cfg.device_name            = dcs_identity_hostname();
+    ESP_LOGI(TAG, "Identity: tailnet=%s  pstop device_id=0x%08x "
+                  "(machine must allow_unlisted or list this ID)",
+             dcs_identity_hostname(), (unsigned)dcs_identity_device_id());
     cfg.enable_disco           = !g_dcs.derp_only_mode;
     cfg.enable_stun            = !g_dcs.derp_only_mode;
     cfg.try_alt_network        = dcs_boot_try_tether_or_skip;
@@ -312,4 +319,10 @@ void dcs_get_initial_pstop_peer(uint32_t *peer_ip, uint16_t *peer_port) {
 
 uint32_t dcs_get_vpn_ip(void) {
     return (g_dcs.ml_handle != NULL) ? microlink_get_vpn_ip(g_dcs.ml_handle) : 0u;
+}
+
+void dcs_notify_priority_health(bool healthy) {
+    if (g_dcs.ml_handle != NULL) {
+        microlink_notify_priority_health(g_dcs.ml_handle, healthy);
+    }
 }

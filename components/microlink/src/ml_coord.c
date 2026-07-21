@@ -722,11 +722,17 @@ static int do_register(microlink_t *ml, ml_noise_state_t *noise) {
     cJSON_AddStringToObject(hostinfo, "GoArch", "arm");
 
     /* NetInfo inside Hostinfo — control plane reads PreferredDERP from here
-     * to populate Node.HomeDERP for other peers */
+     * to populate Node.HomeDERP for other peers. Advertise the priority
+     * (safety) peer's region once we've learned it, so peers — the machine
+     * especially — reach us on the SAME region our single DERP connection is
+     * homed on (see maybe_rehome_to_priority in ml_wg_mgr.c). Until then, the
+     * ML_DERP_REGION default. */
     {
         cJSON *netinfo = cJSON_CreateObject();
         if (netinfo) {
-            cJSON_AddNumberToObject(netinfo, "PreferredDERP", ML_DERP_REGION);
+            uint16_t pref = ml->priority_peer_region ? ml->priority_peer_region
+                                                     : ML_DERP_REGION;
+            cJSON_AddNumberToObject(netinfo, "PreferredDERP", pref);
             cJSON_AddItemToObject(hostinfo, "NetInfo", netinfo);
         }
     }
@@ -978,21 +984,27 @@ static int do_register(microlink_t *ml, ml_noise_state_t *noise) {
             }
         }
         /* Parse self-node DERP region — try modern HomeDERP (int) first,
-         * then fall back to legacy DERP string (format: "127.3.3.40:REGION") */
-        cJSON *home_derp = cJSON_GetObjectItem(node, "HomeDERP");
-        if (home_derp && cJSON_IsNumber(home_derp) && home_derp->valueint > 0) {
-            ml->derp_home_region = (uint16_t)home_derp->valueint;
-            ESP_LOGI(TAG, "Home DERP region: %d (from server, HomeDERP)", ml->derp_home_region);
-        } else {
-            cJSON *self_derp = cJSON_GetObjectItem(node, "DERP");
-            if (self_derp && self_derp->valuestring) {
-                ESP_LOGI(TAG, "Self-Node DERP: %s", self_derp->valuestring);
-                const char *colon = strrchr(self_derp->valuestring, ':');
-                if (colon) {
-                    int region = atoi(colon + 1);
-                    if (region > 0) {
-                        ml->derp_home_region = (uint16_t)region;
-                        ESP_LOGI(TAG, "Home DERP region: %d (from server, legacy DERP)", region);
+         * then fall back to legacy DERP string (format: "127.3.3.40:REGION").
+         * Once we've adopted the priority peer's region as home
+         * (maybe_rehome_to_priority), that choice is authoritative: ignore the
+         * server's HomeDERP, which lags our PreferredDERP update and would
+         * otherwise ping-pong the home region and storm DERP reconnects. */
+        if (ml->priority_peer_region == 0) {
+            cJSON *home_derp = cJSON_GetObjectItem(node, "HomeDERP");
+            if (home_derp && cJSON_IsNumber(home_derp) && home_derp->valueint > 0) {
+                ml->derp_home_region = (uint16_t)home_derp->valueint;
+                ESP_LOGI(TAG, "Home DERP region: %d (from server, HomeDERP)", ml->derp_home_region);
+            } else {
+                cJSON *self_derp = cJSON_GetObjectItem(node, "DERP");
+                if (self_derp && self_derp->valuestring) {
+                    ESP_LOGI(TAG, "Self-Node DERP: %s", self_derp->valuestring);
+                    const char *colon = strrchr(self_derp->valuestring, ':');
+                    if (colon) {
+                        int region = atoi(colon + 1);
+                        if (region > 0) {
+                            ml->derp_home_region = (uint16_t)region;
+                            ESP_LOGI(TAG, "Home DERP region: %d (from server, legacy DERP)", region);
+                        }
                     }
                 }
             }
@@ -1695,21 +1707,25 @@ static int do_fetch_peers(microlink_t *ml, ml_noise_state_t *noise) {
                 }
             }
             /* Parse self-node DERP region — try modern HomeDERP (int) first,
-             * then fall back to legacy DERP string (format: "127.3.3.40:REGION") */
-            cJSON *home_derp = cJSON_GetObjectItem(node, "HomeDERP");
-            if (home_derp && cJSON_IsNumber(home_derp) && home_derp->valueint > 0) {
-                ml->derp_home_region = (uint16_t)home_derp->valueint;
-                ESP_LOGI(TAG, "Home DERP region: %d (from server, HomeDERP)", ml->derp_home_region);
-            } else {
-                cJSON *self_derp = cJSON_GetObjectItem(node, "DERP");
-                if (self_derp && self_derp->valuestring) {
-                    ESP_LOGI(TAG, "Self-Node DERP: %s", self_derp->valuestring);
-                    const char *colon = strrchr(self_derp->valuestring, ':');
-                    if (colon) {
-                        int region = atoi(colon + 1);
-                        if (region > 0) {
-                            ml->derp_home_region = (uint16_t)region;
-                            ESP_LOGI(TAG, "Home DERP region: %d (from server, legacy DERP)", region);
+             * then fall back to legacy DERP string (format: "127.3.3.40:REGION").
+             * Priority-peer region, once adopted, is authoritative — see the
+             * first MapResponse handler for why we ignore the server here. */
+            if (ml->priority_peer_region == 0) {
+                cJSON *home_derp = cJSON_GetObjectItem(node, "HomeDERP");
+                if (home_derp && cJSON_IsNumber(home_derp) && home_derp->valueint > 0) {
+                    ml->derp_home_region = (uint16_t)home_derp->valueint;
+                    ESP_LOGI(TAG, "Home DERP region: %d (from server, HomeDERP)", ml->derp_home_region);
+                } else {
+                    cJSON *self_derp = cJSON_GetObjectItem(node, "DERP");
+                    if (self_derp && self_derp->valuestring) {
+                        ESP_LOGI(TAG, "Self-Node DERP: %s", self_derp->valuestring);
+                        const char *colon = strrchr(self_derp->valuestring, ':');
+                        if (colon) {
+                            int region = atoi(colon + 1);
+                            if (region > 0) {
+                                ml->derp_home_region = (uint16_t)region;
+                                ESP_LOGI(TAG, "Home DERP region: %d (from server, legacy DERP)", region);
+                            }
                         }
                     }
                 }

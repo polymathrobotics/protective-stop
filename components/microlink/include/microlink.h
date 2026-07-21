@@ -154,6 +154,21 @@ bool microlink_is_connected(const microlink_t *ml);
 uint32_t microlink_get_vpn_ip(const microlink_t *ml);
 
 /**
+ * @brief Report application-level health of the priority-peer link.
+ *
+ * The transport layer cannot see whether an encrypted application protocol is
+ * actually being answered — a WireGuard session can read "up" (valid keypair)
+ * while the far end has forgotten us after a restart, silently blackholing
+ * traffic until the keypair expires (~2-3 min). Call this with @p healthy=false
+ * as soon as the app detects the priority peer has stopped responding (e.g. a
+ * heartbeat-reply watchdog), and true again once replies resume. On false the
+ * priority-peer wake forces a fresh 1-RTT handshake instead of waiting out the
+ * stale session, cutting recovery from minutes to seconds. No-op if no
+ * priority peer is configured. Safe to call from any task.
+ */
+void microlink_notify_priority_health(microlink_t *ml, bool healthy);
+
+/**
  * @brief Get number of known peers
  */
 int microlink_get_peer_count(const microlink_t *ml);

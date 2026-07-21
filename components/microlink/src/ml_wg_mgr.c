@@ -456,6 +456,30 @@ static int find_peer_by_ip(microlink_t *ml, uint32_t vpn_ip) {
     return -1;
 }
 
+/* Home our single DERP connection on the priority (safety) peer's region.
+ * microlink keeps ONE DERP connection, and a Tailscale DERP server only
+ * delivers to peers connected to that same server — so if the chip and the
+ * machine home on different regions, the chip's relayed DISCO/WG-init never
+ * reaches the machine and the link only forms after a `tailscale ping` FROM
+ * the machine (which pulls it onto our region). Homing on the machine's region
+ * here — and reporting it as PreferredDERP in the next MapRequest (ml_coord),
+ * so peers find us there too — fixes both directions with no manual ping.
+ * Called wherever a peer's derp_region is (re)learned. */
+static void maybe_rehome_to_priority(microlink_t *ml, const ml_peer_t *p) {
+    if (ml->config.priority_peer_ip == 0 ||
+        p->vpn_ip != ml->config.priority_peer_ip ||
+        p->derp_region == 0) {
+        return;
+    }
+    ml->priority_peer_region = p->derp_region;
+    if (ml->derp_home_region != p->derp_region) {
+        ESP_LOGW(TAG, "Re-homing DERP region %u -> %u (priority peer)",
+                 (unsigned)ml->derp_home_region, (unsigned)p->derp_region);
+        ml->derp_home_region = p->derp_region;
+        xEventGroupSetBits(ml->events, ML_EVT_DERP_RECONNECT);
+    }
+}
+
 static int find_peer_by_disco_key(microlink_t *ml, const uint8_t *disco_key) {
     for (int i = 0; i < ml->peer_count; i++) {
         if (ml->peers[i].active && memcmp(ml->peers[i].disco_key, disco_key, 32) == 0) {
@@ -548,6 +572,7 @@ static int add_peer(microlink_t *ml, const ml_peer_update_t *update) {
     p->hostname[sizeof(p->hostname) - 1] = '\0';
     p->derp_region = update->derp_region;
     p->active = true;
+    maybe_rehome_to_priority(ml, p);
 
     /* Copy endpoints */
     p->endpoint_count = update->endpoint_count;
@@ -662,6 +687,16 @@ static int add_peer(microlink_t *ml, const ml_peer_update_t *update) {
             if (ml->config.priority_peer_ip != 0 &&
                 update->vpn_ip == ml->config.priority_peer_ip) {
                 wireguardif_connect_derp(netif, (u8_t)wg_peer_idx);
+                /* Wake the remote's magicsock so it lazily adds us to
+                 * wireguard-go. A bare WG-init relayed over DERP does NOT
+                 * drive the peer's lazy reconfig — only an inbound DISCO
+                 * ping does (that is why a normal peer otherwise has to
+                 * `tailscale ping` us first). Fire one now, unconditionally
+                 * (bypasses the enable_disco/cellular gates on the paths
+                 * below); it is DERP-carried and embeds our node key, so a
+                 * peer with a stale/rotated disco key can still map us. The
+                 * sustained retry lives in disco_periodic_probes. */
+                disco_send_ping_to_peer(ml, idx, true);
                 /* Near-zero failover: mirror this peer's encrypted data over
                  * BOTH direct and DERP once a direct path forms. Set here and
                  * persisted in the WG peer struct (survives P7 re-ingests); it
@@ -783,6 +818,7 @@ static void process_peer_updates(microlink_t *ml) {
                     }
                     if (update->derp_region > 0) {
                         p->derp_region = update->derp_region;
+                        maybe_rehome_to_priority(ml, p);
                     }
                     ESP_LOGI(TAG, "Peer patched: %s (eps=%d derp=%d)",
                              p->hostname, p->endpoint_count, p->derp_region);
@@ -1624,7 +1660,11 @@ esp_err_t ml_wg_mgr_trigger_handshake(microlink_t *ml, uint32_t dest_vpn_ip) {
 
     /* Path 1: DERP (reliable fallback) */
     wireguardif_connect_derp(netif, (u8_t)p->wg_peer_index);
-    ESP_LOGI(TAG, "WG handshake triggered (DERP) to %s", p->hostname);
+    /* Wake the remote's magicsock via an inbound DISCO ping so it lazily
+     * adds us — a bare DERP WG-init alone won't (see disco_periodic_probes).
+     * Applies to on-demand bring-up of any peer, not just the priority one. */
+    disco_send_ping_to_peer(ml, idx, true);
+    ESP_LOGI(TAG, "WG handshake triggered (DERP + disco wake) to %s", p->hostname);
 
     /* Path 2: Direct UDP (if DISCO has a known endpoint).
      * This wakes the peer's magicsock via receiveIPv4 → noteRecvActivity.
@@ -1699,12 +1739,52 @@ void ml_wg_mgr_update_transport(microlink_t *ml) {
 static int disco_probe_start_idx = 0;
 
 static void disco_periodic_probes(microlink_t *ml) {
+    /* Priority-peer session wake — runs BEFORE the enable_disco/cellular
+     * gates below, because the safety link's initiation MUST be disco-first:
+     * a normal tailscaled peer lazily adds us to wireguard-go only on an
+     * inbound DISCO ping, never on a bare DERP-relayed WG-init. Without
+     * this, the peer has to `tailscale ping` us before a session forms.
+     * Re-ping the priority peer over DERP (node-key-bearing) every
+     * ~ML_DISCO_PRIORITY_HB_MS and refresh the WG-init, until the session
+     * is up — then this stops. One peer, one small DERP frame per 3 s while
+     * down: no busy-tailnet load regression (that was about probing ALL
+     * peers). */
+    if (ml->config.priority_peer_ip != 0 && ml->wg_netif != NULL) {
+        int pidx = find_peer_by_ip(ml, ml->config.priority_peer_ip);
+        if (pidx >= 0 && ml->peers[pidx].wg_peer_index >= 0) {
+            struct netif *nif = (struct netif *)ml->wg_netif;
+            bool up = (wireguardif_peer_is_up(nif,
+                          (u8_t)ml->peers[pidx].wg_peer_index,
+                          NULL, NULL) == ERR_OK);
+            /* Re-establish when the WG transport is down, OR when the app
+             * reports the priority link dead despite a nominally-up session.
+             * The second case is the "zombie keypair": after the far peer
+             * restarts it forgets us, but our keypair stays valid for
+             * ~REJECT_AFTER_TIME (~3 min), so is_up keeps reporting a session
+             * that silently blackholes traffic. Waiting that out is far too
+             * slow for a safety link, and is_up alone can't see it — only the
+             * app (no heartbeat replies) can. The DISCO ping re-adds us to the
+             * peer's wireguard-go; connect_derp forces a fresh 1-RTT handshake
+             * past the stale keypair. priority_link_healthy defaults true, so
+             * this widening is inert until the app calls
+             * microlink_notify_priority_health(false). */
+            if (!up || !ml->priority_link_healthy) {
+                uint64_t nowp = ml_get_time_ms();
+                if (nowp - ml->peers[pidx].last_ping_sent_ms >= ML_DISCO_PRIORITY_HB_MS) {
+                    disco_send_ping_to_peer(ml, pidx, true);
+                    wireguardif_connect_derp(nif, (u8_t)ml->peers[pidx].wg_peer_index);
+                }
+            }
+        }
+    }
+
     /* Honor the runtime enable_disco config flag. Previously this flag was
      * stored but never read — the chip ran DISCO probes regardless. With a
      * 16-peer table that's a per-second burst of UDP+crypto across every
      * peer, which has been hammering the lwIP TCPIP thread and is the
      * leading hypothesis for the chip-side wedge. Skip everything when
-     * disco is disabled — peer→peer direct paths just stay on DERP relay. */
+     * disco is disabled — peer→peer direct paths just stay on DERP relay.
+     * (The priority-peer wake above is intentionally exempt.) */
     if (!ml->config.enable_disco) {
         return;
     }
