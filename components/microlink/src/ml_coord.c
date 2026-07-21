@@ -2728,7 +2728,16 @@ void ml_coord_task(void * arg)
           int ping_ret = noise_send(ml, &noise, ping_frame, sizeof(ping_frame));
           if (ping_ret >= 0) {
             last_h2_ping_ms = now;
-            last_activity_ms = now;
+            /* Do NOT reset the watchdog here. noise_send() only proves the
+             * write went into the local TCP buffer, not that the peer is alive.
+             * On a half-open connection (control plane dropped us, no RST yet)
+             * these PING sends keep "succeeding" for the full TCP retransmit
+             * window (~15 min) while no PING ACKs come back — which silently
+             * defeated the watchdog and left us wedged "online" locally but
+             * offline to the control plane until a reboot. The watchdog is now
+             * fed ONLY by RECEIVED activity (poll_map_update > 0, which returns
+             * 1 on the server's PING ACKs and map updates), so a dead link is
+             * detected within t_ctrl_watchdog_ms and reconnects on its own. */
           } else {
             ESP_LOGW(TAG, "H2 PING send failed, reconnecting");
             state = COORD_RECONNECTING;
