@@ -1,85 +1,136 @@
-# Polymath Protective Stop 🛑🛡
+# Protective Stop 🛑🛡
 
-This initiative is focused on developing a low-cost, reliable protective stop mechanism for robotics and automation systems. Our protective stop system is designed to be a preventative measure that initiates a controlled shutdown with no immediate danger.
+A low-cost, reliable **protective stop** for robots and automation: a
+battery-powerable ESP32-S3 **remote** heartbeats operator intent at 10 Hz
+over an encrypted tunnel to a **machine** process on the robot. If the
+heartbeats say STOP — or stop arriving at all — the machine brings the
+robot to a controlled stop.
 
-**Safety disclaimer:** This system is not designed to be an emergency stop; as such, it should not be used when there is an immediate threat to human safety or significant risk to equipment. It is not designed for immediate, uuncontrolled shutdowns.
+**Safety scope.** This is a *protective* stop (a controlled, preventative
+shutdown), not an emergency stop. It is not a substitute for an E-stop
+where there is an immediate threat to people or equipment.
 
-## Quick Start
+The wire protocol and the machine-side safety state logic are the
+[`pstop_c`](pstop_c/) library, kept on its own certification track and
+**never modified elsewhere in this repo**. Everything around it —
+firmware, transport, sensing, supervision, and the machine wrapper — is
+the open engineering shell that turns `pstop_c` into a deployable device.
 
-Start the Foxglove bridge:
+## How it works
 
-```bash
- ros2 launch foxglove_bridge foxglove_bridge_launch.xml
+The remote (Waveshare ESP32-S3-ETH) senses a physical DPST
+normally-closed E-stop switch through two independent loopback channels,
+one per CPU core. The two cores run in **lockstep**: each reads its own
+loop, independently builds the 40-byte pstop message, and a comparator
+transmits only when the two encodings are byte-identical (2-out-of-2 to
+run, 1-out-of-2 to stop). Any disagreement, loop fault, or stalled task
+sends nothing — and the machine's heartbeat timeout stops the robot.
+**Fail-safe by silence** is the core principle: every failure mode
+degrades to "no message," which is a stop.
+
+pstop traffic rides Tailscale/WireGuard with automatic uplink failover
+(Ethernet → USB-NCM → WiFi) and DERP relay fallback; egress is pinned to
+the tunnel so a downed VPN fails safe rather than leaking plaintext. The
+machine wrapper adds a minimum-hold arming policy so an electrical blip
+can never perform the arming gesture.
+
+```
+        REMOTE (ESP32-S3, firmware/)                 MACHINE (robot host, host/)
+ ┌──────────────────────────────────────┐     ┌────────────────────────────────────┐
+ │ DPST E-stop switch                    │     │ machine_app_runner (wrapper)       │
+ │  pole1 GPIO39▶loopA▶GPIO40  core 0    │     │  ├ machine.toml, min-hold arming   │
+ │  pole2 GPIO41▶loopB▶GPIO42  core 1    │     │  └ status latch + anomaly log      │
+ │        ▼ verdict+encode (×2)          │ 10Hz│ pstop_c machine lib (certified,    │
+ │  ┌─────────────────────────┐  pstop   │ UDP │ UNMODIFIED): bond / counters /     │
+ │  │ comparator: memcmp, tx   ├──────────┼─────┼▶ CRC / heartbeat-timeout → STOP    │
+ │  │ only on byte-match       │          │     └────────────────────────────────────┘
+ │  └─────────────────────────┘          │              ▲ Tailscale / WireGuard
+ │ WS2812 status ring · OTA+rollback ·    │              │ (direct, DERP fallback)
+ │ net supervisor · watchdogs · microlink├──────────────┘
+ └──────────────────────────────────────┘
 ```
 
-Start the node:
+## Repo layout
 
-```bash
-ros2 launch protective_stop_node protective_stop_node.launch.py
+| Path | What |
+|---|---|
+| [`pstop_c/`](pstop_c/) | Certified protocol + machine-safety C library. Its own track — **do not modify here**; contribute upstream. |
+| `firmware/` | ESP-IDF 5.5 remote firmware (`pstop_remote`). `main/main.c` is the auditable lockstep core; `components/dcs_support/` is the shell (boot, OTA+rollback, admin UI, failover, telemetry). |
+| `components/` | `microlink/` (Tailscale/WireGuard/DERP), `ml_dev_tether/` (USB-CDC-NCM), `pstop/` (ESP-IDF glue that compiles `pstop_c/`). |
+| `host/` | `machine_app_runner` + `machine.toml` — the robot-side machine wrapper. |
+| `tools/` · `test/` | Wire-accurate test remote, chaos proxy, MISRA check; bench chaos/soak/netem ladders. |
+| `docs/` | Design records, test reports, safety/recovery playbooks (`docs/archive/` = historical). |
+| `hardware/` | Enclosure CAD + board schematic (work in progress — see `hardware/README.md`). |
+| `archive/` | Deprecated ROS 2 / Foxglove packages, kept for reference pending removal. |
+
+## Quickstart
+
+**Remote firmware**
+```sh
+cp firmware/sdkconfig.credentials.example firmware/sdkconfig.credentials   # WiFi + Tailscale creds
+cd firmware && source ~/esp-idf-5.5/export.sh && idf.py build
+```
+First flash is over the wire (hold **BOOT**, tap **RST** for ROM download
+mode, since TinyUSB owns USB-OTG at runtime):
+```sh
+idf.py -p /dev/ttyACM0 flash
+```
+Every update after that is over the network:
+```sh
+curl -u admin:<pw> --data-binary @build/pstop_remote.bin http://<chip>/admin/api/ota
 ```
 
-If you want to run the example remote, `cd` into that directory, and run:
-
-```bash
-npm install
-npm run dev
+**Machine (robot host)** — needs only `cc` + `make`, no ESP-IDF:
+```sh
+cd host && make && ./machine_app_runner machine.toml     # listens on 0.0.0.0:8890
+curl -X POST "http://<chip>/api/pstop_peer?ip=<machine-ip>&port=8890"
 ```
+Arm by pressing and holding the switch ≥0.5 s, then releasing.
 
-## Components
+## Key facts
 
-### Protective Stop Node
+- **10 Hz** heartbeat; stop-on-silence in ≈1–2 s (configurable).
+- **Arming policy:** a STOP shorter than `min_stop_ms` (default 500 ms) is
+  vetoed machine-side; the remote also debounces loop re-close and holds
+  transmission until the loops settle at boot — an EMC blip can't arm.
+- **Interfaces:** Ethernet > USB-NCM > WiFi, 1 Hz supervised failover.
+  128-peer Tailscale capacity, priority-peer latency isolation.
+- **Recovery:** task watchdog → network-liveness watchdog → crash counter
+  → OTA rollback, all button-free.
+- **Status ring:** yellow = no machine · blue = bonded · green = armed ·
+  red = STOP · purple = lockstep mismatch.
 
-ROS2 node that runs on your robot. This node publishes:
+## Testing & static analysis
 
-- `/protective_stop`: A heartbeat message back to the remote controlled by the user.
-- `/pstop_hb`: A heartbeat message into your robot, which is used to actually stop the robot if `stop` is set to `True`.
-- `/protective_stop/debug`: Debug message showing which remotes are actively connected.
+`docs/TESTING.md` documents the full harness. Highlights:
+`tools/pstop_test_remote.py` (arming-policy suite over the real wire
+protocol), `tools/pstop_chaos_proxy.py` + `test/chaos_ladder.sh`
+(loss/delay/dup/corrupt ladder), `test/netem_ladder.sh` (WireGuard-underlay
+chaos), and `./tools/misra_check.sh` (free-cppcheck MISRA C:2012 over the
+code we own; `pstop_c` excluded — see `docs/MISRA_COMPLIANCE_2026-07-21.md`).
 
-To register a remote protective stop, the node also exposes two services:
+Validated across USB / Ethernet / WiFi (soaks + impairment ladders, zero
+false stops, zero crashes) and on a live 128-peer tailnet. See
+`docs/TRANSPORT_TEST_REPORT_2026-07-20.md`,
+`docs/CHAOS_RESULTS_2026-07-20.md`, and
+`docs/FAILOVER_AND_ARMING_DESIGN_2026-07-21.md`.
 
-- `/activate`
-- `/deactivate`
+## Certification & licensing
 
-In order to integrate with the node, you have to activate it first before starting to send heartbeat messages.
+`pstop_c/` is on its own certification track and is never modified from
+this repo. Every policy the shell adds (arming veto, status latch,
+transport binding, loop debounce) uses only public library API and is
+designed so a shell bug can cost availability but never cause a spurious
+arm. The SIL2 design record is `docs/PSTOP_SAFETY_DESIGN.md`; the option
+of moving the arming policy into the library is analyzed in
+`docs/PSTOP_C_MIN_STOP_OPTION.md`.
 
-#### User Monitor Mode
+Software is Apache-2.0 (see [`LICENSE`](LICENSE)). Open-hardware
+certification progress and the intended hardware/docs license split are
+tracked in `docs/OSHWA_COMPLIANCE.md`.
 
-**USE WITH EXTREME CAUTION**
+## Contributing
 
-In the case you have a test driver or other onsite personnel to operate a physical E-stop, you can set a parameter in the protective stop to indicate the robot does not need to be monitored by a remote protective stop:
-
-```bash
-ros2 param set /protective_stop_node is_user_monitored False
-```
-
-### Protective Stop Remote
-
-The remote is run next to the operator of the P-Stop. It exchanges heartbeat messages with the node on the robot, the latter of which will signal if it detects that the heartbeats are coming in at the expected rate.
-
-In this repo currently, we've implemented it as a web client, but it can also be instantiated as a hardware interface.
-
-### Foxglove Websocket Bridge
-
-The bridge acts as the proxy between the remote and the node, so the two can talk to one-another. If it is not online, the other components will fail gracefully.
-
-## Building the PSTOP C library
-
-```bash
-mkdir build
-cd build
-cmake ..
-make
-
-./pstop/pstop_test
-```
-
-### Code coverage (BullseyeCoverage)
-
-Bullseye code coverage runs against every PR that touches pstop_c. Currently there's no gate on coverage %. TODO: enable
-
-Convenience scripts are provided to run bullseye on your local machine. From `pstop_c/`:
-
-```bash
-scripts/run-coverage.sh           # covsrc summary
-scripts/run-coverage.sh --html    # HTML report at build/coverage-html/
-```
+See [`CONTRIBUTING.md`](CONTRIBUTING.md). In short: CI must be green,
+`pre-commit` clean, and changes to protocol/safety behavior belong in
+`pstop_c` upstream, not here. Security reports: [`SECURITY.md`](SECURITY.md).

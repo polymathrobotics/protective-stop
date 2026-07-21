@@ -1,0 +1,8 @@
+#!/bin/sh
+# NetworkManager dispatcher: clear stale ARP/neighbor cache when the pstop
+# tether comes up, so the host doesn't sit on an INCOMPLETE neighbor from a
+# previous boot (one half of the "needs a power cycle" symptom).
+# Install: sudo cp to /etc/NetworkManager/dispatcher.d/ ; chmod +x
+[ "$1" = "esp-pstop0" ] || exit 0
+[ "$2" = "up" ] && ip neigh flush dev esp-pstop0
+exit 0
