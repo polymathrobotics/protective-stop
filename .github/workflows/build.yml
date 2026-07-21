@@ -8,18 +8,11 @@ name: ROS2 Build and Test
 # packages are not built as part of the active firmware product; see
 # archive/README.md.
 
+# Manual-only: these packages are archived/deprecated and pending removal, so
+# this workflow no longer gates pushes or PRs. Run it on demand from the
+# Actions tab if the archived ROS2 packages ever need a build.
 on:
-  push:
-    branches: [main]
-    paths:
-      - archive/protective_stop_msg/**
-      - archive/protective_stop_node/**
-      - .github/workflows/build.yml
-  pull_request:
-    paths:
-      - archive/protective_stop_msg/**
-      - archive/protective_stop_node/**
-      - .github/workflows/build.yml
+  workflow_dispatch:
 
 jobs:
   build_and_test_ros2:
