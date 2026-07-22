@@ -7,7 +7,7 @@
  *
  * Keys (namespace = "dcs_app"):
  *   usb_en    u8   USB-NCM tether enabled (default 1)
- *   ts_boot   u8   Tailscale active at boot (default 0)
+ *   ts_boot   u8   Tailscale active at boot (default 1: fresh units auto-join)
  *   boot_cnt  u16  CRASH-class boots since last age-out
  *   ps_ip     u32  pstop peer IPv4 in host byte order
  *   ps_port   u16  pstop peer UDP port
@@ -49,8 +49,8 @@ bool dcs_nvs_read_ts_boot_en(void)
 {
   nvs_handle_t h;
   if (nvs_open(DCS_NVS_NS, NVS_READONLY, &h) != ESP_OK) return false;
-  uint8_t v = 0;
-  (void)nvs_get_u8(h, DCS_NVS_KEY_TS_BOOT_EN, &v); /* absent -> default */
+  uint8_t v = 1; /* absent -> default ON: fresh fleet units auto-join Tailscale */
+  (void)nvs_get_u8(h, DCS_NVS_KEY_TS_BOOT_EN, &v); /* explicit 0 still honored */
   nvs_close(h);
   return v != 0u;
 }
