@@ -126,6 +126,8 @@ Arm by pressing and holding the switch ≥0.5 s, then releasing.
   no operator action.
 - **Status ring:** yellow = no machine · blue = bonded · green = armed ·
   red = STOP · purple = lockstep mismatch.
+- **HTTP API:** diagnostic/config (port 80) + password-protected `/admin/*`
+  routes — full reference in [`docs/API.md`](docs/API.md).
 
 ## Testing & static analysis
 

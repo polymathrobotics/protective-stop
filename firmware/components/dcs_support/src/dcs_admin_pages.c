@@ -5,17 +5,23 @@
  * @file dcs_admin_pages.c
  * @brief HTTP handlers for the admin/diagnostic web UI.
  *
- * Routes registered:
- *   GET  /                      Static HTML (k_index_html)
- *   GET  /state.json            Telemetry JSON
- *   POST /api/derp              Toggle DERP TX worker (microlink_pause_derp)
- *   POST /api/wg                Toggle ml_wg_mgr task suspend/resume
- *   POST /api/derp_delay?ms=N   Set DERP loop yield
- *   POST /api/wifi_tx_power?q=N Set WiFi max TX power
- *   POST /api/usb_enable        Flip NVS dcs_app/usb_en flag and reboot
- *   POST /api/ts_boot           Flip NVS dcs_app/ts_boot flag (takes effect next reboot)
+ * Routes registered here (unauthenticated diagnostic/config server):
+ *   GET  /                        Static HTML (k_index_html)
+ *   GET  /state.json              Telemetry JSON
+ *   GET  /api/last_log            Last boot's tail-of-log (from RTC_NOINIT)
+ *   POST /api/derp                Toggle DERP TX worker (microlink_pause_derp)
+ *   POST /api/wg                  Toggle ml_wg_mgr task suspend/resume
+ *   POST /api/derp_delay?ms=N     Set DERP loop yield
+ *   POST /api/wifi_tx_power?q=N   Set WiFi max TX power
+ *   POST /api/iface/eth|wifi|usb  Select the active uplink
+ *   POST /api/usb_enable          Flip NVS dcs_app/usb_en flag and reboot
+ *   POST /api/ts_boot             Flip NVS dcs_app/ts_boot flag (next reboot)
  *   POST /api/pstop_peer?ip&port  Set + persist pstop peer target
- *   GET  /api/last_log          Last boot's tail-of-log (from RTC_NOINIT)
+ *   POST /api/pstop_num?n=N       Set USB "PSTOPxx" unit number (0 = auto)
+ *   POST /api/enter_download      Enter USB download (flashing) mode
+ *
+ * The /admin/* admin routes live in microlink (ml_config_httpd.c, ml_app.c).
+ * Full reference for both servers: docs/API.md.
  *
  * All handlers are pure HTTP plumbing — telemetry values come from the
  * dcs_internal.h atomics that main.c populates via dcs_publish_*.
