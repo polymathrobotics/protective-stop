@@ -901,6 +901,30 @@ static esp_err_t handler_monitor(httpd_req_t * req)
     /* DERP status */
     cJSON_AddBoolToObject(json, "derp_connected", ml->derp.connected);
     cJSON_AddNumberToObject(json, "derp_home_region", ml->derp_home_region);
+    /* DERP re-home diagnostics: the region we DECIDED to home on
+     * (priority_peer_region) vs. the regions we LEARNED for the pinned peers.
+     * fleet_peer_region==0 => the fleet's region never reached us (re-home
+     * can't fire); != derp_home_region => re-home fired but DERP hasn't. */
+    cJSON_AddNumberToObject(json, "priority_peer_region", ml->priority_peer_region);
+    {
+      extern void ml_wg_get_derp_diag(microlink_t *, uint16_t *, uint16_t *);
+      uint16_t fr = 0, pr = 0;
+      ml_wg_get_derp_diag(ml, &fr, &pr);
+      cJSON_AddNumberToObject(json, "fleet_peer_region", fr);
+      cJSON_AddNumberToObject(json, "priority_peer_learned_region", pr);
+      /* Re-home counters: selfheal_calls, rehome_calls, ret_region0,
+       * ret_notpinned, body, applied. Tells us whether the re-home runs and
+       * why it bails, without needing live logs. */
+      extern void ml_wg_get_rehome_diag(uint32_t[6]);
+      uint32_t rd[6] = {0};
+      ml_wg_get_rehome_diag(rd);
+      cJSON_AddNumberToObject(json, "rehome_selfheal_calls", rd[0]);
+      cJSON_AddNumberToObject(json, "rehome_calls", rd[1]);
+      cJSON_AddNumberToObject(json, "rehome_ret_region0", rd[2]);
+      cJSON_AddNumberToObject(json, "rehome_ret_notpinned", rd[3]);
+      cJSON_AddNumberToObject(json, "rehome_body", rd[4]);
+      cJSON_AddNumberToObject(json, "rehome_applied", rd[5]);
+    }
   }
 
   /* Connection type */

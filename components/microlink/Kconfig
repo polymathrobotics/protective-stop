@@ -390,12 +390,14 @@ menu "MicroLink V2 Configuration"
                 Must match the key configured in the backend's config.toml.
 
         config ML_OTA_CHECK_INTERVAL_S
-            int "OTA check interval (seconds)"
-            default 1800
-            range 60 86400
+            int "OTA / fleet check-in interval (seconds)"
+            default 300
+            range 60 300
             help
-                How often to poll the backend for firmware updates.
-                Default: 1800 (30 minutes). Minimum: 60 (1 minute).
+                How often the unit checks in with the fleet (and polls for
+                firmware). Capped at 300 (5 minutes) so the fleet always hears
+                from every unit at least that often; the firmware also clamps
+                any persisted/endpoint value to this ceiling. Minimum 60 (1 min).
 
         config ML_OTA_AUTO_UPDATE
             bool "Enable automatic OTA updates"
