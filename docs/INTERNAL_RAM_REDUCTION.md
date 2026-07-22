@@ -35,15 +35,24 @@ the last few KB of internal RAM.
 - **Validate:** reproduce the low-internal-RAM condition, force a DERP drop, confirm
   `derp_connected` returns true and a fleet check-in lands.
 
-### Phase 2 — headroom (low risk, if Phase 1 isn't enough)
-Move two non-datapath task stacks to PSRAM via the repo's existing
-`xTaskCreatePinnedToCoreWithCaps(..., MALLOC_CAP_SPIRAM, ...)` pattern
-(`dcs_support.c:37`):
-- **ml_coord** stack 12 KB → PSRAM (control plane; not heartbeat path, no flash ops).
-- **fleet_ota** stack 8 KB → PSRAM (rare OTA event; verify stack not touched during
-  the `esp_ota` cache-disabled write window).
-- Frees ~20 KB internal. **Risk:** LOW (neither is the safety datapath, neither runs
-  in ISR context).
+### Phase 2 — NOT SAFE as scoped (findings on implementation, 2026-07-21)
+Both candidate tasks perform **flash operations**, which violate the PSRAM-stack
+contract (a task with a PSRAM stack faults when the cache is disabled during a
+flash write):
+- **fleet_ota** calls `esp_ota_write` (`ml_app.c:577`) — PSRAM stack would fault
+  mid-OTA-write, breaking OTA itself. **Must stay internal.**
+- **ml_coord** invokes the app state-callback (`ml_coord.c:2416`) which calls
+  `esp_ota_mark_app_valid_cancel_rollback()` (`ml_app.c:308`) on the coord stack —
+  PSRAM stack would boot-loop on first connect and/or defeat rollback protection.
+  Would require decoupling the mark-valid off the coord task (into an
+  always-present internal context) — a risky change to the OTA-validity/rollback
+  chain.
+
+**Decision:** SKIP Phase 2. Phase 1 already raised internal free ~13 KB → ~32 KB,
+which resolves the DERP-reconnect OOM with ample margin. The ~12–20 KB extra is not
+worth risking the OTA/rollback safety chain. Revisit only if a future feature
+re-pressures internal RAM, and then prefer Phase 3 (WiFi) or a proper mark-valid
+decouple over PSRAM-stacking flash-op tasks.
 
 ### Phase 3 — biggest reservoir (design decision, deferred)
 WiFi driver static buffers ≈ **40–50 KB internal, DMA-locked (cannot go to PSRAM)**.
