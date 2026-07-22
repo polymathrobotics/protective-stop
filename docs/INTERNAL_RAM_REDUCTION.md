@@ -35,6 +35,13 @@ the last few KB of internal RAM.
 - **Validate:** reproduce the low-internal-RAM condition, force a DERP drop, confirm
   `derp_connected` returns true and a fleet check-in lands.
 
+### Phase 1b — NCM NTB buffers 4+4 → 2+2 (2026-07-22) ✅ done
+TinyUSB NCM NTB buffers are DMA-pinned to internal SRAM. On the USB-NCM tether
+the DERP TLS handshake still starved internal RAM to ~2.8 KB and OOM'd even with
+Phase 1; dropping the NTB counts 4+4 → 2+2 (`sdkconfig.defaults`) returns ~6 KB
+and the handshake low-water rose to ~15 KB. Negligible throughput impact on this
+low-rate fallback link.
+
 ### Phase 2 — NOT SAFE as scoped (findings on implementation, 2026-07-21)
 Both candidate tasks perform **flash operations**, which violate the PSRAM-stack
 contract (a task with a PSRAM stack faults when the cache is disabled during a

@@ -29,6 +29,21 @@ Asserts (exit 0 = all pass):
 Run this after any change to `host/machine_app_runner.c` or a pstop_c
 submodule bump (it will catch a CRC/wire break immediately).
 
+## 1b. Many-remotes-to-one-machine matrix — `tools/pstop_multi_remote_test.py`
+
+Drives N scripted software remotes (each its own device_id + counter handshake)
+against a dedicated `machine_app_runner` to validate the many-to-one logic
+across the corner-case matrix: independent arming, the any-STOP OR, arming
+ownership, heartbeat loss, unbond, capacity overflow, allowlist deny, stop-only
+operators, malformed/bad-CRC/invalid-type traffic, and network chaos (via §2).
+32 assertions covering the fail-safe invariants (I1–I7).
+
+```sh
+python3 tools/pstop_multi_remote_test.py     # exit 0 = all invariants held
+```
+
+Full write-up + invariant list: `MULTI_REMOTE_VALIDATION_2026-07-22.md`.
+
 ## 2. Protocol-level impairment — `tools/pstop_chaos_proxy.py`
 
 UDP proxy interposed in the pstop path
@@ -104,10 +119,10 @@ A transport claim needs, per transport (Ethernet / USB-NCM / WiFi):
 2. The §3 protocol ladder and §4 underlay ladder.
 3. A wire-level audit: tcpdump the underlay and confirm no plaintext
    application ports (this is what caught the critical plaintext
-   downgrade — see `CHAOS_RESULTS_2026-07-20.md`).
+   downgrade — see `archive/CHAOS_RESULTS_2026-07-20.md`).
 
 Measured baselines to compare against
-(`TRANSPORT_TEST_REPORT_2026-07-20.md`):
+(`archive/TRANSPORT_TEST_REPORT_2026-07-20.md`):
 
 | Metric | USB-NCM | Ethernet (PoE) | WiFi (PS off) |
 |---|---|---|---|

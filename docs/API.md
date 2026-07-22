@@ -14,7 +14,7 @@ Query parameters are shown where required. Unless noted, POST bodies are empty.
 | Method | Route | Purpose |
 |--------|-------|---------|
 | GET  | `/` | Diagnostic HTML page |
-| GET  | `/state.json` | Telemetry snapshot (uptime, ml_state, pstop counters, heap, E-stop channels) |
+| GET  | `/state.json` | Telemetry snapshot (uptime, ml_state, pstop counters, heap, E-stop channels, `public_ip`/`derp_region` for fleet-side geolocation) |
 | GET  | `/api/last_log` | Tail of the previous boot's log (RTC ring) |
 | POST | `/api/derp` | Toggle the DERP TX worker |
 | POST | `/api/derp_delay?ms=N` | Set the DERP loop yield (ms) |
@@ -37,7 +37,7 @@ Query parameters are shown where required. Unless noted, POST bodies are empty.
 | GET    | `/admin/api/status` | Node status |
 | GET    | `/admin/api/settings` | Read settings |
 | POST   | `/admin/api/settings` | Update settings |
-| GET    | `/admin/api/monitor` | Heap / DERP / per-task monitor |
+| GET    | `/admin/api/monitor` | Heap / DERP / per-task monitor + DERP re-home diagnostics (`derp_home_region`, `fleet_peer_region`, `rehome_*` counters) |
 | GET    | `/admin/api/peers` | Active WireGuard peer table |
 | GET    | `/admin/api/peers/allowed` | Read the peer allowlist |
 | POST   | `/admin/api/peers/allowed` | Add an allowed peer (fleet server is non-removable) |

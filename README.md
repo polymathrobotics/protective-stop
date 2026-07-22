@@ -156,13 +156,21 @@ C:2012 pass over the code we own (the certified `pstop_c` is excluded).
 See `docs/MISRA_COMPLIANCE_2026-07-21.md` for results and the deviation
 register.
 
-## Current status + open items (2026-07-21)
+## Current status + open items (2026-07-22)
 
 Validated across all three transports (soaks + impairment ladders, zero
-false stops, zero device crashes — `docs/TRANSPORT_TEST_REPORT_2026-07-20.md`,
-`docs/CHAOS_RESULTS_2026-07-20.md`). DERP failover ≤10 s and the arming
-policy are bench-verified (`docs/FAILOVER_AND_ARMING_DESIGN_2026-07-21.md`).
-MISRA C sweep of the owned firmware done (`docs/MISRA_COMPLIANCE_2026-07-21.md`).
+false stops, zero device crashes — `docs/archive/TRANSPORT_TEST_REPORT_2026-07-20.md`,
+`docs/archive/CHAOS_RESULTS_2026-07-20.md`). DERP failover ≤10 s and the arming
+policy are bench-verified (`docs/FAILOVER_AND_ARMING_DESIGN_2026-07-21.md`); the
+many-remotes-to-one-machine logic is validated in
+`docs/MULTI_REMOTE_VALIDATION_2026-07-22.md`. MISRA C sweep of the owned
+firmware done (`docs/MISRA_COMPLIANCE_2026-07-21.md`).
+
+Fleet integration (2026-07-22): units self-provision (per-unit ID, auto-join
+Tailscale), check in on boot and at least every 5 min, and are managed/OTA'd
+from the fleet server (`docs/FLEET_SERVER.md`). Inbound fleet reachability
+required a DERP-home fix so a NAT'd/tethered unit homes on the fleet's region
+(`docs/TROUBLESHOOTING.md`). Bulk USB provisioning via `tools/flash_pstop.sh`.
 
 Open items:
 - **WiFi is the weakest transport** — ~98 % soak reply rate with a
@@ -173,9 +181,10 @@ Open items:
 - **Tailscale subnet-route caveat:** a subnet router advertising the
   robot's LAN hijacks operator-laptop traffic to the chip's LAN IP;
   needs an `ip rule` workaround — document for the fleet.
+- **USB-tether units behind symmetric NAT are relay-only** (no direct path);
+  they depend on the DERP re-home. Reachable in testing after recovery, but
+  worth a dedicated soak.
 - Long-duration (24 h+) per-transport soaks before certification runs.
-- Re-run the WiFi soak to prove zero unscheduled arms under the new
-  debounce + arming policy.
 
 ## Certification note
 

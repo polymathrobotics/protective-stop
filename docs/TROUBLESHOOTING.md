@@ -16,10 +16,11 @@ machine's replies:
 
 | Ring | Meaning |
 |---|---|
-| YELLOW | disconnected — no fresh machine reply in 2 s (never bonded, machine unreachable, or the comparator stopped sending after a lockstep fault) |
+| WHITE | idle — no pstop peer (machine) configured; nothing to connect to (fresh unit, or peer cleared) |
+| RED (slow pulse) | a peer IS configured but no fresh reply — never bonded, machine down/unreachable, or the comparator stopped after a lockstep fault. Distinct from a solid-red commanded STOP |
 | BLUE | bonded, not armed — last reply was BOND/UNBOND |
 | GREEN | armed — last reply OK, robot cleared to run |
-| RED | STOP — commanded stop (switch pressed, or NEED_STOP arming cycle not yet completed) |
+| RED (solid) | STOP — commanded stop (switch pressed, or NEED_STOP arming cycle not yet completed) |
 | PURPLE | lockstep MISMATCH — the two cores disagreed recently (e.g. ONE loop channel open/faulted). Takes priority over all other colours; held 2 s so single blips show |
 | dim purple comet | boot sign-of-life, or an OTA image being flashed |
 
@@ -153,8 +154,48 @@ gaps + `max_lost_messages` (10) exceeded → MSG_LOST STOP.
 
 A tailnet subnet router advertising the robot's LAN steals traffic to
 the chip's LAN IP (policy rule beats the connected route). Bench
-workaround: `ip rule` preference for the connected route (documented in
-`TRANSPORT_TEST_REPORT_2026-07-20.md`, open finding 4).
+workaround: an `ip rule` preference for the connected route. Subnet-router
+interaction and fleet isolation are covered in `TAILSCALE_ISOLATION.md`.
+
+### Reachable over USB/LAN but not via its Tailscale IP (fleet's remote buttons fail)
+
+The unit checks in fine but can't be reached *inbound* over Tailscale — its
+single DERP connection isn't homed on the fleet's region, so remote peers relay
+to the wrong region and packets never arrive. Critical for NAT'd units (USB
+tether / symmetric NAT) where DERP relay is the only inbound path (no direct
+hole-punch). Diagnose via `/admin/api/monitor`:
+
+- `fleet_peer_region` — the fleet's DERP region as learned by the chip (2 = sfo).
+- `derp_home_region` / `priority_peer_region` — where DERP is homed / the region
+  the chip decided on. Both should equal `fleet_peer_region` (or the priority
+  peer's region, which wins when known).
+- `derp_connected` — must be true for relay reachability.
+- `rehome_calls` / `rehome_applied` — did the re-home run. **`rehome_calls = 0`
+  means the WG task isn't running at all** → see the boot-safety pause below.
+
+A wrong region self-heals within a few seconds (the firmware re-homes to the
+fleet's region and re-advertises it in every MapRequest). If it doesn't recover,
+OTA the latest build.
+
+### Tailscale paused / `wg_mgr` task Suspended (boot-safety)
+
+Symptom: `wg_paused=1`, `derp_paused=1`, `ts_boot_en=0`, DERP down, `rehome_calls=0`,
+and the `wg_mgr` task shows **Suspended** in `/admin/api/monitor`. The boot-safety
+ladder pauses Tailscale after repeated crash-class boots (`boot_count>=2`) to
+escape a perceived boot-loop — easily tripped on the bench by aggressive OTA +
+hard power-cycling. Recover:
+
+1. `curl -u admin:PW -X POST http://$CHIP/api/ts_boot` — confirm it returns `"ts_boot_en":1`.
+2. `curl -u admin:PW -X POST http://$CHIP/admin/api/restart` — a **clean** SW
+   restart. Do **not** power-cycle: a hard cut is a crash-class boot and re-arms
+   the pause.
+
+For a wedged USB-NCM tether (chip enumerates as `303a:4001` but takes no IP on
+`10.42.0.0/24`), power-cycle it via the LC relay: `usb-switch cycle`.
+
+> Note: on these units `/api/last_log` (RTC ring) is unreliable/previous-boot and
+> the USB-CDC console emits nothing — debug with the `/admin/api/monitor`
+> **counters**, not logs.
 
 ### OTA upload times out / hangs
 

@@ -23,7 +23,9 @@ curl -m 3 -s http://$CHIP/state.json | jq '.uptime_ms, .ml_state, .free_heap'
 #   - USB-NCM: does the host have the NCM interface up?
 #     (`nmcli c | grep enx` — NetworkManager usually handles the share.)
 #     No NCM interface at all => TinyUSB didn't enumerate; power-cycle
-#     the chip once (yank + reinsert USB).
+#     the chip. If it's on the LC USB relay: `usb-switch cycle`. A wedged
+#     tether (chip enumerates as 303a:4001 but takes no IP on 10.42.0.0/24)
+#     also clears with a power-cycle.
 
 # 2. Is the admin UI reachable?
 curl -m 3 -s -o /dev/null -w "%{http_code}\n" \
@@ -88,6 +90,32 @@ curl -s http://$CHIP/state.json | jq '.boot_count, .reset_reason, .rst_hist'
   fix soon.
 - Grab `/api/last_log` before the next reboot overwrites context.
 
+## Recover a unit in the boot-safety pause
+
+If the unit is reachable but Tailscale is paused — `/state.json` shows
+`wg_paused=1`, `derp_paused=1`, `ts_boot_en=0`, and `/admin/api/monitor` shows
+the `wg_mgr` task **Suspended** with `derp_connected=false` — the boot-safety
+ladder disabled Tailscale after repeated crash-class boots (`boot_count>=2`).
+Re-enable it and clean-restart:
+
+```sh
+curl -u admin:microlink -X POST http://$CHIP/api/ts_boot        # confirm "ts_boot_en":1
+curl -u admin:microlink -X POST http://$CHIP/admin/api/restart  # CLEAN restart
+```
+
+Use the SW restart, **not** a power-cycle — a hard power cut is a crash-class
+boot and re-arms the pause. (Aggressive OTA + hard power-cycling on the bench is
+the usual cause; go easy on the power relay while iterating.)
+
+## Fleet can't reach / update a unit
+
+The direct `/admin/api/ota` upload above is also the **fleet-bypass recovery**:
+if a unit is unreachable from the fleet (e.g. wedged on the wrong DERP region so
+its check-in/OTA fails), push a known-good `pstop_remote.bin` directly to any
+address you *can* reach it on (LAN, USB tether `10.42.0.1`, or its Tailscale IP
+from a same-region peer). It flashes, reboots, and self-heals. See
+`TROUBLESHOOTING.md` → "Reachable over USB/LAN but not via its Tailscale IP".
+
 ## Recover from a botched OTA you just pushed
 
 There is no force-rollback endpoint; you have two options:
@@ -106,6 +134,9 @@ leave no bootable image — but if it does:
 
 1. Hold BOOT, tap RESET — chip enters ROM download mode.
 2. `cd firmware && idf.py -p /dev/ttyACM0 flash` (or esptool directly).
+   For production/bulk provisioning from a pre-built image, use
+   `tools/flash_pstop.sh` (auto-detects a download-mode chip; `--from-ip`
+   forces a running unit into download mode). See `README.md`.
 3. The chip auto-reboots into normal mode. NVS (settings, pstop peer,
    reset history) survives — the partition table keeps stable offsets.
 
