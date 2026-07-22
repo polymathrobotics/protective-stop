@@ -51,11 +51,23 @@ for f in bootloader.bin partition-table.bin ota_data_initial.bin pstop_remote.bi
   [ -f "$IMG/$f" ] || { echo "ERROR: missing $IMG/$f — stage a build into production_image/ first." >&2; exit 1; }
 done
 
-# --- esptool available? ---------------------------------------------------
-if   command -v esptool.py >/dev/null 2>&1; then ESPTOOL=(esptool.py)
-elif command -v esptool     >/dev/null 2>&1; then ESPTOOL=(esptool)
+# --- esptool available? (prefer the modern 'esptool' entrypoint) ----------
+if   command -v esptool     >/dev/null 2>&1; then ESPTOOL=(esptool)
+elif command -v esptool.py  >/dev/null 2>&1; then ESPTOOL=(esptool.py)
 elif python3 -c "import esptool" >/dev/null 2>&1; then ESPTOOL=(python3 -m esptool)
 else echo "ERROR: esptool not found — 'pip install esptool'." >&2; exit 1; fi
+
+# esptool v5 renamed flags to hyphens and deprecated the underscore forms;
+# v4 (the ESP-IDF one) only knows underscores. Pick the right set so we neither
+# spam deprecation warnings on v5 nor break on v4.
+EVER="$("${ESPTOOL[@]}" version 2>&1 | grep -oiE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -1)"
+if [ "${EVER%%.*}" -ge 5 ] 2>/dev/null; then
+  O_WF=write-flash O_EF=erase-flash O_MODE=--flash-mode O_SIZE=--flash-size
+  O_FREQ=--flash-freq O_BEFORE=default-reset O_AFTER=hard-reset
+else
+  O_WF=write_flash O_EF=erase_flash O_MODE=--flash_mode O_SIZE=--flash_size
+  O_FREQ=--flash_freq O_BEFORE=default_reset O_AFTER=hard_reset
+fi
 
 # --- find a chip in DOWNLOAD mode. Match Espressif VID 303a in any
 #     download/JTAG variant (S3 reports 0009, others 1001/0002) but skip the
@@ -109,6 +121,18 @@ if [ -z "$PORT" ]; then
   echo ">> auto-detected port: $PORT"
 fi
 
+# A RUNNING unit exposes a CDC console at 303a:4001 but cannot be flashed —
+# esptool times out talking ROM protocol to live firmware. Catch this early
+# (esp. when a port was passed explicitly, bypassing detect_port).
+rpid="$(udevadm info -q property -n "$PORT" 2>/dev/null | sed -n 's/^ID_MODEL_ID=//p')"
+if [ "$rpid" = "4001" ]; then
+  echo "ERROR: $PORT is a RUNNING pstop (not in download mode) — esptool can't flash it." >&2
+  echo "       Force download mode first:" >&2
+  echo "         $(basename "$0") --from-ip <admin-ip>      # over the network, or" >&2
+  echo "         hold BOOT, tap RESET, then rerun with the port." >&2
+  exit 1
+fi
+
 echo "=========================================================="
 echo " Flashing pstop -> $PORT"
 grep -E '^(version|app sha256):' "$IMG/MANIFEST.txt" 2>/dev/null || true
@@ -116,12 +140,12 @@ echo "=========================================================="
 
 if [ "$ERASE" = "1" ]; then
   echo ">> erasing flash (full chip)..."
-  "${ESPTOOL[@]}" --chip esp32s3 -p "$PORT" -b "$BAUD" erase_flash
+  "${ESPTOOL[@]}" --chip esp32s3 -p "$PORT" -b "$BAUD" "$O_EF"
 fi
 
 "${ESPTOOL[@]}" --chip esp32s3 -p "$PORT" -b "$BAUD" \
-  --before default_reset --after hard_reset \
-  write_flash --flash_mode dio --flash_size 8MB --flash_freq 80m \
+  --before "$O_BEFORE" --after "$O_AFTER" \
+  "$O_WF" "$O_MODE" dio "$O_SIZE" 8MB "$O_FREQ" 80m \
   0x0     "$IMG/bootloader.bin" \
   0x8000  "$IMG/partition-table.bin" \
   0x19000 "$IMG/ota_data_initial.bin" \

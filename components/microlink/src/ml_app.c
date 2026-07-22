@@ -915,6 +915,12 @@ static void fleet_ota_task(void * arg)
   ota_set_state(app, OTA_STATE_IDLE, "Connected, waiting for first check...");
   vTaskDelay(pdMS_TO_TICKS(10000));
 
+  /* Check in immediately on boot so a freshly-provisioned unit registers with
+   * the fleet right away, instead of only after a full check_interval_s (which
+   * left new units showing "never checked in" on the fleet for up to that
+   * interval). Subsequent checks follow the normal interval below. */
+  app->ota_check_now = true;
+
   while (true) {
     /* Wait for interval, break on manual trigger or interval change */
     int interval_s = app->check_interval_s;

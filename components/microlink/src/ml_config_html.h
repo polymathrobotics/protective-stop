@@ -199,34 +199,9 @@ static const char CONFIG_PAGE_HTML[] =
   "<div class='msg' id='peersMsg'></div>"
   "</div></div>"
 
-  /* ---- Fleet OTA Section ---- */
-  "<div class='section' id='fleetSection'>"
-  "<div class='section-hdr'><h2>Fleet OTA Updates</h2>"
-  "<span style='color:#8b949e;font-size:.75em' id='fleetAutoLabel'>--</span></div>"
-  "<div class='section-body'>"
-  "<div id='fleetInfo'></div>"
-  "<div style='display:flex;gap:10px;margin-top:10px;align-items:center'>"
-  "<button class='btn-primary btn-sm' onclick='fleetCheck()' id='fleetCheckBtn'>Check Now</button>"
-  "<button class='btn-outline btn-sm' onclick='fleetToggle()' id='fleetToggleBtn'>--</button>"
-  "<select id='fleetIntervalSel' onchange='fleetSetInterval()' style='padding:4px 8px;"
-  "background:#0d1117;border:1px solid #30363d;color:#e6edf3;border-radius:4px;font-size:.8em'>"
-  "<option value='60'>1 min</option>"
-  "<option value='300'>5 min</option>"
-  "<option value='600'>10 min</option>"
-  "<option value='1800'>30 min</option>"
-  "<option value='3600'>1 hour</option>"
-  "<option value='7200'>2 hours</option>"
-  "<option value='21600'>6 hours</option>"
-  "<option value='43200'>12 hours</option>"
-  "<option value='86400'>24 hours</option>"
-  "</select>"
-  "</div>"
-  "<div id='fleetProgress' style='display:none;margin-top:10px'>"
-  "<div style='background:#21262d;border-radius:4px;overflow:hidden;height:24px'>"
-  "<div id='fleetBar' style='background:#238636;height:100%;width:0%;transition:width 0.3s;"
-  "display:flex;align-items:center;justify-content:center;font-size:.75em;font-weight:600;"
-  "color:#fff;min-width:40px'></div></div></div>"
-  "</div></div>"
+  /* Fleet OTA is managed centrally by the fleet server (100.92.1.78); the
+   * per-device admin section was removed. The device still checks in and pulls
+   * updates via the fleet_ota task — that is not exposed here. */
 
   /* ---- Firmware Update Section ---- */
   "<div class='section'>"
@@ -733,108 +708,7 @@ static const char CONFIG_PAGE_HTML[] =
   "}"
   "}"
 
-  /* ---- Fleet OTA ---- */
-  "var fleetInterval=null;"
-
-  "async function loadFleetOta(){"
-  "try{"
-  "const r=await fetch(API_BASE+'/api/fleet-ota/status');"
-  "const d=await r.json();"
-  "var el=document.getElementById('fleetInfo');"
-  "var s=d.state||'idle';"
-
-  /* Status indicator */
-  "var color='#8b949e';var icon='\\u23F8';" /* pause */
-  "if(s==='checking'){color='#58a6ff';icon='\\u21BB';}" /* refresh */
-  "else if(s==='update_found'){color='#d29922';icon='\\u2B07';}" /* down arrow */
-  "else if(s==='downloading'){color='#58a6ff';icon='\\u2B07';}"
-  "else if(s==='rebooting'){color='#3fb950';icon='\\u21BB';}"
-  "else if(s==='error'){color='#f85149';icon='\\u2716';}" /* X */
-  "else if(s==='idle'&&d.message&&d.message.indexOf('Up to date')>=0){color='#3fb950';icon='\\u2714';}" /* check */
-
-  "var h='<div style=\"display:flex;align-items:center;gap:12px\">';"
-  "h+='<span style=\"font-size:1.8em;color:'+color+'\">'+icon+'</span>';"
-  "h+='<div><div style=\"font-size:.95em;color:'+color+';font-weight:600\">';"
-
-  "if(s==='idle')h+='Idle';"
-  "else if(s==='checking')h+='Checking for updates...';"
-  "else if(s==='update_found')h+='Update found!';"
-  "else if(s==='downloading')h+='Downloading firmware...';"
-  "else if(s==='rebooting')h+='Rebooting with new firmware...';"
-  "else if(s==='error')h+='Error';"
-
-  "h+='</div>';"
-  "if(d.message)h+='<div style=\"font-size:.8em;color:#8b949e;margin-top:2px\">'+d.message+'</div>';"
-  "h+='</div></div>';"
-
-  "el.innerHTML=h;"
-
-  /* Auto-update label + toggle button */
-  "var lbl=document.getElementById('fleetAutoLabel');"
-  "var btn=document.getElementById('fleetToggleBtn');"
-  "if(d.auto_update){"
-  "lbl.textContent='auto-update ON';lbl.style.color='#3fb950';"
-  "btn.textContent='Disable Auto-Update';btn.className='btn-outline btn-sm';"
-  "}else{"
-  "lbl.textContent='auto-update OFF';lbl.style.color='#f85149';"
-  "btn.textContent='Enable Auto-Update';btn.className='btn-primary btn-sm';"
-  "}"
-
-  /* Progress bar */
-  "var fp=document.getElementById('fleetProgress');"
-  "var fb=document.getElementById('fleetBar');"
-  "if(s==='downloading'){"
-  "fp.style.display='block';"
-  "var pct=d.dl_percent||0;"
-  "fb.style.width=pct+'%';fb.textContent=pct+'%';"
-  "}else if(s==='rebooting'){"
-  "fp.style.display='block';"
-  "fb.style.width='100%';fb.textContent='100%';"
-  "}else{"
-  "fp.style.display='none';"
-  "fb.style.width='0%';"
-  "}"
-
-  /* Set interval dropdown */
-  "var sel=document.getElementById('fleetIntervalSel');"
-  "var ivl=d.check_interval_s||1800;"
-  "sel.value=ivl;"
-
-  /* Poll faster while active */
-  "if(s==='checking'||s==='downloading'||s==='update_found'){"
-  "if(!fleetInterval||fleetInterval>2000){clearInterval(fleetInterval);fleetInterval=setInterval(loadFleetOta,1000);}"
-  "}else{"
-  "if(!fleetInterval||fleetInterval<5000){clearInterval(fleetInterval);fleetInterval=setInterval(loadFleetOta,5000);}"
-  "}"
-
-  "}catch(e){"
-  /* Fleet OTA not available (backend URL not configured) — hide section */
-  "document.getElementById('fleetSection').style.display='none';"
-  "}"
-  "}"
-
-  "async function fleetCheck(){"
-  "document.getElementById('fleetCheckBtn').disabled=true;"
-  "document.getElementById('fleetCheckBtn').textContent='Checking...';"
-  "try{await fetch(API_BASE+'/api/fleet-ota/check',{method:'POST'});}catch(e){}"
-  "setTimeout(function(){"
-  "document.getElementById('fleetCheckBtn').disabled=false;"
-  "document.getElementById('fleetCheckBtn').textContent='Check Now';"
-  "loadFleetOta();"
-  "},2000);"
-  "}"
-
-  "async function fleetSetInterval(){"
-  "var s=parseInt(document.getElementById('fleetIntervalSel').value);"
-  "try{await fetch(API_BASE+'/api/fleet-ota/interval',{method:'POST',"
-  "headers:{'Content-Type':'application/json'},body:JSON.stringify({interval_s:s})});"
-  "}catch(e){}"
-  "}"
-
-  "async function fleetToggle(){"
-  "try{await fetch(API_BASE+'/api/fleet-ota/toggle',{method:'POST'});}catch(e){}"
-  "loadFleetOta();"
-  "}"
+/* ---- Fleet OTA UI removed — managed centrally at the fleet server ---- */
 
   /* ---- Verbose Logging ---- */
   "async function loadVerbose(){"
@@ -863,8 +737,7 @@ static const char CONFIG_PAGE_HTML[] =
   "}"
 
   /* ---- Init ---- */
-  "loadStatus();loadWifi();loadSettings();loadAllowed();loadMonitor();loadOtaStatus();loadFleetOta();loadVerbose();"
-  "fleetInterval=setInterval(loadFleetOta,5000);"
+  "loadStatus();loadWifi();loadSettings();loadAllowed();loadMonitor();loadOtaStatus();loadVerbose();"
   "setInterval(loadOtaStatus,15000);"
   "statusInterval=setInterval(loadStatus,2000);"
   "setInterval(loadMonitor,3000);"
