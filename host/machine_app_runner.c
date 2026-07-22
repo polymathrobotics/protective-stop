@@ -418,6 +418,33 @@ static const char * err_name(pstop_error_t e)
   }
 }
 
+/* Map a local remote id (machine.robot_state.remote_stop_id) back to its wire
+ * device id (0x01xxxxxx) for display. 0 = no owner / not found. */
+static uint32_t device_id_for_local(const pstop_machine_t *m, uint32_t local_id)
+{
+  if (local_id == 0U) return 0U;
+  for (uint16_t i = 0; i < m->remotes.max_remotes; i++) {
+    const pstop_remote_data_t *c = &m->remotes.remotes[i];
+    if (c->local_remote_id == local_id) return c->remote_data.remote_id.data;
+  }
+  return 0U;
+}
+
+/* Library log hook — fires when a remote's command TYPE changes (and on
+ * rejections / heartbeat timeouts). Names the pstop by its device id so it is
+ * always clear WHICH remote sent WHAT. */
+static void log_message(uint64_t timestamp, const device_id_t *client,
+                        uint8_t message, pstop_error_t error)
+{
+  (void)timestamp;
+  if (error == PSTOP_OK) {
+    fprintf(stderr, "pstop 0x%08X -> %s\n", client->data, msg_name(message));
+  } else {
+    fprintf(stderr, "pstop 0x%08X -> %s  [%s]\n", client->data,
+            msg_name(message), err_name(error));
+  }
+}
+
 static pstop_application_t pstop_app;
 static pstop_machine_t machine;
 static udp_transport_data_t udp_transport;
@@ -470,6 +497,7 @@ int main(int argc, char * argv[])
   pstop_app.app_config.max_missed_heartbeats = g_cfg.max_missed_heartbeats;
   pstop_app.remote_details_cb = is_operator_allowed;
   pstop_app.status_cb = robot_status;
+  pstop_app.log_message_cb = log_message;
   pstop_app.env.get_time_cb = machine_now_ms;
 
   machine_init(&machine, &pstop_app, pstop_clients, g_cfg.max_remotes);
@@ -699,11 +727,14 @@ int main(int argc, char * argv[])
       {
         fprintf(
           stderr,
-          "  STATE robot=%s restart=%s stop_id=%u active=%u  (was robot=%s restart=%s)\n",
+          "  STATE robot=%s restart=%s owner=0x%08X active=%u  (from pstop "
+          "0x%08X %s; was robot=%s restart=%s)\n",
           rstate_name(machine.robot_state.robot_state),
           restart_name(machine.robot_state.restart_state),
-          machine.robot_state.remote_stop_id,
+          device_id_for_local(&machine, machine.robot_state.remote_stop_id),
           pstop_remote_num_active(&machine.remotes),
+          req_msg.id.data,
+          msg_name(req_msg.message),
           rstate_name(prev_robot),
           restart_name(prev_restart));
       }

@@ -41,10 +41,11 @@ sources. Builds to `./machine_app_runner`.
 ./machine_app_runner 9999 -v          # port override + verbose RX/TX trace
 ```
 
-Stderr prints transitions only by default — `Robot Status = OK` / `STOP`,
-`ARMED by ...`, `ANOMALY: ...` — so you can tell at a glance whether the
-remote's lockstep is producing heartbeats or the comparator is
-suppressing them (no heartbeat for the configured timeout ⇒ STOP).
+Stderr prints per-pstop command changes and state transitions by default —
+`pstop 0x<id> -> STOP/OK/BOND/...`, `Robot Status = OK` / `STOP`,
+`ARMED by 0x<id> ...`, `ANOMALY: ...` — each line naming the remote by its
+device id, so with several remotes bonded you can see exactly which one sent
+what (and which one caused a stop or owns the arming cycle).
 
 ## Point the remote at this host
 
@@ -72,7 +73,13 @@ the machine safely sees silence.
 ```
 machine_app_runner listening on 0.0.0.0:8890
 Robot Status = STOP
-  STATE robot=STOPPED restart=NEED_STOP ...
+pstop 0x01D7791C -> BOND
+  STATE robot=STOPPED restart=NEED_STOP owner=0x00000000 active=1  (from pstop 0x01D7791C BOND; ...)
+pstop 0x01D7791C -> STOP
+ARMED by 0x01D7791C: STOP held 804 ms (policy minimum 500 ms)
+Robot Status = OK
+pstop 0x01D778B4 -> STOP
+  STATE robot=STOPPED restart=NEED_STOP owner=0x01D7791C active=2  (from pstop 0x01D778B4 STOP; was robot=OK ...)
 ```
 
 The machine starts disarmed (NEED_STOP). Arm it: press and hold the
