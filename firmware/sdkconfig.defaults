@@ -168,3 +168,13 @@ CONFIG_ESP_COREDUMP_MAX_TASKS_NUM=64
 # lives in sdkconfig.credentials (CONFIG_ML_OTA_API_KEY), never committed.
 CONFIG_ML_FLEET_SERVER_IP="100.92.1.78"
 CONFIG_ML_OTA_BACKEND_URL="http://100.92.1.78"
+
+# mbedTLS allocates its TLS working buffers from PSRAM, not internal RAM.
+# Internal RAM runs 5-13KB free on this build; a DERP TLS handshake needs
+# ~20-30KB transiently (IN_CONTENT_LEN 16K + OUT 4K + scratch), so with
+# INTERNAL_MEM_ALLOC the reconnect OOMs and DERP stays down. External (PSRAM)
+# alloc fixes it; prereq CONFIG_SPIRAM_USE_MALLOC is set. TLS runs in the
+# derp_tx/net_io tasks (not ISR/cache-disabled) and is NOT the WireGuard/pstop
+# datapath crypto, so the safety heartbeat path is unaffected.
+# See docs/INTERNAL_RAM_REDUCTION.md.
+CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC=y
