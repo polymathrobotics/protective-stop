@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2026 Polymath Robotics
+// SPDX-FileCopyrightText: 2026 SET_YOUR_ORGANIZATION_HERE
 // SPDX-License-Identifier: Apache-2.0
 
 /**
@@ -536,25 +536,67 @@ static int find_peer_by_ip(microlink_t * ml, uint32_t vpn_ip)
   return -1;
 }
 
-/* Home our single DERP connection on the priority (safety) peer's region.
+/* Fleet coordination/OTA server VPN IP (CONFIG_ML_FLEET_SERVER_IP), parsed
+ * once. 0 if unset. */
+static uint32_t fleet_server_ip_cached(void)
+{
+  static uint32_t ip;
+  static bool done;
+  if (!done) {
+    ip = microlink_parse_ip(CONFIG_ML_FLEET_SERVER_IP);
+    done = true;
+  }
+  return ip;
+}
+
+/* Peers that must always keep a WG slot and are never evicted: the priority
+ * (safety) peer — the machine — and the fleet coordination/OTA server. On a
+ * large tailnet (100s of peers, trimmed to ML_MAX_PEERS) either could
+ * otherwise fall out of the table, leaving the chip unable to reach the
+ * machine (unsafe) or the fleet (no OTA/coordination). */
+static bool is_pinned_peer(microlink_t * ml, uint32_t vpn_ip)
+{
+  if (vpn_ip == 0) return false;
+  if (ml->config.priority_peer_ip != 0 && vpn_ip == ml->config.priority_peer_ip) {
+    return true;
+  }
+  uint32_t fip = fleet_server_ip_cached();
+  return (fip != 0 && vpn_ip == fip);
+}
+
+/* Home our single DERP connection on a pinned peer's region.
  * microlink keeps ONE DERP connection, and a Tailscale DERP server only
- * delivers to peers connected to that same server — so if the chip and the
- * machine home on different regions, the chip's relayed DISCO/WG-init never
- * reaches the machine and the link only forms after a `tailscale ping` FROM
- * the machine (which pulls it onto our region). Homing on the machine's region
- * here — and reporting it as PreferredDERP in the next MapRequest (ml_coord),
- * so peers find us there too — fixes both directions with no manual ping.
- * Called wherever a peer's derp_region is (re)learned. */
+ * delivers to peers connected to that same server — so if the chip homes on a
+ * different region than a peer it must reach, its relayed DISCO/WG-init never
+ * arrives and the link only forms after a `tailscale ping` FROM that peer.
+ * Home on the priority (safety) peer's region when known; otherwise fall back
+ * to the fleet server's region (the always-on anchor) so the chip can still be
+ * managed/updated when no machine is online. The chosen region is reported as
+ * PreferredDERP in the next MapRequest (ml_coord) so peers find us there too.
+ * Called wherever a pinned peer's derp_region is (re)learned. */
 static void maybe_rehome_to_priority(microlink_t * ml, const ml_peer_t * p)
 {
-  if (ml->config.priority_peer_ip == 0 || p->vpn_ip != ml->config.priority_peer_ip || p->derp_region == 0) {
+  if (p->derp_region == 0 || !is_pinned_peer(ml, p->vpn_ip)) {
     return;
   }
-  ml->priority_peer_region = p->derp_region;
-  if (ml->derp_home_region != p->derp_region) {
+  bool is_prio = (ml->config.priority_peer_ip != 0 && p->vpn_ip == ml->config.priority_peer_ip);
+  uint16_t target = p->derp_region;
+  if (!is_prio && ml->config.priority_peer_ip != 0) {
+    /* Fleet peer: prefer the priority peer's region if we know it. */
+    int pidx = find_peer_by_ip(ml, ml->config.priority_peer_ip);
+    if (pidx >= 0 && ml->peers[pidx].derp_region != 0) {
+      target = ml->peers[pidx].derp_region;
+    }
+  }
+  ml->priority_peer_region = target; /* advertised as PreferredDERP */
+  if (ml->derp_home_region != target) {
     ESP_LOGW(
-      TAG, "Re-homing DERP region %u -> %u (priority peer)", (unsigned)ml->derp_home_region, (unsigned)p->derp_region);
-    ml->derp_home_region = p->derp_region;
+      TAG,
+      "Re-homing DERP region %u -> %u (%s)",
+      (unsigned)ml->derp_home_region,
+      (unsigned)target,
+      is_prio ? "priority peer" : "fleet server");
+    ml->derp_home_region = target;
     xEventGroupSetBits(ml->events, ML_EVT_DERP_RECONNECT);
   }
 }
@@ -605,13 +647,14 @@ static int add_peer(microlink_t * ml, const ml_peer_update_t * update)
       }
     }
 
-    /* Peer table full — evict LRU non-priority peer if incoming peer is priority */
-    if (idx < 0 && ml->config.priority_peer_ip != 0 && update->vpn_ip == ml->config.priority_peer_ip) {
+    /* Peer table full — evict LRU non-pinned peer if the incoming peer is
+         * pinned (priority/safety peer OR fleet coordination server). */
+    if (idx < 0 && is_pinned_peer(ml, update->vpn_ip)) {
       uint64_t oldest_ms = UINT64_MAX;
       int evict_idx = -1;
       for (int i = 0; i < ML_MAX_PEERS; i++) {
         if (!ml->peers[i].active) continue;
-        if (ml->peers[i].vpn_ip == ml->config.priority_peer_ip) continue;
+        if (is_pinned_peer(ml, ml->peers[i].vpn_ip)) continue;
         uint64_t last_activity = ml->peers[i].last_send_ms;
         if (ml->peers[i].last_pong_recv_ms > last_activity) last_activity = ml->peers[i].last_pong_recv_ms;
         if (last_activity < oldest_ms) {
@@ -1947,44 +1990,40 @@ void ml_wg_mgr_update_transport(microlink_t * ml)
 
 static int disco_probe_start_idx = 0;
 
-static void disco_periodic_probes(microlink_t * ml)
+/* Disco-first session wake for a must-reach peer. Initiation MUST be
+ * disco-first: a normal tailscaled peer lazily adds us to wireguard-go only on
+ * an inbound DISCO ping, never on a bare DERP-relayed WG-init — otherwise the
+ * peer has to `tailscale ping` us before a session forms. Re-ping over DERP
+ * (node-key-bearing) every ~ML_DISCO_PRIORITY_HB_MS and refresh the WG-init
+ * until the session is up. One small DERP frame per 3 s per peer while down.
+ * use_health: for the safety peer, also re-establish when the app reports the
+ * link dead despite a nominally-up (zombie) keypair — is_up can't see a peer
+ * that forgot us after a restart; only the app (no heartbeat replies) can. */
+static void disco_wake_peer(microlink_t * ml, uint32_t vpn_ip, bool use_health)
 {
-  /* Priority-peer session wake — runs BEFORE the enable_disco/cellular
-     * gates below, because the safety link's initiation MUST be disco-first:
-     * a normal tailscaled peer lazily adds us to wireguard-go only on an
-     * inbound DISCO ping, never on a bare DERP-relayed WG-init. Without
-     * this, the peer has to `tailscale ping` us before a session forms.
-     * Re-ping the priority peer over DERP (node-key-bearing) every
-     * ~ML_DISCO_PRIORITY_HB_MS and refresh the WG-init, until the session
-     * is up — then this stops. One peer, one small DERP frame per 3 s while
-     * down: no busy-tailnet load regression (that was about probing ALL
-     * peers). */
-  if (ml->config.priority_peer_ip != 0 && ml->wg_netif != NULL) {
-    int pidx = find_peer_by_ip(ml, ml->config.priority_peer_ip);
-    if (pidx >= 0 && ml->peers[pidx].wg_peer_index >= 0) {
-      struct netif * nif = (struct netif *)ml->wg_netif;
-      bool up = (wireguardif_peer_is_up(nif, (u8_t)ml->peers[pidx].wg_peer_index, NULL, NULL) == ERR_OK);
-      /* Re-establish when the WG transport is down, OR when the app
-             * reports the priority link dead despite a nominally-up session.
-             * The second case is the "zombie keypair": after the far peer
-             * restarts it forgets us, but our keypair stays valid for
-             * ~REJECT_AFTER_TIME (~3 min), so is_up keeps reporting a session
-             * that silently blackholes traffic. Waiting that out is far too
-             * slow for a safety link, and is_up alone can't see it — only the
-             * app (no heartbeat replies) can. The DISCO ping re-adds us to the
-             * peer's wireguard-go; connect_derp forces a fresh 1-RTT handshake
-             * past the stale keypair. priority_link_healthy defaults true, so
-             * this widening is inert until the app calls
-             * microlink_notify_priority_health(false). */
-      if (!up || !ml->priority_link_healthy) {
-        uint64_t nowp = ml_get_time_ms();
-        if (nowp - ml->peers[pidx].last_ping_sent_ms >= ML_DISCO_PRIORITY_HB_MS) {
-          disco_send_ping_to_peer(ml, pidx, true);
-          wireguardif_connect_derp(nif, (u8_t)ml->peers[pidx].wg_peer_index);
-        }
-      }
+  if (vpn_ip == 0 || ml->wg_netif == NULL) return;
+  int pidx = find_peer_by_ip(ml, vpn_ip);
+  if (pidx < 0 || ml->peers[pidx].wg_peer_index < 0) return;
+  struct netif * nif = (struct netif *)ml->wg_netif;
+  bool up = (wireguardif_peer_is_up(nif, (u8_t)ml->peers[pidx].wg_peer_index, NULL, NULL) == ERR_OK);
+  if (!up || (use_health && !ml->priority_link_healthy)) {
+    uint64_t nowp = ml_get_time_ms();
+    if (nowp - ml->peers[pidx].last_ping_sent_ms >= ML_DISCO_PRIORITY_HB_MS) {
+      disco_send_ping_to_peer(ml, pidx, true);
+      wireguardif_connect_derp(nif, (u8_t)ml->peers[pidx].wg_peer_index);
     }
   }
+}
+
+static void disco_periodic_probes(microlink_t * ml)
+{
+  /* Pinned-peer session wakes — run BEFORE the enable_disco/cellular gates so
+     * the safety peer AND the fleet coordination/OTA server always (re)establish
+     * their WG session disco-first, even on a busy tailnet where general disco is
+     * throttled. Without this the fleet can be in the peer table yet have no live
+     * session (check-in silently fails). */
+  disco_wake_peer(ml, ml->config.priority_peer_ip, true);
+  disco_wake_peer(ml, fleet_server_ip_cached(), false);
 
   /* Honor the runtime enable_disco config flag. Previously this flag was
      * stored but never read — the chip ran DISCO probes regardless. With a
