@@ -20,7 +20,7 @@
  *   POST /api/pstop_num?n=N       Set USB "PSTOPxx" unit number (0 = auto)
  *   POST /api/enter_download      Enter USB download (flashing) mode
  *
- * The /admin/* admin routes live in microlink (ml_config_httpd.c, ml_app.c).
+ * The admin routes (/admin/...) live in microlink (ml_config_httpd.c, ml_app.c).
  * Full reference for both servers: docs/API.md.
  *
  * All handlers are pure HTTP plumbing — telemetry values come from the

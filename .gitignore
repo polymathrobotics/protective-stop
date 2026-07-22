@@ -18,3 +18,7 @@ host/machine_app_runner
 *.ctu-info
 cppcheck-build/
 firmware/managed_components/
+
+# Production flash image — contains baked-in secrets (Tailscale key, WiFi
+# creds, admin password, fleet key). Never commit.
+tools/production_image/

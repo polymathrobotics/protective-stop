@@ -185,7 +185,13 @@ dcs_boot_state_t dcs_support_init(void)
   cfg.enable_stun = !g_dcs.derp_only_mode;
   cfg.try_alt_network = dcs_boot_try_tether_or_skip;
   cfg.alt_network_timeout_ms = 30000;
-  cfg.max_user_uri_handlers = 16;
+  /* httpd URI-handler budget. The server holds 16 + this many slots
+   * (ml_app.c). microlink registers ~20 of its own (config panel + /admin
+   * API + fleet-ota + verbose) and dcs_admin_pages registers ~15; at 16 the
+   * total overflowed 32 and the LAST-registered app routes silently failed to
+   * register (observed: /api/pstop_num and /api/enter_download 404'd on
+   * shipped firmware). 24 gives 40 total slots with headroom. */
+  cfg.max_user_uri_handlers = 24;
   g_dcs.app = ml_app_start(&cfg);
   g_dcs.ml_handle = ml_app_get_microlink(g_dcs.app);
 
