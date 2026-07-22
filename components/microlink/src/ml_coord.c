@@ -1415,7 +1415,8 @@ static int do_fetch_peers(microlink_t * ml, ml_noise_state_t * noise)
      * to populate Node.HomeDERP for other peers. */
   cJSON * netinfo = cJSON_CreateObject();
   if (netinfo) {
-    cJSON_AddNumberToObject(netinfo, "PreferredDERP", ML_DERP_REGION);
+    cJSON_AddNumberToObject(netinfo, "PreferredDERP",
+                            ml->priority_peer_region ? ml->priority_peer_region : ML_DERP_REGION);
     if (ml->stun_nat_checked) {
       cJSON_AddBoolToObject(netinfo, "MappingVariesByDestIP", ml->nat_mapping_varies);
     }
@@ -1997,7 +1998,8 @@ static int do_start_long_poll(microlink_t * ml, ml_noise_state_t * noise)
      * to populate Node.HomeDERP for other peers. */
   cJSON * netinfo = cJSON_CreateObject();
   if (netinfo) {
-    cJSON_AddNumberToObject(netinfo, "PreferredDERP", ML_DERP_REGION);
+    cJSON_AddNumberToObject(netinfo, "PreferredDERP",
+                            ml->priority_peer_region ? ml->priority_peer_region : ML_DERP_REGION);
     if (ml->stun_nat_checked) {
       cJSON_AddBoolToObject(netinfo, "MappingVariesByDestIP", ml->nat_mapping_varies);
     }
@@ -2107,7 +2109,8 @@ static int do_send_endpoint_update(microlink_t * ml, ml_noise_state_t * noise)
 
     cJSON * netinfo = cJSON_CreateObject();
     if (netinfo) {
-      cJSON_AddNumberToObject(netinfo, "PreferredDERP", ML_DERP_REGION);
+      cJSON_AddNumberToObject(netinfo, "PreferredDERP",
+                            ml->priority_peer_region ? ml->priority_peer_region : ML_DERP_REGION);
       if (ml->stun_nat_checked) {
         cJSON_AddBoolToObject(netinfo, "MappingVariesByDestIP", ml->nat_mapping_varies);
       }
