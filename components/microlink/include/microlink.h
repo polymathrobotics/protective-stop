@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2026 Polymath Robotics
+// SPDX-FileCopyrightText: 2026 SET_YOUR_ORGANIZATION_HERE
 // SPDX-License-Identifier: Apache-2.0
 
 /**
@@ -175,6 +175,17 @@ extern "C"
  * priority peer is configured. Safe to call from any task.
  */
   void microlink_notify_priority_health(microlink_t * ml, bool healthy);
+
+  /**
+ * @brief Report health of the fleet coordination/OTA server link.
+ *
+ * Like microlink_notify_priority_health() but for the fleet server: call with
+ * false when a fleet check-in fails to reach the backend, true on success. On
+ * false the fleet peer's disco-first wake forces a fresh handshake through a
+ * stale/zombie session (e.g. after a reboot the far end kept our persisted
+ * keypair). No-op if no fleet server is configured. Safe from any task.
+ */
+  void microlink_notify_fleet_health(microlink_t * ml, bool healthy);
 
   /**
  * @brief Get number of known peers

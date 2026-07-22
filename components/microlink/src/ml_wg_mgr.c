@@ -1996,17 +1996,18 @@ static int disco_probe_start_idx = 0;
  * peer has to `tailscale ping` us before a session forms. Re-ping over DERP
  * (node-key-bearing) every ~ML_DISCO_PRIORITY_HB_MS and refresh the WG-init
  * until the session is up. One small DERP frame per 3 s per peer while down.
- * use_health: for the safety peer, also re-establish when the app reports the
- * link dead despite a nominally-up (zombie) keypair — is_up can't see a peer
- * that forgot us after a restart; only the app (no heartbeat replies) can. */
-static void disco_wake_peer(microlink_t * ml, uint32_t vpn_ip, bool use_health)
+ * link_healthy: pass the app's view of the link. Even when is_up reads true,
+ * a false here forces re-establishment — is_up can't see a peer that forgot us
+ * after a restart (zombie keypair); only the app can (no heartbeat replies /
+ * failed check-in). */
+static void disco_wake_peer(microlink_t * ml, uint32_t vpn_ip, bool link_healthy)
 {
   if (vpn_ip == 0 || ml->wg_netif == NULL) return;
   int pidx = find_peer_by_ip(ml, vpn_ip);
   if (pidx < 0 || ml->peers[pidx].wg_peer_index < 0) return;
   struct netif * nif = (struct netif *)ml->wg_netif;
   bool up = (wireguardif_peer_is_up(nif, (u8_t)ml->peers[pidx].wg_peer_index, NULL, NULL) == ERR_OK);
-  if (!up || (use_health && !ml->priority_link_healthy)) {
+  if (!up || !link_healthy) {
     uint64_t nowp = ml_get_time_ms();
     if (nowp - ml->peers[pidx].last_ping_sent_ms >= ML_DISCO_PRIORITY_HB_MS) {
       disco_send_ping_to_peer(ml, pidx, true);
@@ -2022,8 +2023,8 @@ static void disco_periodic_probes(microlink_t * ml)
      * their WG session disco-first, even on a busy tailnet where general disco is
      * throttled. Without this the fleet can be in the peer table yet have no live
      * session (check-in silently fails). */
-  disco_wake_peer(ml, ml->config.priority_peer_ip, true);
-  disco_wake_peer(ml, fleet_server_ip_cached(), false);
+  disco_wake_peer(ml, ml->config.priority_peer_ip, ml->priority_link_healthy);
+  disco_wake_peer(ml, fleet_server_ip_cached(), ml->fleet_link_healthy);
 
   /* Honor the runtime enable_disco config flag. Previously this flag was
      * stored but never read — the chip ran DISCO probes regardless. With a

@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2026 Polymath Robotics
+// SPDX-FileCopyrightText: 2026 SET_YOUR_ORGANIZATION_HERE
 // SPDX-License-Identifier: Apache-2.0
 
 /**
@@ -186,6 +186,7 @@ microlink_t * microlink_init(const microlink_config_t * config)
 
   ml->state = ML_STATE_IDLE;
   ml->priority_link_healthy = true; /* until the app says otherwise */
+  ml->fleet_link_healthy = true; /* until a check-in fails */
   ml->coord_sock = -1;
   ml->disco_sock4 = -1;
   ml->disco_sock6 = -1;
@@ -645,6 +646,13 @@ void microlink_notify_priority_health(microlink_t * ml, bool healthy)
 {
   if (ml) {
     ml->priority_link_healthy = healthy;
+  }
+}
+
+void microlink_notify_fleet_health(microlink_t * ml, bool healthy)
+{
+  if (ml) {
+    ml->fleet_link_healthy = healthy;
   }
 }
 

@@ -427,6 +427,14 @@ extern "C"
      * 0 = not yet known → fall back to ML_DERP_REGION. */
     volatile uint16_t priority_peer_region;
 
+    /* Fleet coordination/OTA server link health, set by the app (fleet-OTA
+     * check-in) via microlink_notify_fleet_health(): true on a successful
+     * check-in, false when a check-in can't reach the fleet. Drives the fleet
+     * peer's disco-first wake to force a fresh handshake through a zombie
+     * session (same idea as priority_link_healthy for the safety peer).
+     * Defaults true. */
+    volatile bool fleet_link_healthy;
+
     /* Event group (cross-task synchronization) */
     EventGroupHandle_t events;
 
