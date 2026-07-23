@@ -14,12 +14,15 @@ on:
 
 jobs:
   bullseye_coverage:
+    # Dependabot-triggered runs get no repo secrets, so the Bullseye install
+    # fails on an empty BULLSEYE_LICENSE_KEY. Skip instead of failing red.
+    if: github.actor != 'dependabot[bot]'
     runs-on: ubuntu-latest
     env:
       BULLSEYE_VERSION: 9.25.2
       BULLSEYE_PREFIX: /opt/BullseyeCoverage
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install BullseyeCoverage
         env:
@@ -68,7 +71,7 @@ jobs:
           } >> "${GITHUB_STEP_SUMMARY}"
 
       - name: Upload coverage HTML report
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: pstop_c-coverage-html
           path: pstop_c/build/coverage-html
