@@ -22,3 +22,9 @@ firmware/managed_components/
 # Production flash image — contains baked-in secrets (Tailscale key, WiFi
 # creds, admin password, fleet key). Never commit.
 tools/production_image/
+
+# analysis / CAD / stray artifacts
+*.dump
+*.pyc
+*.FCBak
+nohup.out

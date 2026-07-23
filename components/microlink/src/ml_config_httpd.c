@@ -924,6 +924,55 @@ static esp_err_t handler_monitor(httpd_req_t * req)
       cJSON_AddNumberToObject(json, "rehome_ret_notpinned", rd[3]);
       cJSON_AddNumberToObject(json, "rehome_body", rd[4]);
       cJSON_AddNumberToObject(json, "rehome_applied", rd[5]);
+
+      /* Same-LAN direct-path diagnostics for the priority peer (the machine):
+       * what LAN endpoint we advertise, which candidate endpoints we hold for
+       * the machine, and which one (if any) we selected as the direct path.
+       * Lets us see on a log-less unit whether the device->machine leg is
+       * riding the LAN or relaying. */
+      ml_direct_diag_t dd;
+      ml_wg_get_direct_diag(ml, &dd);
+      char ipbuf[24];
+      snprintf(
+        ipbuf,
+        sizeof(ipbuf),
+        "%u.%u.%u.%u",
+        (unsigned)((dd.active_lan_ip >> 24) & 0xFF),
+        (unsigned)((dd.active_lan_ip >> 16) & 0xFF),
+        (unsigned)((dd.active_lan_ip >> 8) & 0xFF),
+        (unsigned)(dd.active_lan_ip & 0xFF));
+      cJSON_AddStringToObject(json, "advert_lan_ip", ipbuf);
+      cJSON_AddBoolToObject(json, "pp_has_direct", dd.pp_has_direct);
+      snprintf(
+        ipbuf,
+        sizeof(ipbuf),
+        "%u.%u.%u.%u",
+        (unsigned)((dd.pp_best_ip >> 24) & 0xFF),
+        (unsigned)((dd.pp_best_ip >> 16) & 0xFF),
+        (unsigned)((dd.pp_best_ip >> 8) & 0xFF),
+        (unsigned)(dd.pp_best_ip & 0xFF));
+      cJSON_AddStringToObject(json, "pp_best_ip", ipbuf);
+      cJSON_AddNumberToObject(json, "pp_best_port", dd.pp_best_port);
+      cJSON_AddNumberToObject(json, "pp_endpoint_count", dd.pp_endpoint_count);
+      {
+        char eps[192];
+        int off = 0;
+        eps[0] = '\0';
+        for (int k = 0; k < dd.pp_endpoint_count && k < ML_MAX_ENDPOINTS; k++) {
+          off += snprintf(
+            eps + off,
+            sizeof(eps) - (size_t)off,
+            "%s%u.%u.%u.%u:%u",
+            (k ? "," : ""),
+            (unsigned)((dd.pp_ep_ip[k] >> 24) & 0xFF),
+            (unsigned)((dd.pp_ep_ip[k] >> 16) & 0xFF),
+            (unsigned)((dd.pp_ep_ip[k] >> 8) & 0xFF),
+            (unsigned)(dd.pp_ep_ip[k] & 0xFF),
+            (unsigned)dd.pp_ep_port[k]);
+          if (off >= (int)sizeof(eps) - 1) break;
+        }
+        cJSON_AddStringToObject(json, "pp_endpoints", eps);
+      }
     }
   }
 

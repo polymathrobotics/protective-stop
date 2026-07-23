@@ -619,6 +619,28 @@ extern "C"
   int ml_h2_build_settings_ack(uint8_t * out, size_t out_size);
   int ml_h2_build_window_update(uint8_t * out, size_t out_size, uint32_t stream_id, uint32_t increment);
 
+  /* ml_wg_mgr.c — active-uplink LAN IPv4 (host byte order), or 0 if none.
+   * Used to advertise our local endpoint for same-LAN direct-path discovery. */
+  uint32_t ml_active_lan_ip(void);
+
+  /* ml_wg_mgr.c — same-LAN direct-path diagnostics for the priority peer.
+   * Exposed via /admin/api/monitor to see, on units with no live log, what
+   * candidate endpoints the chip holds for its machine and which one (if any)
+   * it selected as the direct path. All IPs host byte order. */
+  typedef struct
+  {
+    uint32_t active_lan_ip; /* what we would advertise as our LAN endpoint  */
+    uint32_t pp_vpn_ip; /* priority peer (machine) VPN IP               */
+    uint32_t pp_best_ip; /* chosen direct endpoint, 0 = none (on DERP)   */
+    uint16_t pp_best_port;
+    bool pp_has_direct; /* has_direct_path flag for the priority peer   */
+    int pp_endpoint_count;
+    uint32_t pp_ep_ip[ML_MAX_ENDPOINTS]; /* candidate endpoints we know     */
+    uint16_t pp_ep_port[ML_MAX_ENDPOINTS];
+  } ml_direct_diag_t;
+
+  void ml_wg_get_direct_diag(microlink_t * ml, ml_direct_diag_t * out);
+
   /* ml_peer_nvs.c */
   esp_err_t ml_peer_nvs_init(void);
   void ml_peer_nvs_deinit(void);

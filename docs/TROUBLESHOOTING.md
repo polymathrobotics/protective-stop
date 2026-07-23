@@ -128,6 +128,26 @@ The chip is riding a DERP relay instead of the direct UDP path:
 2. Direct path never formed → NAT/firewall/different LAN between chip
    and peer. DERP works, just slower; the pstop link stays up either way.
 
+> **Do not use `pstop_rtt_ms` to judge direct-vs-relay.** It is
+> counter-lag-inflated and can read ~100 ms on a ~10 ms direct path
+> (`main.c:619`). Judge the path with `tailscale status` (`direct <ip>` vs
+> `relay <region>`) from the machine, or the chip's `/admin/api/monitor`
+> `pp_has_direct` / `pp_best_ip` (the endpoint the chip picked for the machine).
+
+### Same-LAN chip and machine still relay through DERP
+
+Both on one LAN but the pstop link won't go direct. Check, in order:
+1. **Chip advertises its LAN endpoint** — `/admin/api/monitor` `advert_lan_ip`
+   should equal the chip's active-uplink IP (not 0). Fixed 2026-07-22 so eth/USB
+   units advertise it, not just WiFi.
+2. **Machine host isn't hijacking the chip's LAN IP into Tailscale** — on the
+   machine, `ip route get <chip-LAN-IP>` must NOT return `dev tailscale0`. If a
+   tailnet subnet router advertises the LAN, add `sudo ip rule add to
+   <chip-LAN-IP>/32 lookup main priority 1000` (see the subnet-route caveat
+   below). This was the dominant real blocker in bench testing.
+3. **AP/client isolation** — some APs block client-to-client traffic; no
+   firmware change overcomes it, only DERP will work there.
+
 ### Machine stays in STOP after the switch was released
 
 Expected if the STOP episode was shorter than the arming policy minimum

@@ -162,6 +162,26 @@ static esp_err_t page_state(httpd_req_t * req)
   (void)esp_ota_get_state_partition(esp_ota_get_running_partition(), &ota_st);
   int pstop_num = dcs_nvs_read_pstop_unit_num(); /* 0 = auto (chip-ID derived) */
 
+  /* local_ip = the IP of the currently active uplink (eth/usb/wifi). The
+     * per-iface fields below already carry each one, but a single "which LAN
+     * address am I actually on right now" value is what the fleet displays and
+     * what the same-subnet direct-path logic keys off of. 0 = no uplink. */
+  uint32_t local_ip = 0;
+  switch ((int)atomic_load(&g_dcs_active_iface)) {
+    case 1:
+      local_ip = netif_ip_by_key("DCS_ETH");
+      break;
+    case 2:
+      local_ip = netif_ip_by_key("USB_NCM");
+      break;
+    case 3:
+      local_ip = netif_ip_by_key("WIFI_STA_DEF");
+      break;
+    default:
+      local_ip = 0;
+      break;
+  }
+
   /* Build into a PSRAM buffer (off the httpd task stack, and off the
      * internal heap which runs tight on this build). */
   enum
@@ -185,7 +205,7 @@ static esp_err_t page_state(httpd_req_t * req)
     "\"active_iface\":%d,\"eth_link\":%d,"
     "\"eth_en\":%d,\"wifi_en\":%d,\"usbncm_en\":%d,"
     "\"wifi_disc\":%d,\"wifi_conn\":%d,\"wifi_idx\":%d,\"wifi_n\":%d,"
-    "\"eth_ip\":%lu,\"usb_ip\":%lu,\"wifi_ip\":%lu,"
+    "\"eth_ip\":%lu,\"usb_ip\":%lu,\"wifi_ip\":%lu,\"local_ip\":%lu,"
     "\"rgb_cycles\":%lu,\"uptime_ms\":%llu,"
     "\"derp_paused\":%d,\"derp_delay_ms\":%d,\"wg_paused\":%d,"
     "\"usb_enabled\":%d,\"ts_boot_en\":%d,\"derp_only\":%d,"
@@ -223,6 +243,7 @@ static esp_err_t page_state(httpd_req_t * req)
     (unsigned long)netif_ip_by_key("DCS_ETH"),
     (unsigned long)netif_ip_by_key("USB_NCM"),
     (unsigned long)netif_ip_by_key("WIFI_STA_DEF"),
+    (unsigned long)local_ip,
     (unsigned long)atomic_load(&g_dcs_rgb_cycles),
     (unsigned long long)esp_timer_get_time() / 1000ULL,
     microlink_is_derp_paused() ? 1 : 0,

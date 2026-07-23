@@ -238,7 +238,7 @@ extern "C"
   void dcs_pstop_ring_set_offset(uint8_t off);
   uint8_t dcs_pstop_ring_get_offset(void);
 
-  /* Locate mode: paint ONLY logical LED 1 solid white so an installer can see /
+/* Locate mode: paint ONLY logical LED 1 solid white so an installer can see /
  * verify the rotation offset. Overrides the state colours; auto-expires after
  * DCS_RING_LOCATE_TIMEOUT_MS so a forgotten locate can't mask STOP/OK forever. */
 #define DCS_RING_LOCATE_TIMEOUT_MS 300000u /* 5 min */

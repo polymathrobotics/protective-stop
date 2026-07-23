@@ -591,6 +591,26 @@ void ml_wg_get_derp_diag(microlink_t * ml, uint16_t * fleet_region, uint16_t * p
   }
 }
 
+void ml_wg_get_direct_diag(microlink_t * ml, ml_direct_diag_t * out)
+{
+  if (out == NULL) return;
+  memset(out, 0, sizeof(*out));
+  out->active_lan_ip = ml_active_lan_ip();
+  if (ml == NULL) return;
+  out->pp_vpn_ip = ml->config.priority_peer_ip;
+  int i = (ml->config.priority_peer_ip != 0) ? find_peer_by_ip(ml, ml->config.priority_peer_ip) : -1;
+  if (i < 0) return;
+  ml_peer_t * p = &ml->peers[i];
+  out->pp_best_ip = p->best_ip;
+  out->pp_best_port = p->best_port;
+  out->pp_has_direct = p->has_direct_path;
+  out->pp_endpoint_count = p->endpoint_count;
+  for (int k = 0; k < p->endpoint_count && k < ML_MAX_ENDPOINTS; k++) {
+    out->pp_ep_ip[k] = p->endpoints[k].ip;
+    out->pp_ep_port[k] = p->endpoints[k].port;
+  }
+}
+
 /* DERP re-home diagnostics — counters (not logs) so the re-home path is visible
  * on units with no live-log access. Read via /admin/api/monitor. */
 static uint32_t s_diag_selfheal_calls; /* self_heal_rehome invocations      */
@@ -1808,6 +1828,31 @@ static void process_wg_packet(microlink_t * ml, const ml_rx_packet_t * pkt)
  * Reference: tailscale/wgengine/magicsock/magicsock.go (sendCallMeMaybe)
  * ========================================================================== */
 
+/* Active-uplink LAN IPv4 (host byte order), or 0 if none.
+ *
+ * The LAN endpoint we advertise (MapRequest endpoints + disco CallMeMaybe) used
+ * to be read only from the "WIFI_STA_DEF" netif. On the Ethernet (W5500) and
+ * USB-NCM uplinks — the primary production transports — that netif doesn't
+ * exist, so we advertised NO local endpoint and same-LAN peers could never form
+ * a direct WireGuard path (they only had our shared public STUN endpoint, which
+ * needs NAT hairpin). Source it instead from the active uplink: the default-route
+ * esp_netif (highest route_prio, up, with a valid IPv4). The WG tunnel is a raw
+ * lwIP netif (not an esp_netif) so it is never returned here. Falls back to
+ * WIFI_STA_DEF for safety. See docs/SAME_LAN_DIRECT_PATH_PLAN.md. */
+uint32_t ml_active_lan_ip(void)
+{
+  esp_netif_ip_info_t ip;
+  esp_netif_t * n = esp_netif_get_default_netif();
+  if (n != NULL && esp_netif_get_ip_info(n, &ip) == ESP_OK && ip.ip.addr != 0) {
+    return ntohl(ip.ip.addr);
+  }
+  esp_netif_t * sta = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+  if (sta != NULL && esp_netif_get_ip_info(sta, &ip) == ESP_OK && ip.ip.addr != 0) {
+    return ntohl(ip.ip.addr);
+  }
+  return 0;
+}
+
 static void disco_send_call_me_maybe(microlink_t * ml, int peer_idx)
 {
   /* Honor enable_disco. With disco off, CMM is meaningless (we'll never
@@ -1829,38 +1874,32 @@ static void disco_send_call_me_maybe(microlink_t * ml, int peer_idx)
   plaintext[pt_len++] = DISCO_MSG_CALL_ME_MAYBE;
   plaintext[pt_len++] = 0; /* version */
 
-  /* 1. Local LAN IP endpoint (critical for same-network peers) */
-  esp_netif_t * netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
-  if (netif) {
-    esp_netif_ip_info_t ip_info;
-    if (esp_netif_get_ip_info(netif, &ip_info) == ESP_OK && ip_info.ip.addr != 0) {
-      uint32_t local_ip = ntohl(ip_info.ip.addr);
-      uint16_t local_port = ml->disco_local_port;
+  /* 1. Local LAN IP endpoint (critical for same-network peers). Sourced from
+     * the active uplink (eth/usb/wifi), not WiFi-only — see ml_active_lan_ip(). */
+  uint32_t local_ip = ml_active_lan_ip();
+  uint16_t local_port = ml->disco_local_port;
+  if (local_ip != 0 && local_port > 0) {
+    /* IPv6-mapped IPv4: ::ffff:A.B.C.D */
+    memset(plaintext + pt_len, 0, 10);
+    pt_len += 10;
+    plaintext[pt_len++] = 0xff;
+    plaintext[pt_len++] = 0xff;
+    plaintext[pt_len++] = (local_ip >> 24) & 0xFF;
+    plaintext[pt_len++] = (local_ip >> 16) & 0xFF;
+    plaintext[pt_len++] = (local_ip >> 8) & 0xFF;
+    plaintext[pt_len++] = local_ip & 0xFF;
+    plaintext[pt_len++] = (local_port >> 8) & 0xFF;
+    plaintext[pt_len++] = local_port & 0xFF;
+    ep_count++;
 
-      if (local_port > 0) {
-        /* IPv6-mapped IPv4: ::ffff:A.B.C.D */
-        memset(plaintext + pt_len, 0, 10);
-        pt_len += 10;
-        plaintext[pt_len++] = 0xff;
-        plaintext[pt_len++] = 0xff;
-        plaintext[pt_len++] = (local_ip >> 24) & 0xFF;
-        plaintext[pt_len++] = (local_ip >> 16) & 0xFF;
-        plaintext[pt_len++] = (local_ip >> 8) & 0xFF;
-        plaintext[pt_len++] = local_ip & 0xFF;
-        plaintext[pt_len++] = (local_port >> 8) & 0xFF;
-        plaintext[pt_len++] = local_port & 0xFF;
-        ep_count++;
-
-        ESP_LOGI(
-          TAG,
-          "CMM endpoint: LAN %lu.%lu.%lu.%lu:%u",
-          (unsigned long)((local_ip >> 24) & 0xFF),
-          (unsigned long)((local_ip >> 16) & 0xFF),
-          (unsigned long)((local_ip >> 8) & 0xFF),
-          (unsigned long)(local_ip & 0xFF),
-          local_port);
-      }
-    }
+    ESP_LOGI(
+      TAG,
+      "CMM endpoint: LAN %lu.%lu.%lu.%lu:%u",
+      (unsigned long)((local_ip >> 24) & 0xFF),
+      (unsigned long)((local_ip >> 16) & 0xFF),
+      (unsigned long)((local_ip >> 8) & 0xFF),
+      (unsigned long)(local_ip & 0xFF),
+      local_port);
   }
 
   /* 2. STUN public endpoint (for cross-NAT peers) */
