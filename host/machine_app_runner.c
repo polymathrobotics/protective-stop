@@ -420,11 +420,11 @@ static const char * err_name(pstop_error_t e)
 
 /* Map a local remote id (machine.robot_state.remote_stop_id) back to its wire
  * device id (0x01xxxxxx) for display. 0 = no owner / not found. */
-static uint32_t device_id_for_local(const pstop_machine_t *m, uint32_t local_id)
+static uint32_t device_id_for_local(const pstop_machine_t * m, uint32_t local_id)
 {
   if (local_id == 0U) return 0U;
   for (uint16_t i = 0; i < m->remotes.max_remotes; i++) {
-    const pstop_remote_data_t *c = &m->remotes.remotes[i];
+    const pstop_remote_data_t * c = &m->remotes.remotes[i];
     if (c->local_remote_id == local_id) return c->remote_data.remote_id.data;
   }
   return 0U;
@@ -433,15 +433,13 @@ static uint32_t device_id_for_local(const pstop_machine_t *m, uint32_t local_id)
 /* Library log hook — fires when a remote's command TYPE changes (and on
  * rejections / heartbeat timeouts). Names the pstop by its device id so it is
  * always clear WHICH remote sent WHAT. */
-static void log_message(uint64_t timestamp, const device_id_t *client,
-                        uint8_t message, pstop_error_t error)
+static void log_message(uint64_t timestamp, const device_id_t * client, uint8_t message, pstop_error_t error)
 {
   (void)timestamp;
   if (error == PSTOP_OK) {
     fprintf(stderr, "pstop 0x%08X -> %s\n", client->data, msg_name(message));
   } else {
-    fprintf(stderr, "pstop 0x%08X -> %s  [%s]\n", client->data,
-            msg_name(message), err_name(error));
+    fprintf(stderr, "pstop 0x%08X -> %s  [%s]\n", client->data, msg_name(message), err_name(error));
   }
 }
 

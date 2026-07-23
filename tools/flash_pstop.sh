@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Polymath Robotics
+# SPDX-License-Identifier: Apache-2.0
 #
 # flash_pstop.sh — provision a pstop remote over USB from a known-good image.
 #

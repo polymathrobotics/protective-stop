@@ -708,7 +708,7 @@ static const char CONFIG_PAGE_HTML[] =
   "}"
   "}"
 
-/* ---- Fleet OTA UI removed — managed centrally at the fleet server ---- */
+  /* ---- Fleet OTA UI removed — managed centrally at the fleet server ---- */
 
   /* ---- Verbose Logging ---- */
   "async function loadVerbose(){"
