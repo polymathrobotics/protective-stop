@@ -1,0 +1,449 @@
+menu "MicroLink V2 Configuration"
+
+    config ML_ZERO_COPY_WG
+        bool "Enable zero-copy WireGuard receive (high-throughput mode)"
+        default n
+        help
+            Use raw lwIP UDP PCB instead of BSD sockets for WireGuard packet
+            reception on the DISCO UDP socket. This eliminates memory copies
+            and reduces latency by injecting WG packets directly into the
+            WireGuard stack from the lwIP tcpip_thread.
+
+            When enabled:
+            - WireGuard packets: zero-copy direct injection (no malloc, no memcpy)
+            - DISCO packets: lock-free SPSC ring buffer to wg_mgr task
+            - STUN packets: still handled via BSD socket + queue
+
+            Enable this for high-throughput applications like video streaming
+            (30fps+). For typical IoT/sensor applications (heartbeats, commands),
+            the default BSD socket mode is simpler and sufficient.
+
+            Zero-copy mode contributed by dj-oyu (https://github.com/dj-oyu/microlink)
+
+    config ML_MAX_PEERS
+        int "Maximum simultaneous WireGuard peers"
+        default 16
+        range 1 128
+        help
+            Maximum number of peers with active WireGuard tunnels. Each peer
+            uses approximately 200 bytes plus endpoint storage.
+
+            Most deployments need 1-4 peers (only the peers you actively
+            communicate with). For large tailnets, set this to the actual
+            peer count needed, not the total tailnet size.
+
+    config ML_PRIORITY_PEER_IP
+        string "Priority peer VPN IP"
+        default ""
+        help
+            Tailscale VPN IP of the priority peer (e.g., "100.x.y.z").
+            This peer is guaranteed a WireGuard slot even when the peer table
+            is full — the least-recently-used non-priority peer is evicted to
+            make room.
+
+            On large tailnets where the NVS cache fills the peer table at boot
+            before the priority peer arrives from MapResponse, this ensures
+            the peer you care about always gets a slot.
+
+            Can also be set at runtime via the HTTP config server web UI.
+            Leave empty to disable (all peers treated equally).
+
+    config ML_NVS_MAX_PEERS
+        int "Maximum cached peers in NVS"
+        default 128
+        range 16 1024
+        help
+            Maximum number of peers stored in the NVS flash cache. Peers are
+            persisted across reboots so DISCO probing can start immediately
+            before control plane registration completes.
+
+            Storage is a single packed blob: each peer uses 92 bytes.
+            When the cache is full, the least-recently-used peer is evicted.
+
+            Examples:
+            - 16:   ~1.5KB NVS blob (small IoT deployments)
+            - 64:   ~5.9KB NVS blob (default, most tailnets)
+            - 256:  ~23.6KB NVS blob (large tailnets)
+            - 1024: ~94.2KB NVS blob (enterprise, requires large NVS partition)
+
+            The blob is PSRAM-backed in memory. Ensure your NVS partition is
+            large enough for the configured value.
+
+    config ML_H2_BUFFER_SIZE_KB
+        int "HTTP/2 receive buffer size (KB)"
+        default 512
+        range 16 2048
+        help
+            Size of the PSRAM-allocated buffer for receiving HTTP/2 frames
+            from the Tailscale control plane (MapResponse).
+
+            The initial MapResponse contains all peers in your tailnet.
+            Each peer is roughly 1-2KB of JSON. After the initial response,
+            delta updates (PeersChanged/PeersRemoved) are much smaller.
+
+            - 64:   ~30 peers (small tailnets)
+            - 512:  ~300 peers (default, most deployments)
+            - 1024: ~600 peers (large enterprise tailnets)
+            - 2048: ~1200 peers (very large tailnets, requires 8MB PSRAM)
+
+    config ML_WG_MGR_STACK_KB
+        int "wg_mgr task stack size (KB)"
+        default 16
+        range 8 32
+        help
+            Stack for the WG manager task. 16 KB is the safe default: with
+            ML_ZERO_COPY_WG off, every direct-UDP WG packet runs the full
+            decrypt -> ip_input -> ... -> encrypt chain on this stack, and
+            8 KB tripped the canary under sustained ping load (v15.15).
+
+            On no-PSRAM targets (plain ESP32) every KB here comes out of
+            the same internal heap that lwIP pbufs and the coord H2 buffer
+            need; 12 KB is a measured-risk compromise for light workloads
+            (occasional HTTP + heartbeats, QUIET logging).
+
+    config ML_JSON_BUFFER_SIZE_KB
+        int "JSON parse buffer size (KB)"
+        default 512
+        range 16 2048
+        help
+            Size of the PSRAM-allocated buffer for parsing JSON MapResponse
+            data. cJSON builds an in-memory DOM tree that uses 2-3x the
+            raw JSON size, so this should be at least as large as the
+            HTTP/2 buffer.
+
+            Match this to ML_H2_BUFFER_SIZE_KB unless you have a reason
+            to set them differently.
+
+    menu "Cellular Modem"
+
+        config ML_ENABLE_CELLULAR
+            bool "Enable cellular modem support"
+            default n
+            help
+                Enable 4G cellular modem driver for MicroLink.
+                Supports SIMCOM SIM7600 and SIM7670 series modems via UART
+                AT socket bridge (AT+NETOPEN/CIPOPEN/CIPSEND).
+
+                When enabled, MicroLink can operate over cellular data instead
+                of (or in addition to) WiFi. All Tailscale protocol operations
+                work unchanged — traffic is routed through DERP relay.
+
+        choice ML_CELLULAR_BOARD
+            prompt "Cellular board type"
+            depends on ML_ENABLE_CELLULAR
+            default ML_BOARD_WAVESHARE_SIM7600
+
+            config ML_BOARD_WAVESHARE_SIM7600
+                bool "Waveshare SIM7600X + XIAO ESP32S3"
+                help
+                    Waveshare SIM7600X 4G Module connected to Seeed XIAO ESP32S3.
+                    Modem UART: TX=GPIO43, RX=GPIO44.
+                    No power control pin needed (always on via USB-C).
+
+            config ML_BOARD_LILYGO_T_SIM7670G
+                bool "LILYGO T-SIM7670G-S3"
+                help
+                    LILYGO T-SIM7670G-S3 all-in-one board with integrated SIM7670G modem.
+                    Modem UART: TX=GPIO11, RX=GPIO10.
+                    Power control: PWRKEY=GPIO18, DTR=GPIO9, RESET=GPIO17.
+
+            config ML_BOARD_CUSTOM
+                bool "Custom pin configuration"
+                help
+                    Manually configure UART and power control GPIO pins.
+        endchoice
+
+        config ML_CELLULAR_TX_PIN
+            int "Cellular UART TX GPIO pin"
+            depends on ML_ENABLE_CELLULAR
+            default 11 if ML_BOARD_LILYGO_T_SIM7670G
+            default 43
+            help
+                GPIO pin for ESP32 TX -> modem RXD.
+                Waveshare SIM7600X: GPIO43 (XIAO D6).
+                LILYGO T-SIM7670G-S3: GPIO11.
+
+        config ML_CELLULAR_RX_PIN
+            int "Cellular UART RX GPIO pin"
+            depends on ML_ENABLE_CELLULAR
+            default 10 if ML_BOARD_LILYGO_T_SIM7670G
+            default 44
+            help
+                GPIO pin for ESP32 RX <- modem TXD.
+                Waveshare SIM7600X: GPIO44 (XIAO D7).
+                LILYGO T-SIM7670G-S3: GPIO10.
+
+        config ML_CELLULAR_PWRKEY_PIN
+            int "Modem PWRKEY GPIO pin"
+            depends on ML_ENABLE_CELLULAR
+            default 18 if ML_BOARD_LILYGO_T_SIM7670G
+            default -1
+            help
+                GPIO pin for modem power key control.
+                Set to -1 if not connected (Waveshare: always-on via USB).
+                LILYGO T-SIM7670G-S3: GPIO18.
+
+        config ML_CELLULAR_DTR_PIN
+            int "Modem DTR GPIO pin"
+            depends on ML_ENABLE_CELLULAR
+            default 9 if ML_BOARD_LILYGO_T_SIM7670G
+            default -1
+            help
+                GPIO pin for modem Data Terminal Ready signal.
+                Set to -1 if not connected.
+                LILYGO T-SIM7670G-S3: GPIO9.
+
+        config ML_CELLULAR_APN
+            string "Cellular APN"
+            depends on ML_ENABLE_CELLULAR
+            default ""
+            help
+                Access Point Name for cellular data connection.
+                Leave empty for auto-detection.
+
+        config ML_CELLULAR_SIM_PIN
+            string "SIM Card PIN"
+            depends on ML_ENABLE_CELLULAR
+            default ""
+            help
+                PIN code for the SIM card. Leave empty if no PIN required.
+
+        config ML_CELLULAR_PPP_USER
+            string "PPP CHAP username"
+            depends on ML_ENABLE_CELLULAR
+            default ""
+            help
+                Username for PPP CHAP authentication.
+                Leave empty for SIMs that use IMSI-based auth (no credentials).
+                Soracom SIMs use "sora".
+
+        config ML_CELLULAR_PPP_PASS
+            string "PPP CHAP password"
+            depends on ML_ENABLE_CELLULAR
+            default ""
+            help
+                Password for PPP CHAP authentication.
+                Leave empty for SIMs that use IMSI-based auth (no credentials).
+                Soracom SIMs use "sora".
+
+    endmenu
+
+    menu "Network Switching"
+
+        config ML_ENABLE_NET_SWITCH
+            bool "Enable WiFi/Cellular network switching"
+            depends on ML_ENABLE_CELLULAR
+            default n
+            help
+                Automatic WiFi-primary with cellular fallback.
+                When WiFi connection fails or health check detects loss,
+                switches to cellular. Periodically checks if WiFi has
+                recovered and fails back.
+
+        config ML_NET_SWITCH_WIFI_TIMEOUT_MS
+            int "WiFi connect timeout (ms)"
+            depends on ML_ENABLE_NET_SWITCH
+            default 30000
+            help
+                How long to wait for WiFi connection before falling back
+                to cellular.
+
+        config ML_NET_SWITCH_HEALTH_INTERVAL_MS
+            int "Health check interval (ms)"
+            depends on ML_ENABLE_NET_SWITCH
+            default 30000
+            help
+                Interval between health checks when connected.
+                After 3 consecutive failures, triggers network switch.
+
+        config ML_NET_SWITCH_FAILBACK_MS
+            int "WiFi failback check interval (ms)"
+            depends on ML_ENABLE_NET_SWITCH
+            default 120000
+            help
+                When on cellular, how often to check if WiFi has recovered.
+                Set to 0 to disable automatic failback.
+
+    endmenu
+
+    menu "Credentials"
+        comment "Configure via: idf.py menuconfig → MicroLink V2 → Credentials"
+        comment "These values are stored in sdkconfig (git-ignored)."
+
+        config ML_WIFI_SSID
+            string "WiFi SSID"
+            default ""
+            help
+                SSID of the WiFi network to connect to.
+                This is stored in sdkconfig which should be git-ignored.
+
+        config ML_WIFI_PASSWORD
+            string "WiFi Password"
+            default ""
+            help
+                Password for the WiFi network.
+                This is stored in sdkconfig which should be git-ignored.
+
+        config ML_WIFI_SSID_2
+            string "WiFi SSID (secondary)"
+            default ""
+            help
+                Secondary WiFi SSID. When the primary fails to associate,
+                the chip cycles through to this one. Used to seed the NVS
+                wifi_list on first boot (post-erase-flash) so the device
+                tries multiple networks before falling back to SoftAP.
+
+        config ML_WIFI_PASSWORD_2
+            string "WiFi Password (secondary)"
+            default ""
+            help
+                Password for the secondary WiFi network.
+
+        config ML_TAILSCALE_AUTH_KEY
+            string "Tailscale Auth Key"
+            default ""
+            help
+                Tailscale authentication key from https://login.tailscale.com/admin/settings/keys
+                Generate a reusable + ephemeral key for development.
+                This is stored in sdkconfig which should be git-ignored.
+
+        config ML_DEVICE_NAME
+            string "Device Name"
+            default ""
+            help
+                Hostname for this device on the Tailscale network.
+                Leave empty for auto-generated name (esp32-XXYYZZ from MAC,
+                or pstop-IMEI from cellular modem).
+
+    endmenu
+
+    menu "HTTP Config Server"
+
+        config ML_ENABLE_CONFIG_HTTPD
+            bool "Enable HTTP configuration server"
+            default n
+            help
+                Enable an HTTP server accessible via the Tailscale VPN IP
+                (e.g., http://100.x.x.x/) for runtime configuration of
+                WiFi credentials, Tailscale auth key, peer allowlist, etc.
+
+                Settings persist in NVS across reboots. The peer allowlist
+                controls which peers receive outbound DISCO probes — on large
+                tailnets this prevents wg_mgr flooding and reduces latency.
+
+        config ML_CONFIG_MAX_ALLOWED_PEERS
+            int "Maximum peers in allowlist"
+            depends on ML_ENABLE_CONFIG_HTTPD
+            default 16
+            range 1 1024
+            help
+                Maximum number of peers in the DISCO probe allowlist.
+                Each entry uses 28 bytes in NVS (IP + 24-char label).
+                ESP-IDF NVS supports multi-page blobs up to 508KB,
+                so large allowlists are not a problem.
+
+                - 16:    448 bytes (default, small deployments)
+                - 128:   3.6KB
+                - 300:   8.4KB (recommended for large fleets)
+                - 1024:  28.7KB
+
+                When the allowlist is empty, all peers are probed (backwards
+                compatible). When populated, only listed peers receive
+                outbound DISCO probes and WG peer table slots.
+
+        config ML_ADMIN_PASSWORD
+            string "Admin panel password"
+            depends on ML_ENABLE_CONFIG_HTTPD
+            default "microlink"
+            help
+                Password for HTTP Basic Auth on the admin panel (/admin/).
+                Username is always "admin". Used by ml_app framework to
+                protect configuration, OTA, and monitoring endpoints.
+
+    endmenu
+
+    menu "Fleet OTA Updates"
+
+        config ML_FLEET_SERVER_IP
+            string "Fleet coordination server VPN IP"
+            default "100.92.1.78"
+            help
+                Tailscale VPN IP of the central server that updates and
+                coordinates the fleet. This peer is PERMANENTLY allowed and
+                cannot be removed from the runtime allowlist — it must always
+                be reachable. Every other peer remains user-removable. Leave
+                empty only to disable the permanent-allow behavior.
+
+        config ML_OTA_BACKEND_URL
+            string "OTA backend URL"
+            default ""
+            help
+                Base URL of the fleet OTA backend (e.g.
+                "https://myapp.pythonanywhere.com"). Leave empty
+                to disable fleet OTA polling.
+
+        config ML_OTA_API_KEY
+            string "OTA backend API key"
+            default ""
+            help
+                Bearer token for authenticating with the OTA backend.
+                Must match the key configured in the backend's config.toml.
+
+        config ML_OTA_CHECK_INTERVAL_S
+            int "OTA / fleet check-in interval (seconds)"
+            default 300
+            range 60 300
+            help
+                How often the unit checks in with the fleet (and polls for
+                firmware). Capped at 300 (5 minutes) so the fleet always hears
+                from every unit at least that often; the firmware also clamps
+                any persisted/endpoint value to this ceiling. Minimum 60 (1 min).
+
+        config ML_OTA_AUTO_UPDATE
+            bool "Enable automatic OTA updates"
+            default y
+            help
+                When enabled, the device automatically downloads and
+                applies firmware updates from the backend. Can be
+                toggled at runtime via the admin web UI.
+
+    endmenu
+
+    menu "Provisioning AP Fallback"
+
+        config ML_AP_FALLBACK_ENABLE
+            bool "Enable SoftAP fallback when no saved WiFi is reachable"
+            default y
+            help
+                If the device cannot join any saved WiFi network within
+                ML_AP_FALLBACK_TIMEOUT_S seconds of boot, switch to APSTA
+                mode and host its own AP so the user can add a working
+                network via the admin panel.
+
+        config ML_AP_FALLBACK_TIMEOUT_S
+            int "Seconds without STA connection before AP fallback fires"
+            depends on ML_AP_FALLBACK_ENABLE
+            default 60
+            range 10 600
+
+        config ML_AP_SSID_PREFIX
+            string "Prefix for the fallback AP SSID"
+            depends on ML_AP_FALLBACK_ENABLE
+            default "microlink"
+            help
+                Full SSID is "<prefix>-XXYYZZ" where XXYYZZ are the last
+                three bytes of the device's SoftAP MAC in hex, so each
+                unit gets a unique name.
+
+        config ML_AP_PASSWORD
+            string "WPA2 password for the fallback AP"
+            depends on ML_AP_FALLBACK_ENABLE
+            default "microlink"
+            help
+                Must be at least 8 characters for WPA2. Leave empty to
+                make the AP open (no auth) — only do this if you trust
+                the local RF environment.
+
+    endmenu
+
+endmenu

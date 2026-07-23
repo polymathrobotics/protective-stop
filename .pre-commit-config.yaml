@@ -1,5 +1,21 @@
 ---
-# Apply Polymath Code Standard formatters and linters
+# Apply Polymath Code Standard formatters and linters.
+#
+# The standard applies to Polymath-authored, actively-maintained code only.
+# Excluded from ALL hooks:
+#   - pstop_c/            certified protocol library, on its own upstream track
+#   - wireguard_lwip/     vendored WireGuard-lwip lib + its reference crypto
+#   - x25519.c/.h         third-party (Cryptography Research, MIT) — keep notice
+#   - archive/            deprecated ROS2 packages, pending removal
+#   - hardware/ binaries  CAD / images / PDF (not text)
+exclude: |
+  (?x)^(
+    pstop_c/|
+    archive/|
+    components/microlink/components/wireguard_lwip/|
+    components/microlink/src/x25519\.(c|h)$|
+    hardware/.*\.(step|STEP|stp|STP|stl|STL|3mf|3MF|FCStd|jpe?g|pdf)$
+  )
 repos:
   - repo: https://github.com/polymathrobotics/polymath_code_standard
     rev: v2.1.1
@@ -11,11 +27,15 @@ repos:
       # Implementation
       - id: polymath-cmake
       - id: polymath-cpp
-        exclude: ^pstop_c/
       - id: polymath-json
       - id: polymath-python
       # Mark(up/down)
       - id: polymath-markdown
       - id: polymath-shell
+        # Lint shipped/deployment shell (host/setup/*). The dev-only bench and
+        # chaos harnesses under test/ and tools/ rely on intentional word
+        # splitting (tc/netem/curl argument expansion, e.g. `netem $1`), so they
+        # are exempt here rather than peppered with disable directives.
+        exclude: ^(test/|tools/).*\.sh$
       - id: polymath-xml
       - id: polymath-yaml

@@ -1,0 +1,44 @@
+---
+name: Host build and MISRA check
+
+# Builds the robot-side machine_app_runner (plain C, no ESP-IDF) and runs
+# the free cppcheck MISRA C:2012 pre-check. The MISRA step is advisory:
+# residual findings are the documented deviation register
+# (docs/MISRA_COMPLIANCE_2026-07-21.md), so it never fails the build.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - host/**
+      - components/**
+      - firmware/main/**
+      - tools/misra_check.sh
+      - .github/workflows/host-check.yml
+  pull_request:
+    paths:
+      - host/**
+      - components/**
+      - firmware/main/**
+      - tools/misra_check.sh
+      - .github/workflows/host-check.yml
+
+jobs:
+  host_build_and_misra:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          submodules: recursive
+
+      - name: Install toolchain and cppcheck
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cppcheck
+
+      - name: Build host runner
+        run: make -C host
+
+      - name: MISRA check (advisory)
+        run: ./tools/misra_check.sh || true
