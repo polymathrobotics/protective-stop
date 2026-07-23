@@ -1,0 +1,107 @@
+# =============================================================================
+# machine_app_runner config — the laptop-side pstop MACHINE for bench testing.
+#
+# Every value below maps to a parameter the upstream pstop_c machine library
+# exposes (or a knob in the transport/watchdog shell around it). The library
+# itself (components/pstop/upstream/) is never modified — this file just feeds
+# it. Edit freely and re-run; the runner prints the resolved config at startup.
+#
+#   ./machine_app_runner                 # uses ./machine.toml
+#   ./machine_app_runner my.toml         # use a different config
+#   ./machine_app_runner 9000 -v         # override port + force verbose
+#
+# Syntax: TOML-subset — [sections], [[operator]] tables, key = value,
+# '#' comments. Ints accept decimal or 0x-hex. Bools: true/false.
+# (Sections are for readability; keys are matched by name regardless.)
+# =============================================================================
+
+[network]
+# UDP port the machine listens on. The chip's pstop peer port must match.
+port = 8890
+# Interface to bind. 0.0.0.0 = all (so the chip reaches us over Tailscale,
+# USB-NCM, or LAN — whatever its peer IP resolves to). Use 127.0.0.1 to
+# restrict to loopback, or a specific host IP to pin one interface.
+bind = "0.0.0.0"
+
+[machine]
+# This machine's UUID. MUST equal DEVICE_ID_MACHINE in the chip's main.c
+# (the value the remote puts in pstop_msg.receiver_id). Default 0x01020304.
+machine_device_id = 0x01020304
+
+[limits]
+# --- upstream pstop_application_config_t ---
+# How many *sequence-counter* gaps the machine tolerates before declaring a
+# remote lost and stopping. The chip's comparator deliberately drops a tick
+# (but still increments its counter) whenever the two cores disagree, so the
+# remote's counter sequence has small gaps under load. 10 absorbs a ~1 s burst
+# at the chip's 10 Hz cadence without nuisance MSG_LOST. Upstream default 1 is
+# too tight for this remote. Set to 1 to see strict OUT_OF_ORDER behavior.
+max_lost_messages = 10
+# LIVENESS. How many consecutive heartbeats a remote may miss before the
+# library's NATIVE check_heartbeats declares it lost and stops the machine.
+# This is the only liveness control — there is no wrapper watchdog and no clock
+# option: the machine always runs on its own monotonic clock, so the library's
+# check_heartbeats advances in real time and fires on its own. The effective
+# silence timeout = (this remote's) heartbeat_ms x (max_missed_heartbeats + 1).
+# With heartbeat_ms = 1000 and this = 1, the machine STOPs ~1-2 s after the
+# remote goes silent. Lower either for a tighter stop; mind nuisance trips.
+max_missed_heartbeats = 1
+# Size of the machine's remotes table = max simultaneous bonded remotes.
+# This bench has one (the chip); raise it to test multi-remote scenarios.
+max_remotes = 3
+
+[logging]
+# false: log only transitions (bond, robot status, machine STATE changes,
+#        heartbeat timeouts).
+# true : also trace every RX message (type/counter/rcnt/from-id/stamp/crc),
+#        every machine TX, and dropped/rejected messages. Same as passing -v.
+verbose = false
+
+[policy]
+# Default treatment of any remote NOT listed in an [[operator]] block below.
+# allow_unlisted = true accepts any remote that bonds (handy for bring-up).
+# Set false to accept ONLY the explicitly-listed operators (allowlist mode).
+allow_unlisted = true
+# Heartbeat expected from unlisted remotes (and from listed ones that omit it).
+default_heartbeat_ms = 1000
+# Unlisted remotes as stop-only? (stop_only = may command STOP but can never
+# arm the machine to OK). Usually false.
+default_stop_only = false
+# ARMING POLICY. A STOP episode must be held at least this long (ms) for its
+# OK release to count as the arming gesture; shorter STOP->OK cycles are
+# vetoed (machine returns to STOPPED/NEED_STOP and replies STOP). Defends
+# against EMC-induced loop blips on the remote performing the arming gesture
+# accidentally. 0 disables. Enforced entirely in this wrapper — the pstop_c
+# library is unmodified.
+min_stop_ms = 500
+
+# -----------------------------------------------------------------------------
+# Per-remote operator entries (repeatable). Each maps a remote UUID
+# (pstop_msg.id) to its operator_details_t in the library:
+#   device_id    : the remote's UUID. Each pstop remote now derives a UNIQUE
+#                  per-unit ID from its eFuse MAC: 0x01xxxxxx, where xxxxxx is
+#                  the low 24 bits of the MAC. It is printed at boot
+#                  ("device_id=0x01xxxxxx") and shown on the admin page, and it
+#                  matches the remote's Tailscale node name "pstop-01xxxxxx".
+#                  To pin a specific remote, copy its value into an entry below.
+#   heartbeat_ms : how often this remote must check in (0 => default above).
+#   stop_only    : true => this remote may STOP the machine but never arm it OK.
+#   allowed      : false => the machine rejects this remote's bonds outright.
+#
+# With allow_unlisted = true (above) any per-unit ID is accepted and these
+# entries are optional overrides — the simplest setup for a mixed fleet. With
+# allow_unlisted = false, list every remote's exact 0x01xxxxxx ID here.
+# -----------------------------------------------------------------------------
+# [[operator]]
+# device_id    = 0x01xxxxxx   # a specific pstop remote (see its boot log)
+# heartbeat_ms = 1000
+# stop_only    = false
+# allowed      = true
+
+# Example second remote (commented out) — uncomment to test multi-remote /
+# stop-only behavior:
+# [[operator]]
+# device_id    = 0x01020381
+# heartbeat_ms = 500
+# stop_only    = true
+# allowed      = true
