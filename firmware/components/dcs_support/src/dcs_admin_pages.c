@@ -317,7 +317,7 @@ static esp_err_t page_state(httpd_req_t * req)
       cap - n,
       "%s{\"cfg\":%d,\"ip\":%lu,\"port\":%u,\"id\":%lu,\"state\":%lu,"
       "\"sent\":%lu,\"replies\":%lu,\"send_fail\":%lu,\"rebonds\":%lu,"
-      "\"rtt_ms\":%lu,\"last_msg\":%lu,\"last_reply_ms\":%llu}",
+      "\"rtt_ms\":%lu,\"hb_ms\":%lu,\"last_msg\":%lu,\"last_reply_ms\":%llu}",
       (i != 0) ? "," : "",
       cfg ? 1 : 0,
       (unsigned long)mip,
@@ -329,6 +329,7 @@ static esp_err_t page_state(httpd_req_t * req)
       (unsigned long)atomic_load(&g_dcs_pstop_m_send_fail[i]),
       (unsigned long)atomic_load(&g_dcs_pstop_m_rebonds[i]),
       (unsigned long)atomic_load(&g_dcs_pstop_m_rtt_ms[i]),
+      (unsigned long)atomic_load(&g_dcs_pstop_m_hb_ms[i]),
       (unsigned long)atomic_load(&g_dcs_pstop_m_last_msg[i]),
       (unsigned long long)atomic_load(&g_dcs_pstop_m_last_reply_ms[i]));
     CLAMP_N();

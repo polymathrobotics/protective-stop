@@ -146,6 +146,7 @@ extern "C"
   extern atomic_uint_fast32_t g_dcs_pstop_m_send_fail[DCS_PSTOP_MAX_MACHINES];
   extern atomic_uint_fast32_t g_dcs_pstop_m_rebonds[DCS_PSTOP_MAX_MACHINES];
   extern atomic_uint_fast32_t g_dcs_pstop_m_rtt_ms[DCS_PSTOP_MAX_MACHINES];
+  extern atomic_uint_fast32_t g_dcs_pstop_m_hb_ms[DCS_PSTOP_MAX_MACHINES]; /* machine-requested heartbeat window */
   extern atomic_uint_fast32_t g_dcs_pstop_m_last_msg[DCS_PSTOP_MAX_MACHINES];
   extern atomic_uint_fast32_t g_dcs_pstop_m_state[DCS_PSTOP_MAX_MACHINES]; /* 0=idle 1=bonding 2=bonded */
   extern atomic_uint_fast64_t g_dcs_pstop_m_last_reply_ms[DCS_PSTOP_MAX_MACHINES];

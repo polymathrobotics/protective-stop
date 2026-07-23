@@ -171,6 +171,7 @@ extern "C"
     uint32_t replies,
     uint32_t send_fail,
     uint32_t rebonds,
+    uint32_t hb_ms,
     uint64_t last_reply_ms,
     uint32_t rtt_ms,
     uint8_t last_msg,

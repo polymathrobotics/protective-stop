@@ -63,6 +63,13 @@ verbose = false
 # Set false to accept ONLY the explicitly-listed operators (allowlist mode).
 allow_unlisted = true
 # Heartbeat expected from unlisted remotes (and from listed ones that omit it).
+# THE MACHINE OWNS THIS RATE: it is what this machine's safety case requires,
+# and pstop_c advertises it to the remote in the heartbeat_timeout field of
+# every reply (bond ack included). The remote firmware adopts it per session
+# and transmits at half this window (2x margin), clamped between its 100 ms
+# lockstep tick and 1000 ms — so tightening or relaxing this value (or a
+# per-operator heartbeat_ms below) retunes the remote's publish rate with no
+# remote-side configuration.
 default_heartbeat_ms = 1000
 # Unlisted remotes as stop-only? (stop_only = may command STOP but can never
 # arm the machine to OK). Usually false.
@@ -85,6 +92,8 @@ min_stop_ms = 500
 #                  matches the remote's Tailscale node name "pstop-01xxxxxx".
 #                  To pin a specific remote, copy its value into an entry below.
 #   heartbeat_ms : how often this remote must check in (0 => default above).
+#                  Advertised to the remote in every reply; the remote adapts
+#                  its publish rate to it (see default_heartbeat_ms note).
 #   stop_only    : true => this remote may STOP the machine but never arm it OK.
 #   allowed      : false => the machine rejects this remote's bonds outright.
 #

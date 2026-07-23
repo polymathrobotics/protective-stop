@@ -59,7 +59,23 @@
  * ========================================================================== */
 
 #define TICK_HZ 10
+#define TICK_MS (1000u / TICK_HZ)
 #define TICK_PERIOD pdMS_TO_TICKS(1000 / TICK_HZ)
+
+/* === Machine-governed heartbeat rate =======================================
+ * The MACHINE decides the update rate its safety case needs: pstop_c puts the
+ * per-operator heartbeat_ms (machine.toml: default_heartbeat_ms / per-operator
+ * heartbeat_ms) into the heartbeat_timeout field of every reply, including
+ * the bond ack (machine.c: resp->heartbeat_timeout = remote_data.heartbeat_ms;
+ * the field is only valid machine→operator). The remote adopts it per session:
+ * it transmits every heartbeat_timeout/2 (2x margin, so normal jitter can
+ * never cost the machine a whole heartbeat window), clamped between the 10 Hz
+ * lockstep tick (the E-stop sampling cadence is a safety property and never
+ * slows down) and PSTOP_MAX_SEND_PERIOD_MS. Sends are DECIMATED ticks — the
+ * per-session counter advances only on transmitting ticks, so the machine
+ * sees contiguous counters (protocol.c rejects gaps > max_lost_messages+1).
+ * A reply carrying heartbeat_timeout=0 (reject paths) changes nothing. */
+#define PSTOP_MAX_SEND_PERIOD_MS 1000u
 
 /* Each core publishes its encoded buffers within 80 ms of the tick. If a core
  * doesn't, treat that tick as a mismatch (send nothing). 80ms leaves the
@@ -125,6 +141,11 @@ typedef struct
 } tick_input_t;
 
 static tick_input_t g_tick[PSTOP_MAX_MACHINES];
+/* E-stop rolling-level source: advances EVERY tick regardless of which
+ * sessions transmit, so the drive-high/drive-low sampling pattern never
+ * stalls under send decimation. Written by the comparator before it
+ * notifies the cores; read-only for the cores (same discipline as g_tick). */
+static uint32_t g_tick_roll;
 static uint8_t g_encoded[2][PSTOP_MAX_MACHINES][PSTOP_MESSAGE_SIZE];
 static uint8_t g_verdict[2]; /* for telemetry */
 static SemaphoreHandle_t g_done[2]; /* core_id → comparator */
@@ -336,10 +357,9 @@ static void core_task(void * arg)
     (void)memcpy(in, g_tick, sizeof(in));
 
     /* Sample the loop exactly once per tick (the drive/echo pattern is
-         * stateful) — use the first active slot's counter for the rolling
-         * level, or the tick LSB the comparator provides in slot 0 even when
-         * no session is bonded, so priming/debounce always advances. */
-    uint32_t roll = in[0].counter;
+         * stateful), clocked by the dedicated roll counter so priming/debounce
+         * advances every tick even when session sends are decimated. */
+    uint32_t roll = g_tick_roll;
     uint8_t verdict = compute_verdict(roll, core_id);
 
     for (int i = 0; i < PSTOP_MAX_MACHINES; i++) {
@@ -398,6 +418,9 @@ typedef struct
 
   sess_state_t state;
   protocol_data_t pd; /* pstop_c remote handshake state (counters) */
+  uint32_t req_hb_ms; /* machine-requested heartbeat window (reply
+                                 * heartbeat_timeout); 0 = not yet learned */
+  uint64_t next_send_ms; /* next scheduled transmit for this session */
   uint32_t bond_counter;
   uint64_t bond_sent_ms; /* 0 = no BOND in flight */
   uint64_t last_reply_ms;
@@ -413,6 +436,34 @@ typedef struct
 } pstop_sess_t;
 
 static pstop_sess_t g_sess[PSTOP_MAX_MACHINES];
+
+/* Send period this session has adopted: half the machine's requested window
+ * (2x margin so jitter never costs the machine a whole heartbeat window),
+ * clamped to [lockstep tick, PSTOP_MAX_SEND_PERIOD_MS]. Window not yet
+ * learned (0) = every tick, the safe default. */
+static uint32_t sess_send_period_ms(const pstop_sess_t * s)
+{
+  if (s->req_hb_ms == 0u) {
+    return TICK_MS;
+  }
+  uint32_t p = s->req_hb_ms / 2u;
+  if (p < TICK_MS) {
+    p = TICK_MS;
+  }
+  if (p > PSTOP_MAX_SEND_PERIOD_MS) {
+    p = PSTOP_MAX_SEND_PERIOD_MS;
+  }
+  return p;
+}
+
+/* Reply-loss watchdog threshold: replies arrive once per transmit, so the
+ * threshold scales with the adopted send period (4 missed replies), floored
+ * at the legacy 1500 ms that the full-rate link was validated with. */
+static uint64_t sess_rebond_after_ms(const pstop_sess_t * s)
+{
+  uint64_t t = (uint64_t)sess_send_period_ms(s) * 4u;
+  return (t < (uint64_t)REBOND_AFTER_MS) ? (uint64_t)REBOND_AFTER_MS : t;
+}
 
 static struct sockaddr_in sess_addr(const pstop_sess_t * s)
 {
@@ -628,6 +679,19 @@ static uint32_t sess_drain_replies(pstop_sess_t * s, int slot, uint64_t now_ms)
       continue;
     }
 
+    /* The machine governs the update rate its safety case needs: adopt the
+         * heartbeat window it advertises in every accepted reply (0 = reject
+         * paths, ignored). Takes effect on the next scheduled send. */
+    if ((resp.heartbeat_timeout != 0u) && (resp.heartbeat_timeout != s->req_hb_ms)) {
+      s->req_hb_ms = resp.heartbeat_timeout;
+      ESP_LOGI(
+        TAG,
+        "m%d machine requests heartbeat window %lu ms -> sending every %lu ms",
+        slot,
+        (unsigned long)s->req_hb_ms,
+        (unsigned long)sess_send_period_ms(s));
+    }
+
     if (s->state == SESS_BONDING) {
       /* Bond response: adopt the machine's counter/stamp so the first OK
              * heartbeat carries the right context (mirrors the handshake in
@@ -681,7 +745,6 @@ static void comparator_task(void * arg)
   }
 
   uint32_t mismatch = 0;
-  uint32_t tick_lsb = 0; /* rolling level source while no session is bonded */
   uint64_t last_unhealthy_kick_ms = 0;
 
   TickType_t next = xTaskGetTickCount();
@@ -712,13 +775,15 @@ static void comparator_task(void * arg)
       }
     }
 
-    /* 2. Publish this tick's per-session inputs for the cores. Slot 0's
-         *    counter doubles as the E-stop rolling-level source, so keep it
-         *    advancing even when nothing is bonded. */
+    /* 2. Publish this tick's per-session inputs for the cores. A session is
+         *    active this tick only when its machine-governed send period has
+         *    elapsed (sess_send_period_ms) — sends are decimated ticks. The
+         *    E-stop rolling level advances every tick regardless. */
+    g_tick_roll++;
     bool any_active = false;
     for (int i = 0; i < PSTOP_MAX_MACHINES; i++) {
       pstop_sess_t * s = &g_sess[i];
-      g_tick[i].active = (s->configured && (s->state == SESS_BONDED) && (s->sock >= 0));
+      g_tick[i].active = (s->configured && (s->state == SESS_BONDED) && (s->sock >= 0) && (now_ms >= s->next_send_ms));
       if (g_tick[i].active) {
         g_tick[i].stamp_ms = now_ms;
         g_tick[i].counter = s->pd.msg_counter;
@@ -729,11 +794,6 @@ static void comparator_task(void * arg)
         any_active = true;
       }
     }
-    if (!g_tick[0].active) {
-      g_tick[0].stamp_ms = now_ms;
-      g_tick[0].counter = tick_lsb; /* rolling level only; slot stays inactive */
-    }
-    tick_lsb++;
 
     /* 3. Drain any stale completion signal before notifying. If a core
          *    published just *after* CORE_PUBLISH_TIMEOUT on a previous tick,
@@ -835,18 +895,23 @@ static void comparator_task(void * arg)
       }
     }
 
-    /* 8. Per-session reply-loss watchdog + counter advance. A session whose
-         *    machine went silent re-bonds ALONE; its machine sits in fail-safe
-         *    STOP until heartbeats resume. Counter advances once per tick per
-         *    bonded session (send success or not), matching the single-machine
-         *    behaviour the protocol was validated with. */
+    /* 8. Per-session reply-loss watchdog + counter advance + send schedule.
+         *    A session whose machine went silent re-bonds ALONE; its machine
+         *    sits in fail-safe STOP until heartbeats resume. The counter
+         *    advances only on TRANSMITTING ticks (send success or not — a
+         *    failed send leaves a single-step gap, the correct lost-message
+         *    signal), so the machine sees contiguous counters regardless of
+         *    the adopted send period. */
     for (int i = 0; i < PSTOP_MAX_MACHINES; i++) {
       pstop_sess_t * s = &g_sess[i];
       if (!s->configured || (s->state != SESS_BONDED)) {
         continue;
       }
-      s->pd.msg_counter++;
-      if ((drain_now - s->last_reply_ms) > REBOND_AFTER_MS) {
+      if (g_tick[i].active) {
+        s->pd.msg_counter++;
+        s->next_send_ms = now_ms + (uint64_t)sess_send_period_ms(s);
+      }
+      if ((drain_now - s->last_reply_ms) > sess_rebond_after_ms(s)) {
         ESP_LOGW(
           TAG,
           "m%d no reply for %llu ms — re-bonding that session",
@@ -875,7 +940,7 @@ static void comparator_task(void * arg)
     for (int i = 0; i < PSTOP_MAX_MACHINES; i++) {
       pstop_sess_t * s = &g_sess[i];
       if (!s->configured) {
-        dcs_publish_pstop_machine(i, 0, 0, 0, 0, 0, 0, 0, (uint8_t)SESS_IDLE);
+        dcs_publish_pstop_machine(i, 0, 0, 0, 0, 0, 0, 0, 0, (uint8_t)SESS_IDLE);
         continue;
       }
       any_cfg = true;
@@ -886,7 +951,7 @@ static void comparator_task(void * arg)
         agg_last_reply = s->last_reply_ms;
         agg_rtt = s->rtt_ms;
       }
-      if ((s->state == SESS_BONDED) && ((drain_now - s->last_reply_ms) <= REBOND_AFTER_MS)) {
+      if ((s->state == SESS_BONDED) && ((drain_now - s->last_reply_ms) <= sess_rebond_after_ms(s))) {
         any_fresh = true;
       }
       if (s->state == SESS_BONDED) {
@@ -899,7 +964,16 @@ static void comparator_task(void * arg)
         }
       }
       dcs_publish_pstop_machine(
-        i, s->sent, s->replies, s->send_fail, s->rebonds, s->last_reply_ms, s->rtt_ms, s->last_msg, (uint8_t)s->state);
+        i,
+        s->sent,
+        s->replies,
+        s->send_fail,
+        s->rebonds,
+        s->req_hb_ms,
+        s->last_reply_ms,
+        s->rtt_ms,
+        s->last_msg,
+        (uint8_t)s->state);
     }
     if (any_stop) {
       agg_msg = PSTOP_MESSAGE_STOP; /* worst-of: any STOP shows as STOP */

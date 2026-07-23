@@ -42,10 +42,18 @@ mismatch silences every session at once. A STOP (and the arming
 press-and-release) is broadcast — one operator gesture arms every bonded
 machine; each machine keeps enforcing its own `min_stop_ms` veto.
 
+The machine governs each session's publish rate: pstop_c advertises the
+machine's per-operator `heartbeat_ms` (machine.toml) in every reply's
+`heartbeat_timeout` field, and the remote transmits at half that window
+(clamped 100..1000 ms), advancing its counter only on transmitting ticks so
+the machine sees contiguous counters. The E-stop sampling stays at the fixed
+10 Hz lockstep tick regardless.
+
 `/state.json` carries the per-machine detail in `pstop_machines`: an array
 of all 4 slots (stable indices) with `cfg`, `ip`, `port`, `id`,
 `state` (0 idle / 1 bonding / 2 bonded), `sent`, `replies`, `send_fail`,
-`rebonds`, `rtt_ms`, `last_msg`, `last_reply_ms`. The legacy scalar
+`rebonds`, `rtt_ms`, `hb_ms` (the machine-requested heartbeat window),
+`last_msg`, `last_reply_ms`. The legacy scalar
 `pstop_*` fields remain as aggregates (worst-of `last_msg`, summed counters,
 most recent reply) for old tooling.
 
