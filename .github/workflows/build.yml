@@ -1,18 +1,18 @@
 ---
 name: ROS2 Build and Test
 
-# NOTE: This workflow covers the ARCHIVED/DEPRECATED ROS2 packages, which
-# moved to archive/ during the firmware-monorepo restructure. The paths
-# below were updated to their archived locations so the triggers still
-# resolve to real files rather than silently never matching. These
-# packages are not built as part of the active firmware product; see
-# archive/README.md.
-
-# Manual-only: these packages are archived/deprecated and pending removal, so
-# this workflow no longer gates pushes or PRs. Run it on demand from the
-# Actions tab if the archived ROS2 packages ever need a build.
 on:
-  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - protective_stop_msg/**
+      - protective_stop_node/**
+      - .github/workflows/build.yml
+  pull_request:
+    paths:
+      - protective_stop_msg/**
+      - protective_stop_node/**
+      - .github/workflows/build.yml
 
 jobs:
   build_and_test_ros2:
