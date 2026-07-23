@@ -33,6 +33,7 @@ extern "C"
 #define DCS_NVS_KEY_TS_BOOT_EN "ts_boot"
 #define DCS_NVS_KEY_RST_HIST "rst_hist" /* ring of recent esp_reset_reason() */
 #define DCS_NVS_KEY_PSTOP_NUM "ps_num" /* USB "PSTOPxx" unit number (0=auto) */
+#define DCS_NVS_KEY_RING_OFF "ring_off" /* ring rotation: physical index of LED 1 */
 
 #define DCS_RST_HIST_LEN 16
 
@@ -177,6 +178,10 @@ extern "C"
   int dcs_nvs_read_reset_history(uint8_t * out, int max);
   uint8_t dcs_nvs_read_pstop_unit_num(void); /* 0 = auto (chip-ID derived) */
   esp_err_t dcs_nvs_write_pstop_unit_num(uint8_t n);
+  /* Ring rotation offset: the PHYSICAL pixel index (0..15, clockwise from the
+ * data-in pad) that the installed bezel makes "LED 1". Absent -> 0. */
+  uint8_t dcs_nvs_read_ring_offset(void);
+  esp_err_t dcs_nvs_write_ring_offset(uint8_t off);
 
   /* dcs_safety.c */
   void dcs_safety_account_boot(void); /* increments crash counter + applies
@@ -225,6 +230,20 @@ extern "C"
   /* dcs_pstop_ring.c — 16-LED WS2812 ring (GPIO17): solid colour = PSTOP safety
  * state (green=RUN, red=STOP, amber=link-lost, magenta=lockstep fault). */
   void dcs_pstop_ring_start(void);
+
+  /* Ring rotation offset (live value, mirrors NVS ring_off): rotates every frame
+ * so logical LED 1 lands on the installed bezel's physical LED-1 position.
+ * set clamps to 0..15, takes effect on the next repaint (<=250 ms); the caller
+ * persists to NVS separately (dcs_nvs_write_ring_offset). */
+  void dcs_pstop_ring_set_offset(uint8_t off);
+  uint8_t dcs_pstop_ring_get_offset(void);
+
+  /* Locate mode: paint ONLY logical LED 1 solid white so an installer can see /
+ * verify the rotation offset. Overrides the state colours; auto-expires after
+ * DCS_RING_LOCATE_TIMEOUT_MS so a forgotten locate can't mask STOP/OK forever. */
+#define DCS_RING_LOCATE_TIMEOUT_MS 300000u /* 5 min */
+  void dcs_pstop_ring_locate(bool on);
+  bool dcs_pstop_ring_locate_active(void);
 
   /* dcs_net_liveness.c */
   void dcs_net_liveness_start(void); /* esp_ping + watchdog task */

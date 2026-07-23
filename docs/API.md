@@ -27,7 +27,23 @@ Query parameters are shown where required. Unless noted, POST bodies are empty.
 | POST | `/api/ts_boot` | Flip the Tailscale-on-boot NVS flag (effective next reboot) |
 | POST | `/api/pstop_peer?ip=A.B.C.D&port=N` | Set + persist the pstop machine target |
 | POST | `/api/pstop_num?n=N` | Set the USB "PSTOPxx" unit number (0 = auto) |
+| POST | `/api/ring_offset?n=N` | Set + persist the LED-ring rotation offset (0..15) — which physical pixel is "LED 1". Applies immediately, survives reboots and firmware updates (NVS `ring_off`) |
+| POST | `/api/ring_led1?on=0\|1` | Locate mode: light ONLY LED 1 solid white (overrides state colours) so the offset can be verified during install; auto-expires after 5 min |
 | POST | `/api/enter_download` | Enter USB download (flashing) mode |
+
+### LED-ring rotation (fleet setup)
+
+The 16-LED ring can be installed in any of 16 orientations, so "LED 1" is a
+per-device setting. To calibrate from the fleet-setup tooling:
+
+1. `POST /api/ring_led1?on=1` — one white pixel shows where the current offset
+   puts LED 1 (current offset and state are in `/state.json` as `ring_offset` /
+   `ring_led1`).
+2. `POST /api/ring_offset?n=N` — the white pixel moves on the next repaint
+   (≤250 ms); iterate until it sits on the bezel's LED-1 position. Pixel
+   indices run in WS2812 data order (physical pixel `(logical + n) mod 16`).
+3. `POST /api/ring_led1?on=0` — return the ring to the normal state display
+   (it also auto-expires after 5 minutes as a safety backstop).
 
 ## Admin (`admin` : `CONFIG_ML_ADMIN_PASSWORD`)
 

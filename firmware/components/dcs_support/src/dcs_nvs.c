@@ -11,6 +11,7 @@
  *   boot_cnt  u16  CRASH-class boots since last age-out
  *   ps_ip     u32  pstop peer IPv4 in host byte order
  *   ps_port   u16  pstop peer UDP port
+ *   ring_off  u8   LED-ring rotation: physical pixel index of LED 1 (default 0)
  */
 
 #include <string.h>
@@ -164,6 +165,29 @@ esp_err_t dcs_nvs_write_pstop_unit_num(uint8_t n)
   esp_err_t r = nvs_open(DCS_NVS_NS, NVS_READWRITE, &h);
   if (r != ESP_OK) return r;
   r = nvs_set_u8(h, DCS_NVS_KEY_PSTOP_NUM, n);
+  if (r == ESP_OK) {
+    r = nvs_commit(h);
+  }
+  nvs_close(h);
+  return r;
+}
+
+uint8_t dcs_nvs_read_ring_offset(void)
+{
+  nvs_handle_t h;
+  if (nvs_open(DCS_NVS_NS, NVS_READONLY, &h) != ESP_OK) return 0;
+  uint8_t v = 0;
+  (void)nvs_get_u8(h, DCS_NVS_KEY_RING_OFF, &v); /* absent -> default */
+  nvs_close(h);
+  return (uint8_t)(v & 0x0Fu); /* corrupt value degrades to a valid rotation */
+}
+
+esp_err_t dcs_nvs_write_ring_offset(uint8_t off)
+{
+  nvs_handle_t h;
+  esp_err_t r = nvs_open(DCS_NVS_NS, NVS_READWRITE, &h);
+  if (r != ESP_OK) return r;
+  r = nvs_set_u8(h, DCS_NVS_KEY_RING_OFF, (uint8_t)(off & 0x0Fu));
   if (r == ESP_OK) {
     r = nvs_commit(h);
   }
