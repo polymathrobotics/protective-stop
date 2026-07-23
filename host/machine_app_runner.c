@@ -323,7 +323,7 @@ static int s_stop_episode_valid = 0;
 static void status_emit(pstop_status_message_t status)
 {
   if (!s_status_initialized || s_last_status != status) {
-    fprintf(stderr, "Robot Status = %s\n", status == PSTOP_STATUS_OK ? "OK" : "STOP");
+    fprintf(stderr, "*** ROBOT STATUS -> %s ***\n", status == PSTOP_STATUS_OK ? "OK (armed, cleared to run)" : "STOP");
     s_last_status = status;
     s_status_initialized = 1;
   }
@@ -437,9 +437,9 @@ static void log_message(uint64_t timestamp, const device_id_t * client, uint8_t 
 {
   (void)timestamp;
   if (error == PSTOP_OK) {
-    fprintf(stderr, "pstop 0x%08X -> %s\n", client->data, msg_name(message));
+    fprintf(stderr, "RX <- remote 0x%08X  now sending %s\n", client->data, msg_name(message));
   } else {
-    fprintf(stderr, "pstop 0x%08X -> %s  [%s]\n", client->data, msg_name(message), err_name(error));
+    fprintf(stderr, "RX <- remote 0x%08X  %s REJECTED [%s]\n", client->data, msg_name(message), err_name(error));
   }
 }
 
@@ -509,7 +509,14 @@ int main(int argc, char * argv[])
   device_id_t machine_uuid = {.data = g_cfg.machine_device_id};
   device_id_copy(&(machine.application->machine_device_id), &machine_uuid);
 
-  fprintf(stderr, "machine_app_runner listening on %s:%d\n", g_cfg.bind_addr, g_cfg.port);
+  fprintf(
+    stderr,
+    "MACHINE node up on %s:%d (machine_id=0x%08X) — pstop remotes connect here.\n"
+    "Log grammar: RX <- remote (what a pstop sent us) | TX -> remote (our reply) |\n"
+    "*** ROBOT STATUS / ARMED *** (actuation-relevant) | STATE (library arming cycle).\n",
+    g_cfg.bind_addr,
+    g_cfg.port,
+    g_cfg.machine_device_id);
 
   uint8_t reqbytes[PSTOP_MESSAGE_SIZE];
   uint8_t respbytes[PSTOP_MESSAGE_SIZE];
@@ -546,11 +553,11 @@ int main(int argc, char * argv[])
       if (g_cfg.verbose) {
         fprintf(
           stderr,
-          "  RX %-6s cnt=%-5u rcnt=%-5u from=0x%08X stamp=%llu crc=%s\n",
+          "RX <- remote 0x%08X  %-6s cnt=%-5u rcnt=%-5u stamp=%llu crc=%s\n",
+          req_msg.id.data,
           msg_name(req_msg.message),
           req_msg.counter,
           req_msg.received_counter,
-          req_msg.id.data,
           (unsigned long long)req_msg.stamp,
           req_msg.checksum == req_msg.calculated_checksum ? "ok" : "BAD");
       }
@@ -563,7 +570,7 @@ int main(int argc, char * argv[])
       int known = (pstop_remote_get(&machine.remotes, &req_msg.id) != NULL);
       if (!known && req_msg.message != PSTOP_MESSAGE_BOND) {
         if (g_cfg.verbose)
-          fprintf(stderr, "  (dropped %s from unbonded 0x%08X)\n", msg_name(req_msg.message), req_msg.id.data);
+          fprintf(stderr, "RX <- remote 0x%08X  %s DROPPED (not bonded)\n", req_msg.id.data, msg_name(req_msg.message));
         continue;
       }
 
@@ -662,8 +669,8 @@ int main(int argc, char * argv[])
           } else {
             fprintf(
               stderr,
-              "ARMED by 0x%08X: STOP held %llu ms (policy "
-              "minimum %llu ms)\n",
+              "*** ARMED by remote 0x%08X: STOP held %llu ms (policy "
+              "minimum %llu ms) ***\n",
               req_msg.id.data,
               (unsigned long long)held,
               (unsigned long long)g_cfg.min_stop_ms);
@@ -676,7 +683,14 @@ int main(int argc, char * argv[])
       if (err == PSTOP_OK) {
         pstop_message_encode(&resp_msg, respbytes);
         transport_udp_write(&udp_transport, respbytes, PSTOP_MESSAGE_SIZE, (struct sockaddr_in *)&client);
-        if (g_cfg.verbose) fprintf(stderr, "  TX %-6s cnt=%u\n", msg_name(resp_msg.message), resp_msg.counter);
+        if (g_cfg.verbose)
+          fprintf(
+            stderr,
+            "TX -> remote 0x%08X  %-6s cnt=%-5u hb=%ums\n",
+            req_msg.id.data,
+            msg_name(resp_msg.message),
+            resp_msg.counter,
+            resp_msg.heartbeat_timeout);
       } else {
         /* Rejected by pstop (recoverable: no response sent, and no STOP
                  * unless loss exceeds tolerance). MSG_LOST/OUT_OF_ORDER can come
@@ -725,14 +739,14 @@ int main(int argc, char * argv[])
       {
         fprintf(
           stderr,
-          "  STATE robot=%s restart=%s owner=0x%08X active=%u  (from pstop "
-          "0x%08X %s; was robot=%s restart=%s)\n",
+          "   STATE robot=%s restart=%s owner=0x%08X active=%u  (trigger: RX %s "
+          "from remote 0x%08X; was robot=%s restart=%s)\n",
           rstate_name(machine.robot_state.robot_state),
           restart_name(machine.robot_state.restart_state),
           device_id_for_local(&machine, machine.robot_state.remote_stop_id),
           pstop_remote_num_active(&machine.remotes),
-          req_msg.id.data,
           msg_name(req_msg.message),
+          req_msg.id.data,
           rstate_name(prev_robot),
           restart_name(prev_restart));
       }
