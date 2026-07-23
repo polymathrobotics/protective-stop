@@ -19,7 +19,7 @@ jobs:
       BULLSEYE_VERSION: 9.25.2
       BULLSEYE_PREFIX: /opt/BullseyeCoverage
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install BullseyeCoverage
         env:
