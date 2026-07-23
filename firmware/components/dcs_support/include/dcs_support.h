@@ -139,6 +139,43 @@ extern "C"
  */
   void dcs_get_initial_pstop_peer(uint32_t * peer_ip, uint16_t * peer_port);
 
+/* ============================================================================
+ * Multi-machine support: up to DCS_PSTOP_MAX_MACHINES peer slots. Slot 0 is
+ * the legacy single peer (mirrored to the old NVS keys + /api/pstop_peer).
+ * ========================================================================== */
+#define DCS_PSTOP_MAX_MACHINES 4
+
+/* Default pstop_msg.receiver_id — matches machine_app_runner's default
+ * machine_device_id (upstream 0x01020304). Per-slot override via
+ * /api/pstop_peers?...&id=. */
+#define DCS_PSTOP_DEFAULT_MACHINE_ID 0x01020304u
+
+  /**
+ * @brief Read one peer slot. Called by the comparator every tick, so
+ * /api/pstop_peers changes take effect live. Lock-free: a concurrent update
+ * can yield one tick with a mismatched endpoint/machine_id pair, which the
+ * machine rejects and the session re-bonds — benign, fail-safe.
+ * @param slot        0..DCS_PSTOP_MAX_MACHINES-1 (out-params zeroed if out of range).
+ * @param configured  false = slot empty (other out-params zeroed).
+ */
+  void dcs_get_pstop_peer_slot(
+    int slot, bool * configured, uint32_t * peer_ip, uint16_t * peer_port, uint32_t * machine_id);
+
+  /**
+ * @brief Publish one machine session's telemetry (comparator, once per tick
+ * per configured slot). sess_state: 0=idle, 1=bonding, 2=bonded.
+ */
+  void dcs_publish_pstop_machine(
+    int slot,
+    uint32_t sent,
+    uint32_t replies,
+    uint32_t send_fail,
+    uint32_t rebonds,
+    uint64_t last_reply_ms,
+    uint32_t rtt_ms,
+    uint8_t last_msg,
+    uint8_t sess_state);
+
   /**
  * @brief Tell the transport whether the pstop link to the machine is alive.
  *

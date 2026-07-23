@@ -122,6 +122,11 @@ releasing. The runner logs `ARMED` and the ring turns green.
 
 - 10 Hz heartbeat; stop-on-silence is `heartbeat_ms ×
   (max_missed_heartbeats+1)`, about 1 to 2 s as configured.
+- One remote can heartbeat up to 4 machines (`/api/pstop_peers`), each an
+  independent session with its own bond and reply watchdog; one dead
+  machine never stalls the others. STOP and the arming gesture broadcast
+  to all bonded machines. The lockstep check still silences every session
+  on any core mismatch.
 - Arming: a STOP held shorter than `min_stop_ms` (default 500 ms) is
   vetoed machine-side. The remote also debounces loop re-close by 3
   ticks and holds all transmission until the loops settle at boot, so
@@ -142,7 +147,9 @@ releasing. The runner logs `ARMED` and the ring turns green.
   (`docs/SAFETY_CHAIN.md`, `docs/RECOVERY_PLAYBOOK.md`).
 - Status ring: white = no machine configured, pulsing red = machine
   unreachable, blue = bonded, green = armed, solid red = STOP, purple =
-  lockstep mismatch (`docs/TROUBLESHOOTING.md`). The ring mounts in any
+  lockstep mismatch (`docs/TROUBLESHOOTING.md`). With several machines
+  configured the ring splits into one segment per machine, in slot order
+  from LED 1. The ring mounts in any
   of 16 rotations, so which pixel is "LED 1" is a per-device setting:
   `POST /api/ring_offset?n=0..15`, with a locate mode
   (`POST /api/ring_led1?on=1`) that lights only LED 1 for calibration.

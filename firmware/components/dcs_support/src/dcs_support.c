@@ -95,6 +95,25 @@ atomic_uint_fast64_t g_dcs_pstop_last_reply_ms;
 atomic_uint_fast32_t g_dcs_pstop_peer_ip;
 atomic_uint_fast32_t g_dcs_pstop_peer_port;
 
+atomic_uint_fast64_t g_dcs_pstop_slot_ep[DCS_PSTOP_MAX_MACHINES];
+atomic_uint_fast32_t g_dcs_pstop_slot_id[DCS_PSTOP_MAX_MACHINES];
+atomic_uint_fast32_t g_dcs_pstop_m_sent[DCS_PSTOP_MAX_MACHINES];
+atomic_uint_fast32_t g_dcs_pstop_m_replies[DCS_PSTOP_MAX_MACHINES];
+atomic_uint_fast32_t g_dcs_pstop_m_send_fail[DCS_PSTOP_MAX_MACHINES];
+atomic_uint_fast32_t g_dcs_pstop_m_rebonds[DCS_PSTOP_MAX_MACHINES];
+atomic_uint_fast32_t g_dcs_pstop_m_rtt_ms[DCS_PSTOP_MAX_MACHINES];
+atomic_uint_fast32_t g_dcs_pstop_m_last_msg[DCS_PSTOP_MAX_MACHINES];
+atomic_uint_fast32_t g_dcs_pstop_m_state[DCS_PSTOP_MAX_MACHINES];
+atomic_uint_fast64_t g_dcs_pstop_m_last_reply_ms[DCS_PSTOP_MAX_MACHINES];
+
+/* Endpoint packing for g_dcs_pstop_slot_ep (see dcs_internal.h). */
+#define PSTOP_EP_CONFIGURED (1ULL << 63)
+
+static uint64_t pstop_ep_pack(bool configured, uint32_t ip, uint16_t port)
+{
+  return (configured ? PSTOP_EP_CONFIGURED : 0ULL) | ((uint64_t)ip << 16) | (uint64_t)port;
+}
+
 TaskHandle_t g_dcs_wg_handle;
 atomic_int g_dcs_wg_paused;
 
@@ -187,7 +206,7 @@ dcs_boot_state_t dcs_support_init(void)
   cfg.alt_network_timeout_ms = 30000;
   /* httpd URI-handler budget. The server holds 16 + this many slots
      * (ml_app.c). microlink registers ~20 of its own (config panel + /admin
-     * API + fleet-ota + verbose) and dcs_admin_pages registers 17; at 16 the
+     * API + fleet-ota + verbose) and dcs_admin_pages registers 18; at 16 the
      * total overflowed 32 and the LAST-registered app routes silently failed
      * to register (observed: /api/pstop_num and /api/enter_download 404'd on
      * shipped firmware). 26 gives 42 total slots with headroom — re-check this
@@ -234,10 +253,19 @@ dcs_boot_state_t dcs_support_init(void)
      * onboard single LED's network indicator). */
   dcs_pstop_ring_start();
 
-  /* Initial peer target (NVS-backed, defaults if unset) — main.c reads this
-     * via dcs_get_initial_pstop_peer() before spawning the comparator. */
-  atomic_store(&g_dcs_pstop_peer_ip, dcs_nvs_read_pstop_peer_ip());
-  atomic_store(&g_dcs_pstop_peer_port, dcs_nvs_read_pstop_peer_port());
+  /* Initial peer targets (NVS-backed, legacy single peer migrated into
+     * slot 0) — main.c reads the slots via dcs_get_pstop_peer_slot() before
+     * and during the comparator's run. Slot 0 mirrors to the legacy atomics. */
+  {
+    dcs_pstop_peer_rec_t peers[DCS_PSTOP_MAX_MACHINES];
+    dcs_nvs_read_pstop_peers(peers);
+    for (int i = 0; i < DCS_PSTOP_MAX_MACHINES; i++) {
+      atomic_store(&g_dcs_pstop_slot_ep[i], pstop_ep_pack(peers[i].configured, peers[i].ip, peers[i].port));
+      atomic_store(&g_dcs_pstop_slot_id[i], peers[i].machine_id);
+    }
+    atomic_store(&g_dcs_pstop_peer_ip, peers[0].configured ? peers[0].ip : 0u);
+    atomic_store(&g_dcs_pstop_peer_port, peers[0].port);
+  }
 
   /* Register the admin pages now that ml_app is up. */
   dcs_admin_pages_register(g_dcs.app);
@@ -327,13 +355,81 @@ void dcs_publish_comparator(
 
 void dcs_publish_pstop_peer(uint32_t peer_ip, uint16_t peer_port)
 {
-  atomic_store(&g_dcs_pstop_peer_ip, peer_ip);
-  atomic_store(&g_dcs_pstop_peer_port, peer_port);
-  /* Persist for next boot. */
-  esp_err_t werr = dcs_nvs_write_pstop_peer(peer_ip, peer_port);
+  /* Legacy single-peer setter (/api/pstop_peer, fleet tooling) = slot 0
+   * with the default machine id. */
+  esp_err_t werr = dcs_pstop_set_peer_slot(0, true, peer_ip, peer_port, DCS_PSTOP_DEFAULT_MACHINE_ID);
   if (werr != ESP_OK) {
     ESP_LOGW(TAG, "persist pstop peer: %s", esp_err_to_name(werr));
   }
+}
+
+esp_err_t dcs_pstop_set_peer_slot(int slot, bool configured, uint32_t ip, uint16_t port, uint32_t machine_id)
+{
+  if ((slot < 0) || (slot >= DCS_PSTOP_MAX_MACHINES)) {
+    return ESP_ERR_INVALID_ARG;
+  }
+  /* Live update first (comparator picks it up next tick)... */
+  atomic_store(&g_dcs_pstop_slot_id[slot], machine_id);
+  atomic_store(&g_dcs_pstop_slot_ep[slot], pstop_ep_pack(configured, ip, port));
+  if (slot == 0) {
+    atomic_store(&g_dcs_pstop_peer_ip, configured ? ip : 0u);
+    atomic_store(&g_dcs_pstop_peer_port, port);
+  }
+  /* ...then persist the whole table (read-modify-write of the blob). */
+  dcs_pstop_peer_rec_t peers[DCS_PSTOP_MAX_MACHINES];
+  dcs_nvs_read_pstop_peers(peers);
+  peers[slot].configured = configured;
+  peers[slot].ip = ip;
+  peers[slot].port = port;
+  peers[slot].machine_id = machine_id;
+  return dcs_nvs_write_pstop_peers(peers);
+}
+
+void dcs_get_pstop_peer_slot(
+  int slot, bool * configured, uint32_t * peer_ip, uint16_t * peer_port, uint32_t * machine_id)
+{
+  uint64_t ep = 0;
+  uint32_t id = 0;
+  if ((slot >= 0) && (slot < DCS_PSTOP_MAX_MACHINES)) {
+    ep = atomic_load(&g_dcs_pstop_slot_ep[slot]);
+    id = (uint32_t)atomic_load(&g_dcs_pstop_slot_id[slot]);
+  }
+  if (configured != NULL) {
+    *configured = (ep & PSTOP_EP_CONFIGURED) != 0ULL;
+  }
+  if (peer_ip != NULL) {
+    *peer_ip = (uint32_t)((ep >> 16) & 0xFFFFFFFFu);
+  }
+  if (peer_port != NULL) {
+    *peer_port = (uint16_t)(ep & 0xFFFFu);
+  }
+  if (machine_id != NULL) {
+    *machine_id = id;
+  }
+}
+
+void dcs_publish_pstop_machine(
+  int slot,
+  uint32_t sent,
+  uint32_t replies,
+  uint32_t send_fail,
+  uint32_t rebonds,
+  uint64_t last_reply_ms,
+  uint32_t rtt_ms,
+  uint8_t last_msg,
+  uint8_t sess_state)
+{
+  if ((slot < 0) || (slot >= DCS_PSTOP_MAX_MACHINES)) {
+    return;
+  }
+  atomic_store(&g_dcs_pstop_m_sent[slot], sent);
+  atomic_store(&g_dcs_pstop_m_replies[slot], replies);
+  atomic_store(&g_dcs_pstop_m_send_fail[slot], send_fail);
+  atomic_store(&g_dcs_pstop_m_rebonds[slot], rebonds);
+  atomic_store(&g_dcs_pstop_m_last_reply_ms[slot], last_reply_ms);
+  atomic_store(&g_dcs_pstop_m_rtt_ms[slot], rtt_ms);
+  atomic_store(&g_dcs_pstop_m_last_msg[slot], last_msg);
+  atomic_store(&g_dcs_pstop_m_state[slot], sess_state);
 }
 
 void dcs_get_initial_pstop_peer(uint32_t * peer_ip, uint16_t * peer_port)

@@ -7,9 +7,12 @@
  *        the MACHINE's replies (NOT the network state; the onboard single LED
  *        on GPIO21, dcs_rgb.c, does network).
  *
- * The whole ring is filled one solid colour, driven by the machine's most
- * recent reply — the comparator publishes the last received message type
- * (g_dcs_pstop_last_msg) and timestamp (g_dcs_pstop_last_reply_ms) in main.c:
+ * The ring is divided evenly among the CONFIGURED machine slots (one machine
+ * = the whole ring, two = halves, etc., in slot order starting at LED 1) and
+ * each segment shows ITS machine's link state from the per-machine telemetry
+ * the comparator publishes (g_dcs_pstop_m_state/_last_msg/_last_reply_ms).
+ * Device-level conditions (lockstep MISMATCH, OTA, locate, no machines at
+ * all) override the whole ring. Per segment / ring:
  *
  *     WHITE  = IDLE          no pstop peer (machine) configured — the remote has
  *                            nothing to connect to (fresh unit, or peer cleared).
@@ -299,90 +302,94 @@ static void ring_task(void * arg)
     }
     bool recent_mismatch = now < mismatch_until;
 
-    /* "Connected" = a fresh reply from the machine within LINK_FRESH_MS.
-         * Otherwise disconnected (never bonded, the machine went away, or the
-         * comparator stopped sending after a lockstep fault — which the machine
-         * then heartbeat-times-out, so replies stop). */
-    uint32_t replies = atomic_load(&g_dcs_pstop_replies);
-    uint64_t last = atomic_load(&g_dcs_pstop_last_reply_ms);
-    uint8_t lastmsg = (uint8_t)atomic_load(&g_dcs_pstop_last_msg);
-    uint32_t peer_ip = atomic_load(&g_dcs_pstop_peer_ip);
-    bool connected = (replies > 0u) && (last > 0u) && (now >= last) && ((now - last) < LINK_FRESH_MS);
-    bool host_set = (peer_ip != 0u); /* a pstop peer (machine) target is configured */
-
-    /* A recent core disagreement (e.g. one E-stop loop channel faulted)
-         * takes priority. When there's no fresh reply, distinguish IDLE (no
-         * peer configured -> nothing to connect to -> white) from UNREACHABLE
-         * (peer configured but not answering -> slow red pulse). Otherwise the
-         * colour reflects the machine's most recent reply. */
-    ring_state_t st;
-    if (recent_mismatch) {
-      st = RING_MISMATCH;
-    } /* purple    */
-    else if (!connected && !host_set)
-    {
-      st = RING_IDLE;
-    } /* white     */
-    else if (!connected)
-    {
-      st = RING_UNREACHABLE;
-    } /* red pulse */
-    else if (lastmsg == PSTOP_MESSAGE_STOP)
-    {
-      st = RING_STOP;
-    } /* red       */
-    else if (lastmsg == PSTOP_MESSAGE_OK)
-    {
-      st = RING_OK;
-    } /* green     */
-    else
-    {
-      st = RING_BOND;
-    } /* blue: BOND/UNBOND */
-
     const uint8_t B = RING_BRIGHTNESS;
     uint32_t frame_ms = RING_REFRESH_MS;
-    switch (st) {
-      case RING_IDLE:
-        ring_fill(B, B, B);
-        break; /* white  */
-      case RING_UNREACHABLE: { /* slow red pulse */
-        /* Triangle ramp 0..B..0 over PULSE_PERIOD_MS; repaint fast (frame_ms)
-             * so the pulse is smooth rather than stepped. */
-        uint32_t ph = (uint32_t)(now % PULSE_PERIOD_MS);
-        uint32_t half = PULSE_PERIOD_MS / 2u;
-        uint32_t level = (ph < half) ? (ph * B / half) : ((PULSE_PERIOD_MS - ph) * B / half);
-        ring_fill((uint8_t)level, 0, 0);
-        frame_ms = PULSE_FRAME_MS;
-        break;
+
+    /* A recent core disagreement (e.g. one E-stop loop channel faulted) is a
+         * DEVICE fault, not a link state — it silences every session — so it
+         * paints the whole ring purple, overriding the per-machine segments. */
+    if (recent_mismatch) {
+      ring_fill(B, 0, B);
+      if (last_logged != (int)RING_MISMATCH) {
+        ESP_LOGI(TAG, "ring -> MISMATCH (mm=%lu)", (unsigned long)mm);
+        last_logged = (int)RING_MISMATCH;
       }
-      case RING_BOND:
-        ring_fill(0, 0, B);
-        break; /* blue   */
-      case RING_OK:
-        ring_fill(0, B, 0);
-        break; /* green  */
-      case RING_STOP:
-        ring_fill(B, 0, 0);
-        break; /* red    */
-      case RING_MISMATCH:
-        ring_fill(B, 0, B);
-        break; /* purple */
-      default:
-        break; /* unreachable */
+      DLY(frame_ms);
+      continue;
     }
 
-    if ((int)st != last_logged) {
+    /* Per-machine segments: the ring is divided evenly among the CONFIGURED
+         * peer slots, in slot order (one machine = the whole ring, matching the
+         * old single-machine display). Per segment, the classic colours apply:
+         *   red pulse = configured but no fresh reply (bonding / unreachable)
+         *   blue      = bonded, machine's last reply was BOND/UNBOND
+         *   green     = machine's last reply was OK
+         *   red       = machine's last reply was STOP
+         * No machines configured at all = whole ring white (IDLE). */
+    int cfg_slots[DCS_PSTOP_MAX_MACHINES];
+    int ncfg = 0;
+    for (int i = 0; i < DCS_PSTOP_MAX_MACHINES; i++) {
+      bool cfg = false;
+      dcs_get_pstop_peer_slot(i, &cfg, NULL, NULL, NULL);
+      if (cfg) {
+        cfg_slots[ncfg] = i;
+        ncfg++;
+      }
+    }
+
+    ring_state_t worst = RING_IDLE; /* for transition logging only */
+    if (ncfg == 0) {
+      ring_fill(B, B, B); /* white: nothing to connect to */
+    } else {
+      /* Pulse level shared by every unreachable segment: triangle ramp
+             * 0..B..0 over PULSE_PERIOD_MS; repaint fast so it is smooth. */
+      uint32_t ph = (uint32_t)(now % PULSE_PERIOD_MS);
+      uint32_t half = PULSE_PERIOD_MS / 2u;
+      uint32_t pulse = (ph < half) ? (ph * B / half) : ((PULSE_PERIOD_MS - ph) * B / half);
+
+      (void)memset(s_grb, 0, sizeof(s_grb));
+      for (int j = 0; j < ncfg; j++) {
+        int slot = cfg_slots[j];
+        uint32_t st8 = (uint32_t)atomic_load(&g_dcs_pstop_m_state[slot]);
+        uint64_t last = (uint64_t)atomic_load(&g_dcs_pstop_m_last_reply_ms[slot]);
+        uint8_t lastmsg = (uint8_t)atomic_load(&g_dcs_pstop_m_last_msg[slot]);
+        bool connected = (st8 == 2u) && (last > 0u) && (now >= last) && ((now - last) < LINK_FRESH_MS);
+
+        uint8_t r = 0, g = 0, b = 0;
+        ring_state_t st;
+        if (!connected) {
+          st = RING_UNREACHABLE;
+          r = (uint8_t)pulse;
+          frame_ms = PULSE_FRAME_MS;
+        } else if (lastmsg == PSTOP_MESSAGE_STOP) {
+          st = RING_STOP;
+          r = B;
+        } else if (lastmsg == PSTOP_MESSAGE_OK) {
+          st = RING_OK;
+          g = B;
+        } else {
+          st = RING_BOND;
+          b = B;
+        }
+        if ((int)st > (int)worst) {
+          worst = st;
+        }
+
+        int seg_start = (j * RING_LEDS) / ncfg;
+        int seg_end = ((j + 1) * RING_LEDS) / ncfg;
+        for (int p = seg_start; p < seg_end; p++) {
+          s_grb[p * 3] = g;
+          s_grb[(p * 3) + 1] = r;
+          s_grb[(p * 3) + 2] = b;
+        }
+      }
+      ring_show();
+    }
+
+    if ((int)worst != last_logged) {
       static const char * N[] = {"IDLE", "UNREACHABLE", "BOND/UNBOND", "OK", "STOP", "MISMATCH"};
-      ESP_LOGI(
-        TAG,
-        "ring -> %s (machine_msg=%u replies=%lu mm=%lu host_set=%d)",
-        N[st],
-        lastmsg,
-        (unsigned long)replies,
-        (unsigned long)mm,
-        (int)host_set);
-      last_logged = (int)st;
+      ESP_LOGI(TAG, "ring -> %s (machines=%d mm=%lu)", N[worst], ncfg, (unsigned long)mm);
+      last_logged = (int)worst;
     }
 
     DLY(frame_ms);

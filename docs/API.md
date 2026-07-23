@@ -25,11 +25,34 @@ Query parameters are shown where required. Unless noted, POST bodies are empty.
 | POST | `/api/iface/usb` | Select the USB-NCM uplink |
 | POST | `/api/usb_enable` | Flip the USB-NCM NVS flag and reboot |
 | POST | `/api/ts_boot` | Flip the Tailscale-on-boot NVS flag (effective next reboot) |
-| POST | `/api/pstop_peer?ip=A.B.C.D&port=N` | Set + persist the pstop machine target |
+| POST | `/api/pstop_peer?ip=A.B.C.D&port=N` | Set + persist the pstop machine target (= peer slot 0, legacy single-machine call) |
+| POST | `/api/pstop_peers?slot=N&ip=A.B.C.D&port=P[&id=HEX]` | Multi-machine peer table: set slot 0..3 (id = the machine's `machine_device_id`, default `0x01020304`). `?slot=N&clear=1` empties a slot. Applies live within one 100 ms tick, persists to NVS |
 | POST | `/api/pstop_num?n=N` | Set the USB "PSTOPxx" unit number (0 = auto) |
 | POST | `/api/ring_offset?n=N` | Set + persist the LED-ring rotation offset (0..15) — which physical pixel is "LED 1". Applies immediately, survives reboots and firmware updates (NVS `ring_off`) |
 | POST | `/api/ring_led1?on=0\|1` | Locate mode: light ONLY LED 1 solid white (overrides state colours) so the offset can be verified during install; auto-expires after 5 min |
 | POST | `/api/enter_download` | Enter USB download (flashing) mode |
+
+### Multi-machine (one remote, up to 4 machines)
+
+The remote heartbeats every configured peer slot independently: per-machine
+socket (local ports 8891..8894, slot order), per-machine bond/counter state
+and reply-loss watchdog, so one dead machine never stalls the heartbeats to
+the others. The lockstep comparator still gates ALL transmissions: a core
+mismatch silences every session at once. A STOP (and the arming
+press-and-release) is broadcast — one operator gesture arms every bonded
+machine; each machine keeps enforcing its own `min_stop_ms` veto.
+
+`/state.json` carries the per-machine detail in `pstop_machines`: an array
+of all 4 slots (stable indices) with `cfg`, `ip`, `port`, `id`,
+`state` (0 idle / 1 bonding / 2 bonded), `sent`, `replies`, `send_fail`,
+`rebonds`, `rtt_ms`, `last_msg`, `last_reply_ms`. The legacy scalar
+`pstop_*` fields remain as aggregates (worst-of `last_msg`, summed counters,
+most recent reply) for old tooling.
+
+The LED ring divides evenly among the configured slots, in slot order
+starting at LED 1 (one machine = whole ring, matching the old display);
+each segment shows its machine's state with the usual colours. HIL
+validation: `tools/pstop_multi_machine_test.py`.
 
 ### LED-ring rotation (fleet setup)
 

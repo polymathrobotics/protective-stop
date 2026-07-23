@@ -12,6 +12,8 @@
  *   ps_ip     u32  pstop peer IPv4 in host byte order
  *   ps_port   u16  pstop peer UDP port
  *   ring_off  u8   LED-ring rotation: physical pixel index of LED 1 (default 0)
+ *   ps_peers  blob multi-machine peer table: version byte + per-slot records
+ *                  (absent -> migrate legacy ps_ip/ps_port into slot 0)
  */
 
 #include <string.h>
@@ -188,6 +190,98 @@ esp_err_t dcs_nvs_write_ring_offset(uint8_t off)
   esp_err_t r = nvs_open(DCS_NVS_NS, NVS_READWRITE, &h);
   if (r != ESP_OK) return r;
   r = nvs_set_u8(h, DCS_NVS_KEY_RING_OFF, (uint8_t)(off & 0x0Fu));
+  if (r == ESP_OK) {
+    r = nvs_commit(h);
+  }
+  nvs_close(h);
+  return r;
+}
+
+/* ps_peers blob layout (byte-serialized, no struct padding on the wire):
+ *   [0]            format version (1)
+ *   per slot, DCS_PSTOP_MAX_MACHINES records of 11 bytes:
+ *   [0]            used (0/1)
+ *   [1..4]         ip, big-endian, host-order value
+ *   [5..6]         port, big-endian
+ *   [7..10]        machine_id, big-endian
+ */
+#define PS_PEERS_VER 1u
+#define PS_PEERS_REC_LEN 11
+#define PS_PEERS_BLOB_LEN (1 + (DCS_PSTOP_MAX_MACHINES * PS_PEERS_REC_LEN))
+
+static void ps_peers_put_u32(uint8_t * p, uint32_t v)
+{
+  p[0] = (uint8_t)(v >> 24);
+  p[1] = (uint8_t)(v >> 16);
+  p[2] = (uint8_t)(v >> 8);
+  p[3] = (uint8_t)v;
+}
+
+static uint32_t ps_peers_get_u32(const uint8_t * p)
+{
+  return ((uint32_t)p[0] << 24) | ((uint32_t)p[1] << 16) | ((uint32_t)p[2] << 8) | (uint32_t)p[3];
+}
+
+void dcs_nvs_read_pstop_peers(dcs_pstop_peer_rec_t out[DCS_PSTOP_MAX_MACHINES])
+{
+  (void)memset(out, 0, DCS_PSTOP_MAX_MACHINES * sizeof(out[0]));
+
+  uint8_t blob[PS_PEERS_BLOB_LEN] = {0};
+  size_t len = sizeof(blob);
+  nvs_handle_t h;
+  esp_err_t r = ESP_FAIL;
+  if (nvs_open(DCS_NVS_NS, NVS_READONLY, &h) == ESP_OK) {
+    r = nvs_get_blob(h, DCS_NVS_KEY_PSTOP_PEERS, blob, &len);
+    nvs_close(h);
+  }
+
+  if ((r == ESP_OK) && (len == sizeof(blob)) && (blob[0] == PS_PEERS_VER)) {
+    for (int i = 0; i < DCS_PSTOP_MAX_MACHINES; i++) {
+      const uint8_t * rec = &blob[1 + (i * PS_PEERS_REC_LEN)];
+      out[i].configured = (rec[0] != 0u);
+      out[i].ip = ps_peers_get_u32(&rec[1]);
+      out[i].port = (uint16_t)(((uint16_t)rec[5] << 8) | (uint16_t)rec[6]);
+      out[i].machine_id = ps_peers_get_u32(&rec[7]);
+      if ((out[i].ip == 0u) || (out[i].port == 0u)) {
+        out[i].configured = false; /* corrupt/cleared record degrades to empty */
+      }
+    }
+    return;
+  }
+
+  /* Blob absent (first boot on this firmware) or unreadable: migrate the
+   * legacy single peer into slot 0 so existing installs keep working. */
+  out[0].configured = true;
+  out[0].ip = dcs_nvs_read_pstop_peer_ip();
+  out[0].port = dcs_nvs_read_pstop_peer_port();
+  out[0].machine_id = DCS_PSTOP_DEFAULT_MACHINE_ID;
+}
+
+esp_err_t dcs_nvs_write_pstop_peers(const dcs_pstop_peer_rec_t recs[DCS_PSTOP_MAX_MACHINES])
+{
+  uint8_t blob[PS_PEERS_BLOB_LEN] = {0};
+  blob[0] = PS_PEERS_VER;
+  for (int i = 0; i < DCS_PSTOP_MAX_MACHINES; i++) {
+    uint8_t * rec = &blob[1 + (i * PS_PEERS_REC_LEN)];
+    rec[0] = recs[i].configured ? 1u : 0u;
+    ps_peers_put_u32(&rec[1], recs[i].ip);
+    rec[5] = (uint8_t)(recs[i].port >> 8);
+    rec[6] = (uint8_t)recs[i].port;
+    ps_peers_put_u32(&rec[7], recs[i].machine_id);
+  }
+
+  nvs_handle_t h;
+  esp_err_t r = nvs_open(DCS_NVS_NS, NVS_READWRITE, &h);
+  if (r != ESP_OK) return r;
+  r = nvs_set_blob(h, DCS_NVS_KEY_PSTOP_PEERS, blob, sizeof(blob));
+  if ((r == ESP_OK) && recs[0].configured) {
+    /* Mirror slot 0 to the legacy keys so a firmware ROLLBACK (old image
+     * reads only ps_ip/ps_port) still heartbeats its primary machine. */
+    r = nvs_set_u32(h, DCS_NVS_KEY_PSTOP_IP, recs[0].ip);
+    if (r == ESP_OK) {
+      r = nvs_set_u16(h, DCS_NVS_KEY_PSTOP_PORT, recs[0].port);
+    }
+  }
   if (r == ESP_OK) {
     r = nvs_commit(h);
   }

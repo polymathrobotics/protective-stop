@@ -13,6 +13,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "dcs_support.h" /* DCS_PSTOP_MAX_MACHINES + public telemetry API */
 #include "esp_err.h"
 #include "esp_netif.h"
 #include "freertos/FreeRTOS.h"
@@ -34,6 +35,7 @@ extern "C"
 #define DCS_NVS_KEY_RST_HIST "rst_hist" /* ring of recent esp_reset_reason() */
 #define DCS_NVS_KEY_PSTOP_NUM "ps_num" /* USB "PSTOPxx" unit number (0=auto) */
 #define DCS_NVS_KEY_RING_OFF "ring_off" /* ring rotation: physical index of LED 1 */
+#define DCS_NVS_KEY_PSTOP_PEERS "ps_peers" /* multi-machine peer table (blob, see dcs_nvs.c) */
 
 #define DCS_RST_HIST_LEN 16
 
@@ -121,6 +123,38 @@ extern "C"
   extern atomic_uint_fast32_t g_dcs_pstop_peer_ip;
   extern atomic_uint_fast32_t g_dcs_pstop_peer_port;
 
+  /* === Multi-machine peer table + per-machine telemetry. ==================
+ *
+ * Up to DCS_PSTOP_MAX_MACHINES machine targets (slots). Slot 0 is mirrored
+ * into the legacy g_dcs_pstop_peer_ip/port atomics and the legacy NVS keys
+ * so old tooling (and a firmware rollback) keep working.
+ *
+ * Endpoint packing: one u64 atomic per slot =
+ *      (configured?1:0) << 63 | ip(32) << 16 | port(16)
+ * The machine_id lives in a SECOND atomic per slot, so a reader can see a
+ * torn slot (new endpoint + old id) for one tick during an update. That is
+ * benign by design: the wrong-id packet is rejected by the machine and the
+ * session re-bonds on the next tick — fail-safe, never fail-wrong. */
+
+  extern atomic_uint_fast64_t g_dcs_pstop_slot_ep[DCS_PSTOP_MAX_MACHINES];
+  extern atomic_uint_fast32_t g_dcs_pstop_slot_id[DCS_PSTOP_MAX_MACHINES];
+
+  /* Per-machine telemetry sinks, published by main.c's comparator via
+ * dcs_publish_pstop_machine(); read by /state.json and the LED ring. */
+  extern atomic_uint_fast32_t g_dcs_pstop_m_sent[DCS_PSTOP_MAX_MACHINES];
+  extern atomic_uint_fast32_t g_dcs_pstop_m_replies[DCS_PSTOP_MAX_MACHINES];
+  extern atomic_uint_fast32_t g_dcs_pstop_m_send_fail[DCS_PSTOP_MAX_MACHINES];
+  extern atomic_uint_fast32_t g_dcs_pstop_m_rebonds[DCS_PSTOP_MAX_MACHINES];
+  extern atomic_uint_fast32_t g_dcs_pstop_m_rtt_ms[DCS_PSTOP_MAX_MACHINES];
+  extern atomic_uint_fast32_t g_dcs_pstop_m_last_msg[DCS_PSTOP_MAX_MACHINES];
+  extern atomic_uint_fast32_t g_dcs_pstop_m_state[DCS_PSTOP_MAX_MACHINES]; /* 0=idle 1=bonding 2=bonded */
+  extern atomic_uint_fast64_t g_dcs_pstop_m_last_reply_ms[DCS_PSTOP_MAX_MACHINES];
+
+  /* Set + persist one peer slot (0..DCS_PSTOP_MAX_MACHINES-1). configured=false
+ * clears the slot. Slot 0 also updates the legacy atomics + NVS keys. Used by
+ * the /api/pstop_peer(s) handlers. */
+  esp_err_t dcs_pstop_set_peer_slot(int slot, bool configured, uint32_t ip, uint16_t port, uint32_t machine_id);
+
   /* WG-manager pause state (legacy /api/wg toggle). */
   extern TaskHandle_t g_dcs_wg_handle;
   extern atomic_int g_dcs_wg_paused;
@@ -182,6 +216,20 @@ extern "C"
  * data-in pad) that the installed bezel makes "LED 1". Absent -> 0. */
   uint8_t dcs_nvs_read_ring_offset(void);
   esp_err_t dcs_nvs_write_ring_offset(uint8_t off);
+
+  /* Multi-machine peer table (ps_peers blob). One record per slot. Read
+ * falls back to migrating the legacy ps_ip/ps_port pair into slot 0 when
+ * the blob is absent (first boot on this firmware). */
+  typedef struct
+  {
+    bool configured;
+    uint32_t ip; /* host byte order */
+    uint16_t port;
+    uint32_t machine_id; /* pstop_msg.receiver_id for this machine */
+  } dcs_pstop_peer_rec_t;
+
+  void dcs_nvs_read_pstop_peers(dcs_pstop_peer_rec_t out[DCS_PSTOP_MAX_MACHINES]);
+  esp_err_t dcs_nvs_write_pstop_peers(const dcs_pstop_peer_rec_t recs[DCS_PSTOP_MAX_MACHINES]);
 
   /* dcs_safety.c */
   void dcs_safety_account_boot(void); /* increments crash counter + applies

@@ -18,6 +18,7 @@
  *   POST /api/ts_boot             Flip NVS dcs_app/ts_boot flag (next reboot)
  *   POST /api/pstop_peer?ip&port  Set + persist pstop peer target
  *   POST /api/pstop_num?n=N       Set USB "PSTOPxx" unit number (0 = auto)
+ *   POST /api/pstop_peers?slot..  Multi-machine peer table (set/clear slot)
  *   POST /api/ring_offset?n=N     Set + persist LED-ring rotation (physical LED 1)
  *   POST /api/ring_led1?on=0|1    Locate mode: only LED 1 white (auto-expires)
  *   POST /api/enter_download      Enter USB download (flashing) mode
@@ -186,7 +187,7 @@ static esp_err_t page_state(httpd_req_t * req)
      * internal heap which runs tight on this build). */
   enum
   {
-    JSON_CAP = 2304
+    JSON_CAP = 3072
   };
 
   char * buf = heap_caps_malloc(JSON_CAP, MALLOC_CAP_SPIRAM);
@@ -220,7 +221,7 @@ static esp_err_t page_state(httpd_req_t * req)
     "\"gw_rtt_ms\":%lu,\"gw_rtt_max_ms\":%lu,\"gw_ok\":%lu,\"gw_loss\":%lu,"
     "\"inet_down\":%d,\"inet_silent_ms\":%lu,"
     "\"rst_hist\":%s,\"ota_state\":%d,\"pstop_num\":%d,"
-    "\"ring_offset\":%d,\"ring_led1\":%d,\"tk0\":",
+    "\"ring_offset\":%d,\"ring_led1\":%d,\"pstop_machines\":",
     (unsigned long)atomic_load(&g_dcs_core_tick[0]),
     (unsigned long)atomic_load(&g_dcs_core_tick[1]),
     (int)atomic_load(&g_dcs_core_verdict[0]),
@@ -301,6 +302,38 @@ static esp_err_t page_state(httpd_req_t * req)
       n = cap - 1;              \
     }                           \
   } while (0)
+  CLAMP_N();
+  /* Per-machine session array (multi-machine support). Every slot is
+     * emitted, configured or not, so indices are stable for consumers. */
+  n += snprintf(buf + n, cap - n, "[");
+  CLAMP_N();
+  for (int i = 0; i < DCS_PSTOP_MAX_MACHINES; i++) {
+    bool cfg = false;
+    uint32_t mip = 0, mid = 0;
+    uint16_t mport = 0;
+    dcs_get_pstop_peer_slot(i, &cfg, &mip, &mport, &mid);
+    n += snprintf(
+      buf + n,
+      cap - n,
+      "%s{\"cfg\":%d,\"ip\":%lu,\"port\":%u,\"id\":%lu,\"state\":%lu,"
+      "\"sent\":%lu,\"replies\":%lu,\"send_fail\":%lu,\"rebonds\":%lu,"
+      "\"rtt_ms\":%lu,\"last_msg\":%lu,\"last_reply_ms\":%llu}",
+      (i != 0) ? "," : "",
+      cfg ? 1 : 0,
+      (unsigned long)mip,
+      mport,
+      (unsigned long)mid,
+      (unsigned long)atomic_load(&g_dcs_pstop_m_state[i]),
+      (unsigned long)atomic_load(&g_dcs_pstop_m_sent[i]),
+      (unsigned long)atomic_load(&g_dcs_pstop_m_replies[i]),
+      (unsigned long)atomic_load(&g_dcs_pstop_m_send_fail[i]),
+      (unsigned long)atomic_load(&g_dcs_pstop_m_rebonds[i]),
+      (unsigned long)atomic_load(&g_dcs_pstop_m_rtt_ms[i]),
+      (unsigned long)atomic_load(&g_dcs_pstop_m_last_msg[i]),
+      (unsigned long long)atomic_load(&g_dcs_pstop_m_last_reply_ms[i]));
+    CLAMP_N();
+  }
+  n += snprintf(buf + n, cap - n, "],\"tk0\":");
   CLAMP_N();
   n += emit_bucket(buf + n, cap - n, &snap.b[0]);
   CLAMP_N();
@@ -454,6 +487,90 @@ static esp_err_t api_pstop_peer(httpd_req_t * req)
   char resp[96];
   int n = snprintf(resp, sizeof(resp), "{\"ok\":true,\"ip\":\"%u.%u.%u.%u\",\"port\":%d}", a, b, c, d, port);
   (void)httpd_resp_set_type(req, "application/json");
+  return httpd_resp_send(req, resp, n);
+}
+
+/* === POST /api/pstop_peers?slot=N&ip=A.B.C.D&port=P[&id=HEX] ============== *
+ * Multi-machine peer table. slot = 0..DCS_PSTOP_MAX_MACHINES-1; id is the
+ * machine's device id (pstop_msg.receiver_id), default 0x01020304 to match
+ * machine_app_runner's default machine_device_id. ?slot=N&clear=1 empties a
+ * slot. Applies live (comparator picks the change up within one tick) and
+ * persists to NVS. Slot 0 mirrors the legacy /api/pstop_peer target. */
+static esp_err_t api_pstop_peers(httpd_req_t * req)
+{
+  char query[128];
+  char val[20];
+  (void)httpd_resp_set_type(req, "application/json");
+  if (httpd_req_get_url_query_str(req, query, sizeof(query)) != ESP_OK) {
+    (void)httpd_resp_set_status(req, "400 Bad Request");
+    return httpd_resp_sendstr(req, "{\"ok\":false,\"error\":\"missing ?slot=N&ip=A.B.C.D&port=P (or &clear=1)\"}");
+  }
+  if (httpd_query_key_value(query, "slot", val, sizeof(val)) != ESP_OK) {
+    (void)httpd_resp_set_status(req, "400 Bad Request");
+    return httpd_resp_sendstr(req, "{\"ok\":false,\"error\":\"missing slot\"}");
+  }
+  int slot = (int)strtol(val, NULL, 10);
+  if ((slot < 0) || (slot >= DCS_PSTOP_MAX_MACHINES)) {
+    (void)httpd_resp_set_status(req, "400 Bad Request");
+    return httpd_resp_sendstr(req, "{\"ok\":false,\"error\":\"slot out of range\"}");
+  }
+
+  if ((httpd_query_key_value(query, "clear", val, sizeof(val)) == ESP_OK) && (val[0] == '1')) {
+    esp_err_t r = dcs_pstop_set_peer_slot(slot, false, 0, 0, 0);
+    char resp[64];
+    int n =
+      snprintf(resp, sizeof(resp), "{\"ok\":%s,\"slot\":%d,\"cleared\":true}", (r == ESP_OK) ? "true" : "false", slot);
+    if (r != ESP_OK) {
+      (void)httpd_resp_set_status(req, "500 Internal Server Error");
+    }
+    return httpd_resp_send(req, resp, n);
+  }
+
+  char ipstr[20], portstr[8];
+  if (
+    (httpd_query_key_value(query, "ip", ipstr, sizeof(ipstr)) != ESP_OK) ||
+    (httpd_query_key_value(query, "port", portstr, sizeof(portstr)) != ESP_OK))
+  {
+    (void)httpd_resp_set_status(req, "400 Bad Request");
+    return httpd_resp_sendstr(req, "{\"ok\":false,\"error\":\"need ip and port (or clear=1)\"}");
+  }
+  unsigned int a, b, c, d;
+  if ((sscanf(ipstr, "%u.%u.%u.%u", &a, &b, &c, &d) != 4) || (a > 255U) || (b > 255U) || (c > 255U) || (d > 255U)) {
+    (void)httpd_resp_set_status(req, "400 Bad Request");
+    return httpd_resp_sendstr(req, "{\"ok\":false,\"error\":\"bad ip\"}");
+  }
+  int port = (int)strtol(portstr, NULL, 10);
+  if ((port < 1) || (port > 65535)) {
+    (void)httpd_resp_set_status(req, "400 Bad Request");
+    return httpd_resp_sendstr(req, "{\"ok\":false,\"error\":\"bad port\"}");
+  }
+  uint32_t machine_id = DCS_PSTOP_DEFAULT_MACHINE_ID;
+  if (httpd_query_key_value(query, "id", val, sizeof(val)) == ESP_OK) {
+    machine_id = (uint32_t)strtoul(val, NULL, 0); /* accepts 0x... hex */
+    if (machine_id == 0u) {
+      (void)httpd_resp_set_status(req, "400 Bad Request");
+      return httpd_resp_sendstr(req, "{\"ok\":false,\"error\":\"bad id\"}");
+    }
+  }
+
+  uint32_t ip = ((uint32_t)a << 24) | ((uint32_t)b << 16) | ((uint32_t)c << 8) | (uint32_t)d;
+  esp_err_t r = dcs_pstop_set_peer_slot(slot, true, ip, (uint16_t)port, machine_id);
+  char resp[128];
+  int n = snprintf(
+    resp,
+    sizeof(resp),
+    "{\"ok\":%s,\"slot\":%d,\"ip\":\"%u.%u.%u.%u\",\"port\":%d,\"id\":%lu}",
+    (r == ESP_OK) ? "true" : "false",
+    slot,
+    a,
+    b,
+    c,
+    d,
+    port,
+    (unsigned long)machine_id);
+  if (r != ESP_OK) {
+    (void)httpd_resp_set_status(req, "500 Internal Server Error");
+  }
   return httpd_resp_send(req, resp, n);
 }
 
@@ -733,6 +850,7 @@ void dcs_admin_pages_register(ml_app_t * app)
   (void)ml_app_add_page(app, "/api/usb_enable", HTTP_POST, api_usb_enable_toggle);
   (void)ml_app_add_page(app, "/api/ts_boot", HTTP_POST, api_ts_boot_toggle);
   (void)ml_app_add_page(app, "/api/pstop_peer", HTTP_POST, api_pstop_peer);
+  (void)ml_app_add_page(app, "/api/pstop_peers", HTTP_POST, api_pstop_peers);
   (void)ml_app_add_page(app, "/api/last_log", HTTP_GET, api_last_log);
   (void)ml_app_add_page(app, "/api/iface/eth", HTTP_POST, api_iface_eth);
   (void)ml_app_add_page(app, "/api/iface/wifi", HTTP_POST, api_iface_wifi);
