@@ -1,85 +1,200 @@
-# Polymath Protective Stop 🛑🛡
+# pstop — networked protective stop
 
-This initiative is focused on developing a low-cost, reliable protective stop mechanism for robotics and automation systems. Our protective stop system is designed to be a preventative measure that initiates a controlled shutdown with no immediate danger.
+A protective-stop (pstop) system: a battery-powerable ESP32-S3 **remote**
+heartbeats operator intent at 10 Hz over an encrypted tunnel to a
+**machine** process on the robot; if the heartbeats say STOP — or stop
+arriving at all — the machine stops the robot. The wire protocol and the
+machine-side state logic are the certification-track
+[`pstop_c`](https://github.com/polymathrobotics/protective-stop) library
+(pinned submodule, never modified); everything in this repo is the
+transport, sensing, and supervision shell around it.
 
-**Safety disclaimer:** This system is not designed to be an emergency stop; as such, it should not be used when there is an immediate threat to human safety or significant risk to equipment. It is not designed for immediate, uuncontrolled shutdowns.
+The remote (Waveshare ESP32-S3-ETH, W5500 PoE Ethernet) senses a physical
+DPST normally-closed E-stop switch through two independent loopback
+channels — one per CPU core. The two cores run in lockstep: each reads
+its own loop, builds the full 40-byte pstop message independently, and a
+comparator transmits only when the two encodings are byte-identical
+(2oo2-to-run, 1oo2-to-stop). Any disagreement, loop fault, or task stall
+sends nothing, and the machine's native heartbeat timeout stops the
+robot: fail-safe by silence. Uplinks fail over Ethernet → USB-NCM →
+WiFi automatically; the pstop traffic rides Tailscale/WireGuard via the
+vendored microlink library, with egress pinned to the tunnel so a downed
+VPN fails safe, never falls back to plaintext.
 
-## Quick Start
+The machine side (`host/machine_app_runner`) wraps the unmodified pstop_c
+machine library with transport, config (`machine.toml`), logging, and a
+wrapper-owned arming policy: a STOP episode must be held ≥ `min_stop_ms`
+(default 500 ms) for its release to arm the robot, so an EMC blip can
+never perform the arming gesture. All wrapper policies are documented in
+`docs/FAILOVER_AND_ARMING_DESIGN_2026-07-21.md`.
 
-Start the Foxglove bridge:
+## Architecture
 
-```bash
- ros2 launch foxglove_bridge foxglove_bridge_launch.xml
+```
+            REMOTE (ESP32-S3, firmware/)                        MACHINE (robot host, host/)
+ ┌────────────────────────────────────────────────┐    ┌──────────────────────────────────────┐
+ │  DPST E-stop switch (physical part)            │    │  machine_app_runner (wrapper)        │
+ │   pole1: GPIO39 ─▶ loop A ─▶ GPIO40  core 0    │    │   ├─ machine.toml config             │
+ │   pole2: GPIO41 ─▶ loop B ─▶ GPIO42  core 1    │    │   ├─ min_stop_ms arming policy       │
+ │        │verdict+encode      │verdict+encode    │    │   ├─ status latch (actuation hook)   │
+ │        ▼                    ▼                  │    │   └─ anomaly logging                 │
+ │   ┌─────────────────────────────┐              │    │  pstop_c machine library (submodule, │
+ │   │ comparator: memcmp 40-byte  │  10 Hz UDP   │    │  certification track, UNMODIFIED):   │
+ │   │ encodings, tx only on match ├──────────────┼────┼─▶ bond/counters/CRC/heartbeat        │
+ │   └─────────────────────────────┘  pstop msgs  │    │   timeout → robot STOP               │
+ │  WS2812 ring (GPIO17): link state              │    └──────────────────────────────────────┘
+ │  dcs_support: admin UI, OTA+rollback chain,    │            ▲
+ │  net supervisor (Eth>USB>WiFi), liveness WDT   │            │ Tailscale / WireGuard
+ │  microlink: Tailscale/WG, DERP fallback ───────┼────────────┘ (DERP relay fallback ≤10 s)
+ └────────────────────────────────────────────────┘
 ```
 
-Start the node:
+## Repo layout
 
-```bash
-ros2 launch protective_stop_node protective_stop_node.launch.py
+| Path | What |
+|---|---|
+| `firmware/` | ESP-IDF 5.5 project (`pstop_remote`): `main/main.c` is the auditable lockstep safety core; `components/dcs_support/` is everything else (boot, OTA chain, admin UI, failover, telemetry) |
+| `components/pstop/` | `upstream/` = pstop_c submodule @ `d9f4970` (certification track, never modified) + ESP port glue |
+If certification scoping later requires the arming-duration policy
+inside the library, the specified change and its risk register are in
+[`docs/PSTOP_C_MIN_STOP_OPTION.md`](docs/PSTOP_C_MIN_STOP_OPTION.md).
+| `components/microlink/` | vendored Tailscale/WireGuard/DERP transport library |
+| `components/ml_dev_tether/` | USB-CDC-NCM tether (TinyUSB) |
+| `host/` | `machine_app_runner.c` + `machine.toml` — the robot-side machine wrapper |
+| `tools/` | Python test tools: scripted wire-protocol remote, chaos proxy, soak harnesses |
+| `test/` | bench test scripts (chaos/netem ladders, soak loops) |
+| `hardware/` | enclosure CAD (STL/STEP/3MF), board schematic |
+| `docs/` | current design docs, reports, playbooks; `docs/archive/` = historical records |
+
+## Quickstart
+
+### Build + first flash (remote)
+
+```sh
+cd firmware
+source ~/esp-idf-5.5/export.sh
+idf.py build
 ```
 
-If you want to run the example remote, `cd` into that directory, and run:
+First flash must be over the wire: hold **BOOT**, tap **RST** to enter
+ROM download mode (when the USB tether is enabled, TinyUSB owns USB-OTG,
+so the ROM USB-JTAG is not visible otherwise), then:
 
-```bash
-npm install
-npm run dev
+```sh
+idf.py -p /dev/ttyACM0 flash
 ```
 
-## Components
+Every subsequent update goes over the network (either interface):
 
-### Protective Stop Node
-
-ROS2 node that runs on your robot. This node publishes:
-
-- `/protective_stop`: A heartbeat message back to the remote controlled by the user.
-- `/pstop_hb`: A heartbeat message into your robot, which is used to actually stop the robot if `stop` is set to `True`.
-- `/protective_stop/debug`: Debug message showing which remotes are actively connected.
-
-To register a remote protective stop, the node also exposes two services:
-
-- `/activate`
-- `/deactivate`
-
-In order to integrate with the node, you have to activate it first before starting to send heartbeat messages.
-
-#### User Monitor Mode
-
-**USE WITH EXTREME CAUTION**
-
-In the case you have a test driver or other onsite personnel to operate a physical E-stop, you can set a parameter in the protective stop to indicate the robot does not need to be monitored by a remote protective stop:
-
-```bash
-ros2 param set /protective_stop_node is_user_monitored False
+```sh
+curl -u admin:microlink --data-binary @build/pstop_remote.bin \
+     http://$CHIP/admin/api/ota
 ```
 
-### Protective Stop Remote
+**Backup recovery (fleet bypass):** this same direct upload is the way to
+recover a unit that the fleet can't reach or update — e.g. one wedged with a
+bad DERP home so its fleet check-in/OTA fails. As long as you can reach the
+unit's admin server directly (LAN, USB tether `10.42.0.1`, or its Tailscale IP
+from a same-region/direct peer), push a known-good `pstop_remote.bin` to
+`http://$CHIP/admin/api/ota`; it flashes, reboots, and self-heals. Verified
+2026-07-22 recovering a unit stuck advertising the wrong DERP region.
 
-The remote is run next to the operator of the P-Stop. It exchanges heartbeat messages with the node on the robot, the latter of which will signal if it detects that the heartbeats are coming in at the expected rate.
+Copy `sdkconfig.credentials.example` → `sdkconfig.credentials` for WiFi
+and Tailscale credentials before the first build.
 
-In this repo currently, we've implemented it as a web client, but it can also be instantiated as a hardware interface.
+### Machine (robot host)
 
-### Foxglove Websocket Bridge
-
-The bridge acts as the proxy between the remote and the node, so the two can talk to one-another. If it is not online, the other components will fail gracefully.
-
-## Building the PSTOP C library
-
-```bash
-mkdir build
-cd build
-cmake ..
-make
-
-./pstop/pstop_test
+```sh
+cd host
+make                                  # needs only cc + make
+./machine_app_runner machine.toml     # listens on 0.0.0.0:8890
 ```
 
-### Code coverage (BullseyeCoverage)
+Point the remote at it (persisted to NVS, applied within one 100 ms tick):
 
-Bullseye code coverage runs against every PR that touches pstop_c. Currently there's no gate on coverage %. TODO: enable
-
-Convenience scripts are provided to run bullseye on your local machine. From `pstop_c/`:
-
-```bash
-scripts/run-coverage.sh           # covsrc summary
-scripts/run-coverage.sh --html    # HTML report at build/coverage-html/
+```sh
+curl -X POST "http://$CHIP/api/pstop_peer?ip=<machine-ip>&port=8890"
 ```
+
+Arming: press and hold the E-stop switch ≥0.5 s, release — the runner
+logs `ARMED`, the ring turns green. See `host/README.md`.
+
+## Key runtime facts
+
+- **10 Hz** heartbeat; machine stop-on-silence =
+  `heartbeat_ms × (max_missed_heartbeats+1)` ≈ 1–2 s as configured.
+- **Arming policy:** STOP held < `min_stop_ms` (500 ms) is vetoed by the
+  machine wrapper; the chip additionally debounces loop re-close by
+  3 ticks and holds all transmission until the loops settle at boot.
+- **Fail-safe silence:** lockstep mismatch, loop fault, VPN-down
+  (source-bound socket), or comparator stall all result in *no message*,
+  which the machine treats as STOP.
+- **Interfaces:** Ethernet > USB-NCM > WiFi, supervised at 1 Hz with
+  automatic default-route failover. Bench IPs are environment-specific —
+  nothing in this repo assumes a particular LAN.
+- **Status ring:** yellow = no machine, blue = bonded, green = armed,
+  red = STOP, purple = lockstep mismatch (see `docs/TROUBLESHOOTING.md`).
+- **Recovery chain:** TWDT → network-liveness watchdog → crash counter →
+  OTA rollback, all button-free (`docs/SAFETY_CHAIN.md`,
+  `docs/RECOVERY_PLAYBOOK.md`).
+- **HTTP API:** diagnostic/config (port 80) + password-protected `/admin/*`
+  routes — full reference in [`docs/API.md`](docs/API.md).
+
+## Testing
+
+See `docs/TESTING.md` for the full harness: `tools/pstop_test_remote.py`
+(arming-policy suite over the real wire protocol),
+`tools/pstop_chaos_proxy.py` + `test/chaos_ladder.sh` (protocol-level
+impairment ladder), `test/netem_ladder.sh` (WG-underlay chaos), and the
+soak methodology with measured baselines. The simulated-press endpoint
+(`pstop_sim`) was removed from production firmware — tests exercise the
+machine policy via `tools/pstop_test_remote.py` instead, and arming a
+real unit requires a physical press.
+
+Static analysis: `./tools/misra_check.sh` runs a free-cppcheck MISRA
+C:2012 pass over the code we own (the certified `pstop_c` is excluded).
+See `docs/MISRA_COMPLIANCE_2026-07-21.md` for results and the deviation
+register.
+
+## Current status + open items (2026-07-22)
+
+Validated across all three transports (soaks + impairment ladders, zero
+false stops, zero device crashes — `docs/archive/TRANSPORT_TEST_REPORT_2026-07-20.md`,
+`docs/archive/CHAOS_RESULTS_2026-07-20.md`). DERP failover ≤10 s and the arming
+policy are bench-verified (`docs/FAILOVER_AND_ARMING_DESIGN_2026-07-21.md`); the
+many-remotes-to-one-machine logic is validated in
+`docs/MULTI_REMOTE_VALIDATION_2026-07-22.md`. MISRA C sweep of the owned
+firmware done (`docs/MISRA_COMPLIANCE_2026-07-21.md`).
+
+Fleet integration (2026-07-22): units self-provision (per-unit ID, auto-join
+Tailscale), check in on boot and at least every 5 min, and are managed/OTA'd
+from the fleet server (`docs/FLEET_SERVER.md`). Inbound fleet reachability
+required a DERP-home fix so a NAT'd/tethered unit homes on the fleet's region
+(`docs/TROUBLESHOOTING.md`). Bulk USB provisioning via `tools/flash_pstop.sh`.
+
+Open items:
+- **WiFi is the weakest transport** — ~98 % soak reply rate with a
+  fail-safe stop/self-heal burst every 10–15 min. Deployment policy:
+  Ethernet primary, WiFi fallback, USB-NCM for bench/service.
+- Retune machine `max_lost_messages` (10 → ≈20) so the heartbeat
+  timeout, not the counter gap, is the stop authority on WiFi.
+- **Tailscale subnet-route caveat:** a subnet router advertising the
+  robot's LAN hijacks operator-laptop traffic to the chip's LAN IP;
+  needs an `ip rule` workaround — document for the fleet.
+- **USB-tether units behind symmetric NAT are relay-only** (no direct path);
+  they depend on the DERP re-home. Reachable in testing after recovery, but
+  worth a dedicated soak.
+- Long-duration (24 h+) per-transport soaks before certification runs.
+
+## Certification note
+
+`components/pstop/upstream` (pstop_c) is pinned at `d9f4970` and is
+**never modified** — it is on its own certification track. Every policy
+this repo adds (arming veto, status latch, transport binding, debounce)
+lives in the wrapper or the firmware shell, uses only public library
+API, and is designed so a wrapper bug can cost availability but never
+cause a spurious arm. Wrapper-owned policies and the option of moving
+them into the library are documented in
+`docs/FAILOVER_AND_ARMING_DESIGN_2026-07-21.md`; the SIL2 design record
+is `docs/PSTOP_SAFETY_DESIGN.md`. Deployment rule: a pstop_c bump that
+changes the CRC is a wire break — update chip and machine together.

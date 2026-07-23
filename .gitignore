@@ -6,3 +6,25 @@ node_modules
 */build/
 */build-cov/
 *.cov
+
+# ESP-IDF firmware build artifacts
+firmware/build/
+firmware/sdkconfig
+firmware/sdkconfig.old
+firmware/sdkconfig.credentials
+# host runner binary
+host/machine_app_runner
+# cppcheck
+*.ctu-info
+cppcheck-build/
+firmware/managed_components/
+
+# Production flash image — contains baked-in secrets (Tailscale key, WiFi
+# creds, admin password, fleet key). Never commit.
+tools/production_image/
+
+# analysis / CAD / stray artifacts
+*.dump
+*.pyc
+*.FCBak
+nohup.out

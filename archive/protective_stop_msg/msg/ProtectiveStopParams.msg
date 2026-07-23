@@ -1,0 +1,2 @@
+float32 heartbeat_timeout
+string machine_uuid
