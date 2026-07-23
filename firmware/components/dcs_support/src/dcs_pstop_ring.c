@@ -227,8 +227,11 @@ static int s_wave_head;
 
 static uint32_t wave_scale_pct(int dist)
 {
-  static const uint32_t k_scale[4] = {160u, 130u, 110u, 95u}; /* head, then tail */
-  return (dist < 4) ? k_scale[dist] : 85u;
+  /* Head well above base with a longer fading tail, and the rest of the
+   * segment dimmed to 55% — the deeper dip is what makes the wave read
+   * clearly at a glance (85% base was too subtle on the bench). */
+  static const uint32_t k_scale[5] = {170u, 135u, 105u, 80u, 65u}; /* head, then tail */
+  return (dist < 5) ? k_scale[dist] : 55u;
 }
 
 typedef enum
