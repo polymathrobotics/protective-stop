@@ -213,6 +213,24 @@ static bool ring_hw_init(void)
   return true;
 }
 
+/* === Liveness comet wave (OK / STOP segments) ==============================
+ * A steady green or red ring is indistinguishable from a wedged display, so
+ * a subtle comet-shaped brightness wave (same design as the boot spinner)
+ * chases around the ring through OK and STOP segments: head boosted above
+ * the base brightness with a fading tail, everything else slightly below
+ * base so the motion reads clearly. Percent-of-base per distance-from-head;
+ * base far pixels at 85% keep the state colour dominant — the wave is a
+ * liveness cue, not a pattern of its own. */
+#define WAVE_FRAME_MS 70 /* comet step period: ~1.1 s per revolution (matches boot spinner) */
+
+static int s_wave_head;
+
+static uint32_t wave_scale_pct(int dist)
+{
+  static const uint32_t k_scale[4] = {160u, 130u, 110u, 95u}; /* head, then tail */
+  return (dist < 4) ? k_scale[dist] : 85u;
+}
+
 typedef enum
 {
   RING_IDLE, /* no pstop peer configured — nothing to connect to (white) */
@@ -356,6 +374,7 @@ static void ring_task(void * arg)
         bool connected = (st8 == 2u) && (last > 0u) && (now >= last) && ((now - last) < LINK_FRESH_MS);
 
         uint8_t r = 0, g = 0, b = 0;
+        bool wave = false; /* overlay the liveness comet on this segment */
         ring_state_t st;
         if (!connected) {
           st = RING_UNREACHABLE;
@@ -364,9 +383,11 @@ static void ring_task(void * arg)
         } else if (lastmsg == PSTOP_MESSAGE_STOP) {
           st = RING_STOP;
           r = B;
+          wave = true;
         } else if (lastmsg == PSTOP_MESSAGE_OK) {
           st = RING_OK;
           g = B;
+          wave = true;
         } else {
           st = RING_BOND;
           b = B;
@@ -378,11 +399,28 @@ static void ring_task(void * arg)
         int seg_start = (j * RING_LEDS) / ncfg;
         int seg_end = ((j + 1) * RING_LEDS) / ncfg;
         for (int p = seg_start; p < seg_end; p++) {
-          s_grb[p * 3] = g;
-          s_grb[(p * 3) + 1] = r;
-          s_grb[(p * 3) + 2] = b;
+          uint8_t rr = r, gg = g, bb = b;
+          if (wave) {
+            /* Liveness comet: same shape as the boot spinner, overlaid as a
+                         * subtle brightness wave on the segment's base colour so a
+                         * steady OK/STOP visibly "breathes" instead of looking frozen.
+                         * Head brightest with a fading tail; pixels far from the head
+                         * sit slightly BELOW base so the wave reads as movement, not a
+                         * static brightness change. Chases the whole ring so multiple
+                         * segments share one coherent wave. */
+            int d = ((s_wave_head - p) + RING_LEDS) % RING_LEDS;
+            uint32_t scale = wave_scale_pct(d);
+            rr = (uint8_t)(((uint32_t)r * scale) / 100u);
+            gg = (uint8_t)(((uint32_t)g * scale) / 100u);
+            bb = (uint8_t)(((uint32_t)b * scale) / 100u);
+            frame_ms = WAVE_FRAME_MS;
+          }
+          s_grb[p * 3] = gg;
+          s_grb[(p * 3) + 1] = rr;
+          s_grb[(p * 3) + 2] = bb;
         }
       }
+      s_wave_head = (s_wave_head + 1) % RING_LEDS;
       ring_show();
     }
 
