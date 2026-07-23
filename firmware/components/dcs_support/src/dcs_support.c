@@ -430,6 +430,7 @@ void dcs_publish_pstop_machine(
   atomic_store(&g_dcs_pstop_m_rebonds[slot], rebonds);
   atomic_store(&g_dcs_pstop_m_last_reply_ms[slot], last_reply_ms);
   atomic_store(&g_dcs_pstop_m_rtt_ms[slot], rtt_ms);
+  atomic_store(&g_dcs_pstop_m_hb_ms[slot], hb_ms);
   atomic_store(&g_dcs_pstop_m_last_msg[slot], last_msg);
   atomic_store(&g_dcs_pstop_m_state[slot], sess_state);
 }
