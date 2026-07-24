@@ -31,6 +31,7 @@ them.
 ```mermaid
 flowchart LR
     subgraph BOARD["ESP32-S3-ETH"]
+        direction TB
         P5V["5V"]
         GND["GND"]
         G17["GPIO17"]
@@ -41,26 +42,32 @@ flowchart LR
     end
 
     subgraph RING["WS2812 ring, 16 LEDs"]
+        direction TB
         RV["5V"]
         RG["GND"]
         RD["DIN"]
     end
 
-    subgraph SW["DPST E-stop switch, normally closed"]
-        P1["pole 1"]
-        P2["pole 2"]
+    subgraph SW["DPST E-stop switch, NC"]
+        direction TB
+        P1A["pole 1, term A"]
+        P1B["pole 1, term B"]
+        P2A["pole 2, term A"]
+        P2B["pole 2, term B"]
     end
 
-    P5V -- red --> RV
-    GND -- black --> RG
-    G17 -- green --> RD
-    G39 -- white --> P1 -- white --> G40
-    G41 -- yellow --> P2 -- yellow --> G42
+    P5V --- |red| RV
+    GND --- |black| RG
+    G17 --- |green| RD
+    G39 --- |white| P1A
+    G40 --- |white| P1B
+    G41 --- |yellow| P2A
+    G42 --- |yellow| P2B
 
     linkStyle 0 stroke:#d33,stroke-width:2px
     linkStyle 1 stroke:#333,stroke-width:2px
     linkStyle 2 stroke:#2a2,stroke-width:2px
-    linkStyle 3,4 stroke:#bbb,stroke-width:2px
+    linkStyle 3,4 stroke:#aaa,stroke-width:2px
     linkStyle 5,6 stroke:#cc2,stroke-width:2px
 ```
 
