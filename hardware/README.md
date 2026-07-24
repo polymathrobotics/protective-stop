@@ -18,9 +18,9 @@ side pod.
 Two external parts connect to the board: the 16-LED WS2812 ring and a DPST
 normally-closed E-stop switch. Each pole of the switch sits in its own
 loopback: the firmware drives one GPIO and reads the echo on another, once
-per pole, so a broken wire reads the same as a pressed button (STOP). Match
-the wire colors below when building a unit; the firmware and docs assume
-them.
+per pole, so a broken wire reads the same as a pressed button (STOP). The
+GPIO assignments are fixed in the firmware; the wire colors are only an
+assembly convention to keep units consistent and easy to check.
 
 | Board pin | Goes to | Wire color |
 |---|---|---|
