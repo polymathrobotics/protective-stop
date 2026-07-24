@@ -90,13 +90,13 @@ Notes:
 
 ## Bill of materials
 
-Everything except the printed parts is ordered online. Pinned listings
-where we have them; the rest are search links, and the specs in the notes
-are what matters either way. All links open in a new window.
+Everything except the printed parts is ordered online. Listings are
+pinned where the exact part matters; the wire and lid hardware are
+generic, so those stay as search links. All links open in a new window.
 
 | Qty | Part | Notes | Order |
 |---|---|---|---|
-| 1 | Waveshare ESP32-S3-ETH | The W5500 Ethernet carrier board this design is built around. The PoE variant powers the unit over the Ethernet cable. | <a href="https://www.amazon.com/s?k=waveshare+esp32-s3-eth" target="_blank" rel="noopener">search</a> |
+| 1 | Waveshare ESP32-S3-ETH | The W5500 Ethernet carrier board this design is built around. The PoE variant powers the unit over the Ethernet cable. | <a href="https://www.waveshare.com/esp32-s3-eth.htm" target="_blank" rel="noopener">Waveshare</a> |
 | 1 | DIYmall WS2812B ring, 16 pixels | 5V addressable ring. | <a href="https://www.amazon.com/DIYmall-WS2812B-Integrated-Individually-Addressable/dp/B0B2D5QXG5" target="_blank" rel="noopener">Amazon</a> |
 | 1 | NKK Switches FF0126BBCAEA01 E-stop button | Twist-release mushroom, two normally-closed contacts (DPST NC). The STEP model in this folder is this exact part. Substitutes must have 2NC: both loops need an NC pole, so a 1NO+1NC unit will not work. | <a href="https://octopart.com/part/nkk-switches/FF0126BBCAEA01" target="_blank" rel="noopener">Octopart</a> |
 | 1 set | Silicone hookup wire | Red, black, green, white, yellow, 24 to 26 AWG, per the wiring table above. | <a href="https://www.amazon.com/s?k=silicone+hookup+wire+kit+26awg" target="_blank" rel="noopener">search</a> |
@@ -111,7 +111,6 @@ design package. Some parts exist only as STL/STEP exports rather than
 editable source, and there is no assembly guide yet. Still to do:
 
 - editable source for every custom part,
-- pinned product listings and verified quantities in the BOM,
 - assembly instructions,
 - per-file licensing.
 
