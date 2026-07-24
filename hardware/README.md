@@ -1,13 +1,17 @@
 # Hardware (WIP)
 
-![Assembled remote: E-stop button over the 16-LED ring, RJ45 and USB-C in the side pod](enclosure-render.png)
+<p>
+  <img src="enclosure-render.png" alt="CAD render: E-stop button over the 16-LED ring, ports in the side pod" width="49%" />
+  <img src="real.jpg" alt="Printed unit: yellow lid, red E-stop, RJ45 in the side pod" width="49%" />
+</p>
 
 The physical design of the Protective Stop remote lives here: enclosure CAD
 (FreeCAD source `casing.FCStd` plus printable exports), the Waveshare
 ESP32-S3-ETH carrier board (`ESP32-S3-ETH-Schematic.pdf`, photos, STEP), and
-the LED, lens, and connector models. The render above shows the assembly:
-the E-stop button in the center, the LED ring around its base, and the
-Ethernet and USB-C ports in the side pod.
+the LED and connector models. CAD render on the left, a printed unit on the
+right: the E-stop button sits in the center, the LED ring lights the
+diffuser around its base, and the Ethernet and USB-C ports live in the
+side pod.
 
 ## Pinout and wiring
 
