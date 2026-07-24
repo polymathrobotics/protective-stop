@@ -2225,11 +2225,26 @@ static int poll_map_update(microlink_t * ml, ml_noise_state_t * noise)
     return frame_len; /* Real error or connection closed */
   }
 
-  /* Extract DATA frame payload from H2 frames, track flow control */
+  /* Extract DATA frame payload from H2 frames, track flow control.
+   *
+   * map_stream_seen / stream_lost close the 2026-07-23 "wedged online"
+   * hole: after control drops the map long-poll (GOAWAY, RST_STREAM, or
+   * END_STREAM on stream 5) while the TCP+Noise session stays up, our
+   * own H2 PINGs keep getting ACKed — and those ACKs used to count as
+   * "activity", feeding the control watchdog forever while the node sat
+   * offline on the control plane until reboot (observed in the fleet:
+   * every chip froze at the same control-server stream drop and stayed
+   * "offline" for 17 h with a healthy data plane). The watchdog is now
+   * fed ONLY by MAP-STREAM traffic — control sends keepalive
+   * MapResponses (~60 s cadence; we request KeepAlive=true) so a healthy
+   * stream feeds the 120 s watchdog with 2x margin — and an explicit
+   * stream termination reconnects immediately instead of never. */
   uint8_t * json_data = NULL;
   size_t json_data_len = 0;
   uint32_t total_data_bytes = 0;
   uint32_t data_stream_id = 0;
+  int map_stream_seen = 0;
+  int stream_lost = 0;
   int pos = 0;
 
   while (pos + 9 <= frame_len) {
@@ -2247,6 +2262,11 @@ static int poll_map_update(microlink_t * ml, ml_noise_state_t * noise)
       if (f_stream == 5) {
         /* Long-poll MapResponse data (stream 5) — parse as JSON */
         data_stream_id = f_stream;
+        map_stream_seen = 1;
+        if (f_flags & 0x01) { /* END_STREAM: control ended the long-poll */
+          ESP_LOGW(TAG, "Map long-poll ended by control (END_STREAM) — reconnecting");
+          stream_lost = 1;
+        }
         if (f_len > 0) {
           json_data = frame_buf + pos;
           json_data_len = f_len;
@@ -2274,6 +2294,31 @@ static int poll_map_update(microlink_t * ml, ml_noise_state_t * noise)
       /* HTTP/2 SETTINGS from server — respond with SETTINGS ACK */
       uint8_t settings_ack[9] = {0x00, 0x00, 0x00, 0x04, 0x01, 0x00, 0x00, 0x00, 0x00};
       noise_send(ml, noise, settings_ack, sizeof(settings_ack));
+    } else if (f_type == 0x07) {
+      /* GOAWAY: the whole H2 connection is going away — the map stream is
+       * dead with it. Previously logged nowhere in this path and silently
+       * skipped, leaving the node wedged (see block comment above). */
+      uint32_t errcode = 0;
+      if (f_len >= 8) {
+        errcode = ((uint32_t)frame_buf[pos + 4] << 24) | ((uint32_t)frame_buf[pos + 5] << 16) |
+                  ((uint32_t)frame_buf[pos + 6] << 8) | (uint32_t)frame_buf[pos + 7];
+      }
+      ESP_LOGW(TAG, "Map long-poll GOAWAY from control (err=0x%lx) — reconnecting", (unsigned long)errcode);
+      stream_lost = 1;
+    } else if ((f_type == 0x03) && (f_stream == 5)) {
+      /* RST_STREAM on the map stream: control killed the long-poll. */
+      uint32_t errcode = 0;
+      if (f_len == 4) {
+        errcode = ((uint32_t)frame_buf[pos] << 24) | ((uint32_t)frame_buf[pos + 1] << 16) |
+                  ((uint32_t)frame_buf[pos + 2] << 8) | (uint32_t)frame_buf[pos + 3];
+      }
+      ESP_LOGW(TAG, "Map long-poll RST_STREAM from control (err=0x%lx) — reconnecting", (unsigned long)errcode);
+      stream_lost = 1;
+    } else if ((f_type == 0x01) && (f_stream == 5) && ((f_flags & 0x01) != 0)) {
+      /* HEADERS with END_STREAM on the map stream = trailers closing the
+       * long-poll (graceful server-side termination). */
+      ESP_LOGW(TAG, "Map long-poll closed by control (trailers) — reconnecting");
+      stream_lost = 1;
     }
     pos += f_len;
   }
@@ -2292,10 +2337,22 @@ static int poll_map_update(microlink_t * ml, ml_noise_state_t * noise)
     noise_send(ml, noise, wu_buf, wu_len);
   }
 
-  if (!json_data || json_data_len == 0) {
-    /* Keepalive, SETTINGS, or PING frame - not an error */
+  if (stream_lost) {
+    /* Map stream (or the whole connection) terminated by control: report
+     * connection loss so the caller re-issues the streaming MapRequest
+     * immediately. Any DATA in this same batch is stale — discard it. */
     free(frame_buf);
-    return 1; /* Got data, reset watchdog */
+    return -1;
+  }
+
+  if (!json_data || json_data_len == 0) {
+    /* Transport-level frames only (our PING's ACK, SETTINGS, WINDOW_UPDATE)
+     * — proof the TCP+Noise session is alive but NOT that the map stream
+     * is: do NOT feed the watchdog with these (that masking left nodes
+     * wedged offline for hours — see block comment above). Empty stream-5
+     * keepalive DATA still counts as map-stream activity. */
+    free(frame_buf);
+    return map_stream_seen ? 1 : 0;
   }
 
   /* Skip 4-byte length prefix if present */
@@ -2762,9 +2819,13 @@ void ml_coord_task(void * arg)
                          * silently defeated the watchdog and left us wedged
                          * "online" locally but offline to the control plane
                          * until a reboot. The watchdog is now fed ONLY by
-                         * RECEIVED activity (poll_map_update > 0, which returns
-                         * 1 on the server's PING ACKs and map updates), so a
-                         * dead link is detected within t_ctrl_watchdog_ms and
+                         * MAP-STREAM activity (poll_map_update > 0 requires
+                         * stream-5 traffic; PING ACKs and other stream-0
+                         * frames return 0 — they proved the TCP session
+                         * alive while the map stream was dead, the 2026-07-23
+                         * "wedged offline for 17 h" failure). Control's
+                         * keepalive MapResponses (~60 s) feed a healthy
+                         * stream; a dead one trips t_ctrl_watchdog_ms and
                          * reconnects on its own. */
           } else {
             ESP_LOGW(TAG, "H2 PING send failed, reconnecting");
