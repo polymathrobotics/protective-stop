@@ -90,17 +90,18 @@ Notes:
 
 ## Bill of materials
 
-Everything except the printed parts comes off Amazon. The links below are
-search links, since specific listings come and go; the specs in the notes
-are what matters. When you find a listing that fits, pin it here.
+Everything except the printed parts is ordered online. Pinned listings
+where we have them; the rest are search links, and the specs in the notes
+are what matters either way. All links open in a new window.
 
 | Qty | Part | Notes | Order |
 |---|---|---|---|
-| 1 | Waveshare ESP32-S3-ETH | The W5500 Ethernet carrier board this design is built around. The PoE variant powers the unit over the Ethernet cable. | [search](https://www.amazon.com/s?k=waveshare+esp32-s3-eth) |
-| 1 | WS2812B ring, 16 pixels | 5V addressable ring. Verify the outer diameter against the lid pocket in `casing.FCStd` before ordering. | [search](https://www.amazon.com/s?k=ws2812b+ring+16+led) |
-| 1 | E-stop mushroom button, twist release | Must have two normally-closed contacts (DPST NC / 2NC). A 1NO+1NC unit will not work: both loops need an NC pole. | [search](https://www.amazon.com/s?k=emergency+stop+button+2nc+twist+release) |
-| 1 set | Silicone hookup wire | Red, black, green, white, yellow, 24 to 26 AWG, per the wiring table above. | [search](https://www.amazon.com/s?k=silicone+hookup+wire+kit+26awg) |
-| ~6 | M3 socket-head screws + brass heat-set inserts | Lid fasteners. Confirm length and count against the current print before buying in bulk. | [search](https://www.amazon.com/s?k=m3+heat+set+insert+socket+head+kit) |
+| 1 | Waveshare ESP32-S3-ETH | The W5500 Ethernet carrier board this design is built around. The PoE variant powers the unit over the Ethernet cable. | <a href="https://www.amazon.com/s?k=waveshare+esp32-s3-eth" target="_blank" rel="noopener">search</a> |
+| 1 | DIYmall WS2812B ring, 16 pixels | 5V addressable ring. | <a href="https://www.amazon.com/DIYmall-WS2812B-Integrated-Individually-Addressable/dp/B0B2D5QXG5" target="_blank" rel="noopener">Amazon</a> |
+| 1 | NKK Switches FF0126BBCAEA01 E-stop button | Twist-release mushroom, two normally-closed contacts (DPST NC). The STEP model in this folder is this exact part. Substitutes must have 2NC: both loops need an NC pole, so a 1NO+1NC unit will not work. | <a href="https://octopart.com/part/nkk-switches/FF0126BBCAEA01" target="_blank" rel="noopener">Octopart</a> |
+| 1 set | Silicone hookup wire | Red, black, green, white, yellow, 24 to 26 AWG, per the wiring table above. | <a href="https://www.amazon.com/s?k=silicone+hookup+wire+kit+26awg" target="_blank" rel="noopener">search</a> |
+| ~6 | M3 socket-head screws + brass heat-set inserts | Lid fasteners. Confirm length and count against the current print before buying in bulk. | <a href="https://www.amazon.com/s?k=m3+heat+set+insert+socket+head+kit" target="_blank" rel="noopener">search</a> |
+| 4 | M1.6 heat-set threaded inserts, M1.6 x 5 x 2.5 mm | Anchor the ESP32-S3-ETH board to the base; 2.5 mm is the insert height/depth. | <a href="https://www.amazon.com/s?k=m1.6+heat+set+threaded+insert" target="_blank" rel="noopener">search</a> |
 | 1 | Printed enclosure | `print.3mf` in this folder (base, lid, diffuser). Not purchased; any common PLA/PETG works. | n/a |
 
 ## Status: work in progress
