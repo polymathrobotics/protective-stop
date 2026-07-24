@@ -114,13 +114,13 @@ fit-check references, with their origins listed below.
 | File(s) | License / origin |
 |---|---|
 | `casing.FCStd`, `base*.stl`, `lid*.stl`, `led.stl`, `print.3mf` | CERN-OHL-P-2.0 (original design) |
+| `LED.step` | CERN-OHL-P-2.0 (ring model commissioned by Polymath Robotics) |
 | `README.md`, `enclosure-render.png`, `real.jpg` | CC-BY-4.0 (original documentation) |
 | `ESP32-S3-ETH-Schematic.pdf` | Waveshare, from the <a href="https://www.waveshare.com/wiki/ESP32-S3-ETH" target="_blank" rel="noopener">product wiki</a> (<a href="https://files.waveshare.com/wiki/ESP32-S3-ETH/ESP32-S3-ETH-Schematic.pdf" target="_blank" rel="noopener">direct PDF</a>) |
 | `ESP32-S3-ETH-details-15.jpg` | Waveshare product photo, from the <a href="https://www.waveshare.com/esp32-s3-eth.htm" target="_blank" rel="noopener">product page</a> |
-| `esp32.step` | Board 3D model; origin unidentified (Waveshare publishes no official STEP) |
+| `esp32.step` | Mock-up of the ESP32-S3-ETH board by xro, from <a href="https://www.printables.com/model/1326075-mock-up-of-waveshare-esp32-s3-eth-ov2640-cam-lan-r" target="_blank" rel="noopener">Printables</a>, CC BY-NC-SA 4.0. The NC term conflicts with the open-hardware definition and with commercial use, so this file should be replaced with a redrawn model; kept meanwhile as a fit reference with attribution. |
 | `FF0126BBCAEA01.stp` | NKK Switches E-stop model; series datasheet: <a href="https://www.nkkswitches.eu/pdf/estop_FF01.pdf" target="_blank" rel="noopener">FF01 (NKK)</a> |
 | `JACK-USBC-6SMT-2SL.stp` | GlobTek USB-C jack model; <a href="https://en.globtek.com/pdf/manual-datasheets/JACK-USBC-6SMT-2SL.pdf" target="_blank" rel="noopener">datasheet (GlobTek)</a> |
-| `LED.step` | WS2812 ring model; origin unidentified (DIYmall publishes no official CAD) |
 
 ## Status: work in progress
 
@@ -129,8 +129,8 @@ custom parts is `casing.FCStd`; the STL/3MF files are its exports, and
 the STEP models are vendor references used for fit. Still to do:
 
 - assembly instructions,
-- identify or redraw the two reference models of unknown origin
-  (`esp32.step`, `LED.step`).
+- redraw `esp32.step` to clear its CC BY-NC-SA license (see the
+  manifest above).
 
 OSHWA certification progress is tracked in
 [`../docs/OSHWA_COMPLIANCE.md`](../docs/OSHWA_COMPLIANCE.md).
