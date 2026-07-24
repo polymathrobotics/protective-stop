@@ -88,14 +88,29 @@ Notes:
   assembly (`POST /api/ring_offset`, see `../docs/API.md`).
 - The board's onboard status LED (GPIO21) needs no wiring.
 
+## Bill of materials
+
+Everything except the printed parts comes off Amazon. The links below are
+search links, since specific listings come and go; the specs in the notes
+are what matters. When you find a listing that fits, pin it here.
+
+| Qty | Part | Notes | Order |
+|---|---|---|---|
+| 1 | Waveshare ESP32-S3-ETH | The W5500 Ethernet carrier board this design is built around. The PoE variant powers the unit over the Ethernet cable. | [search](https://www.amazon.com/s?k=waveshare+esp32-s3-eth) |
+| 1 | WS2812B ring, 16 pixels | 5V addressable ring. Verify the outer diameter against the lid pocket in `casing.FCStd` before ordering. | [search](https://www.amazon.com/s?k=ws2812b+ring+16+led) |
+| 1 | E-stop mushroom button, twist release | Must have two normally-closed contacts (DPST NC / 2NC). A 1NO+1NC unit will not work: both loops need an NC pole. | [search](https://www.amazon.com/s?k=emergency+stop+button+2nc+twist+release) |
+| 1 set | Silicone hookup wire | Red, black, green, white, yellow, 24 to 26 AWG, per the wiring table above. | [search](https://www.amazon.com/s?k=silicone+hookup+wire+kit+26awg) |
+| ~6 | M3 socket-head screws + brass heat-set inserts | Lid fasteners. Confirm length and count against the current print before buying in bulk. | [search](https://www.amazon.com/s?k=m3+heat+set+insert+socket+head+kit) |
+| 1 | Printed enclosure | `print.3mf` in this folder (base, lid, diffuser). Not purchased; any common PLA/PETG works. | n/a |
+
 ## Status: work in progress
 
 These files are the current working set, not a finished, reproducible
 design package. Some parts exist only as STL/STEP exports rather than
-editable source, and there is no BOM or assembly guide yet. Still to do:
+editable source, and there is no assembly guide yet. Still to do:
 
 - editable source for every custom part,
-- a bill of materials with quantities and sources,
+- pinned product listings and verified quantities in the BOM,
 - assembly instructions,
 - per-file licensing.
 
