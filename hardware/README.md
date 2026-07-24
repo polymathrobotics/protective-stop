@@ -119,8 +119,7 @@ fit-check references, with their origins listed below.
 | `ESP32-S3-ETH-Schematic.pdf` | Waveshare, from the <a href="https://www.waveshare.com/wiki/ESP32-S3-ETH" target="_blank" rel="noopener">product wiki</a> (<a href="https://files.waveshare.com/wiki/ESP32-S3-ETH/ESP32-S3-ETH-Schematic.pdf" target="_blank" rel="noopener">direct PDF</a>) |
 | `ESP32-S3-ETH-details-15.jpg` | Waveshare product photo, from the <a href="https://www.waveshare.com/esp32-s3-eth.htm" target="_blank" rel="noopener">product page</a> |
 | `esp32.step` | Mock-up of the ESP32-S3-ETH board by xro, from <a href="https://www.printables.com/model/1326075-mock-up-of-waveshare-esp32-s3-eth-ov2640-cam-lan-r" target="_blank" rel="noopener">Printables</a>, CC BY-NC-SA 4.0. The NC term conflicts with the open-hardware definition and with commercial use, so this file should be replaced with a redrawn model; kept meanwhile as a fit reference with attribution. |
-| `FF0126BBCAEA01.stp` | NKK Switches E-stop model; series datasheet: <a href="https://www.nkkswitches.eu/pdf/estop_FF01.pdf" target="_blank" rel="noopener">FF01 (NKK)</a> |
-| `JACK-USBC-6SMT-2SL.stp` | GlobTek USB-C jack model; <a href="https://en.globtek.com/pdf/manual-datasheets/JACK-USBC-6SMT-2SL.pdf" target="_blank" rel="noopener">datasheet (GlobTek)</a> |
+| `FF0126BBCAEA01.stp` | NKK Switches E-stop model, from the <a href="https://www.nkkswitches.com/distributor-landing-page/?part_no=FF0126BBCAEA01&vendor=digikey" target="_blank" rel="noopener">NKK part page</a>; series datasheet: <a href="https://www.nkkswitches.eu/pdf/estop_FF01.pdf" target="_blank" rel="noopener">FF01 (NKK)</a> |
 
 ## Status: work in progress
 
