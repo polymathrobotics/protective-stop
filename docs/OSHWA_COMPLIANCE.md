@@ -26,16 +26,16 @@ shareable datasheets.
 
 | # | Requirement (OSHWA) | This repo | Status |
 |---|---------------------|-----------|--------|
-| 1 | Product meets the OSHW definition (freely usable, modifiable, redistributable, no field-of-use restrictions) | Software is Apache-2.0; hardware/docs licensing not yet formally declared | Partial |
-| 2 | **Design files released in the original, editable format** (native CAD, not just exports) | Enclosure has FreeCAD source (`casing.FCStd`) ✅; other parts present mainly as STL/STEP/3MF exports; ensure every custom part has editable source committed | Partial |
+| 1 | Product meets the OSHW definition (freely usable, modifiable, redistributable, no field-of-use restrictions) | Apache-2.0 (software) + CERN-OHL-P-2.0 (hardware) + CC-BY-4.0 (docs), texts in `LICENSES/` | Met |
+| 2 | **Design files released in the original, editable format** (native CAD, not just exports) | All custom parts live in the FreeCAD source (`casing.FCStd`); STL/3MF are its exports, STEP files are vendor fit references | Met |
 | 3 | **Schematics** available and, ideally, in editable EDA source | Only `ESP32-S3-ETH-Schematic.pdf` + a details JPG for the off-the-shelf carrier board; no custom PCB of our own | Partial |
-| 4 | **Bill of Materials (BOM)** — parts, quantities, references, sources | Not present | TODO |
+| 4 | **Bill of Materials (BOM)** — parts, quantities, references, sources | `hardware/README.md` BOM with pinned listings (board, ring, E-stop) | Met |
 | 5 | **Assembly / build instructions** | Not present | TODO |
-| 6 | Clearly specify which portion of the design is released under which license | Not yet stated per-directory | TODO |
+| 6 | Clearly specify which portion of the design is released under which license | Root `README.md` states the split; per-file manifest in `hardware/README.md` | Met |
 | 7 | Firmware/software openly licensed (OSI-approved) or interfaces fully documented | Firmware + host are Apache-2.0 (OSI-approved); protocol documented in `docs/` | Met |
 | 8 | Third-party components documented with accessible, shareable datasheets | Carrier board is a commercial ESP32-S3-ETH (W5500); datasheet/schematic public but not yet linked/collected | Partial |
-| 9 | Documentation licensed (recommended CC-BY 4.0) | No docs license declared yet | TODO |
-| 10 | Hardware licensed (recommended CERN-OHL family) | No hardware license declared yet | TODO |
+| 9 | Documentation licensed (recommended CC-BY 4.0) | CC-BY-4.0 declared; text in `LICENSES/CC-BY-4.0.txt` | Met |
+| 10 | Hardware licensed (recommended CERN-OHL family) | CERN-OHL-P-2.0 declared; text in `LICENSES/CERN-OHL-P-2.0.txt` | Met |
 | 11 | Design files hosted in a public, accessible location | Repo is the intended host; must be public and complete | Partial |
 | 12 | Register each unique product with OSHWA and obtain a UID | Not started | TODO |
 | 13 | Complete the OSHWA license agreement / self-certification | Not started | TODO |

@@ -223,9 +223,11 @@ the option of moving the arming policy into the library is analyzed in
 that changes the CRC is a wire break, so update chip and machine
 together.
 
-Software is Apache-2.0 (see [`LICENSE`](LICENSE)). Open-hardware
-certification progress and the intended hardware/docs license split are
-tracked in `docs/OSHWA_COMPLIANCE.md`.
+Software is Apache-2.0 (see [`LICENSE`](LICENSE)); the hardware design
+is CERN-OHL-P-2.0 and the documentation is CC-BY-4.0, with the full
+texts in [`LICENSES/`](LICENSES/) and a per-file manifest in
+[`hardware/README.md`](hardware/README.md). Open-hardware certification
+progress is tracked in `docs/OSHWA_COMPLIANCE.md`.
 
 ## Contributing
 
