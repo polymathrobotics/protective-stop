@@ -106,11 +106,10 @@ generic, so those stay as search links. All links open in a new window.
 
 ## Status: work in progress
 
-These files are the current working set, not a finished, reproducible
-design package. Some parts exist only as STL/STEP exports rather than
-editable source, and there is no assembly guide yet. Still to do:
+These files are the current working set. The editable source for the
+custom parts is `casing.FCStd`; the STL/3MF files are its exports, and
+the STEP models are vendor references used for fit. Still to do:
 
-- editable source for every custom part,
 - assembly instructions,
 - per-file licensing.
 
