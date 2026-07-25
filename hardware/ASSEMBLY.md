@@ -9,6 +9,26 @@ separate piece. Wire colors and pin names follow the
 Tools: soldering iron (wiring and heat-set inserts), solder, flush
 cutters, wire stripper, Phillips screwdriver, 2.5 mm hex driver.
 
+## Printing the enclosure
+
+`print.3mf` is a Bambu Studio project with everything preconfigured; the
+plate holds two units (two bases, two lids). The reference setup, straight
+from the project file:
+
+- Printer: Bambu Lab X1 Carbon, 0.4 mm nozzle, textured PEI plate.
+- Process: the 0.20 mm Strength preset, tuned to 6 walls, 25% grid
+  infill, 5 top / 3 bottom shells.
+- Filaments: AMS slot 1 is white Bambu PLA Tough+ (base, diffuser),
+  slot 2 is yellow Bambu PLA Matte (lid face). The lid is the two-color
+  piece, so the AMS handles the swaps; the diffuser prints in the white
+  as part of the lid.
+- Tree supports (auto) and auto brim are on; leave them enabled, since
+  the side pod overhangs need the support.
+
+Other printers and materials work; keep the walls and infill at least
+this heavy, because the lid takes the button's shove every time someone
+hits STOP.
+
 ## 1. Prepare the base
 
 ![Bare base next to a base with inserts and ballast installed](assembly/step-01-inserts-and-ballast.jpg)
