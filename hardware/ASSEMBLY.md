@@ -18,12 +18,17 @@ from the project file:
 - Printer: Bambu Lab X1 Carbon, 0.4 mm nozzle, textured PEI plate.
 - Process: the 0.20 mm Strength preset, tuned to 6 walls, 25% grid
   infill, 5 top / 3 bottom shells.
-- Filaments: AMS slot 1 is white Bambu PLA Tough+ (base, diffuser),
-  slot 2 is yellow Bambu PLA Matte (lid face). The lid is the two-color
-  piece, so the AMS handles the swaps; the diffuser prints in the white
-  as part of the lid.
+- Filaments: AMS slot 1 is white Bambu PLA Tough+ (base, diffuser,
+  supports), slot 2 is yellow PLA Tough+ (lid face). The lid is the
+  two-color piece; it prints face-down, so the yellow only appears in
+  the first few layers and the AMS swaps are cheap. The diffuser prints
+  in the white as part of the lid.
 - Tree supports (auto) and auto brim are on; leave them enabled, since
   the side pod overhangs need the support.
+- Sliced on this setup, the full plate runs about 4.5 hours and uses
+  144 g of filament (136 g white, 9 g yellow) for the two units.
+  `print.gcode.3mf` is that exact sliced plate, ready to send to an
+  X1C.
 
 Other printers and materials work; keep the walls and infill at least
 this heavy, because the lid takes the button's shove every time someone
