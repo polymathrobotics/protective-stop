@@ -13,6 +13,8 @@ right: the E-stop button sits in the center, the LED ring lights the
 diffuser around its base, and the Ethernet and USB-C ports live in the
 side pod.
 
+Build steps with photos: [ASSEMBLY.md](ASSEMBLY.md).
+
 ## Pinout and wiring
 
 Two external parts connect to the board: the 16-LED WS2812 ring and a DPST
@@ -98,12 +100,13 @@ generic, so those stay as search links. All links open in a new window.
 
 | Qty | Part | Notes | Order |
 |---|---|---|---|
-| 1 | Waveshare ESP32-S3-ETH | The W5500 Ethernet carrier board this design is built around. The PoE variant powers the unit over the Ethernet cable. | <a href="https://www.waveshare.com/esp32-s3-eth.htm" target="_blank" rel="noopener">Waveshare</a> |
+| 1 | Waveshare ESP32-S3-ETH | The W5500 Ethernet carrier board this design is built around. For PoE-powered units order the ESP32-S3-POE-ETH variant on the same page; it includes the PoE Module (B) that mounts on the board. | <a href="https://www.waveshare.com/esp32-s3-eth.htm" target="_blank" rel="noopener">Waveshare</a> |
 | 1 | DIYmall WS2812B ring, 16 pixels | 5V addressable ring. | <a href="https://www.amazon.com/DIYmall-WS2812B-Integrated-Individually-Addressable/dp/B0B2D5QXG5" target="_blank" rel="noopener">Amazon</a> |
 | 1 | NKK Switches FF0126BBCAEA01 E-stop button | Twist-release mushroom, two normally-closed contacts (DPST NC). The STEP model in this folder is this exact part. Substitutes must have 2NC: both loops need an NC pole, so a 1NO+1NC unit will not work. | <a href="https://octopart.com/part/nkk-switches/FF0126BBCAEA01" target="_blank" rel="noopener">Octopart</a> |
 | 1 set | Silicone hookup wire | Red, black, green, white, yellow, 24 to 26 AWG, per the wiring table above. | <a href="https://www.amazon.com/s?k=silicone+hookup+wire+kit+26awg" target="_blank" rel="noopener">search</a> |
 | ~6 | M3 socket-head screws + brass heat-set inserts | Lid fasteners. Confirm length and count against the current print before buying in bulk. | <a href="https://www.amazon.com/s?k=m3+heat+set+insert+socket+head+kit" target="_blank" rel="noopener">search</a> |
 | 4 | M1.6 heat-set threaded inserts, M1.6 x 5 x 2.5 mm | Anchor the ESP32-S3-ETH board to the base; 2.5 mm is the insert height/depth. | <a href="https://www.amazon.com/s?k=m1.6+heat+set+threaded+insert" target="_blank" rel="noopener">search</a> |
+| 3 | 1 oz (28 g) adhesive steel weights | Ballast in the base floor pockets so the unit stays put on a table. Wheel-weight style, adhesive backed. | <a href="https://www.amazon.com/s?k=1oz+adhesive+wheel+weights+steel" target="_blank" rel="noopener">search</a> |
 | 1 | Printed enclosure | `print.3mf` in this folder (base, lid, diffuser). Not purchased; any common PLA/PETG works. | n/a |
 
 ## Component datasheets
@@ -138,9 +141,8 @@ fit-check references, with their origins listed below.
 
 These files are the current working set. The editable source for the
 custom parts is `casing.FCStd`; the STL/3MF files are its exports, and
-the STEP models are vendor references used for fit. Still to do:
-
-- assembly instructions.
+the STEP models are vendor references used for fit. Build steps live in
+[ASSEMBLY.md](ASSEMBLY.md).
 
 OSHWA certification progress is tracked in
 [`../docs/OSHWA_COMPLIANCE.md`](../docs/OSHWA_COMPLIANCE.md).

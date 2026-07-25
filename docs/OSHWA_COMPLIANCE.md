@@ -30,7 +30,7 @@ shareable datasheets.
 | 2 | **Design files released in the original, editable format** (native CAD, not just exports) | All custom parts live in the FreeCAD source (`casing.FCStd`); STL/3MF are its exports, STEP files are vendor fit references | Met |
 | 3 | **Schematics** available and, ideally, in editable EDA source | No custom electronics in the design; the off-the-shelf carrier board's schematic is included and linked to the vendor's copy (`hardware/README.md`) | Met |
 | 4 | **Bill of Materials (BOM)** — parts, quantities, references, sources | `hardware/README.md` BOM with pinned listings (board, ring, E-stop) | Met |
-| 5 | **Assembly / build instructions** | Not present | TODO |
+| 5 | **Assembly / build instructions** | `hardware/ASSEMBLY.md`: photo build guide, print through commissioning | Met |
 | 6 | Clearly specify which portion of the design is released under which license | Root `README.md` states the split; per-file manifest in `hardware/README.md` | Met |
 | 7 | Firmware/software openly licensed (OSI-approved) or interfaces fully documented | Firmware + host are Apache-2.0 (OSI-approved); protocol documented in `docs/` | Met |
 | 8 | Third-party components documented with accessible, shareable datasheets | Datasheet list in `hardware/README.md` (ESP32-S3, W5500, board schematic, WS2812B, NKK FF01) | Met |
