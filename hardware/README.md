@@ -25,7 +25,7 @@ match the board silkscreen (IO17, IO39, and so on).
 
 | Board pin | Goes to | Wire color |
 |---|---|---|
-| 5V | Ring 5V | red |
+| VBUS | Ring 5V | red |
 | GND | Ring GND | black |
 | IO17 | Ring DIN (data) | green |
 | IO39 | Switch pole 1, terminal A | white |
@@ -37,7 +37,7 @@ match the board silkscreen (IO17, IO39, and so on).
 flowchart LR
     subgraph BOARD["ESP32-S3-ETH"]
         direction TB
-        P5V["5V"]
+        P5V["VBUS"]
         GND["GND"]
         G17["IO17"]
         G39["IO39 drive"]
