@@ -81,8 +81,9 @@ flowchart LR
 | `archive/` | Deprecated ROS 2 / Foxglove packages, kept for reference pending removal. |
 
 The encrypted transport is [microlink](https://github.com/CamM2325/microlink),
-an embedded Tailscale client. This pstop work was possible in part by
-helping fund microlink's open source development.
+an embedded Tailscale client by Malone Technologies. This work was made
+possible in part by Polymath Robotics funding microlink's open-source
+development.
 
 ## Quickstart
 
@@ -106,9 +107,9 @@ Every update after that goes over the network:
 curl -u admin:<pw> --data-binary @build/pstop_remote.bin http://<chip>/admin/api/ota
 ```
 
-This direct upload is also the recovery path for a unit the fleet
-server can't reach or update, for example one wedged with a bad DERP
-home so its fleet check-in fails. If you can reach the unit's admin
+This direct upload is also the recovery path for a unit your management
+system can't reach or update, for example one wedged with a bad DERP
+home so its check-ins fail. If you can reach the unit's admin
 server at all (LAN, USB tether at `10.42.0.1`, or its Tailscale IP from
 a same-region or direct peer), push a known-good `pstop_remote.bin` and
 it flashes, reboots, and self-heals. Verified 2026-07-22 recovering a
@@ -192,13 +193,13 @@ logic is validated in `docs/MULTI_REMOTE_VALIDATION_2026-07-22.md`.
 
 ## Current status and open items (2026-07-22)
 
-Fleet integration works end to end: units self-provision (per-unit ID,
-auto-join Tailscale), check in on boot and at least every 5 minutes,
-and are managed and updated from the fleet server
-(`docs/FLEET_SERVER.md`). Inbound fleet reachability required a
-DERP-home fix so a NAT'd or tethered unit homes on the fleet's region
-(`docs/TROUBLESHOOTING.md`). Bulk USB provisioning goes through
-`tools/flash_pstop.sh`.
+Units self-provision (per-unit ID, auto-join Tailscale) and check in on
+boot and at least every 5 minutes. The check-in and OTA tooling is
+intended to pair with a centralized configuration management and OTA
+system of your own; none is included in this project. Inbound
+reachability from such a backend required a DERP-home fix so a NAT'd or
+tethered unit homes on the backend's region (`docs/TROUBLESHOOTING.md`).
+Bulk USB provisioning goes through `tools/flash_pstop.sh`.
 
 Open items:
 
@@ -210,8 +211,7 @@ Open items:
   timeout, not the counter gap, is the stop authority on WiFi.
 - Tailscale subnet-route caveat: a subnet router advertising the
   robot's LAN hijacks operator-laptop traffic to the chip's LAN IP.
-  There is an `ip rule` workaround that needs documenting for the
-  fleet.
+  There is an `ip rule` workaround that needs documenting.
 - USB-tether units behind symmetric NAT are relay-only (no direct
   path) and depend on the DERP re-home. Reachable in testing after
   recovery, but worth a dedicated soak.

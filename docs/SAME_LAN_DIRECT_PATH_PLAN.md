@@ -129,7 +129,7 @@ generic, decoupled signal.
 
 On failover the LAN IP changes, so stale endpoints must be refreshed. Verify /
 ensure that an `active_iface` change (or a netif `IP_EVENT_*_GOT_IP`) triggers
-`do_send_endpoint_update()` and a CallMeMaybe to the priority peer + fleet. If no
+`do_send_endpoint_update()` and a CallMeMaybe to the priority peer + the management server (if configured). If no
 such trigger exists, add one. Without this, a post-failover unit advertises the
 wrong LAN endpoint until the next periodic update.
 

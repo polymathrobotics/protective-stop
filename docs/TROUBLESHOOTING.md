@@ -177,15 +177,15 @@ the chip's LAN IP (policy rule beats the connected route). Bench
 workaround: an `ip rule` preference for the connected route. Subnet-router
 interaction and fleet isolation are covered in `TAILSCALE_ISOLATION.md`.
 
-### Reachable over USB/LAN but not via its Tailscale IP (fleet's remote buttons fail)
+### Reachable over USB/LAN but not via its Tailscale IP (remote management fails)
 
 The unit checks in fine but can't be reached *inbound* over Tailscale — its
-single DERP connection isn't homed on the fleet's region, so remote peers relay
+single DERP connection isn't homed on the management server's region, so remote peers relay
 to the wrong region and packets never arrive. Critical for NAT'd units (USB
 tether / symmetric NAT) where DERP relay is the only inbound path (no direct
 hole-punch). Diagnose via `/admin/api/monitor`:
 
-- `fleet_peer_region` — the fleet's DERP region as learned by the chip (2 = sfo).
+- `fleet_peer_region` — the management server's DERP region as learned by the chip.
 - `derp_home_region` / `priority_peer_region` — where DERP is homed / the region
   the chip decided on. Both should equal `fleet_peer_region` (or the priority
   peer's region, which wins when known).
@@ -194,7 +194,7 @@ hole-punch). Diagnose via `/admin/api/monitor`:
   means the WG task isn't running at all** → see the boot-safety pause below.
 
 A wrong region self-heals within a few seconds (the firmware re-homes to the
-fleet's region and re-advertises it in every MapRequest). If it doesn't recover,
+management server's region and re-advertises it in every MapRequest). If it doesn't recover,
 OTA the latest build.
 
 ### Tailscale paused / `wg_mgr` task Suspended (boot-safety)

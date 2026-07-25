@@ -5,7 +5,7 @@
 ESP32-S3, 8 MB PSRAM (plentiful), but **internal RAM (DRAM / `MALLOC_CAP_INTERNAL`)
 runs 5–13 KB free**. The **DERP TLS (re)connect fails** under this pressure: after
 any DERP drop or a DERP re-home, `mbedtls_ssl_handshake` can't allocate its working
-buffers → `derp_connected` stays false → the chip can't relay to the fleet server
+buffers → `derp_connected` stays false → the chip can't relay to the management server
 (or to the safety peer when the direct WG path is down).
 
 ## Root cause (the important finding)
@@ -33,7 +33,7 @@ the last few KB of internal RAM.
   slightly slower, but DERP only carries tiny 10 Hz pstop frames — a *working*
   reconnect beats an OOM. Does NOT affect the WG/pstop datapath crypto.
 - **Validate:** reproduce the low-internal-RAM condition, force a DERP drop, confirm
-  `derp_connected` returns true and a fleet check-in lands.
+  `derp_connected` returns true and a backend check-in lands.
 
 ### Phase 1b — NCM NTB buffers 4+4 → 2+2 (2026-07-22) ✅ done
 TinyUSB NCM NTB buffers are DMA-pinned to internal SRAM. On the USB-NCM tether
@@ -84,7 +84,7 @@ buf, all coord H2/JSON buffers (incl. 512 KB H2 recv), nacl cache, and the WireG
 device to PSRAM; `SPIRAM_MALLOC_RESERVE_INTERNAL=32768`, `ALWAYSINTERNAL=2048`.
 
 ## Non-findings (corrected)
-- `crt_bundle_attach` on the plain-HTTP fleet clients is a **no-op** (esp-tls not
+- `crt_bundle_attach` on the plain-HTTP backend clients is a **no-op** (esp-tls not
   invoked for `http://`) — no internal-RAM win; cosmetic cleanup only.
 
 ## Plan

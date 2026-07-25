@@ -199,7 +199,7 @@ static const char CONFIG_PAGE_HTML[] =
   "<div class='msg' id='peersMsg'></div>"
   "</div></div>"
 
-  /* Fleet OTA is managed centrally by the fleet server (100.92.1.78); the
+  /* Managed OTA is driven by a centralized management/OTA backend (if configured); the
    * per-device admin section was removed. The device still checks in and pulls
    * updates via the fleet_ota task — that is not exposed here. */
 
@@ -708,7 +708,7 @@ static const char CONFIG_PAGE_HTML[] =
   "}"
   "}"
 
-  /* ---- Fleet OTA UI removed — managed centrally at the fleet server ---- */
+  /* ---- Managed-OTA UI removed — driven by the central OTA backend ---- */
 
   /* ---- Verbose Logging ---- */
   "async function loadVerbose(){"

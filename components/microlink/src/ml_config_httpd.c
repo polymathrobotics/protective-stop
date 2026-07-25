@@ -289,7 +289,7 @@ bool ml_config_allowlist_active(const ml_config_ctx_t * ctx)
 
 /* Fleet coordination/OTA server VPN IP (CONFIG_ML_FLEET_SERVER_IP), parsed
  * once. This peer is PERMANENTLY allowed and cannot be removed from the
- * allowlist — it is the central server that updates and coordinates the fleet,
+ * allowlist — it is the configured central management server for the devices,
  * so it must always be reachable regardless of the user-editable allowlist. */
 static uint32_t ml_config_fleet_server_ip(void)
 {
@@ -306,7 +306,7 @@ bool ml_config_peer_is_allowed(const ml_config_ctx_t * ctx, uint32_t vpn_ip)
 {
   if (!ctx) return true;
 
-  /* The fleet server is always allowed — never filterable, never removable. */
+  /* The configured management server is always allowed — never filterable, never removable. */
   uint32_t fleet_ip = ml_config_fleet_server_ip();
   if (fleet_ip != 0u && vpn_ip == fleet_ip) return true;
 
@@ -754,7 +754,7 @@ static esp_err_t handler_post_allowed(httpd_req_t * req)
       }
       ctx->peer_list.count++;
     }
-    /* The fleet server is non-removable: re-inject it if the client dropped
+    /* The management server is non-removable: re-inject it if the client dropped
      * it, so it always persists in the allowlist. (It is also always allowed
      * at runtime via ml_config_peer_is_allowed, independent of this list.) */
     uint32_t fleet_ip = ml_config_fleet_server_ip();
@@ -770,7 +770,7 @@ static esp_err_t handler_post_allowed(httpd_req_t * req)
         ml_config_peer_entry_t * e = &ctx->peer_list.entries[ctx->peer_list.count];
         e->vpn_ip = fleet_ip;
         memset(e->label, 0, sizeof(e->label));
-        strncpy(e->label, "fleet-server", sizeof(e->label) - 1);
+        strncpy(e->label, "mgmt-server", sizeof(e->label) - 1);
         ctx->peer_list.count++;
       }
     }

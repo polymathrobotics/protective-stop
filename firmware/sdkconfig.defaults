@@ -161,13 +161,11 @@ CONFIG_ESP_COREDUMP_CHECKSUM_CRC32=y
 CONFIG_ESP_COREDUMP_CHECK_BOOT=y
 CONFIG_ESP_COREDUMP_MAX_TASKS_NUM=64
 
-# Fleet coordination / OTA. 100.92.1.78 is the central server that updates and
-# coordinates the pstops; it is baked into every build as a permanently-allowed,
-# non-removable allowlist peer (CONFIG_ML_FLEET_SERVER_IP, enforced in
-# ml_config_httpd.c). Fleet OTA polls the same host. The API key is a secret and
-# lives in sdkconfig.credentials (CONFIG_ML_OTA_API_KEY), never committed.
-CONFIG_ML_FLEET_SERVER_IP="100.92.1.78"
-CONFIG_ML_OTA_BACKEND_URL="http://100.92.1.78"
+# Centralized configuration management / OTA. The firmware's check-in and
+# OTA tooling is intended to pair with a management backend of your own;
+# none is included in this project. The backend address, URL, and API key
+# are site-specific and live in sdkconfig.credentials (never committed):
+# CONFIG_ML_FLEET_SERVER_IP, CONFIG_ML_OTA_BACKEND_URL, CONFIG_ML_OTA_API_KEY.
 
 # mbedTLS allocates its TLS working buffers from PSRAM, not internal RAM.
 # Internal RAM runs 5-13KB free on this build; a DERP TLS handshake needs

@@ -107,10 +107,10 @@ Use the SW restart, **not** a power-cycle — a hard power cut is a crash-class
 boot and re-arms the pause. (Aggressive OTA + hard power-cycling on the bench is
 the usual cause; go easy on the power relay while iterating.)
 
-## Fleet can't reach / update a unit
+## The management backend can't reach / update a unit
 
-The direct `/admin/api/ota` upload above is also the **fleet-bypass recovery**:
-if a unit is unreachable from the fleet (e.g. wedged on the wrong DERP region so
+The direct `/admin/api/ota` upload above is also the **backend-bypass recovery**:
+if a unit is unreachable from your management backend (e.g. wedged on the wrong DERP region so
 its check-in/OTA fails), push a known-good `pstop_remote.bin` directly to any
 address you *can* reach it on (LAN, USB tether `10.42.0.1`, or its Tailscale IP
 from a same-region peer). It flashes, reboots, and self-heals. See

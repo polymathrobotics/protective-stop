@@ -52,7 +52,7 @@ bool dcs_nvs_read_ts_boot_en(void)
 {
   nvs_handle_t h;
   if (nvs_open(DCS_NVS_NS, NVS_READONLY, &h) != ESP_OK) return false;
-  uint8_t v = 1; /* absent -> default ON: fresh fleet units auto-join Tailscale */
+  uint8_t v = 1; /* absent -> default ON: fresh units auto-join Tailscale */
   (void)nvs_get_u8(h, DCS_NVS_KEY_TS_BOOT_EN, &v); /* explicit 0 still honored */
   nvs_close(h);
   return v != 0u;

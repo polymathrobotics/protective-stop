@@ -162,7 +162,7 @@ extern "C"
   uint32_t microlink_get_vpn_ip(const microlink_t * ml);
 
   /** Public egress IP (host byte order) as seen via STUN; 0 until STUN completes.
- *  Behind NAT this is the site's egress — useful for rough fleet-side geolocation. */
+ *  Behind NAT this is the site's egress — useful for rough management-side geolocation. */
   uint32_t microlink_get_public_ip(const microlink_t * ml);
 
   /** DERP home region the single relay connection is on (0 = unset). Coarse locality hint. */
@@ -184,13 +184,13 @@ extern "C"
   void microlink_notify_priority_health(microlink_t * ml, bool healthy);
 
   /**
- * @brief Report health of the fleet coordination/OTA server link.
+ * @brief Report health of the management/OTA server link.
  *
- * Like microlink_notify_priority_health() but for the fleet server: call with
- * false when a fleet check-in fails to reach the backend, true on success. On
- * false the fleet peer's disco-first wake forces a fresh handshake through a
+ * Like microlink_notify_priority_health() but for the management server: call with
+ * false when a check-in fails to reach the backend, true on success. On
+ * false the management peer's disco-first wake forces a fresh handshake through a
  * stale/zombie session (e.g. after a reboot the far end kept our persisted
- * keypair). No-op if no fleet server is configured. Safe from any task.
+ * keypair). No-op if no management server is configured. Safe from any task.
  */
   void microlink_notify_fleet_health(microlink_t * ml, bool healthy);
 

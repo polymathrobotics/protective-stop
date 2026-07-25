@@ -550,10 +550,10 @@ static uint32_t fleet_server_ip_cached(void)
 }
 
 /* Peers that must always keep a WG slot and are never evicted: the priority
- * (safety) peer — the machine — and the fleet coordination/OTA server. On a
+ * (safety) peer — the machine — and the management/OTA server. On a
  * large tailnet (100s of peers, trimmed to ML_MAX_PEERS) either could
  * otherwise fall out of the table, leaving the chip unable to reach the
- * machine (unsafe) or the fleet (no OTA/coordination). */
+ * machine (unsafe) or the management server (no OTA/coordination). */
 static bool is_pinned_peer(microlink_t * ml, uint32_t vpn_ip)
 {
   if (vpn_ip == 0) return false;
@@ -572,8 +572,8 @@ bool ml_wg_is_pinned_peer(microlink_t * ml, uint32_t vpn_ip)
   return is_pinned_peer(ml, vpn_ip);
 }
 
-/* Diagnostic: report the DERP region the chip has LEARNED for the fleet and
- * priority peers (0 = not learned yet). Distinguishes "never learned the fleet's
+/* Diagnostic: report the DERP region the chip has LEARNED for the management and
+ * priority peers (0 = not learned yet). Distinguishes "never learned the server's
  * region -> re-home can't fire" from "learned but re-home/DERP-connect stuck".
  * Exposed via /admin/api/monitor. */
 void ml_wg_get_derp_diag(microlink_t * ml, uint16_t * fleet_region, uint16_t * priority_region)
@@ -636,7 +636,7 @@ void ml_wg_get_rehome_diag(uint32_t out[6])
  * different region than a peer it must reach, its relayed DISCO/WG-init never
  * arrives and the link only forms after a `tailscale ping` FROM that peer.
  * Home on the priority (safety) peer's region when known; otherwise fall back
- * to the fleet server's region (the always-on anchor) so the chip can still be
+ * to the management server's region (the always-on anchor) so the chip can still be
  * managed/updated when no machine is online. The chosen region is reported as
  * PreferredDERP in the next MapRequest (ml_coord) so peers find us there too.
  * Called wherever a pinned peer's derp_region is (re)learned. */
@@ -655,7 +655,7 @@ static void maybe_rehome_to_priority(microlink_t * ml, const ml_peer_t * p)
   bool is_prio = (ml->config.priority_peer_ip != 0 && p->vpn_ip == ml->config.priority_peer_ip);
   uint16_t target = p->derp_region;
   if (!is_prio && ml->config.priority_peer_ip != 0) {
-    /* Fleet peer: prefer the priority peer's region if we know it. */
+    /* Management peer: prefer the priority peer's region if we know it. */
     int pidx = find_peer_by_ip(ml, ml->config.priority_peer_ip);
     if (pidx >= 0 && ml->peers[pidx].derp_region != 0) {
       target = ml->peers[pidx].derp_region;
@@ -669,7 +669,7 @@ static void maybe_rehome_to_priority(microlink_t * ml, const ml_peer_t * p)
       "Re-homing DERP region %u -> %u (%s)",
       (unsigned)ml->derp_home_region,
       (unsigned)target,
-      is_prio ? "priority peer" : "fleet server");
+      is_prio ? "priority peer" : "management server");
     ml->derp_home_region = target;
     xEventGroupSetBits(ml->events, ML_EVT_DERP_RECONNECT);
   }
@@ -722,7 +722,7 @@ static int add_peer(microlink_t * ml, const ml_peer_update_t * update)
     }
 
     /* Peer table full — evict LRU non-pinned peer if the incoming peer is
-         * pinned (priority/safety peer OR fleet coordination server). */
+         * pinned (priority/safety peer OR the management server). */
     if (idx < 0 && is_pinned_peer(ml, update->vpn_ip)) {
       uint64_t oldest_ms = UINT64_MAX;
       int evict_idx = -1;
@@ -772,7 +772,7 @@ static int add_peer(microlink_t * ml, const ml_peer_update_t * update)
      * re-add a peer with derp_region=0 (the region is carried separately, via
      * PeersChangedPatch), and unconditionally overwriting wiped the pinned
      * peer's known region back to 0 — so maybe_rehome() below early-returned and
-     * the chip never stayed homed on the fleet's region. Behind a symmetric NAT
+     * the chip never stayed homed on the server's region. Behind a symmetric NAT
      * (USB tether) DERP relay is the only path, so this left the unit
      * permanently unreachable. Only overwrite when the update actually carries a
      * region. */
@@ -2122,9 +2122,9 @@ static void disco_wake_peer(microlink_t * ml, uint32_t vpn_ip, bool link_healthy
 static void disco_periodic_probes(microlink_t * ml)
 {
   /* Pinned-peer session wakes — run BEFORE the enable_disco/cellular gates so
-     * the safety peer AND the fleet coordination/OTA server always (re)establish
+     * the safety peer AND the management/OTA server always (re)establish
      * their WG session disco-first, even on a busy tailnet where general disco is
-     * throttled. Without this the fleet can be in the peer table yet have no live
+     * throttled. Without this the management peer can be in the table yet have no live
      * session (check-in silently fails). */
   disco_wake_peer(ml, ml->config.priority_peer_ip, ml->priority_link_healthy);
   disco_wake_peer(ml, fleet_server_ip_cached(), ml->fleet_link_healthy);

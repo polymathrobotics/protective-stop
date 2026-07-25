@@ -480,13 +480,13 @@ static bool fleet_ota_checkin(
 
   if (err != ESP_OK || status != 200) {
     ESP_LOGW(TAG, "OTA check-in failed: err=%s status=%d", esp_err_to_name(err), status);
-    /* Couldn't reach the fleet — flag the link unhealthy so the fleet
+    /* Couldn't reach the backend — flag the link unhealthy so the management
          * peer's disco-first wake forces a fresh handshake (e.g. a stale
          * post-reboot session), and let the caller surface the real state. */
     microlink_notify_fleet_health(app->ml, false);
     return false;
   }
-  /* Reached the fleet (HTTP 200). */
+  /* Reached the backend (HTTP 200). */
   if (out_reached) *out_reached = true;
   microlink_notify_fleet_health(app->ml, true);
 
@@ -794,7 +794,7 @@ static void save_interval_to_nvs(int interval_s)
   }
 }
 
-  /* The fleet must hear from every unit at least this often; the check interval
+  /* The backend must hear from every unit at least this often; the check interval
  * is capped here so no NVS/endpoint value can make a unit go quiet longer. */
   #define ML_OTA_CHECK_INTERVAL_MAX_S 300 /* >= once per 5 minutes */
   #define ML_OTA_CHECK_INTERVAL_MIN_S 60
@@ -929,8 +929,8 @@ static void fleet_ota_task(void * arg)
   vTaskDelay(pdMS_TO_TICKS(10000));
 
   /* Check in immediately on boot so a freshly-provisioned unit registers with
-     * the fleet right away, instead of only after a full check_interval_s (which
-     * left new units showing "never checked in" on the fleet for up to that
+     * the backend right away, instead of only after a full check_interval_s (which
+     * left new units showing "never checked in" on the backend for up to that
      * interval). Subsequent checks follow the normal interval below. */
   app->ota_check_now = true;
 
@@ -957,11 +957,11 @@ static void fleet_ota_task(void * arg)
     bool update_available = fleet_ota_checkin(app, fw_url, sizeof(fw_url), fw_sha256, &fw_size, &reached);
 
     if (!reached) {
-      /* Distinguish an unreachable fleet from "no update" — the old code
+      /* Distinguish an unreachable backend from "no update" — the old code
              * showed "Up to date" for both, hiding a silently-unreachable
              * backend. */
-      ota_set_state(app, OTA_STATE_ERROR, "Check-in failed (fleet unreachable)");
-      ESP_LOGW(TAG, "OTA: check-in did not reach the fleet backend");
+      ota_set_state(app, OTA_STATE_ERROR, "Check-in failed (backend unreachable)");
+      ESP_LOGW(TAG, "OTA: check-in did not reach the OTA backend");
       continue;
     }
 

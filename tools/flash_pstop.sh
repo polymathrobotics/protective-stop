@@ -8,11 +8,11 @@
 # partition table, otadata, app) to an ESP32-S3 over USB. Use this to bring up
 # new units in production from ONE compiled image — no ESP-IDF or rebuild
 # needed, just esptool. After flashing, the chip self-provisions (per-unit ID
-# from its MAC, auto-joins Tailscale, checks in to the fleet) and takes all
-# future updates over OTA from the fleet monitor.
+# from its MAC, auto-joins Tailscale, checks in to the OTA backend if one is
+# configured) and takes all future updates over the network.
 #
 # The image in tools/production_image/ contains secrets (Tailscale key, WiFi
-# creds, admin password, fleet key) and is git-ignored — never commit it.
+# creds, admin password, OTA API key) and is git-ignored — never commit it.
 #
 # Usage:
 #   tools/flash_pstop.sh                 # auto-detect a chip in download mode
@@ -155,5 +155,5 @@ fi
 
 echo
 echo ">> DONE. The unit will reboot, derive its ID from its MAC, join Tailscale,"
-echo "   and check in to the fleet. It should appear on the fleet monitor within"
+echo "   and check in to the OTA backend (if configured). It should appear there within"
 echo "   ~30-60 s; future updates roll out from there over OTA."

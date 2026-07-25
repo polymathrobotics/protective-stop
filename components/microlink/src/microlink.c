@@ -644,7 +644,7 @@ uint32_t microlink_get_vpn_ip(const microlink_t * ml)
 
 /* Our public egress IP as seen from the internet (learned via STUN). 0 until
  * STUN completes. Behind NAT this is the site's egress point, useful for rough
- * (city-level) geolocation on the fleet side. */
+ * (city-level) geolocation on the management side. */
 uint32_t microlink_get_public_ip(const microlink_t * ml)
 {
   return ml ? ml->stun_public_ip : 0;

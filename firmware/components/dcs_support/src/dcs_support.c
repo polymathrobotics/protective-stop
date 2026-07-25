@@ -356,7 +356,7 @@ void dcs_publish_comparator(
 
 void dcs_publish_pstop_peer(uint32_t peer_ip, uint16_t peer_port)
 {
-  /* Legacy single-peer setter (/api/pstop_peer, fleet tooling) = slot 0
+  /* Legacy single-peer setter (/api/pstop_peer, provisioning tooling) = slot 0
    * with the default machine id. */
   esp_err_t werr = dcs_pstop_set_peer_slot(0, true, peer_ip, peer_port, DCS_PSTOP_DEFAULT_MACHINE_ID);
   if (werr != ESP_OK) {

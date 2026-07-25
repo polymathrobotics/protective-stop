@@ -1051,7 +1051,7 @@ static int do_register(microlink_t * ml, ml_noise_state_t * noise)
  * State: FETCH_PEERS - Send MapRequest, parse MapResponse
  * ========================================================================== */
 
-/* Defined in ml_wg_mgr.c — true for the fleet server and the priority (safety)
+/* Defined in ml_wg_mgr.c — true for the management server and the priority (safety)
  * peer, whose updates must not be dropped from the queue below (their DERP
  * region drives the re-home; a dropped one leaves a NAT'd unit relay-
  * unreachable). */

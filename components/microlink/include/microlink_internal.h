@@ -429,7 +429,7 @@ extern "C"
 
     /* Fleet coordination/OTA server link health, set by the app (fleet-OTA
      * check-in) via microlink_notify_fleet_health(): true on a successful
-     * check-in, false when a check-in can't reach the fleet. Drives the fleet
+     * check-in, false when a check-in can't reach the backend. Drives the management peer's
      * peer's disco-first wake to force a fresh handshake through a zombie
      * session (same idea as priority_link_healthy for the safety peer).
      * Defaults true. */

@@ -50,7 +50,7 @@
  * "LED 1" is a per-device NVS setting (ring_off): frames are composed in
  * logical coordinates and rotated at transmit time (ring_show). An installer
  * locate mode (POST /api/ring_led1) paints only logical LED 1 white so the
- * offset can be dialled in from the fleet-setup tooling.
+ * offset can be dialled in from the provisioning tooling.
  */
 
 #include <stdatomic.h>

@@ -121,7 +121,7 @@ static esp_err_t page_state(httpd_req_t * req)
 
   int ml_state = -1;
   uint32_t vpn_ip = 0;
-  uint32_t public_ip = 0; /* STUN egress IP — for rough fleet-side geolocation */
+  uint32_t public_ip = 0; /* STUN egress IP — for rough management-side geolocation */
   int derp_region = 0; /* DERP home region — coarse locality hint */
   if (g_dcs.ml_handle != NULL) {
     ml_state = (int)microlink_get_state(g_dcs.ml_handle);
@@ -165,7 +165,7 @@ static esp_err_t page_state(httpd_req_t * req)
 
   /* local_ip = the IP of the currently active uplink (eth/usb/wifi). The
      * per-iface fields below already carry each one, but a single "which LAN
-     * address am I actually on right now" value is what the fleet displays and
+     * address am I actually on right now" value is what management tooling shows and
      * what the same-subnet direct-path logic keys off of. 0 = no uplink. */
   uint32_t local_ip = 0;
   switch ((int)atomic_load(&g_dcs_active_iface)) {
@@ -767,7 +767,7 @@ static esp_err_t api_pstop_num(httpd_req_t * req)
  * Set which PHYSICAL ring pixel is "LED 1" — the ring can be installed in any
  * of 16 rotations, so this is per-device. Applies immediately (next repaint)
  * and persists to NVS; survives reboots and firmware updates. Pair with
- * /api/ring_led1 to dial the value in visually during fleet setup. */
+ * /api/ring_led1 to dial the value in visually during provisioning. */
 static esp_err_t api_ring_offset(httpd_req_t * req)
 {
   char query[48], val[8];

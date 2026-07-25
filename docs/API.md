@@ -14,7 +14,7 @@ Query parameters are shown where required. Unless noted, POST bodies are empty.
 | Method | Route | Purpose |
 |--------|-------|---------|
 | GET  | `/` | Diagnostic HTML page |
-| GET  | `/state.json` | Telemetry snapshot (uptime, ml_state, pstop counters, heap, E-stop channels, `public_ip`/`derp_region` for fleet-side geolocation, `local_ip` = active-uplink LAN address) |
+| GET  | `/state.json` | Telemetry snapshot (uptime, ml_state, pstop counters, heap, E-stop channels, `public_ip`/`derp_region` for management-side geolocation, `local_ip` = active-uplink LAN address) |
 | GET  | `/api/last_log` | Tail of the previous boot's log (RTC ring) |
 | POST | `/api/derp` | Toggle the DERP TX worker |
 | POST | `/api/derp_delay?ms=N` | Set the DERP loop yield (ms) |
@@ -62,10 +62,10 @@ starting at LED 1 (one machine = whole ring, matching the old display);
 each segment shows its machine's state with the usual colours. HIL
 validation: `tools/pstop_multi_machine_test.py`.
 
-### LED-ring rotation (fleet setup)
+### LED-ring rotation (provisioning)
 
 The 16-LED ring can be installed in any of 16 orientations, so "LED 1" is a
-per-device setting. To calibrate from the fleet-setup tooling:
+per-device setting. To calibrate from your provisioning tooling:
 
 1. `POST /api/ring_led1?on=1` — one white pixel shows where the current offset
    puts LED 1 (current offset and state are in `/state.json` as `ring_offset` /
@@ -87,25 +87,32 @@ per-device setting. To calibrate from the fleet-setup tooling:
 | GET    | `/admin/api/monitor` | Heap / DERP / per-task monitor + DERP re-home diagnostics (`derp_home_region`, `fleet_peer_region`, `rehome_*` counters) + same-LAN direct-path diagnostics (`advert_lan_ip`, `pp_has_direct`, `pp_best_ip`/`pp_best_port`, `pp_endpoints`) |
 | GET    | `/admin/api/peers` | Active WireGuard peer table |
 | GET    | `/admin/api/peers/allowed` | Read the peer allowlist |
-| POST   | `/admin/api/peers/allowed` | Add an allowed peer (fleet server is non-removable) |
+| POST   | `/admin/api/peers/allowed` | Add an allowed peer (the configured management server, if any, is non-removable) |
 | DELETE | `/admin/api/peers/allowed` | Remove an allowed peer |
 | POST   | `/admin/api/restart` | Reboot the device |
 | GET    | `/admin/api/wifi` | WiFi scan / status |
 | POST   | `/admin/api/wifi` | Set WiFi credentials |
 | POST   | `/admin/api/ota` | Direct firmware upload (OTA) |
 | GET    | `/admin/api/ota/status` | Running version + OTA image state |
-| GET    | `/admin/api/fleet-ota/status` | Fleet OTA status |
-| POST   | `/admin/api/fleet-ota/check` | Trigger a fleet check-in (pull if assigned) |
-| POST   | `/admin/api/fleet-ota/toggle` | Toggle fleet auto-update |
-| POST   | `/admin/api/fleet-ota/interval` | Set the fleet poll interval |
+| GET    | `/admin/api/fleet-ota/status` | Managed-OTA status |
+| POST   | `/admin/api/fleet-ota/check` | Trigger a check-in against the OTA backend (pull if an update is assigned) |
+| POST   | `/admin/api/fleet-ota/toggle` | Toggle auto-update |
+| POST   | `/admin/api/fleet-ota/interval` | Set the check-in interval |
 | GET    | `/admin/api/verbose` | Verbose-logging status |
 | POST   | `/admin/api/verbose/toggle` | Toggle verbose logging |
+
+The `/admin/api/fleet-ota/*` endpoints and the periodic check-in are
+intended to pair with a centralized configuration management and OTA
+system of your own (configured via `CONFIG_ML_FLEET_SERVER_IP` /
+`CONFIG_ML_OTA_BACKEND_URL`); no such backend is included in this
+project. With no backend configured, the direct `/admin/api/ota` upload
+is the update path.
 
 ## Source of truth
 
 - Diagnostic/config routes: `firmware/components/dcs_support/src/dcs_admin_pages.c`
 - Admin routes: `components/microlink/src/ml_config_httpd.c` (`/admin` prefix) and
-  `components/microlink/src/ml_app.c` (fleet-ota, verbose).
+  `components/microlink/src/ml_app.c` (managed OTA, verbose).
 
 The app server's user-handler budget is set in `dcs_support.c`
 (`cfg.max_user_uri_handlers`); adding routes beyond it fails silently, so bump
