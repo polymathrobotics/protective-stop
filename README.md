@@ -10,7 +10,7 @@ robot to a controlled stop.
 
 Safety scope: this is a protective stop (a controlled, preventative
 shutdown), not an emergency stop. It is not a substitute for an E-stop
-where there is an immediate threat to people or equipment.
+where power is immediately physically removed from a machine.
 
 The wire protocol and the machine-side safety state logic are the
 [`pstop_c`](pstop_c/) library, kept on its own certification track and
