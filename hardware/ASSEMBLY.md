@@ -15,9 +15,9 @@ cutters, wire stripper, Phillips screwdriver, 2.5 mm hex driver.
 
 Press the brass heat-set inserts into the base with the soldering iron:
 M3 inserts into the lid-screw bosses, M1.6 inserts into the board anchor
-holes in the side pod. Stick the three 1 oz steel weights into the floor
-pockets. The weights are ballast so the unit stays put on a table instead
-of following the Ethernet cable around.
+holes in the side pod. Optionally, stick the three 1 oz steel weights
+into the floor pockets; they are ballast so the unit stays put on a table
+instead of following the Ethernet cable around.
 
 ## 2. Mount the button and ring in the lid
 
