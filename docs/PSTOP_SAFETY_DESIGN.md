@@ -30,9 +30,9 @@ STOP within the process safety time.
 
 ## 2. Implemented today (`firmware/main/main.c`)
 
-- **Dual-channel loopback.** Core 0 owns channel A (GPIO39 drive →
-  DPST pole 1 → GPIO40 sense); core 1 owns channel B (GPIO41 →
-  pole 2 → GPIO42). Sense inputs are pulled DOWN, so an open loop
+- **Dual-channel loopback.** Core 0 owns channel A (IO39 drive →
+  DPST pole 1 → IO40 sense); core 1 owns channel B (IO41 →
+  pole 2 → IO42). Sense inputs are pulled DOWN, so an open loop
   reads 0 (STOP) — fail-safe idle.
 - **Rolling drive level.** Each tick the owning core drives its OUT pin
   with the tick counter's LSB (10 µs settle, `ESTOP_SETTLE_US`) and
@@ -249,8 +249,8 @@ Recommended defaults marked ⭐. None of these change `pstop_c`.
 Each row is a bench test (observable via the LED ring + `/state.json` +
 `machine_app_runner -v`):
 
-1. Open channel A only (pull GPIO40) → cores diverge → **purple**, machine STOP.
-2. Open channel B only (pull GPIO42) → same, opposite channel.
+1. Open channel A only (pull IO40) → cores diverge → **purple**, machine STOP.
+2. Open channel B only (pull IO42) → same, opposite channel.
 3. Short an IN pin high → stuck-high caught by low phase → STOP.
 4. Freeze one core (debug stub) → publish-timeout/freshness → STOP.
 5. Drop/garble packets (netem) → counter stall → machine MSG_LOST → STOP.

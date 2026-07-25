@@ -44,7 +44,7 @@ arming gesture.
 flowchart LR
     subgraph REMOTE["REMOTE — ESP32-S3 · firmware/"]
         direction TB
-        SW["DPST E-stop switch<br/>pole1 GPIO39▸loopA▸GPIO40<br/>pole2 GPIO41▸loopB▸GPIO42"]
+        SW["DPST E-stop switch<br/>pole1 IO39▸loopA▸IO40<br/>pole2 IO41▸loopB▸IO42"]
         C0["core 0<br/>read loopA · build + encode"]
         C1["core 1<br/>read loopB · build + encode"]
         CMP{"comparator<br/>memcmp — transmit<br/>only on byte-match"}

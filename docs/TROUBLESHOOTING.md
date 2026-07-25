@@ -11,7 +11,7 @@ default `microlink`).
 
 ## First contact: the LED ring, then `/state.json`
 
-The 16-LED WS2812 ring (GPIO17) shows the pstop link as seen from the
+The 16-LED WS2812 ring (IO17) shows the pstop link as seen from the
 machine's replies:
 
 | Ring | Meaning |
@@ -24,7 +24,7 @@ machine's replies:
 | PURPLE | lockstep MISMATCH — the two cores disagreed recently (e.g. ONE loop channel open/faulted). Takes priority over all other colours; held 2 s so single blips show |
 | dim purple comet | boot sign-of-life, or an OTA image being flashed |
 
-The onboard single LED (GPIO21) shows network state, not pstop state.
+The onboard single LED (IO21) shows network state, not pstop state.
 
 ```sh
 curl -s http://$CHIP/state.json | python3 -m json.tool

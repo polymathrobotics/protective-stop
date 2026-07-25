@@ -19,18 +19,19 @@ Two external parts connect to the board: the 16-LED WS2812 ring and a DPST
 normally-closed E-stop switch. Each pole of the switch sits in its own
 loopback: the firmware drives one GPIO and reads the echo on another, once
 per pole, so a broken wire reads the same as a pressed button (STOP). The
-GPIO assignments are fixed in the firmware; the wire colors are only an
-assembly convention to keep units consistent and easy to check.
+pin assignments are fixed in the firmware; the wire colors are only an
+assembly convention to keep units consistent and easy to check. Pin names
+match the board silkscreen (IO17, IO39, and so on).
 
 | Board pin | Goes to | Wire color |
 |---|---|---|
 | 5V | Ring 5V | red |
 | GND | Ring GND | black |
-| GPIO17 | Ring DIN (data) | green |
-| GPIO39 | Switch pole 1, terminal A | white |
-| GPIO40 | Switch pole 1, terminal B | white |
-| GPIO41 | Switch pole 2, terminal A | yellow |
-| GPIO42 | Switch pole 2, terminal B | yellow |
+| IO17 | Ring DIN (data) | green |
+| IO39 | Switch pole 1, terminal A | white |
+| IO40 | Switch pole 1, terminal B | white |
+| IO41 | Switch pole 2, terminal A | yellow |
+| IO42 | Switch pole 2, terminal B | yellow |
 
 ```mermaid
 flowchart LR
@@ -38,11 +39,11 @@ flowchart LR
         direction TB
         P5V["5V"]
         GND["GND"]
-        G17["GPIO17"]
-        G39["GPIO39 drive"]
-        G40["GPIO40 sense"]
-        G41["GPIO41 drive"]
-        G42["GPIO42 sense"]
+        G17["IO17"]
+        G39["IO39 drive"]
+        G40["IO40 sense"]
+        G41["IO41 drive"]
+        G42["IO42 sense"]
     end
 
     subgraph RING["WS2812 ring, 16 LEDs"]
@@ -86,7 +87,7 @@ Notes:
 - The ring can be installed in any of its 16 rotations. Which pixel counts
   as LED 1 is a per-device setting, calibrated over the network after
   assembly (`POST /api/ring_offset`, see `../docs/API.md`).
-- The board's onboard status LED (GPIO21) needs no wiring.
+- The board's onboard status LED (IO21) needs no wiring.
 
 ## Bill of materials
 
