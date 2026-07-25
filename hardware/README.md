@@ -16,7 +16,7 @@ side pod.
 ## Pinout and wiring
 
 Two external parts connect to the board: the 16-LED WS2812 ring and a DPST
-normally-closed E-stop switch. Each pole of the switch sits in its own
+normally-closed E-stop button. Each pole of the button sits in its own
 loopback: the firmware drives one GPIO and reads the echo on another, once
 per pole, so a broken wire reads the same as a pressed button (STOP). The
 pin assignments are fixed in the firmware; the wire colors are only an
@@ -28,10 +28,10 @@ match the board silkscreen (IO17, IO39, and so on).
 | VBUS | Ring 5V | red |
 | GND | Ring GND | black |
 | IO17 | Ring DIN (data) | green |
-| IO39 | Switch pole 1, terminal A | white |
-| IO40 | Switch pole 1, terminal B | white |
-| IO41 | Switch pole 2, terminal A | yellow |
-| IO42 | Switch pole 2, terminal B | yellow |
+| IO39 | Button terminal 11 (pole A) | white |
+| IO40 | Button terminal 12 (pole A) | white |
+| IO41 | Button terminal 21 (pole B) | yellow |
+| IO42 | Button terminal 22 (pole B) | yellow |
 
 ```mermaid
 flowchart LR
@@ -53,12 +53,12 @@ flowchart LR
         RD["DIN"]
     end
 
-    subgraph SW["DPST E-stop switch, NC"]
+    subgraph SW["DPST E-stop button, NC"]
         direction TB
-        P1A["pole 1, term A"]
-        P1B["pole 1, term B"]
-        P2A["pole 2, term A"]
-        P2B["pole 2, term B"]
+        P1A["terminal 11, pole A"]
+        P1B["terminal 12, pole A"]
+        P2A["terminal 21, pole B"]
+        P2B["terminal 22, pole B"]
     end
 
     P5V --- |red| RV
@@ -78,8 +78,9 @@ flowchart LR
 
 Notes:
 
-- The switch poles have no polarity; either terminal of a pole can go to
-  the drive pin. Keep each color pair on one pole.
+- The button contacts have no polarity; within a pole, either terminal can
+  go to the drive pin. Keep each color pair on one pole: 11/12 together
+  (white), 21/22 together (yellow).
 - The sense pins are pulled down internally, so an open loop reads 0 and
   the firmware treats it as STOP. Pressing the button opens both poles at
   once; a single open loop (one broken wire) makes the two cores disagree,
