@@ -107,7 +107,7 @@ generic, so those stay as search links. All links open in a new window.
 | ~6 | M3 socket-head screws + brass heat-set inserts | Lid fasteners. Confirm length and count against the current print before buying in bulk. | <a href="https://www.amazon.com/s?k=m3+heat+set+insert+socket+head+kit" target="_blank" rel="noopener">search</a> |
 | 4 | M1.6 heat-set threaded inserts, M1.6 x 5 x 2.5 mm | Anchor the ESP32-S3-ETH board to the base; 2.5 mm is the insert height/depth. | <a href="https://www.amazon.com/s?k=m1.6+heat+set+threaded+insert" target="_blank" rel="noopener">search</a> |
 | 3 | 1 oz (28 g) adhesive steel weights | Ballast in the base floor pockets so the unit stays put on a table. Wheel-weight style, adhesive backed. | <a href="https://www.amazon.com/s?k=1oz+adhesive+wheel+weights+steel" target="_blank" rel="noopener">search</a> |
-| 1 | Printed enclosure | `print.3mf` in this folder (base, lid, diffuser). Not purchased; any common PLA/PETG works. | n/a |
+| 1 | Printed enclosure | `print.3mf` in this folder (base and lid; the diffuser is a white section of the lid print). Not purchased; any common PLA/PETG works. | n/a |
 
 ## Component datasheets
 
