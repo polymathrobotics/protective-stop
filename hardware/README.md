@@ -104,6 +104,17 @@ generic, so those stay as search links. All links open in a new window.
 | 4 | M1.6 heat-set threaded inserts, M1.6 x 5 x 2.5 mm | Anchor the ESP32-S3-ETH board to the base; 2.5 mm is the insert height/depth. | <a href="https://www.amazon.com/s?k=m1.6+heat+set+threaded+insert" target="_blank" rel="noopener">search</a> |
 | 1 | Printed enclosure | `print.3mf` in this folder (base, lid, diffuser). Not purchased; any common PLA/PETG works. | n/a |
 
+## Component datasheets
+
+The design contains no custom electronics; the active components are all
+off the shelf, with freely accessible datasheets:
+
+- <a href="https://files.waveshare.com/wiki/common/Esp32-s3_datasheet_en.pdf" target="_blank" rel="noopener">ESP32-S3 datasheet</a> (Espressif, via the Waveshare wiki)
+- <a href="https://files.waveshare.com/wiki/common/W5500_ds_v110e.pdf" target="_blank" rel="noopener">W5500 Ethernet controller datasheet</a> (WIZnet, via the Waveshare wiki)
+- <a href="https://files.waveshare.com/wiki/ESP32-S3-ETH/ESP32-S3-ETH-Schematic.pdf" target="_blank" rel="noopener">ESP32-S3-ETH carrier board schematic</a> (Waveshare)
+- <a href="https://cdn-shop.adafruit.com/datasheets/WS2812B.pdf" target="_blank" rel="noopener">WS2812B datasheet</a> (WorldSemi, the ring's LEDs)
+- <a href="https://www.nkkswitches.eu/pdf/estop_FF01.pdf" target="_blank" rel="noopener">FF01 series E-stop datasheet</a> (NKK Switches)
+
 ## Licensing
 
 The design is CERN-OHL-P-2.0 and the documentation is CC-BY-4.0; the full
