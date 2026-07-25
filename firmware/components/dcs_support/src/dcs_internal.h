@@ -213,8 +213,10 @@ extern "C"
   int dcs_nvs_read_reset_history(uint8_t * out, int max);
   uint8_t dcs_nvs_read_pstop_unit_num(void); /* 0 = auto (chip-ID derived) */
   esp_err_t dcs_nvs_write_pstop_unit_num(uint8_t n);
-  /* Ring rotation offset: the PHYSICAL pixel index (0..15, clockwise from the
- * data-in pad) that the installed bezel makes "LED 1". Absent -> 0. */
+  /* Ring rotation offset: the PHYSICAL pixel index (0..15) that the installed
+ * bezel makes "LED 1". Increasing the offset moves the displayed LED-1
+ * position COUNTER-clockwise viewed from the front (bench-verified on the
+ * assembled unit, 2026-07-24). Absent -> 0. */
   uint8_t dcs_nvs_read_ring_offset(void);
   esp_err_t dcs_nvs_write_ring_offset(uint8_t off);
 
