@@ -71,12 +71,16 @@ flowchart LR
 |---|---|
 | [`pstop_c/`](pstop_c/) | Certified protocol + machine-safety C library. Its own track; do not modify here, contribute upstream. |
 | `firmware/` | ESP-IDF 5.5 remote firmware (`pstop_remote`). `main/main.c` is the auditable lockstep core; `components/dcs_support/` is the shell (boot, OTA+rollback, admin UI, failover, telemetry). |
-| `components/` | `microlink/` (Tailscale/WireGuard/DERP), `ml_dev_tether/` (USB-CDC-NCM), `pstop/` (ESP-IDF glue that compiles `pstop_c/`). |
+| `components/` | [`microlink/`](https://github.com/CamM2325/microlink) (Tailscale/WireGuard/DERP), `ml_dev_tether/` (USB-CDC-NCM), `pstop/` (ESP-IDF glue that compiles `pstop_c/`). |
 | `host/` | `machine_app_runner` + `machine.toml`, the robot-side machine wrapper. |
 | `tools/` · `test/` | Wire-accurate test remote, chaos proxy, MISRA check, bulk USB flasher; bench chaos/soak/netem ladders. |
 | `docs/` | Design records, test reports, safety/recovery playbooks (`docs/archive/` holds historical records). |
 | `hardware/` | Enclosure CAD + board schematic (work in progress, see `hardware/README.md`). |
 | `archive/` | Deprecated ROS 2 / Foxglove packages, kept for reference pending removal. |
+
+The encrypted transport is [microlink](https://github.com/CamM2325/microlink),
+an embedded Tailscale client. This pstop work was possible in part by
+helping fund microlink's open source development.
 
 ## Quickstart
 
