@@ -443,6 +443,9 @@ static bool fleet_ota_checkin(
   cJSON_AddStringToObject(body, "idf_version", desc ? desc->idf_ver : "");
   cJSON_AddNumberToObject(body, "free_heap", esp_get_free_heap_size());
   cJSON_AddNumberToObject(body, "uptime_s", (double)(esp_timer_get_time() / 1000000));
+  /* Advertise our own cadence so the backend can judge staleness without
+   * polling the device for its configured interval. */
+  cJSON_AddNumberToObject(body, "check_interval_s", app->check_interval_s);
   cJSON_AddStringToObject(body, "tailscale_ip", tailscale_ip);
   cJSON_AddStringToObject(body, "local_ip", local_ip);
   cJSON_AddStringToObject(body, "state", app->tailscale_connected ? "CONNECTED" : (app->ml ? "CONNECTING" : "IDLE"));
