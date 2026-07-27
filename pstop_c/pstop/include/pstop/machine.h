@@ -57,6 +57,11 @@ typedef struct {
      * 2 = stop received
      */
     int restart_state;
+
+    /**
+     * Minimum time between a stop and ok message before ok transition.
+     */
+    uint64_t stop_time_ms;
 } robot_state_t;
 
 typedef struct pstop_machine_t {

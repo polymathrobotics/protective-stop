@@ -51,9 +51,7 @@ pstop_application_t pstop_app = {
     .machine_device_id.data = 1236,
     .remote_details_cb = is_operator_allowed,
     .status_cb = robot_status,
-    .log_message_cb = log_error,
-    .app_config.max_lost_messages = 1U,
-    .app_config.max_missed_heartbeats = 1U
+    .log_message_cb = log_error
 };
 
 #define MAX_CLIENTS 2U
@@ -73,7 +71,7 @@ void
 test_new_client_operator_not_allowed_req_3_11(void)
 {
     pstop_machine_t machine;
-
+    pstop_application_set_protocol_limits(&pstop_app, 1U, 1U, 1000U);
     machine_init(&machine, &pstop_app, pstop_clients, MAX_CLIENTS);
 
     pstop_msg_t msg;
@@ -98,6 +96,7 @@ test_new_client_no_more_clients_req_3_10(void)
 {
     pstop_machine_t machine;
 
+    pstop_application_set_protocol_limits(&pstop_app, 1U, 1U, 1000U);
     machine_init(&machine, &pstop_app, pstop_clients, MAX_CLIENTS);
 
     pstop_msg_t resp;
@@ -146,6 +145,7 @@ test_handle_mssage_null_resp(void)
 {
     pstop_machine_t machine;
 
+    pstop_application_set_protocol_limits(&pstop_app, 1U, 1U, 1000U);
     machine_init(&machine, &pstop_app, pstop_clients, MAX_CLIENTS);
 
     pstop_msg_t msg;
@@ -160,6 +160,7 @@ test_handle_mssage_invalid_message(void)
 {
     pstop_machine_t machine;
 
+    pstop_application_set_protocol_limits(&pstop_app, 1U, 1U, 1000U);
     machine_init(&machine, &pstop_app, pstop_clients, MAX_CLIENTS);
 
     pstop_msg_t msg;
@@ -178,6 +179,7 @@ test_new_client_operator_allowed(void)
 {
     pstop_machine_t machine;
 
+    pstop_application_set_protocol_limits(&pstop_app, 1U, 1U, 1000U);
     machine_init(&machine, &pstop_app, pstop_clients, MAX_CLIENTS);
 
     device_id_t id;
@@ -208,6 +210,7 @@ test_bond_req_bond_resp_req_3_12(void)
 {
     pstop_machine_t machine;
 
+    pstop_application_set_protocol_limits(&pstop_app, 1U, 1U, 1000U);
     machine_init(&machine, &pstop_app, pstop_clients, MAX_CLIENTS);
 
     device_id_t id;
@@ -239,6 +242,7 @@ test_ok_not_bonded_req_3_03(void)
 {
     pstop_machine_t machine;
 
+    pstop_application_set_protocol_limits(&pstop_app, 1U, 1U, 1000U);
     machine_init(&machine, &pstop_app, pstop_clients, MAX_CLIENTS);
 
     // OK => UNBOND
@@ -269,6 +273,7 @@ test_bond_unbond(void)
 {
     pstop_machine_t machine;
 
+    pstop_application_set_protocol_limits(&pstop_app, 1U, 1U, 1000U);
     machine_init(&machine, &pstop_app, pstop_clients, MAX_CLIENTS);
 
     device_id_t id;
@@ -307,6 +312,7 @@ test_bond_ok(void)
 {
     pstop_machine_t machine;
 
+    pstop_application_set_protocol_limits(&pstop_app, 1U, 1U, 1000U);
     machine_init(&machine, &pstop_app, pstop_clients, MAX_CLIENTS);
 
     device_id_t id;
@@ -338,6 +344,7 @@ test_bond_bond(void)
 {
     pstop_machine_t machine;
 
+    pstop_application_set_protocol_limits(&pstop_app, 1U, 1U, 1000U);
     machine_init(&machine, &pstop_app, pstop_clients, MAX_CLIENTS);
 
     device_id_t id;
@@ -370,6 +377,7 @@ test_bond_ok_stop_req_3_17(void)
 {
     pstop_machine_t machine;
 
+    pstop_application_set_protocol_limits(&pstop_app, 1U, 1U, 1000U);
     machine_init(&machine, &pstop_app, pstop_clients, MAX_CLIENTS);
 
     device_id_t id;
@@ -398,6 +406,8 @@ test_bond_ok_stop_req_3_17(void)
     TEST_ASSERT_EQUAL(PSTOP_OK, machine_handle_message(&machine, &msg, &resp));
     TEST_ASSERT_EQUAL(PSTOP_MESSAGE_STOP, resp.message);
 
+    current_time += 1001U;
+
     for(int i = 0; i < 10; ++i) {
         msg.message = PSTOP_MESSAGE_OK;
         TEST_ASSERT_EQUAL(PSTOP_OK, machine_handle_message(&machine, &msg, &resp));
@@ -419,6 +429,7 @@ test_bond_stop_ok_req_3_04(void)
 {
     pstop_machine_t machine;
 
+    pstop_application_set_protocol_limits(&pstop_app, 1U, 1U, 1000U);
     machine_init(&machine, &pstop_app, pstop_clients, MAX_CLIENTS);
 
     device_id_t id;
@@ -459,6 +470,7 @@ test_bond_stop_ok_req_3_04(void)
     TEST_ASSERT_EQUAL(PSTOP_MESSAGE_STOP, resp.message);
     TEST_ASSERT_EQUAL(PSTOP_STATUS_STOP, last_status);
 
+    current_time += 1001U;
     msg.message = PSTOP_MESSAGE_OK;
     TEST_ASSERT_EQUAL(PSTOP_OK, machine_handle_message(&machine, &msg, &resp));
     TEST_ASSERT_EQUAL(PSTOP_MESSAGE_OK, resp.message);
@@ -476,6 +488,7 @@ test_bond_stop_stop_ok_req_3_08(void)
 {
     pstop_machine_t machine;
 
+    pstop_application_set_protocol_limits(&pstop_app, 1U, 1U, 1000U);
     machine_init(&machine, &pstop_app, pstop_clients, MAX_CLIENTS);
 
     device_id_t id;
@@ -517,6 +530,7 @@ test_bond_stop_stop_ok_req_3_08(void)
     TEST_ASSERT_EQUAL(PSTOP_MESSAGE_STOP, resp.message);
     TEST_ASSERT_EQUAL(ROBOT_RESTART_STATE_STOP_RECEIVED, machine.robot_state.restart_state);
 
+    current_time += 1001U;
     msg.message = PSTOP_MESSAGE_OK;
     TEST_ASSERT_EQUAL(PSTOP_OK, machine_handle_message(&machine, &msg, &resp));
     TEST_ASSERT_EQUAL(PSTOP_MESSAGE_OK, resp.message);
@@ -535,6 +549,66 @@ test_bond_stop_stop_ok_req_3_08(void)
     TEST_ASSERT_EQUAL(0U, pstop_remote_num_active(&(machine.remotes)));
 }
 
+/*
+ * Send bond. Send stop. Send OK immediately after. Should not transition
+ * to OK. Wait 1 second (configured transition time), then send OK, should transition to OK.
+ */
+static
+void
+test_bond_stop_ok_req_3_24(void)
+{
+    pstop_machine_t machine;
+
+    pstop_application_set_protocol_limits(&pstop_app, 1U, 1U, 1000U);
+    machine_init(&machine, &pstop_app, pstop_clients, MAX_CLIENTS);
+
+    device_id_t id;
+    pstop_msg_t msg;
+    init_client(&id, &msg, 1234);
+
+    pstop_msg_t resp;
+    pstop_message_init(&resp);
+
+    details.allowed = true;
+    details.stop_only = 0;
+    details.heartbeat_ms = 500U;
+    current_time = 100U;
+
+    robot_status_counter = 0;
+
+    msg.message = PSTOP_MESSAGE_BOND;
+    TEST_ASSERT_EQUAL(PSTOP_OK, machine_handle_message(&machine, &msg, &resp));
+    TEST_ASSERT_EQUAL(PSTOP_MESSAGE_BOND, resp.message);
+    TEST_ASSERT_EQUAL(ROBOT_RESTART_STATE_NEED_STOP, machine.robot_state.restart_state);
+
+    TEST_ASSERT_EQUAL(0, robot_status_counter);
+
+    msg.message = PSTOP_MESSAGE_STOP;
+    TEST_ASSERT_EQUAL(PSTOP_OK, machine_handle_message(&machine, &msg, &resp));
+    TEST_ASSERT_EQUAL(PSTOP_MESSAGE_STOP, resp.message);
+    TEST_ASSERT_EQUAL(ROBOT_RESTART_STATE_STOP_RECEIVED, machine.robot_state.restart_state);
+    TEST_ASSERT_EQUAL(machine.robot_state.remote_stop_id, pstop_clients[0].local_remote_id);
+
+    // too soon for OK
+    msg.message = PSTOP_MESSAGE_OK;
+    TEST_ASSERT_EQUAL(PSTOP_OK, machine_handle_message(&machine, &msg, &resp));
+    TEST_ASSERT_EQUAL(PSTOP_MESSAGE_STOP, resp.message);
+    TEST_ASSERT_EQUAL(ROBOT_RESTART_STATE_STOP_RECEIVED, machine.robot_state.restart_state);
+    TEST_ASSERT_EQUAL(machine.robot_state.remote_stop_id, pstop_clients[0].local_remote_id);
+
+    // skip ahead 1 second
+    current_time += 1001U;
+
+    msg.message = PSTOP_MESSAGE_OK;
+    TEST_ASSERT_EQUAL(PSTOP_OK, machine_handle_message(&machine, &msg, &resp));
+    TEST_ASSERT_EQUAL(PSTOP_MESSAGE_OK, resp.message);
+    TEST_ASSERT_EQUAL(ROBOT_RESTART_STATE_OK, machine.robot_state.restart_state);
+    TEST_ASSERT_EQUAL(machine.robot_state.remote_stop_id, pstop_clients[0].local_remote_id);
+    TEST_ASSERT_EQUAL(ROBOT_STATE_OK, last_status);
+
+    TEST_ASSERT_EQUAL(1U, pstop_remote_num_active(&(machine.remotes)));
+}
+
 /**
  * Send STOP message for an unbonded client.
  * Should respond with UNBOND
@@ -545,6 +619,7 @@ test_unbonded_stop(void)
 {
     pstop_machine_t machine;
 
+    pstop_application_set_protocol_limits(&pstop_app, 1U, 1U, 1000U);
     machine_init(&machine, &pstop_app, pstop_clients, MAX_CLIENTS);
 
     device_id_t id;
@@ -574,6 +649,7 @@ test_heartbeat_timeout(void)
 {
     pstop_machine_t machine;
 
+    pstop_application_set_protocol_limits(&pstop_app, 1U, 1U, 1000U);
     machine_init(&machine, &pstop_app, pstop_clients, MAX_CLIENTS);
 
     device_id_t id;
@@ -602,6 +678,7 @@ test_bond_stop_ok_stop_only_operator(void)
 {
     pstop_machine_t machine;
 
+    pstop_application_set_protocol_limits(&pstop_app, 1U, 1U, 1000U);
     machine_init(&machine, &pstop_app, pstop_clients, MAX_CLIENTS);
 
     device_id_t id;
@@ -648,6 +725,7 @@ test_bond_after_bond_req_3_24(void)
 {
     pstop_machine_t machine;
 
+    pstop_application_set_protocol_limits(&pstop_app, 1U, 1U, 1000U);
     machine_init(&machine, &pstop_app, pstop_clients, MAX_CLIENTS);
 
     device_id_t id;
@@ -685,6 +763,7 @@ test_bond_after_stop_ok_sequence_req_3_03(void)
 {
     pstop_machine_t machine;
 
+    pstop_application_set_protocol_limits(&pstop_app, 1U, 1U, 1000U);
     machine_init(&machine, &pstop_app, pstop_clients, MAX_CLIENTS);
 
     device_id_t id, id2;
@@ -715,6 +794,7 @@ test_bond_after_stop_ok_sequence_req_3_03(void)
     TEST_ASSERT_EQUAL(1, robot_status_counter);
     TEST_ASSERT_EQUAL(PSTOP_STATUS_STOP, last_status);
 
+    current_time += 1001U;
     msg.message = PSTOP_MESSAGE_OK;
     TEST_ASSERT_EQUAL(PSTOP_OK, machine_handle_message(&machine, &msg, &resp));
     TEST_ASSERT_EQUAL(PSTOP_MESSAGE_OK, resp.message);
@@ -749,6 +829,7 @@ test_bond_after_stop_ok_sequence_req_3_03(void)
     TEST_ASSERT_EQUAL(PSTOP_STATUS_STOP, last_status);
 
     msg.message = PSTOP_MESSAGE_OK;
+    current_time += 1001U;
     TEST_ASSERT_EQUAL(PSTOP_OK, machine_handle_message(&machine, &msg, &resp));
     TEST_ASSERT_EQUAL(PSTOP_MESSAGE_OK, resp.message);
     TEST_ASSERT_EQUAL(5, robot_status_counter);
@@ -765,6 +846,7 @@ test_2_clients(void)
 {
     pstop_machine_t machine;
 
+    pstop_application_set_protocol_limits(&pstop_app, 1U, 1U, 1000U);
     machine_init(&machine, &pstop_app, pstop_clients, MAX_CLIENTS);
 
     device_id_t id1, id2;
@@ -804,6 +886,7 @@ test_2_clients(void)
     TEST_ASSERT_EQUAL(PSTOP_MESSAGE_STOP, resp.message);
 
     // first node sends OK, should reply OK
+    current_time += 1001U;
     msg1.message = PSTOP_MESSAGE_OK;
     TEST_ASSERT_EQUAL(PSTOP_OK, machine_handle_message(&machine, &msg1, &resp));
     TEST_ASSERT_EQUAL(PSTOP_MESSAGE_OK, resp.message);
@@ -825,6 +908,7 @@ test_2_clients_unbond_before_ok(void)
 {
     pstop_machine_t machine;
 
+    pstop_application_set_protocol_limits(&pstop_app, 1U, 1U, 1000U);
     machine_init(&machine, &pstop_app, pstop_clients, MAX_CLIENTS);
 
     device_id_t id1, id2;
@@ -874,6 +958,7 @@ test_2_clients_unbond_second(void)
 {
     pstop_machine_t machine;
 
+    pstop_application_set_protocol_limits(&pstop_app, 1U, 1U, 1000U);
     machine_init(&machine, &pstop_app, pstop_clients, MAX_CLIENTS);
 
     device_id_t id1, id2;
@@ -907,6 +992,7 @@ test_2_clients_unbond_second(void)
     TEST_ASSERT_EQUAL(PSTOP_MESSAGE_STOP, resp.message);
 
     // first node sends OK, should reply OK. First client is in control
+    current_time += 1001U;
     msg1.message = PSTOP_MESSAGE_OK;
     TEST_ASSERT_EQUAL(PSTOP_OK, machine_handle_message(&machine, &msg1, &resp));
     TEST_ASSERT_EQUAL(PSTOP_MESSAGE_OK, resp.message);
@@ -931,6 +1017,7 @@ test_2_clients_stop_unbond(void)
 {
     pstop_machine_t machine;
 
+    pstop_application_set_protocol_limits(&pstop_app, 1U, 1U, 1000U);
     machine_init(&machine, &pstop_app, pstop_clients, MAX_CLIENTS);
 
     device_id_t id1, id2;
@@ -966,6 +1053,7 @@ test_2_clients_stop_unbond(void)
     TEST_ASSERT_EQUAL(machine.robot_state.remote_stop_id, pstop_clients[0].local_remote_id);
 
     // then OK. It's in control
+    current_time += 1001U;
     msg1.message = PSTOP_MESSAGE_OK;
     TEST_ASSERT_EQUAL(PSTOP_OK, machine_handle_message(&machine, &msg1, &resp));
     TEST_ASSERT_EQUAL(machine.robot_state.remote_stop_id, pstop_clients[0].local_remote_id);
@@ -989,6 +1077,7 @@ test_2_clients_stop_unbond(void)
     TEST_ASSERT_EQUAL(machine.robot_state.remote_stop_id, pstop_clients[1].local_remote_id);
 
     msg2.message = PSTOP_MESSAGE_OK;
+    current_time += 1001U;
     TEST_ASSERT_EQUAL(PSTOP_OK, machine_handle_message(&machine, &msg2, &resp));
     TEST_ASSERT_EQUAL(PSTOP_MESSAGE_OK, resp.message);
     TEST_ASSERT_EQUAL(ROBOT_STATE_OK, machine.robot_state.robot_state);
@@ -1001,6 +1090,7 @@ test_2_clients_stop_ok(void)
 {
     pstop_machine_t machine;
 
+    pstop_application_set_protocol_limits(&pstop_app, 1U, 1U, 1000U);
     machine_init(&machine, &pstop_app, pstop_clients, MAX_CLIENTS);
 
     device_id_t id1, id2;
@@ -1044,6 +1134,7 @@ test_2_clients_stop_ok(void)
     TEST_ASSERT_EQUAL(PSTOP_STATUS_STOP, last_status);
 
     // first node sends OK. It's in control
+    current_time += 1001U;
     msg1.message = PSTOP_MESSAGE_OK;
     TEST_ASSERT_EQUAL(PSTOP_OK, machine_handle_message(&machine, &msg1, &resp));
     TEST_ASSERT_EQUAL(PSTOP_MESSAGE_OK, resp.message);
@@ -1075,6 +1166,7 @@ test_2_clients_stop_only_stop(void)
 {
     pstop_machine_t machine;
 
+    pstop_application_set_protocol_limits(&pstop_app, 1U, 1U, 1000U);
     machine_init(&machine, &pstop_app, pstop_clients, MAX_CLIENTS);
 
     device_id_t id1, id2;
@@ -1112,6 +1204,7 @@ test_2_clients_stop_only_stop(void)
     TEST_ASSERT_EQUAL(machine.robot_state.remote_stop_id, pstop_clients[0].local_remote_id);
 
     // first node sends OK. it's in control
+    current_time += 1001U;
     msg1.message = PSTOP_MESSAGE_OK;
     TEST_ASSERT_EQUAL(PSTOP_OK, machine_handle_message(&machine, &msg1, &resp));
     TEST_ASSERT_EQUAL(PSTOP_MESSAGE_OK, resp.message);
@@ -1154,6 +1247,7 @@ main_machine_test(void)
     RUN_TEST(test_bond_bond);
     RUN_TEST(test_bond_ok_stop_req_3_17);
     RUN_TEST(test_bond_stop_stop_ok_req_3_08);
+    RUN_TEST(test_bond_stop_ok_req_3_24);
     RUN_TEST(test_unbonded_stop);
     RUN_TEST(test_2_clients);
     RUN_TEST(test_2_clients_unbond_second);
