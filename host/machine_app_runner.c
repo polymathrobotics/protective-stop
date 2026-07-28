@@ -25,13 +25,17 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+#include <netdb.h>
+#include <pthread.h>
 #include <signal.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/socket.h>
 #include <time.h>
+#include <unistd.h>
 
 #include "pstop/machine.h"
 #include "pstop/pstop_msg.h"
@@ -85,6 +89,16 @@ typedef struct
      * (pstop_c, certification track) is NOT modified: veto uses only public
      * API and lands in the same state as a heartbeat timeout. */
   uint64_t min_stop_ms;
+  /* [announce] — optional check-in to a central management console so an
+     * operator dashboard can show this machine as RUNNING. One HTTP POST of
+     * {"name":..., "port":...} every announce_interval_s; entirely OFF when
+     * announce_url is empty. The URL and bearer-key FILE PATH can also come
+     * from the environment (PSTOP_ANNOUNCE_URL / PSTOP_ANNOUNCE_KEY_FILE),
+     * so deployment endpoints and secrets stay out of committed config. */
+  char announce_url[256]; /* http://host[:port]/path — empty = disabled  */
+  char announce_key_file[256]; /* file whose first line is the bearer token  */
+  char announce_name[64]; /* display name; empty = gethostname()         */
+  int announce_interval_s; /* default 60                                   */
   /* [[operator]] entries */
   op_cfg_t operators[MAX_OPERATORS];
   int n_operators;
@@ -115,6 +129,10 @@ static void cfg_defaults(machine_cfg_t * c)
   c->min_stop_ms = 500U;
   c->default_stop_only = 0;
   c->n_operators = 0;
+  c->announce_url[0] = '\0';
+  c->announce_key_file[0] = '\0';
+  c->announce_name[0] = '\0';
+  c->announce_interval_s = 60;
 }
 
 static char * trim(char * s)
@@ -222,6 +240,14 @@ static int cfg_load(machine_cfg_t * c, const char * path)
       c->default_stop_only = parse_bool(val);
     else if (!strcmp(key, "min_stop_ms"))
       c->min_stop_ms = parse_uint(val);
+    else if (!strcmp(key, "announce_url"))
+      snprintf(c->announce_url, sizeof(c->announce_url), "%s", val);
+    else if (!strcmp(key, "announce_key_file"))
+      snprintf(c->announce_key_file, sizeof(c->announce_key_file), "%s", val);
+    else if (!strcmp(key, "announce_name"))
+      snprintf(c->announce_name, sizeof(c->announce_name), "%s", val);
+    else if (!strcmp(key, "announce_interval_s"))
+      c->announce_interval_s = (int)parse_uint(val);
     else
       fprintf(stderr, "  config: unknown key '%s' (section [%s])\n", key, section);
   }
@@ -446,9 +472,133 @@ static void log_message(uint64_t timestamp, const device_id_t * client, uint8_t 
   (void)timestamp;
   if (error == PSTOP_OK) {
     fprintf(stderr, "RX <- remote 0x%08X  now sending %s\n", client->data, msg_name(message));
+  } else if ((error == PSTOP_MISSED_HEARTBEATS) && (message == PSTOP_MESSAGE_UNKNOWN)) {
+    /* Not a received packet: this is the library's check_heartbeats verdict
+     * (machine.c logs it with PSTOP_MESSAGE_UNKNOWN as a placeholder).
+     * Printing it as "RX <-" cost real diagnosis time on the bench. */
+    fprintf(stderr, "LIVENESS remote 0x%08X declared lost [MISSED_HEARTBEATS] — robot stopping\n", client->data);
   } else {
     fprintf(stderr, "RX <- remote 0x%08X  %s REJECTED [%s]\n", client->data, msg_name(message), err_name(error));
   }
+}
+
+/* ============================================================================
+ * Console announce — optional periodic POST so a management console can show
+ * this machine as RUNNING. Deliberately dependency-free (raw HTTP/1.1 over a
+ * TCP socket, http:// only) and fully outside the safety loop: it runs on
+ * its own thread, and any failure only logs. The safety protocol never
+ * depends on it.
+ * ========================================================================== */
+
+static int announce_post_once(const char * url, const char * key, const char * name, int pstop_port)
+{
+  /* Parse http://host[:port]/path */
+  const char * p = url;
+  if (strncmp(p, "http://", 7) != 0) return -1;
+  p += 7;
+  char host[128];
+  int port = 80;
+  size_t h = 0;
+  while (*p && *p != ':' && *p != '/' && h + 1 < sizeof(host)) host[h++] = *p++;
+  host[h] = '\0';
+  if (*p == ':') port = atoi(++p);
+  while (*p && *p != '/') p++;
+  const char * path = (*p != '\0') ? p : "/";
+  if (host[0] == '\0' || port <= 0 || port > 65535) return -1;
+
+  char portstr[8];
+  snprintf(portstr, sizeof(portstr), "%d", port);
+  struct addrinfo hints;
+  memset(&hints, 0, sizeof(hints));
+  hints.ai_family = AF_INET;
+  hints.ai_socktype = SOCK_STREAM;
+  struct addrinfo * ai = NULL;
+  if (getaddrinfo(host, portstr, &hints, &ai) != 0 || ai == NULL) return -2;
+
+  int fd = socket(ai->ai_family, ai->ai_socktype, ai->ai_protocol);
+  if (fd < 0) {
+    freeaddrinfo(ai);
+    return -3;
+  }
+  struct timeval tv = {.tv_sec = 10, .tv_usec = 0};
+  (void)setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+  (void)setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+  int rc = connect(fd, ai->ai_addr, ai->ai_addrlen);
+  freeaddrinfo(ai);
+  if (rc != 0) {
+    close(fd);
+    return -4;
+  }
+
+  char body[192];
+  int blen = snprintf(body, sizeof(body), "{\"name\":\"%s\",\"port\":%d}", name, pstop_port);
+  char req[768];
+  int rlen = snprintf(
+    req,
+    sizeof(req),
+    "POST %s HTTP/1.1\r\nHost: %s\r\nAuthorization: Bearer %s\r\n"
+    "Content-Type: application/json\r\nContent-Length: %d\r\n"
+    "Connection: close\r\n\r\n%s",
+    path,
+    host,
+    key,
+    blen,
+    body);
+  if (rlen <= 0 || rlen >= (int)sizeof(req)) {
+    close(fd);
+    return -5;
+  }
+  if (send(fd, req, (size_t)rlen, 0) != rlen) {
+    close(fd);
+    return -6;
+  }
+  char resp[64];
+  ssize_t n = recv(fd, resp, sizeof(resp) - 1, 0);
+  close(fd);
+  if (n < 12) return -7;
+  resp[n] = '\0';
+  /* "HTTP/1.1 200 ..." */
+  int status = atoi(resp + 9);
+  return (status >= 200 && status < 300) ? 0 : status;
+}
+
+static void * announce_thread(void * arg)
+{
+  (void)arg;
+  char key[128] = "";
+  if (g_cfg.announce_key_file[0] != '\0') {
+    FILE * f = fopen(g_cfg.announce_key_file, "r");
+    if (f != NULL) {
+      if (fgets(key, sizeof(key), f) != NULL) {
+        key[strcspn(key, "\r\n")] = '\0';
+      }
+      fclose(f);
+    } else {
+      fprintf(stderr, "announce: cannot read key file %s — announce disabled\n", g_cfg.announce_key_file);
+      return NULL;
+    }
+  }
+  char name[64];
+  if (g_cfg.announce_name[0] != '\0') {
+    snprintf(name, sizeof(name), "%s", g_cfg.announce_name);
+  } else if (gethostname(name, sizeof(name)) != 0) {
+    snprintf(name, sizeof(name), "%s", "pstop-machine");
+  }
+  name[sizeof(name) - 1] = '\0';
+  int interval = (g_cfg.announce_interval_s > 0) ? g_cfg.announce_interval_s : 60;
+  int last_rc = -1000; /* log only on state change, not every minute */
+  while (s_running) {
+    int rc = announce_post_once(g_cfg.announce_url, key, name, g_cfg.port);
+    if (rc != last_rc) {
+      if (rc == 0)
+        fprintf(stderr, "announce: OK -> %s (as \"%s\")\n", g_cfg.announce_url, name);
+      else
+        fprintf(stderr, "announce: FAILED rc=%d -> %s (will keep retrying)\n", rc, g_cfg.announce_url);
+      last_rc = rc;
+    }
+    for (int i = 0; i < interval && s_running; i++) sleep(1);
+  }
+  return NULL;
 }
 
 static pstop_application_t pstop_app;
@@ -479,6 +629,14 @@ int main(int argc, char * argv[])
   }
   if (force_verbose) g_cfg.verbose = 1;
   if (port_override) g_cfg.port = port_override;
+  /* Environment overrides keep deployment endpoints/secrets out of the
+     * committed toml (see [announce] in machine.toml). */
+  {
+    const char * e = getenv("PSTOP_ANNOUNCE_URL");
+    if (e != NULL && e[0] != '\0') snprintf(g_cfg.announce_url, sizeof(g_cfg.announce_url), "%s", e);
+    e = getenv("PSTOP_ANNOUNCE_KEY_FILE");
+    if (e != NULL && e[0] != '\0') snprintf(g_cfg.announce_key_file, sizeof(g_cfg.announce_key_file), "%s", e);
+  }
   if (g_cfg.port <= 0 || g_cfg.port > 65535) {
     fprintf(stderr, "bad port: %d\n", g_cfg.port);
     return 1;
@@ -525,6 +683,18 @@ int main(int argc, char * argv[])
     g_cfg.bind_addr,
     g_cfg.port,
     g_cfg.machine_device_id);
+
+  pthread_t announce_tid;
+  bool announce_started = false;
+  if (g_cfg.announce_url[0] != '\0') {
+    if (pthread_create(&announce_tid, NULL, announce_thread, NULL) == 0) {
+      announce_started = true;
+      fprintf(
+        stderr, "announce: every %ds to %s\n", g_cfg.announce_interval_s, g_cfg.announce_url);
+    } else {
+      fprintf(stderr, "announce: thread create failed — continuing without\n");
+    }
+  }
 
   uint8_t reqbytes[PSTOP_MESSAGE_SIZE];
   uint8_t respbytes[PSTOP_MESSAGE_SIZE];
@@ -762,6 +932,9 @@ int main(int argc, char * argv[])
   }
 
   fprintf(stderr, "shutting down\n");
+  if (announce_started) {
+    (void)pthread_join(announce_tid, NULL); /* s_running=0 ends it within 1s */
+  }
   transport_udp_close(&udp_transport);
   free(pstop_clients);
   return 0;

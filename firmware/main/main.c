@@ -602,6 +602,29 @@ static bool sess_sendto(pstop_sess_t * s, const uint8_t * bytes)
   return n == PSTOP_MESSAGE_SIZE;
 }
 
+/* Aggregate send-failure causes (errno buckets), published to /state.json so
+ * a climbing send_fail can be attributed without guesswork: ENOMEM = TX
+ * queue/pbuf pressure (typically the DERP relay path under load); route =
+ * no path to the peer (tunnel down / no session); other = the rest. */
+static uint32_t g_sf_nomem;
+static uint32_t g_sf_route;
+static uint32_t g_sf_other;
+static int g_sf_last_errno;
+
+static void sess_count_send_fail(pstop_sess_t * s)
+{
+  int e = errno;
+  s->send_fail++;
+  g_sf_last_errno = e;
+  if (e == ENOMEM) {
+    g_sf_nomem++;
+  } else if ((e == EHOSTUNREACH) || (e == ENETUNREACH) || (e == EADDRNOTAVAIL)) {
+    g_sf_route++;
+  } else {
+    g_sf_other++;
+  }
+}
+
 /* Fire one BOND if none is in flight (or the last one timed out). Never
  * blocks; the reply is picked up by the shared drain pass. */
 static void sess_bond_step(pstop_sess_t * s, int slot, uint64_t now_ms)
@@ -639,7 +662,7 @@ static void sess_bond_step(pstop_sess_t * s, int slot, uint64_t now_ms)
 
   if (!sess_sendto(s, req_bytes)) {
     ESP_LOGW(TAG, "m%d BOND sendto failed (errno=%d)", slot, errno);
-    s->send_fail++;
+    sess_count_send_fail(s);
     /* Leave bond_sent_ms at now anyway so we back off BOND_RETRY_MS —
          * a dead route fails instantly and would otherwise spam every tick. */
   }
@@ -850,7 +873,7 @@ static void comparator_task(void * arg)
           s->sent++;
           sent_any = true;
         } else {
-          s->send_fail++;
+          sess_count_send_fail(s);
         }
       }
     } else {
@@ -982,6 +1005,7 @@ static void comparator_task(void * arg)
     } else {
       /* all OK: agg_msg stays OK */
     }
+    dcs_publish_pstop_sf_causes(g_sf_nomem, g_sf_route, g_sf_other, g_sf_last_errno);
     atomic_store(&g_dcs_pstop_last_msg, agg_msg);
     atomic_store(&g_dcs_pstop_replies, agg_replies);
     dcs_publish_comparator(agg_sent, mismatch, agg_fail, agg_last_reply, agg_rtt);

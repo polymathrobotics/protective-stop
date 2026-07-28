@@ -14,7 +14,7 @@ PSTOP_INC   := -I$(PSTOP_ROOT)/pstop/include -I$(PSTOP_ROOT)/transport/include
 PSTOP_SRCS  := $(wildcard $(PSTOP_ROOT)/pstop/src/pstop/*.c)
 TRANS_SRCS  := $(PSTOP_ROOT)/transport/src/transport/udp/udp_transport.c
 
-CFLAGS   ?= -O2 -Wall -Wextra -Wno-unused-parameter
+CFLAGS   ?= -O2 -Wall -Wextra -Wno-unused-parameter -pthread
 CPPFLAGS += $(PSTOP_INC)
 
 # Note: upstream's pstop/time.c (Linux-only) is intentionally included for

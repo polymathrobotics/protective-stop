@@ -782,12 +782,21 @@ static int add_peer(microlink_t * ml, const ml_peer_update_t * update)
   p->active = true;
   maybe_rehome_to_priority(ml, p);
 
-  /* Copy endpoints */
-  p->endpoint_count = update->endpoint_count;
-  for (int i = 0; i < update->endpoint_count && i < ML_MAX_ENDPOINTS; i++) {
-    p->endpoints[i].ip = update->endpoints[i].ip;
-    p->endpoints[i].port = update->endpoints[i].port;
-    p->endpoints[i].is_ipv6 = update->endpoints[i].is_ipv6;
+  /* Copy endpoints — but PRESERVE previously-learned ones when the update
+     * carries none. Full peer re-syncs (coord reconnect / long-poll re-sync)
+     * can deliver a peer entry with an empty Endpoints array, and blindly
+     * copying endpoint_count=0 wiped the stored candidates, leaving the
+     * peer DERP-only until the next endpoint patch (observed on the bench:
+     * a 46h-uptime unit with an empty candidate list for a peer whose
+     * netmap endpoints other units held fine). Same rationale as the
+     * derp_region preservation above. */
+  if (update->endpoint_count > 0) {
+    p->endpoint_count = update->endpoint_count;
+    for (int i = 0; i < update->endpoint_count && i < ML_MAX_ENDPOINTS; i++) {
+      p->endpoints[i].ip = update->endpoints[i].ip;
+      p->endpoints[i].port = update->endpoints[i].port;
+      p->endpoints[i].is_ipv6 = update->endpoints[i].is_ipv6;
+    }
   }
 
   /* Initialize DISCO/direct-path state — ONLY for a genuinely new peer.
@@ -1358,6 +1367,34 @@ static void process_disco_ping(
   ml_derp_queue_send(ml, p->public_key, pong, pong_len);
 
   ESP_LOGI(TAG, "PONG sent to %s (direct=%s, DERP=yes)", p->hostname, direct_sent ? "yes" : "no");
+
+  /* 4. Learn from an inbound DIRECT ping: the source 5-tuple provably
+     * reaches us peer->chip, so adopt it as a candidate and immediately
+     * race our own ping at it to validate the chip->peer direction (a pong
+     * flips has_direct_path). Without this, a chip whose stored candidate
+     * list is empty (netmap endpoints missed or wiped) stays DERP-only
+     * forever even while the peer pings it directly every few seconds. */
+  if (!pkt->via_derp && pkt->src_ip != 0 && pkt->src_port != 0 && !p->has_direct_path) {
+    bool known = false;
+    for (int i = 0; i < p->endpoint_count; i++) {
+      if (!p->endpoints[i].is_ipv6 && p->endpoints[i].ip == pkt->src_ip &&
+          p->endpoints[i].port == pkt->src_port) {
+        known = true;
+        break;
+      }
+    }
+    if (!known && p->endpoint_count < ML_MAX_ENDPOINTS) {
+      p->endpoints[p->endpoint_count].ip = pkt->src_ip;
+      p->endpoints[p->endpoint_count].port = pkt->src_port;
+      p->endpoints[p->endpoint_count].is_ipv6 = false;
+      p->endpoint_count++;
+      ESP_LOGI(
+        TAG,
+        "Learned candidate endpoint for %s from inbound direct ping",
+        p->hostname);
+    }
+    disco_send_ping_to_peer(ml, peer_idx, true);
+  }
 }
 
 static void process_disco_pong(

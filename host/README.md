@@ -22,7 +22,27 @@ certification track) is linked unmodified. This wrapper adds:
   arming — **any real actuation must hang off the latched status, never
   the library's raw callback**;
 - sequence-anomaly logging (counter gaps/regressions, non-monotonic
-  stamps, pstop rejections with direction disambiguation).
+  stamps, pstop rejections with direction disambiguation);
+- optional **console announce** (`[announce]` in machine.toml, or
+  `PSTOP_ANNOUNCE_URL` / `PSTOP_ANNOUNCE_KEY_FILE` in the environment): a
+  60 s bearer-authenticated POST so a management dashboard can show this
+  machine as RUNNING. Off by default, never on the safety path.
+
+## Liveness timeout — read this before tuning
+
+The library declares a remote lost after **`heartbeat_ms ×
+max_missed_heartbeats`** of silence (`machine.c` computes
+`missed = silence / heartbeat_ms` and stops at `missed >=
+max_missed_heartbeats`). It is **not** `× (max_missed + 1)`.
+
+Remotes publish at `heartbeat_ms / 2`, and the dual-core remote
+**deliberately withholds one send** whenever its lockstep comparator
+disagrees for a tick. With `max_missed_heartbeats = 1` the timeout equals
+exactly two send slots, so a single withheld tick lands *on* the deadline
+and races the 10 ms liveness poll — observed on the bench (2026-07-27
+soak) as sporadic false `MISSED_HEARTBEATS` stops every ~15 min. **Do not
+use `max_missed_heartbeats = 1` with lockstep remotes.** The default is 3
+(six send slots of margin; ~1.2 s stop at `heartbeat_ms = 400`).
 
 ## Build
 

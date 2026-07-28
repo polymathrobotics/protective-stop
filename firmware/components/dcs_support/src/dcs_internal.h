@@ -117,6 +117,14 @@ extern "C"
   extern atomic_uint_fast32_t g_dcs_pstop_last_msg; /* last message TYPE from the machine (PSTOP_MESSAGE_*) */
   extern atomic_uint_fast32_t g_dcs_pstop_mismatch;
   extern atomic_uint_fast32_t g_dcs_pstop_send_fail;
+  /* send_fail split by cause (errno at the failing sendto): ENOMEM =
+   * TX-queue/pbuf pressure (typically DERP relay backpressure), route =
+   * EHOSTUNREACH/ENETUNREACH/EADDRNOTAVAIL (no path / tunnel down), other =
+   * everything else. last_errno is the most recent failure's raw errno. */
+  extern atomic_uint_fast32_t g_dcs_pstop_sf_nomem;
+  extern atomic_uint_fast32_t g_dcs_pstop_sf_route;
+  extern atomic_uint_fast32_t g_dcs_pstop_sf_other;
+  extern atomic_int g_dcs_pstop_sf_last_errno;
   extern atomic_uint_fast32_t g_dcs_pstop_rebonds; /* link re-syncs after reply loss */
   extern atomic_uint_fast32_t g_dcs_pstop_rtt_ms;
   extern atomic_uint_fast64_t g_dcs_pstop_last_reply_ms;

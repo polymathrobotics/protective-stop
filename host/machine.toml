@@ -87,6 +87,22 @@ default_stop_only = false
 # library is unmodified.
 min_stop_ms = 500
 
+[announce]
+# OPTIONAL check-in to a centralized configuration-management console, so an
+# operator dashboard can show this machine as RUNNING while the app is up.
+# One POST of {"name": ..., "port": ...} every announce_interval_s, bearer-
+# authenticated; the console attributes the source IP itself. Fully OFF when
+# announce_url is empty, and never on the safety path — a dead console only
+# produces a log line. Prefer the environment for deployment values so they
+# stay out of committed config: PSTOP_ANNOUNCE_URL and
+# PSTOP_ANNOUNCE_KEY_FILE override these two keys when set.
+announce_url = ""
+# Path to a file whose first line is the bearer token (chmod 600 it).
+announce_key_file = ""
+# Display name on the console; empty = this host's hostname.
+announce_name = ""
+announce_interval_s = 60
+
 # -----------------------------------------------------------------------------
 # Per-remote operator entries (repeatable). Each maps a remote UUID
 # (pstop_msg.id) to its operator_details_t in the library:

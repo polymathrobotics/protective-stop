@@ -178,6 +178,15 @@ extern "C"
     uint8_t sess_state);
 
   /**
+ * @brief Publish the aggregate send-failure cause split (errno buckets from
+ * the failing sendto): nomem = ENOMEM (TX-queue/pbuf pressure, typically the
+ * DERP relay path under load), route = EHOSTUNREACH/ENETUNREACH/
+ * EADDRNOTAVAIL (no path), other = the rest. Exposed in /state.json as
+ * pstop_sf_nomem / pstop_sf_route / pstop_sf_other / pstop_sf_errno.
+ */
+  void dcs_publish_pstop_sf_causes(uint32_t nomem, uint32_t route, uint32_t other, int last_errno);
+
+  /**
  * @brief Tell the transport whether the pstop link to the machine is alive.
  *
  * Thin wrapper over microlink_notify_priority_health(). Call with true on every
