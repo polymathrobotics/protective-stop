@@ -88,6 +88,12 @@ typedef struct {
      */
     uint16_t max_missed_heartbeats;
 
+    /**
+     * The minimum time (in milliseconds) between the stop and OK messages used
+     * for transitioning to OK after stop. Default is 1 second.
+     */
+    uint32_t delay_between_stop_ms;
+
 } pstop_application_config_t;
 
 typedef struct pstop_application_t {
@@ -136,6 +142,7 @@ void pstop_application_set_hardware_status_cb(pstop_application_t *app, pstop_st
 
 void pstop_application_set_log_cb(pstop_application_t *app, log_message_t log_cb);
 
-void pstop_application_set_protocol_limits(pstop_application_t *app, uint16_t max_lost_messages, uint16_t max_missed_heartbeats);
+void pstop_application_set_protocol_limits(pstop_application_t *app,
+    uint16_t max_lost_messages, uint16_t max_missed_heartbeats, uint32_t stop_ok_delay_ms);
 
 #endif /* PSTOP_PSTOP_APPLICATION_H */

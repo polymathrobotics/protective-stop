@@ -11,12 +11,17 @@ wrapper's min-STOP-duration arming policy without touching a chip:
     ./machine_app_runner test.toml &          # dedicated instance
     python3 pstop_test_remote.py --port 8893  # runs the test script
 
-Test script (asserts on the machine's replies):
+Test script (asserts on the machine's replies; library-native min-delay
+semantics from pstop_c #59 — an OK sooner than delay_between_stop_ms after
+the cycle-opening STOP is refused, and the SAME episode completes once the
+delay elapses):
     1. bond, stream OK           -> machine must reply STOP (NEED_STOP)
-    2. blip: STOP 200 ms, OK     -> arming must be VETOED (replies stay STOP)
-    3. press: STOP 800 ms, OK    -> arming must complete (replies turn OK)
-    4. blip while armed          -> robot stops; short release must NOT re-arm
-    5. press again               -> re-arms
+    2. blip: STOP 200 ms, OK     -> immediate OK refused; steady OKs arm
+                                    after the min delay
+    3. press: STOP 800 ms, OK    -> arms immediately on release
+    4. blip while armed          -> robot stops; immediate OK refused;
+                                    steady OKs self-re-arm after the delay
+    5. press-and-hold, release   -> re-arms
 
 Exit code 0 = all assertions passed.
 """
@@ -151,25 +156,29 @@ def main():
     last = r.stream(MSG_OK, 1.5)
     ok &= expect(last and last['message'] == MSG_STOP, 'OK stream answered with STOP before any arming cycle')
 
-    print('2. blip: STOP 200 ms then OK (must be VETOED)')
+    print('2. blip: STOP 200 ms then OK — early OK refused, arms after min delay')
     r.stream(MSG_STOP, 0.2)
+    first = r.xfer(MSG_OK)
+    ok &= expect(first and first['message'] == MSG_STOP, 'OK 200 ms after STOP refused (library min delay)')
     last = r.stream(MSG_OK, 1.5)
-    ok &= expect(last and last['message'] == MSG_STOP, 'short STOP->OK did not arm (replies stay STOP)')
+    ok &= expect(last and last['message'] == MSG_OK, 'steady OK stream arms once the min delay elapses')
 
-    print('3. press: STOP 800 ms then OK (must ARM)')
+    print('3. press: STOP 800 ms then OK (must ARM immediately)')
     r.stream(MSG_STOP, 0.8)
     last = r.stream(MSG_OK, 1.5)
     ok &= expect(last and last['message'] == MSG_OK, 'held STOP->OK armed (replies turn OK)')
 
-    print('4. blip while armed: robot stops, short release must NOT re-arm')
+    print('4. blip while armed: robot stops; early release refused, self-re-arms')
     r.stream(MSG_STOP, 0.2)
+    first = r.xfer(MSG_OK)
+    ok &= expect(first and first['message'] == MSG_STOP, 'blip stopped the robot; immediate OK refused')
     last = r.stream(MSG_OK, 1.5)
-    ok &= expect(last and last['message'] == MSG_STOP, 'blip stopped the robot and the release was vetoed')
+    ok &= expect(last and last['message'] == MSG_OK, 'steady OK re-arms after the min delay')
 
-    print('5. press again (must re-arm)')
+    print('5. press-and-hold then release (normal gesture must still arm)')
     r.stream(MSG_STOP, 0.8)
     last = r.stream(MSG_OK, 1.5)
-    ok &= expect(last and last['message'] == MSG_OK, 're-armed after veto')
+    ok &= expect(last and last['message'] == MSG_OK, 're-armed after a held press')
 
     print('ALL PASS' if ok else 'FAILURES PRESENT')
     sys.exit(0 if ok else 1)

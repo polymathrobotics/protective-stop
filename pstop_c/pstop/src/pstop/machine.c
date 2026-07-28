@@ -98,6 +98,18 @@ handle_ok_msg(pstop_machine_t *machine, pstop_remote_data_t *client, const pstop
         return PSTOP_OK;
     }
 
+    // if we've received a stop make sure the OK comes after our mimimum wait time
+    if(machine->robot_state.restart_state == ROBOT_RESTART_STATE_STOP_RECEIVED) {
+        uint64_t now = machine->application->env.get_time_cb();
+
+        // if we've received OK too soon, then we'll stay in stopped state
+        if((now - machine->robot_state.stop_time_ms) < machine->application->app_config.delay_between_stop_ms) {
+            resp->message = PSTOP_MESSAGE_STOP;
+            machine->application->status_cb(PSTOP_STATUS_STOP);
+            return PSTOP_OK;
+        }
+    }
+
     // either this is the client that started the STOP/OK cycle or we're in a
     // normal case where STOP/OK has already finished.
     machine->robot_state.robot_state = ROBOT_STATE_OK;
@@ -124,6 +136,7 @@ handle_stop_msg(pstop_machine_t *machine, pstop_remote_data_t *client, const pst
         if(client->is_stop_only == false) {
             machine->robot_state.remote_stop_id = client->local_remote_id;
             machine->robot_state.restart_state = ROBOT_RESTART_STATE_STOP_RECEIVED;
+            machine->robot_state.stop_time_ms = machine->application->env.get_time_cb();
         }
     }
     else {
@@ -134,6 +147,7 @@ handle_stop_msg(pstop_machine_t *machine, pstop_remote_data_t *client, const pst
         }
         else {
             machine->robot_state.restart_state = ROBOT_RESTART_STATE_STOP_RECEIVED;
+            machine->robot_state.stop_time_ms = machine->application->env.get_time_cb();
         }
     }
 

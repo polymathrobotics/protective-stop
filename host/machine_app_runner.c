@@ -79,15 +79,14 @@ typedef struct
   int allow_unlisted;
   uint64_t default_heartbeat_ms;
   int default_stop_only;
-  /* Minimum duration (ms) a STOP episode must last for its OK release to
-     * count as the arming gesture. Shorter STOP->OK cycles are VETOED (the
-     * machine is returned to STOPPED/NEED_STOP via the library's own public
-     * machine_stop_robot()) — this is the wrapper-owned defence against
-     * EMC-induced loop blips on the remote performing the arming gesture
-     * accidentally (observed 2026-07-21: 100-200 ms both-channel blips in
-     * WiFi mode re-armed the machine). 0 disables the policy. The library
-     * (pstop_c, certification track) is NOT modified: veto uses only public
-     * API and lands in the same state as a heartbeat timeout. */
+  /* Minimum duration (ms) between the STOP that opens an arming cycle and
+     * the OK that completes it — the defence against EMC-induced loop blips
+     * performing the arming gesture accidentally (observed 2026-07-21:
+     * 100-200 ms both-channel blips in WiFi mode re-armed the machine).
+     * Enforced NATIVELY by pstop_c since #59: wired straight into
+     * app_config.delay_between_stop_ms; an early OK is refused by the
+     * library (replies STOP, stays STOPPED) and the episode can still
+     * complete by waiting out the minimum. 0 disables. */
   uint64_t min_stop_ms;
   /* [announce] — optional check-in to a central management console so an
      * operator dashboard can show this machine as RUNNING. One HTTP POST of
@@ -659,6 +658,12 @@ int main(int argc, char * argv[])
 
   pstop_app.app_config.max_lost_messages = g_cfg.max_lost_messages;
   pstop_app.app_config.max_missed_heartbeats = g_cfg.max_missed_heartbeats;
+  /* Native min-STOP-duration arming policy (pstop_c #59): an OK arriving
+     * sooner than this after the STOP that opened the arming cycle is refused
+     * by the LIBRARY (replies STOP, stays STOPPED; the episode may still
+     * complete by waiting). Supersedes the wrapper-owned veto this runner
+     * carried while the library lacked the feature. 0 disables. */
+  pstop_app.app_config.delay_between_stop_ms = (uint32_t)g_cfg.min_stop_ms;
   pstop_app.remote_details_cb = is_operator_allowed;
   pstop_app.status_cb = robot_status;
   pstop_app.log_message_cb = log_message;
@@ -808,18 +813,13 @@ int main(int argc, char * argv[])
 
       pstop_error_t err = machine_process_message(&machine, &req_msg, &resp_msg);
 
-      /* --- Min-STOP-duration arming policy (wrapper-owned) ---------
-             * A STOP episode must last >= min_stop_ms for its OK release to
-             * count as the arming gesture; shorter STOP->OK cycles (e.g.
-             * EMC-induced loop blips on the remote, observed 2026-07-21 in
-             * WiFi mode) are vetoed. Enforcement uses ONLY public library
-             * API: machine_stop_robot() lands in the exact state the
-             * library's own heartbeat timeout produces, and the pending
-             * reply is rewritten to STOP before it is encoded (the CRC is
-             * computed at encode time). pstop_c itself is unchanged.
-             * Fail-safe by construction: every path here moves the machine
-             * toward STOPPED — a policy bug can cost availability, never
-             * cause a spurious arm. */
+      /* --- Min-STOP-duration arming policy (LIBRARY-native, pstop_c #59) --
+             * The library refuses an OK arriving sooner than
+             * delay_between_stop_ms after the STOP that opened the arming
+             * cycle (replies STOP, stays STOPPED; the episode can still
+             * complete by waiting out the minimum). The wrapper no longer
+             * enforces anything here — it only tracks the episode clock to
+             * make the log lines self-explanatory. */
       if (err == PSTOP_OK) {
         if (req_msg.message == PSTOP_MESSAGE_BOND || req_msg.message == PSTOP_MESSAGE_UNBOND) {
           s_stop_episode_valid = 0;
@@ -833,27 +833,29 @@ int main(int argc, char * argv[])
         }
         if (prev_robot == ROBOT_STATE_STOPPED && machine.robot_state.robot_state == ROBOT_STATE_OK) {
           uint64_t held = s_stop_episode_valid ? machine_now_ms() - s_stop_episode_start : 0U;
-          if (g_cfg.min_stop_ms > 0U && (!s_stop_episode_valid || held < g_cfg.min_stop_ms)) {
-            machine_stop_robot(&machine);
-            resp_msg.message = PSTOP_MESSAGE_STOP;
-            fprintf(
-              stderr,
-              "ANOMALY: arming VETOED from 0x%08X — STOP held "
-              "%llu ms < %llu ms policy minimum (blip?)\n",
-              req_msg.id.data,
-              (unsigned long long)held,
-              (unsigned long long)g_cfg.min_stop_ms);
-          } else {
-            fprintf(
-              stderr,
-              "*** ARMED by remote 0x%08X: STOP held %llu ms (policy "
-              "minimum %llu ms) ***\n",
-              req_msg.id.data,
-              (unsigned long long)held,
-              (unsigned long long)g_cfg.min_stop_ms);
-            robot_status_commit_ok();
-          }
+          fprintf(
+            stderr,
+            "*** ARMED by remote 0x%08X: STOP held %llu ms (library "
+            "minimum %llu ms) ***\n",
+            req_msg.id.data,
+            (unsigned long long)held,
+            (unsigned long long)g_cfg.min_stop_ms);
+          robot_status_commit_ok();
           s_stop_episode_valid = 0;
+        } else if (
+          req_msg.message == PSTOP_MESSAGE_OK && resp_msg.message == PSTOP_MESSAGE_STOP &&
+          prev_restart == ROBOT_RESTART_STATE_STOP_RECEIVED && machine.robot_state.robot_state == ROBOT_STATE_STOPPED)
+        {
+          /* The library refused an early OK (min-delay not yet met) —
+                     * log it so a blip-driven release attempt is visible. */
+          uint64_t held = s_stop_episode_valid ? machine_now_ms() - s_stop_episode_start : 0U;
+          fprintf(
+            stderr,
+            "ANOMALY: arming DEFERRED for 0x%08X — OK %llu ms after STOP "
+            "< %llu ms library minimum (blip?)\n",
+            req_msg.id.data,
+            (unsigned long long)held,
+            (unsigned long long)g_cfg.min_stop_ms);
         }
       }
 

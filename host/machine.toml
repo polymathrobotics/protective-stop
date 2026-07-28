@@ -79,12 +79,13 @@ default_heartbeat_ms = 400
 # Unlisted remotes as stop-only? (stop_only = may command STOP but can never
 # arm the machine to OK). Usually false.
 default_stop_only = false
-# ARMING POLICY. A STOP episode must be held at least this long (ms) for its
-# OK release to count as the arming gesture; shorter STOP->OK cycles are
-# vetoed (machine returns to STOPPED/NEED_STOP and replies STOP). Defends
-# against EMC-induced loop blips on the remote performing the arming gesture
-# accidentally. 0 disables. Enforced entirely in this wrapper — the pstop_c
-# library is unmodified.
+# ARMING POLICY. Minimum time (ms) between the STOP that opens an arming
+# cycle and the OK that completes it; an earlier OK is refused (machine
+# replies STOP and stays STOPPED — the episode can still complete by waiting
+# out the minimum). Defends against EMC-induced loop blips on the remote
+# performing the arming gesture accidentally. 0 disables. Enforced NATIVELY
+# by the pstop_c library (delay_between_stop_ms, upstream #59); this runner
+# just forwards the value. Library default would be 1000 if unset here.
 min_stop_ms = 500
 
 [announce]

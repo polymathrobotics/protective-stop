@@ -13,10 +13,12 @@ certification track) is linked unmodified. This wrapper adds:
   the remote can reach it over Tailscale, USB-NCM, or plain LAN;
 - config: every library knob + wrapper policy in `machine.toml`
   (documented inline);
-- **min-STOP-duration arming policy** (`min_stop_ms`, default 500 ms): a
-  STOP episode shorter than this cannot arm the robot on release —
-  vetoed via the library's public `machine_stop_robot()`. Defends
-  against EMC-induced loop blips performing the arming gesture. See
+- **min-STOP-duration arming policy** (`min_stop_ms`, default 500 ms):
+  an OK arriving sooner than this after the STOP that opened the arming
+  cycle cannot arm the robot. Enforced natively by pstop_c
+  (`delay_between_stop_ms`, upstream #59) — the runner forwards the
+  value and logs `ARMED` / `arming DEFERRED`. Defends against
+  EMC-induced loop blips performing the arming gesture. See
   `docs/FAILOVER_AND_ARMING_DESIGN_2026-07-21.md`;
 - a status latch: OK is only propagated after the policy approves the
   arming — **any real actuation must hang off the latched status, never
