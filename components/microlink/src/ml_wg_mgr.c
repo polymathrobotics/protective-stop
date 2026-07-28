@@ -453,22 +453,6 @@ static esp_err_t wg_init_interface(microlink_t * ml)
   wireguardif_set_derp_output(netif, wg_derp_output_cb, ml);
   wireguardif_set_udp_output(netif, wg_udp_output_cb, ml);
 
-  /* On cellular AT socket bridge, force all WG output through DERP relay.
-     * AT sockets are TCP-only, so direct UDP is impossible.
-     * PPP mode has real lwIP sockets with UDP, so allow direct connections. */
-#if CONFIG_ML_ENABLE_CELLULAR
-  {
-    bool at_ready = ml_at_socket_is_ready();
-    ESP_LOGI(TAG, "Cellular mode: at_socket_ready=%d, force_derp=%d", at_ready, at_ready);
-    if (at_ready) {
-      wireguardif_force_derp_output(netif, true);
-      ESP_LOGI(TAG, "Cellular AT socket: forcing DERP output (direct UDP disabled)");
-    } else {
-      ESP_LOGI(TAG, "Cellular PPP mode: direct UDP ENABLED");
-    }
-  }
-#endif
-
   ml->wg_netif = netif;
 
   /* Verify WG device public key matches our expected key */
@@ -924,20 +908,17 @@ static int add_peer(microlink_t * ml, const ml_peer_update_t * update)
                  * drive the peer's lazy reconfig — only an inbound DISCO
                  * ping does (that is why a normal peer otherwise has to
                  * `tailscale ping` us first). Fire one now, unconditionally
-                 * (bypasses the enable_disco/cellular gates on the paths
-                 * below); it is DERP-carried and embeds our node key, so a
-                 * peer with a stale/rotated disco key can still map us. The
-                 * sustained retry lives in disco_periodic_probes. */
+                 * (bypasses the enable_disco gate on the paths below); it is
+                 * DERP-carried and embeds our node key, so a peer with a
+                 * stale/rotated disco key can still map us. The sustained
+                 * retry lives in disco_periodic_probes. */
         disco_send_ping_to_peer(ml, idx, true);
         /* Near-zero failover: mirror this peer's encrypted data over
                  * BOTH direct and DERP once a direct path forms. Set here and
                  * persisted in the WG peer struct (survives P7 re-ingests); it
                  * only takes effect while a direct endpoint exists, so it's a
-                 * no-op until DISCO upgrades the path. Skip on cellular
-                 * (direct paths impossible; DERP is already the only path). */
-        if (!ml_at_socket_is_ready()) {
-          wireguardif_set_dual_path(netif, (u8_t)wg_peer_idx, true);
-        }
+                 * no-op until DISCO upgrades the path. */
+        wireguardif_set_dual_path(netif, (u8_t)wg_peer_idx, true);
         ESP_LOGI(TAG, "WG: triggered DERP handshake to priority peer %s (dual-path)", update->hostname);
       } else {
         ESP_LOGI(TAG, "WG peer ready (passive), waiting for peer-initiated handshake");
@@ -951,19 +932,13 @@ static int add_peer(microlink_t * ml, const ml_peer_update_t * update)
   /* Persist to NVS for fast boot next time */
   ml_peer_nvs_save(p);
 
-  /* Send CallMeMaybe to trigger peer-initiated handshake (NAT traversal).
-     * Skip on cellular: our endpoints are behind carrier-grade NAT and
-     * unreachable — all traffic goes through DERP relay. */
-  if (!ml_at_socket_is_ready()) {
-    disco_send_call_me_maybe(ml, idx);
-  }
+  /* Send CallMeMaybe to trigger peer-initiated handshake (NAT traversal). */
+  disco_send_call_me_maybe(ml, idx);
 
   /* Immediately probe known endpoints (throttled to avoid flooding with 100s of peers).
      * Only force-ping if fewer than 5 peers added in the last second;
-     * the periodic probe (every 15s) will handle the rest.
-     * Skip on cellular: direct probes fill DERP TX queue (~0.6s each on AT socket),
-     * blocking time-critical WG handshake responses. */
-  if (!ml_at_socket_is_ready()) {
+     * the periodic probe (every 15s) will handle the rest. */
+  {
     static uint64_t last_burst_ms = 0;
     static int burst_count = 0;
     uint64_t add_now = ml_get_time_ms();
@@ -1667,21 +1642,16 @@ static void process_disco_packet(microlink_t * ml, const ml_rx_packet_t * pkt)
 
       ESP_LOGI(
         TAG,
-        "CallMeMaybe from %s: %d endpoints (udp_path=%d, at_sock=%d)",
+        "CallMeMaybe from %s: %d endpoints (udp_path=%d)",
         ml->peers[peer_idx].hostname,
         ep_count,
-        disco_has_udp_path(ml),
-        ml_at_socket_is_ready());
+        disco_has_udp_path(ml));
 
-      /* Reply with our own CallMeMaybe (bidirectional NAT traversal).
-             * Skip on cellular: our endpoints are behind CGNAT and unreachable. */
-      if (!ml_at_socket_is_ready()) {
-        disco_send_call_me_maybe(ml, peer_idx);
-      }
+      /* Reply with our own CallMeMaybe (bidirectional NAT traversal). */
+      disco_send_call_me_maybe(ml, peer_idx);
 
-      /* Probe each endpoint with a DISCO ping.
-             * Skip on cellular: direct UDP impossible, saves TX queue capacity. */
-      for (int i = 0; !ml_at_socket_is_ready() && i < ep_count && i < ML_MAX_ENDPOINTS; i++) {
+      /* Probe each endpoint with a DISCO ping. */
+      for (int i = 0; i < ep_count && i < ML_MAX_ENDPOINTS; i++) {
         const uint8_t * entry = ep_data + (i * 18);
         uint16_t port = (entry[16] << 8) | entry[17];
 
@@ -1996,11 +1966,9 @@ static void disco_send_call_me_maybe(microlink_t * ml, int peer_idx)
   }
 }
 
-/* Public wrapper for UDP API to trigger CallMeMaybe.
- * Skip on cellular: our endpoints are behind CGNAT and unreachable. */
+/* Public wrapper for UDP API to trigger CallMeMaybe. */
 void ml_wg_mgr_send_cmm(microlink_t * ml, uint32_t peer_vpn_ip)
 {
-  if (ml_at_socket_is_ready()) return; /* cellular: CMM useless */
   int idx = find_peer_by_ip(ml, peer_vpn_ip);
   if (idx >= 0) {
     disco_send_call_me_maybe(ml, idx);
@@ -2104,15 +2072,7 @@ bool ml_wg_mgr_peer_is_up(microlink_t * ml, uint32_t vpn_ip)
 
 void ml_wg_mgr_update_transport(microlink_t * ml)
 {
-#if CONFIG_ML_ENABLE_CELLULAR
-  if (!ml || !ml->wg_netif) return;
-  struct netif * netif = (struct netif *)ml->wg_netif;
-  bool at_ready = ml_at_socket_is_ready();
-  wireguardif_force_derp_output(netif, at_ready);
-  ESP_LOGI(TAG, "WG transport updated: force_derp=%d (%s)", at_ready, at_ready ? "AT socket" : "PPP/WiFi");
-#else
-  (void)ml;
-#endif
+  (void)ml; /* transport is uniform (eth/usb/wifi all real lwIP sockets) */
 }
 
 /* ============================================================================
@@ -2154,7 +2114,7 @@ static void disco_wake_peer(microlink_t * ml, uint32_t vpn_ip, bool link_healthy
 
 static void disco_periodic_probes(microlink_t * ml)
 {
-  /* Pinned-peer session wakes — run BEFORE the enable_disco/cellular gates so
+  /* Pinned-peer session wakes — run BEFORE the enable_disco gate so
      * the safety peer AND the management/OTA server always (re)establish
      * their WG session disco-first, even on a busy tailnet where general disco is
      * throttled. Without this the management peer can be in the table yet have no live
@@ -2227,20 +2187,17 @@ static void disco_periodic_probes(microlink_t * ml)
           ESP_LOGI(TAG, "  WG endpoint cleared, %s now via DERP", p->hostname);
         }
 
-        /* Force-ping to try re-establishing direct path (WiFi only) */
-        if (!ml_at_socket_is_ready()) {
-          disco_send_ping_to_peer(ml, i, true);
-        }
+        /* Force-ping to try re-establishing the direct path */
+        disco_send_ping_to_peer(ml, i, true);
       }
     }
 
     if (!peer_allowed) continue;
 
     /* Probe for direct path upgrade (every UPGRADE_INTERVAL when on DERP).
-         * Skip on cellular: direct paths impossible through carrier-grade NAT.
          * Throttled to DISCO_PROBES_PER_TICK to spread load and reduce jitter. */
     uint64_t upgrade_interval = is_priority ? ML_DISCO_PRIORITY_REPROBE_MS : ML_DISCO_UPGRADE_INTERVAL_MS;
-    if (!ml_at_socket_is_ready() && !p->has_direct_path && now - p->last_upgrade_ms > upgrade_interval) {
+    if (!p->has_direct_path && now - p->last_upgrade_ms > upgrade_interval) {
       if (upgrade_probes_sent < DISCO_PROBES_PER_TICK) {
         disco_send_ping_to_peer(ml, i, false);
         p->last_upgrade_ms = now;
@@ -2415,7 +2372,7 @@ void ml_wg_mgr_task(void * arg)
          * Peers need to know our public endpoint (from STUN) to send direct
          * probes. Without this, our initial CMMs during peer-add have 0
          * endpoints because STUN hasn't finished yet. */
-    if (!stun_cmm_sent && !ml_at_socket_is_ready() && ml->stun_public_ip != 0 && ml->peer_count > 0) {
+    if (!stun_cmm_sent && ml->stun_public_ip != 0 && ml->peer_count > 0) {
       /* Paced: each CMM is a NaCl seal (~30 ms) and solicits a ping
              * back — broadcasting to 100 peers in one pass both stalled
              * this loop for seconds and triggered an inbound box-open

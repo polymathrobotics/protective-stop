@@ -25,10 +25,6 @@
 #include "nvs.h"
 #include "nvs_flash.h"
 
-#ifdef CONFIG_ML_ENABLE_CELLULAR
-  #include "ml_cellular.h"
-#endif
-
 static const char * TAG = "microlink";
 
 /* NVS keys */
@@ -790,21 +786,6 @@ const char * microlink_default_device_name(void)
     snprintf(name, sizeof(name), "%s-%02x%02x%02x%02x%02x%02x", prefix, mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
   }
   return name;
-}
-
-const char * microlink_imei_device_name(void)
-{
-#ifdef CONFIG_ML_ENABLE_CELLULAR
-  static char name[48] = {0}; /* prefix + "-" + 15-digit IMEI + null */
-  const char * imei = ml_cellular_get_imei();
-  if (imei && imei[0]) {
-    const char * prefix = CONFIG_ML_DEVICE_NAME;
-    if (!prefix || !prefix[0]) prefix = "esp32";
-    snprintf(name, sizeof(name), "%s-%s", prefix, imei);
-    return name;
-  }
-#endif
-  return NULL;
 }
 
 uint64_t ml_get_time_ms(void)

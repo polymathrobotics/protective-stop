@@ -178,7 +178,7 @@ void wireguardif_disable_socket_bind(void);
 // via an external unified socket instead of the internal lwIP UDP PCB.
 void wireguardif_set_udp_output(struct netif *netif, wireguard_udp_output_fn fn, void *ctx);
 
-// Force all peer output through DERP relay callback (cellular mode).
+// Force all peer output through DERP relay callback.
 // When enabled, peer_output always uses DERP even if peer has a direct endpoint.
 void wireguardif_force_derp_output(struct netif *netif, bool force);
 

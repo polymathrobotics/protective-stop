@@ -63,7 +63,7 @@ This is finding #1 of the code survey and is a plain bug, not a tuning issue.
   address. The data path uses direct iff `peer->ip`/`peer->port` are set
   (`wireguardif.c:148-223`).
 - **disco is enabled by default**: `.enable_disco = true` (`ml_app.h:72`,
-  `ml_net_switch.c:287`); no NVS override forces it off.
+  `ml_app.h:72`); no NVS override forces it off.
 - **The direct-UDP wedge is fixed**. Historically `enable_disco` was reverted to
   false because sustained direct-UDP traffic panicked the chip ~100–180 s in.
   Root cause (v15.20, `docs/archive/TAILSCALE_FINAL_2026-05-26.md:274-334`):

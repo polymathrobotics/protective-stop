@@ -665,139 +665,25 @@ extern "C"
   uint64_t ml_get_time_ms(void);
 
   /* ============================================================================
- * Network Socket Wrappers — Route through AT sockets when cellular active
- *
- * These inline functions check ml_at_socket_is_ready() and route socket calls
- * to either the normal BSD socket API (WiFi/lwIP) or the AT socket bridge
- * (cellular SIM7600 internal TCP/IP stack).
+ * Network socket aliases — thin names over the BSD socket API so call sites
+ * stay uniform.
  * ========================================================================== */
 
-#include "ml_at_socket.h"
-
-#ifdef CONFIG_ML_ENABLE_CELLULAR
-  #include <fcntl.h>
-  #include <netdb.h>
-  #include <sys/socket.h>
-  #include <unistd.h>
-
-  static inline int ml_socket(int domain, int type, int protocol)
-  {
-    if (ml_at_socket_is_ready() && (domain == AF_INET || domain == AF_INET6))
-      return ml_at_socket(domain, type, protocol);
-    return socket(domain, type, protocol);
-  }
-
-  static inline int ml_connect(int fd, const struct sockaddr * addr, socklen_t len)
-  {
-    if (ml_at_socket_is_at_fd(fd)) return ml_at_connect(fd, addr, len);
-    return connect(fd, addr, len);
-  }
-
-  static inline ssize_t ml_send(int fd, const void * buf, size_t len, int flags)
-  {
-    if (ml_at_socket_is_at_fd(fd)) return ml_at_send(fd, buf, len, flags);
-    return send(fd, buf, len, flags);
-  }
-
-  static inline ssize_t ml_recv(int fd, void * buf, size_t len, int flags)
-  {
-    if (ml_at_socket_is_at_fd(fd)) return ml_at_recv(fd, buf, len, flags);
-    return recv(fd, buf, len, flags);
-  }
-
-  static inline ssize_t ml_sendto(
-    int fd, const void * buf, size_t len, int flags, const struct sockaddr * addr, socklen_t addrlen)
-  {
-    if (ml_at_socket_is_at_fd(fd)) return ml_at_sendto(fd, buf, len, flags, addr, addrlen);
-    return sendto(fd, buf, len, flags, addr, addrlen);
-  }
-
-  static inline ssize_t ml_recvfrom(
-    int fd, void * buf, size_t len, int flags, struct sockaddr * addr, socklen_t * addrlen)
-  {
-    if (ml_at_socket_is_at_fd(fd)) return ml_at_recvfrom(fd, buf, len, flags, addr, addrlen);
-    return recvfrom(fd, buf, len, flags, addr, addrlen);
-  }
-
-  static inline int ml_close_sock(int fd)
-  {
-    if (ml_at_socket_is_at_fd(fd)) return ml_at_close(fd);
-    return close(fd);
-  }
-
-  static inline int ml_bind(int fd, const struct sockaddr * addr, socklen_t len)
-  {
-    if (ml_at_socket_is_at_fd(fd)) return ml_at_bind(fd, addr, len);
-    return bind(fd, addr, len);
-  }
-
-  static inline int ml_setsockopt(int fd, int level, int optname, const void * optval, socklen_t optlen)
-  {
-    if (ml_at_socket_is_at_fd(fd)) return ml_at_setsockopt(fd, level, optname, optval, optlen);
-    return setsockopt(fd, level, optname, optval, optlen);
-  }
-
-  static inline int ml_fcntl(int fd, int cmd, int arg)
-  {
-    if (ml_at_socket_is_at_fd(fd)) return ml_at_fcntl(fd, cmd, arg);
-    return fcntl(fd, cmd, arg);
-  }
-
-  static inline int ml_select_fds(int nfds, fd_set * rd, fd_set * wr, fd_set * ex, struct timeval * tv)
-  {
-    /* If any FD in the sets is an AT socket, use AT select */
-    if (ml_at_socket_is_ready() && nfds > ML_AT_SOCK_FD_BASE) return ml_at_select(nfds, rd, wr, ex, tv);
-    return select(nfds, rd, wr, ex, tv);
-  }
-
-  static inline int ml_getaddrinfo(
-    const char * host, const char * svc, const struct addrinfo * hints, struct addrinfo ** res)
-  {
-    if (ml_at_socket_is_ready()) return ml_at_getaddrinfo(host, svc, hints, res);
-    return getaddrinfo(host, svc, hints, res);
-  }
-
-  static inline void ml_freeaddrinfo(struct addrinfo * res)
-  {
-    /* AT socket addrinfo is also malloc'd, free works for both */
-    if (ml_at_socket_is_ready()) {
-      ml_at_freeaddrinfo(res);
-      return;
-    }
-    freeaddrinfo(res);
-  }
-
-  /* write/read for mbedTLS BIO compatibility */
-  static inline ssize_t ml_write_sock(int fd, const void * buf, size_t len)
-  {
-    if (ml_at_socket_is_at_fd(fd)) return ml_at_write(fd, buf, len);
-    return write(fd, buf, len);
-  }
-
-  static inline ssize_t ml_read_sock(int fd, void * buf, size_t len)
-  {
-    if (ml_at_socket_is_at_fd(fd)) return ml_at_read(fd, buf, len);
-    return read(fd, buf, len);
-  }
-
-#else
-  /* Non-cellular builds: direct pass-through (zero overhead) */
-  #define ml_socket socket
-  #define ml_connect connect
-  #define ml_send send
-  #define ml_recv recv
-  #define ml_sendto sendto
-  #define ml_recvfrom recvfrom
-  #define ml_close_sock close
-  #define ml_bind bind
-  #define ml_setsockopt setsockopt
-  #define ml_fcntl fcntl
-  #define ml_select_fds select
-  #define ml_getaddrinfo getaddrinfo
-  #define ml_freeaddrinfo freeaddrinfo
-  #define ml_write_sock write
-  #define ml_read_sock read
-#endif /* CONFIG_ML_ENABLE_CELLULAR */
+#define ml_socket socket
+#define ml_connect connect
+#define ml_send send
+#define ml_recv recv
+#define ml_sendto sendto
+#define ml_recvfrom recvfrom
+#define ml_close_sock close
+#define ml_bind bind
+#define ml_setsockopt setsockopt
+#define ml_fcntl fcntl
+#define ml_select_fds select
+#define ml_getaddrinfo getaddrinfo
+#define ml_freeaddrinfo freeaddrinfo
+#define ml_write_sock write
+#define ml_read_sock read
 
   /* PSRAM allocation helper */
   static inline void * ml_psram_malloc(size_t size)

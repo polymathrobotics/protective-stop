@@ -117,7 +117,7 @@ extern "C"
  * @param ml Handle
  * @return ESP_OK on success
  *
- * Use this when switching between WiFi and cellular (or vice versa).
+ * Use this when the active uplink interface changes.
  * Closes and reopens all sockets on the new interface while preserving:
  * - WireGuard peer state and crypto keys
  * - Peer table and DISCO discovery state
@@ -279,15 +279,6 @@ extern "C"
  * @return Static string like "esp32-a1b2c3"
  */
   const char * microlink_default_device_name(void);
-
-  /**
- * @brief Get device name based on IMEI (cellular modem)
- * @return Static string like "pstop-123456789012345", or NULL if no IMEI available
- *
- * Requires ml_cellular_init() to have been called first.
- * Returns NULL if cellular module is not initialized or IMEI not available.
- */
-  const char * microlink_imei_device_name(void);
 
   /* ============================================================================
  * MagicDNS — Resolve Tailnet hostnames to VPN IPs

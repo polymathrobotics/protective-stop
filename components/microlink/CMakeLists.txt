@@ -14,9 +14,6 @@ set(SRCS
     "src/nacl_box.c"
     "src/x25519.c"
     "src/ml_zerocopy.c"
-    "src/ml_cellular.c"
-    "src/ml_at_socket.c"
-    "src/ml_net_switch.c"
     "src/ml_config_httpd.c"
     "src/ml_app.c"
 )

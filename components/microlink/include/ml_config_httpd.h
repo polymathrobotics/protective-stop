@@ -6,7 +6,7 @@
  * @brief MicroLink HTTP Config Server — Runtime configuration via web UI
  *
  * Provides an HTTP server accessible via the Tailscale VPN IP for:
- * - WiFi/Tailscale/cellular credential management (stored in NVS)
+ * - WiFi/Tailscale credential management (stored in NVS)
  * - Peer allowlist for DISCO probe filtering (immediate effect, no restart)
  * - Device status and peer list viewing
  *
@@ -44,7 +44,7 @@ extern "C"
 
   /* General settings (NVS key: "settings")
  * Version history:
- *   v1: Original fields (wifi, auth, device, cellular, flags)
+ *   v1: Original fields (wifi, auth, device, reserved, flags)
  *   v2: Added max_peers, disco_heartbeat_ms, priority_peer_ip,
  *       ctrl_host, debug_flags
  */
@@ -59,8 +59,8 @@ extern "C"
     char wifi_pass[65]; /* 64 chars + null */
     char auth_key[96]; /* tskey-auth-... + null */
     char device_prefix[32]; /* e.g. "pstop" → becomes "pstop-a1b2c3" */
-    char cellular_apn[32];
-    char cellular_sim_pin[16];
+    char v1_reserved0[32]; /* retained for NVS blob layout compatibility */
+    char v1_reserved1[16]; /* retained for NVS blob layout compatibility */
     uint8_t flags; /* bit 0: reserved */
 
     /* --- v2 fields (appended, zero = use Kconfig default) --- */
@@ -74,8 +74,8 @@ extern "C"
     /* --- v3 fields --- */
     char device_name_full[48]; /* Full custom hostname (overrides prefix+MAC).
                                        Empty = use device_prefix + MAC suffix */
-    char ppp_user[32]; /* PPP username (blank = none) */
-    char ppp_pass[32]; /* PPP password (blank = none) */
+    char v3_reserved0[32]; /* retained for NVS blob layout compatibility */
+    char v3_reserved1[32]; /* retained for NVS blob layout compatibility */
   } ml_config_settings_t;
 
   /* Peer allowlist entry */
@@ -223,23 +223,6 @@ extern "C"
   bool ml_config_get_nvs_wifi(char * ssid, size_t ssid_len, char * pass, size_t pass_len);
 
   /**
- * @brief Read PPP credentials from NVS settings blob
- *
- * Lightweight helper for boot: reads NVS settings and copies PPP
- * username/password into caller-provided buffers. Returns true if
- * NVS had non-empty PPP credentials.
- */
-  bool ml_config_get_nvs_ppp(char * user, size_t user_len, char * pass, size_t pass_len);
-
-  /**
- * @brief Read cellular APN from NVS settings blob
- *
- * Lightweight helper for boot: reads NVS settings and copies APN
- * into caller-provided buffer. Returns true if NVS had non-empty APN.
- */
-  bool ml_config_get_nvs_apn(char * apn, size_t apn_len);
-
-  /**
  * @brief Read WiFi multi-SSID list from NVS
  *
  * Returns the priority-ordered list of WiFi networks configured via the web UI.
@@ -351,22 +334,6 @@ static inline bool ml_config_get_nvs_wifi(char * s, size_t sl, char * p, size_t 
   (void)sl;
   (void)p;
   (void)pl;
-  return false;
-}
-
-static inline bool ml_config_get_nvs_ppp(char * u, size_t ul, char * p, size_t pl)
-{
-  (void)u;
-  (void)ul;
-  (void)p;
-  (void)pl;
-  return false;
-}
-
-static inline bool ml_config_get_nvs_apn(char * a, size_t al)
-{
-  (void)a;
-  (void)al;
   return false;
 }
 

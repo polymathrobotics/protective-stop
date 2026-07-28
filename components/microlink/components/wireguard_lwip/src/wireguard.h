@@ -212,7 +212,7 @@ struct wireguard_device {
 	wireguard_udp_output_fn udp_output_fn;
 	void *udp_output_ctx;
 
-	// Force all peer output through DERP relay (cellular mode)
+	// Force all peer output through DERP relay
 	bool force_derp_output;
 
 	bool valid;

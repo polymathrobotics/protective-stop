@@ -27,14 +27,15 @@
  *     RED    = STOP          connected; the machine's last reply was STOP — a
  *                            commanded stop (E-stop pressed, or the NEED_STOP
  *                            arming cycle not yet completed).
- *     PURPLE = MISMATCH      the two lockstep cores disagreed recently (their
- *                            encoded messages differed) — e.g. ONE E-stop loop
+ *     PURPLE = MISMATCH      the two lockstep cores are disagreeing (their
+ *                            encoded messages differ) — e.g. ONE E-stop loop
  *                            channel opened/faulted while the other stayed
  *                            closed. The comparator sends nothing on a mismatch,
  *                            so the link would otherwise just time out to
- *                            yellow; purple flags the real cause. Held briefly
- *                            after each mismatch so single blips show. Takes
- *                            priority over every other colour.
+ *                            yellow; purple flags the real cause. Shows only
+ *                            while the disagreement is present (a lone blip =
+ *                            about one ring frame). Takes priority over every
+ *                            other colour.
  *
  * Additionally, a DIM PURPLE comet (much dimmer than the mismatch purple)
  * spins around the ring from the very top of boot via
@@ -75,7 +76,12 @@ static const char * TAG = "dcs_ring";
 
 #define RING_REFRESH_MS 250 /* re-evaluate state + repaint; also the WS2812 reset gap */
 #define LINK_FRESH_MS 2000u /* no machine reply within this -> not connected (re-bond is 1.5s) */
-#define MISMATCH_HOLD_MS 2000u /* show PURPLE this long after a lockstep mismatch increments */
+#define MISMATCH_HOLD_MS \
+  300u /* PURPLE bridging window: just over one ring frame (250 ms), so a \
+                                * SUSTAINED fault (counter increments every 100 ms comparator tick) \
+                                * paints solid purple with no flicker, while a single transient blip \
+                                * clears within ~one frame. Deliberately NOT longer: purple must only \
+                                * show while the disagreement is actually present. */
 #define PULSE_PERIOD_MS 2400u /* slow RED pulse period when a configured host is unreachable */
 #define PULSE_FRAME_MS 60 /* repaint step while pulsing, for a smooth ramp */
 
@@ -313,9 +319,11 @@ static void ring_task(void * arg)
       locate_showing = false;
     }
 
-    /* PURPLE hold: latch on any new lockstep mismatch so even a single
-         * transient blip is visible; a sustained single-channel fault keeps
-         * re-extending it (the cores disagree every tick). */
+    /* PURPLE: track the mismatch counter poll-to-poll. A sustained fault
+         * increments it every 100 ms comparator tick, so each 250 ms frame
+         * sees a change and keeps the ring purple; a single transient blip
+         * shows for at most ~one frame and clears. No longer hold — purple
+         * means the disagreement is present NOW. */
     uint32_t mm = atomic_load(&g_dcs_pstop_mismatch);
     if (mm != prev_mismatch) {
       prev_mismatch = mm;

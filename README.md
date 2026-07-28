@@ -3,7 +3,7 @@
 <img src="hardware/real.jpg" alt="Assembled Protective Stop remote: red E-stop button on a printed enclosure with Ethernet in the side pod" width="380" />
 
 A low-cost, reliable protective stop for robots and automation. A
-battery-powerable ESP32-S3 remote heartbeats operator intent at 10 Hz
+PoE- or USB-powered ESP32-S3 remote heartbeats operator intent at 10 Hz
 over an encrypted tunnel to a machine process on the robot. If the
 heartbeats say STOP, or stop arriving at all, the machine brings the
 robot to a controlled stop.

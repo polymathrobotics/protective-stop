@@ -447,10 +447,10 @@ static int do_noise_handshake(microlink_t * ml, ml_noise_state_t * noise)
      * server's tx_nonce. We must process them to keep nonces in sync.
      * (Matches v1 g_server_extra_data logic)
      *
-     * On fast connections (WiFi), the proactive frames often arrive in
-     * the same TCP segment as the HTTP 101 + msg2. On slow connections
-     * (cellular PPP), they arrive in separate TCP segments. We must
-     * read from the socket if they weren't in the initial buffer. */
+     * On fast connections the proactive frames often arrive in the same
+     * TCP segment as the HTTP 101 + msg2; on slow connections they arrive
+     * in separate TCP segments. We must read from the socket if they
+     * weren't in the initial buffer. */
   int extra_len = body_buf_len - msg2_total;
   uint8_t * extra_data = NULL;
 
@@ -465,7 +465,7 @@ static int do_noise_handshake(microlink_t * ml, ml_noise_state_t * noise)
     /* Slow path: proactive frames arrive in subsequent TCP segments.
          * Set a short recv timeout and read them from the socket.
          * Server sends EarlyNoise immediately after msg2, so they should
-         * arrive within a few hundred ms even on slow cellular links. */
+         * arrive within a few hundred ms even on slow links. */
     ESP_LOGI(TAG, "No extra data in initial buffer, reading proactive frames from socket...");
     struct timeval short_tv = {.tv_sec = 2, .tv_usec = 0};
     ml_setsockopt(ml->coord_sock, SOL_SOCKET, SO_RCVTIMEO, &short_tv, sizeof(short_tv));
@@ -1322,9 +1322,6 @@ static int add_endpoints_to_json(microlink_t * ml, cJSON * root)
     cJSON_AddItemToArray(et_array, cJSON_CreateNumber(1)); /* EndpointLocal */
     count++;
   }
-
-  /* PPP endpoint (cellular) — use STUN-discovered public IP as our endpoint */
-  /* (PPP netif doesn't have a useful local IP for peers — it's behind CGNAT) */
 
   /* STUN public endpoint (IPv4) */
   if (ml->stun_public_ip != 0) {
@@ -2417,7 +2414,7 @@ void ml_coord_task(void * arg)
   /* Noise protocol state - owned exclusively by this task */
   ml_noise_state_t noise = {0};
 
-  /* Wait for WiFi/cellular OR shutdown */
+  /* Wait for the uplink OR shutdown */
   ESP_LOGI(TAG, "Waiting for WiFi...");
   {
     EventBits_t wb =

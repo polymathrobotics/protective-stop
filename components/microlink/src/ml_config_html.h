@@ -27,7 +27,6 @@ static const char CONFIG_PAGE_HTML[] =
   ".hdr-right{display:flex;align-items:center;gap:12px}"
   ".conn-badge{padding:5px 12px;border-radius:12px;font-size:.8em;font-weight:600}"
   ".conn-wifi{background:#1f6feb30;color:#58a6ff;border:1px solid #1f6feb}"
-  ".conn-cell{background:#da363330;color:#f85149;border:1px solid #da3633}"
   ".hdr-ip{font-family:monospace;font-size:1em;color:#58a6ff;font-weight:600}"
   ".hdr-host{color:#8b949e;font-size:.85em}"
 
@@ -240,11 +239,6 @@ static const char CONFIG_PAGE_HTML[] =
   "<input type='text' id='device_name_full' placeholder='e.g. pstop-tailscale' onchange='saveSettings()'>"
   "<div class='hint'>Overrides prefix+MAC. DNS: name.tailnet.ts.net</div></div>"
 
-  "<div class='form-group'><label>Cellular APN</label>"
-  "<input type='text' id='cellular_apn' onchange='saveSettings()'></div>"
-  "<div class='form-group'><label>SIM PIN</label>"
-  "<input type='password' id='cellular_sim_pin' onchange='saveSettings()'></div>"
-
   /* Advanced */
   "<div class='form-group full' style='margin-top:8px'>"
   "<label style='color:#58a6ff;font-size:.85em;font-weight:600'>Advanced</label></div>"
@@ -398,9 +392,8 @@ static const char CONFIG_PAGE_HTML[] =
   "const r=await fetch(API_BASE+'/api/monitor');"
   "const d=await r.json();"
   "document.getElementById('mTemp').textContent=d.temp_c!=null?d.temp_c+'\\u00b0C':'N/A';"
-  /* Signal: show RSSI for wifi, just 'Cellular' for cell */
   "var sig='N/A';"
-  "if(d.connection==='cellular'){sig='Cellular';}else if(d.rssi!=null){sig=d.rssi+' dBm';}"
+  "if(d.rssi!=null){sig=d.rssi+' dBm';}"
   "document.getElementById('mRssi').textContent=sig;"
   "document.getElementById('mUptime').textContent=fmtUptime(d.uptime_s);"
   "document.getElementById('mHeap').textContent=(d.free_heap/1024|0)+' KB';"
@@ -410,13 +403,8 @@ static const char CONFIG_PAGE_HTML[] =
   "'#'+d.derp_home_region+(d.derp_connected?' (up)':' (down)'):'--';"
   /* Connection badge */
   "var cb=document.getElementById('connBadge');"
-  "if(d.connection==='cellular'){"
-  "cb.textContent='Cellular';cb.className='conn-badge conn-cell';"
-  "document.querySelector('.mon-card:nth-child(2) .lbl').textContent='Connection';"
-  "}else{"
   "cb.textContent='WiFi';cb.className='conn-badge conn-wifi';"
   "document.querySelector('.mon-card:nth-child(2) .lbl').textContent='WiFi RSSI';"
-  "}"
   /* Peer count card */
   "const sr=await fetch(API_BASE+'/api/status');"
   "const sd=await sr.json();"
@@ -440,8 +428,6 @@ static const char CONFIG_PAGE_HTML[] =
   "document.getElementById('auth_key').value=d.auth_key||'';"
   "document.getElementById('device_prefix').value=d.device_prefix||'';"
   "document.getElementById('device_name_full').value=d.device_name_full||'';"
-  "document.getElementById('cellular_apn').value=d.cellular_apn||'';"
-  "document.getElementById('cellular_sim_pin').value=d.cellular_sim_pin||'';"
   "var mp=d.max_peers||0;"
   "document.getElementById('max_peers').value=mp>0?mp:'';"
   "var hb=d.disco_heartbeat_ms||0;"
@@ -466,8 +452,6 @@ static const char CONFIG_PAGE_HTML[] =
   "auth_key:document.getElementById('auth_key').value,"
   "device_prefix:document.getElementById('device_prefix').value,"
   "device_name_full:document.getElementById('device_name_full').value,"
-  "cellular_apn:document.getElementById('cellular_apn').value,"
-  "cellular_sim_pin:document.getElementById('cellular_sim_pin').value,"
   "max_peers:parseInt(document.getElementById('max_peers').value)||0,"
   "disco_heartbeat_ms:parseInt(document.getElementById('disco_heartbeat_ms').value)||0,"
   "priority_peer_ip:document.getElementById('priority_peer_ip').value,"

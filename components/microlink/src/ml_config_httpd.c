@@ -39,9 +39,6 @@
   #include "freertos/semphr.h"
   #include "nvs.h"
   #include "nvs_flash.h"
-  #ifdef CONFIG_ML_ENABLE_CELLULAR
-    #include "ml_at_socket.h"
-  #endif
 
 static const char * TAG = "ml_config";
 
@@ -518,11 +515,7 @@ static esp_err_t handler_status(httpd_req_t * req)
   cJSON_AddNumberToObject(json, "free_psram", heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
   cJSON_AddBoolToObject(json, "filter_enabled", ctx->filter_enabled);
 
-  #ifdef CONFIG_ML_ENABLE_CELLULAR
-  cJSON_AddStringToObject(json, "connection", ml_at_socket_is_ready() ? "cellular" : "wifi");
-  #else
   cJSON_AddStringToObject(json, "connection", "wifi");
-  #endif
 
   return send_json(req, json);
 }
@@ -541,8 +534,6 @@ static esp_err_t handler_get_settings(httpd_req_t * req)
   cJSON_AddStringToObject(json, "wifi_pass", ctx->settings.wifi_pass[0] ? "********" : "");
   cJSON_AddStringToObject(json, "auth_key", ctx->settings.auth_key[0] ? "********" : "");
   cJSON_AddStringToObject(json, "device_prefix", ctx->settings.device_prefix);
-  cJSON_AddStringToObject(json, "cellular_apn", ctx->settings.cellular_apn);
-  cJSON_AddStringToObject(json, "cellular_sim_pin", ctx->settings.cellular_sim_pin[0] ? "****" : "");
 
   /* v2 fields */
   cJSON_AddNumberToObject(json, "max_peers", ctx->settings.max_peers);
@@ -606,15 +597,6 @@ static esp_err_t handler_post_settings(httpd_req_t * req)
   }
   if ((item = cJSON_GetObjectItem(json, "device_prefix")) && cJSON_IsString(item)) {
     COPY_STR_FIELD(ctx->settings.device_prefix, item->valuestring);
-  }
-  if ((item = cJSON_GetObjectItem(json, "cellular_apn")) && cJSON_IsString(item)) {
-    COPY_STR_FIELD(ctx->settings.cellular_apn, item->valuestring);
-  }
-  if ((item = cJSON_GetObjectItem(json, "cellular_sim_pin")) && cJSON_IsString(item)) {
-    const char * v = item->valuestring;
-    if (v[0] != '\0' && strcmp(v, "****") != 0) {
-      COPY_STR_FIELD(ctx->settings.cellular_sim_pin, v);
-    }
   }
   /* v2 fields */
   if ((item = cJSON_GetObjectItem(json, "max_peers")) && cJSON_IsNumber(item)) {
@@ -977,15 +959,7 @@ static esp_err_t handler_monitor(httpd_req_t * req)
   }
 
   /* Connection type */
-  #ifdef CONFIG_ML_ENABLE_CELLULAR
-  if (ml_at_socket_is_ready()) {
-    cJSON_AddStringToObject(json, "connection", "cellular");
-  } else {
-    cJSON_AddStringToObject(json, "connection", "wifi");
-  }
-  #else
   cJSON_AddStringToObject(json, "connection", "wifi");
-  #endif
 
   return send_json(req, json);
 }

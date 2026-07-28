@@ -97,8 +97,8 @@ microlink_tcp_socket_t * microlink_tcp_connect(
   }
 
   /* Bind to our VPN IP so lwIP routes through the WG netif.
-     * Without this, the PPP default route may catch 100.x.x.x traffic
-     * and send it out the cellular modem raw (unroutable). */
+     * Without this, another default route may catch 100.x.x.x traffic
+     * and send it out the wrong interface (unroutable). */
   if (ml->vpn_ip != 0) {
     struct sockaddr_in src = {
       .sin_family = AF_INET,

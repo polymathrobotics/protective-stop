@@ -154,7 +154,7 @@ static err_t wireguardif_peer_output(struct netif *netif, struct pbuf *q, struct
 
 	// Check if peer has a direct endpoint (non-zero IP and port)
 	// If not, use DERP relay callback if available.
-	// force_derp_output: cellular mode — always route through DERP.
+	// force_derp_output: always route through DERP when set.
 	if (ip_addr_isany(&peer->ip) || peer->port == 0 || device->force_derp_output) {
 		WG_DEBUG("[WG_OUT] No direct endpoint or force_derp, checking DERP\n");
 
@@ -837,7 +837,7 @@ void wireguardif_network_rx(void *arg, struct udp_pcb *pcb, struct pbuf *p, cons
 
 					// If initiation arrived via DERP (addr=0.0.0.0), send response
 					// via DERP too by temporarily clearing the peer endpoint.
-					// The ESP32 on cellular may not reach the peer's direct endpoint.
+					// The chip may not reach the peer's direct endpoint.
 					ip_addr_t saved_ip;
 					u16_t saved_port;
 					bool via_derp = ip_addr_isany(addr);
