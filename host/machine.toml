@@ -37,15 +37,19 @@ machine_device_id = 0x01020304
 # at the chip's 10 Hz cadence without nuisance MSG_LOST. Upstream default 1 is
 # too tight for this remote. Set to 1 to see strict OUT_OF_ORDER behavior.
 max_lost_messages = 10
-# LIVENESS. How many consecutive heartbeats a remote may miss before the
+# LIVENESS. How many heartbeat windows a remote may stay silent before the
 # library's NATIVE check_heartbeats declares it lost and stops the machine.
 # This is the only liveness control — there is no wrapper watchdog and no clock
 # option: the machine always runs on its own monotonic clock, so the library's
 # check_heartbeats advances in real time and fires on its own. The effective
-# silence timeout = (this remote's) heartbeat_ms x (max_missed_heartbeats + 1).
-# With heartbeat_ms = 1000 and this = 1, the machine STOPs ~1-2 s after the
-# remote goes silent. Lower either for a tighter stop; mind nuisance trips.
-max_missed_heartbeats = 1
+# silence timeout = (this remote's) heartbeat_ms x max_missed_heartbeats
+# (machine.c: missed = diff/hb, stop when missed >= max — NOT max+1).
+# Remotes send at heartbeat_ms/2 and deliberately withhold one send on a
+# lockstep mismatch, so 1 tolerates ZERO withheld ticks and races the
+# deadline (caused false STOPs on the bench, 2026-07-27 soak). 3 gives a
+# heartbeat_ms x 3 timeout = 6 send slots of margin. Mind nuisance trips
+# before lowering.
+max_missed_heartbeats = 3
 # Size of the machine's remotes table = max simultaneous bonded remotes.
 # This bench has one (the chip); raise it to test multi-remote scenarios.
 max_remotes = 3
@@ -69,8 +73,9 @@ allow_unlisted = true
 # and transmits at half this window (2x margin), clamped between its 100 ms
 # lockstep tick and 1000 ms — so tightening or relaxing this value (or a
 # per-operator heartbeat_ms below) retunes the remote's publish rate with no
-# remote-side configuration.
-default_heartbeat_ms = 1000
+# remote-side configuration. 400 => remotes publish every 200 ms (5 Hz);
+# with max_missed_heartbeats = 3 the machine STOPs after ~1.2 s of silence.
+default_heartbeat_ms = 400
 # Unlisted remotes as stop-only? (stop_only = may command STOP but can never
 # arm the machine to OK). Usually false.
 default_stop_only = false

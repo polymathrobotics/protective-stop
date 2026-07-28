@@ -99,11 +99,19 @@ static void cfg_defaults(machine_cfg_t * c)
   snprintf(c->bind_addr, sizeof(c->bind_addr), "%s", "0.0.0.0");
   c->machine_device_id = 0x01020304U; /* matches DEVICE_ID_MACHINE in main.c */
   c->max_lost_messages = 10U;
-  c->max_missed_heartbeats = 1U;
+  /* Library timeout = heartbeat_ms x max_missed_heartbeats (machine.c
+   * check_heartbeats: missed = diff/hb, stop when missed >= max). Remotes
+   * send at hb/2 and deliberately withhold a tick on a lockstep mismatch,
+   * so max_missed=1 tolerates ZERO withheld ticks (a 1-tick withhold races
+   * the deadline exactly — observed false STOPs on the bench). 3 = ~3 s
+   * silence at hb=1000 and absorbs up to 5 withheld send slots. */
+  c->max_missed_heartbeats = 3U;
   c->max_remotes = 3U;
   c->verbose = 0;
   c->allow_unlisted = 1;
-  c->default_heartbeat_ms = 1000U;
+  /* Advertised per-remote heartbeat window; remotes publish at half this
+   * (2x margin), so 400 ms => a 5 Hz remote update rate. */
+  c->default_heartbeat_ms = 400U;
   c->min_stop_ms = 500U;
   c->default_stop_only = 0;
   c->n_operators = 0;
