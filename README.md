@@ -122,6 +122,13 @@ cd host && make && ./machine_app_runner machine.toml     # listens on 0.0.0.0:88
 curl -X POST "http://<chip>/api/pstop_peer?ip=<machine-ip>&port=8890"
 ```
 
+To use a unit over its USB cable, the host needs a one-time tether
+setup first (an interface-naming rule plus a shared-mode NetworkManager
+profile — the chip does not serve DHCP, so without this the USB link
+sits in "connecting…" forever and the unit falls back to WiFi). See
+["USB tether — one-time host setup"](host/README.md#usb-tether--one-time-host-setup-read-this-first)
+in `host/README.md`.
+
 Arm by pressing and holding the switch for at least 0.5 s, then
 releasing. The runner logs `ARMED` and the ring turns green.
 

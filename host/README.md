@@ -67,10 +67,43 @@ Stderr prints per-pstop command changes and state transitions by default —
 device id, so with several remotes bonded you can see exactly which one sent
 what (and which one caused a stop or owns the arming cycle).
 
+## USB tether — one-time host setup (read this first)
+
+Plugging a pstop into a Linux host does NOT give you a working network
+link out of the box, and the failure mode is misleading: the laptop's
+new "wired" connection sits in *connecting…* forever while the unit
+silently falls back to its provisioned WiFi. The chip's USB-NCM tether
+deliberately runs **no DHCP server** — the HOST is expected to own the
+link (serve DHCP, NAT it out), which NetworkManager calls `shared`
+mode. Two files fix it permanently:
+
+1. Pin every pstop to one predictable interface name (`esp-pstop0`),
+   keyed on the USB VID:PID so it holds across units and reboots:
+
+   ```sh
+   sudo cp 70-esp-pstop.link /etc/systemd/network/   # ships in this directory
+   sudo udevadm control --reload
+   ```
+
+2. Bind a shared-mode NetworkManager profile to that name:
+
+   ```sh
+   sudo nmcli con add type ethernet ifname esp-pstop0 con-name esp-pstop \
+        ipv4.method shared connection.autoconnect yes
+   ```
+
+Replug the unit. The host takes `10.42.0.1`, the chip DHCPs to
+`10.42.0.x`, switches its active uplink to USB, and — because the
+chip's factory-default machine peer is `10.42.0.1:8890` — it will bond
+to a `machine_app_runner` on this host with zero further configuration.
+
+Caveat: only the first unit plugged in gets `esp-pstop0`; simultaneous
+extra units fall back to `enx<mac>` names and need their own profiles.
+
 ## Point the remote at this host
 
-USB-NCM (host side of the tether is `10.42.0.1` under the default
-NetworkManager share):
+USB-NCM (host side of the tether is `10.42.0.1` after the one-time
+setup above — the chip's factory default, so usually nothing to do):
 
 ```sh
 curl -X POST "http://$CHIP/api/pstop_peer?ip=10.42.0.1&port=8890"

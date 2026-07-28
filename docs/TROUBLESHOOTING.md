@@ -101,6 +101,19 @@ xtensa-esp32s3-elf-addr2line -e firmware/build/pstop_remote.elf 0x4037.... 0x403
 
 ## Common scenarios
 
+### Plugged into USB: the laptop's network stays "connecting…" and the unit joins WiFi instead
+
+Expected on any host that hasn't done the one-time tether setup. The
+chip's USB-NCM runs **no DHCP server** — the host must own the link
+(NetworkManager `shared` mode: host = `10.42.0.1`, DHCP + NAT for the
+chip). Without it the host waits forever for DHCP that never comes,
+and the chip, seeing no usable USB uplink, falls back to its
+provisioned WiFi. Fix (two files, once per host): install
+`host/70-esp-pstop.link` and add the shared profile — full steps in
+`host/README.md` → "USB tether — one-time host setup". After replug
+the chip DHCPs to `10.42.0.x`, prefers the USB uplink, and bonds to a
+machine node on the host via its factory-default peer `10.42.0.1:8890`.
+
 ### `tailscale ping $CHIP_TS` shows tx climbing, rx 0
 
 Almost always the chip's peer allowlist doesn't include your host's
