@@ -184,7 +184,7 @@ extern "C"
  * EADDRNOTAVAIL (no path), other = the rest. Exposed in /state.json as
  * pstop_sf_nomem / pstop_sf_route / pstop_sf_other / pstop_sf_errno.
  */
-  void dcs_publish_pstop_sf_causes(uint32_t nomem, uint32_t route, uint32_t other, int last_errno);
+  void dcs_publish_pstop_sf_causes(uint32_t nomem, uint32_t route, uint32_t txdrv, uint32_t other, int last_errno);
 
   /**
  * @brief Tell the transport whether the pstop link to the machine is alive.

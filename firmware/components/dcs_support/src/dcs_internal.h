@@ -123,6 +123,7 @@ extern "C"
    * everything else. last_errno is the most recent failure's raw errno. */
   extern atomic_uint_fast32_t g_dcs_pstop_sf_nomem;
   extern atomic_uint_fast32_t g_dcs_pstop_sf_route;
+  extern atomic_uint_fast32_t g_dcs_pstop_sf_txdrv; /* lwip ERR_IF: uplink driver TX refused */
   extern atomic_uint_fast32_t g_dcs_pstop_sf_other;
   extern atomic_int g_dcs_pstop_sf_last_errno;
   extern atomic_uint_fast32_t g_dcs_pstop_rebonds; /* link re-syncs after reply loss */

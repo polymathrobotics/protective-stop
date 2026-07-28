@@ -608,6 +608,9 @@ static bool sess_sendto(pstop_sess_t * s, const uint8_t * bytes)
  * no path to the peer (tunnel down / no session); other = the rest. */
 static uint32_t g_sf_nomem;
 static uint32_t g_sf_route;
+static uint32_t g_sf_txdrv; /* errno -1 = lwip ERR_IF: the uplink DRIVER refused the
+                             * frame (e.g. USB-NCM transmit busy) — path is up,
+                             * one send slot lost, retried next tick */
 static uint32_t g_sf_other;
 static int g_sf_last_errno;
 
@@ -620,6 +623,8 @@ static void sess_count_send_fail(pstop_sess_t * s)
     g_sf_nomem++;
   } else if ((e == EHOSTUNREACH) || (e == ENETUNREACH) || (e == EADDRNOTAVAIL)) {
     g_sf_route++;
+  } else if (e == -1) {
+    g_sf_txdrv++; /* lwip ERR_IF maps to errno -1 (err.c table) */
   } else {
     g_sf_other++;
   }
@@ -1005,7 +1010,7 @@ static void comparator_task(void * arg)
     } else {
       /* all OK: agg_msg stays OK */
     }
-    dcs_publish_pstop_sf_causes(g_sf_nomem, g_sf_route, g_sf_other, g_sf_last_errno);
+    dcs_publish_pstop_sf_causes(g_sf_nomem, g_sf_route, g_sf_txdrv, g_sf_other, g_sf_last_errno);
     atomic_store(&g_dcs_pstop_last_msg, agg_msg);
     atomic_store(&g_dcs_pstop_replies, agg_replies);
     dcs_publish_comparator(agg_sent, mismatch, agg_fail, agg_last_reply, agg_rtt);

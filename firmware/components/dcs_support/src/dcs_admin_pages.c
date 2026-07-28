@@ -215,7 +215,7 @@ static esp_err_t page_state(httpd_req_t * req)
     "\"pstop_peer_ip\":%lu,\"pstop_peer_port\":%lu,"
     "\"pstop_sent\":%lu,\"pstop_replies\":%lu,\"pstop_last_msg\":%lu,\"pstop_mismatch\":%lu,"
     "\"pstop_send_fail\":%lu,\"pstop_sf_nomem\":%lu,\"pstop_sf_route\":%lu,"
-    "\"pstop_sf_other\":%lu,\"pstop_sf_errno\":%d,\"pstop_rebonds\":%lu,"
+    "\"pstop_sf_txdrv\":%lu,\"pstop_sf_other\":%lu,\"pstop_sf_errno\":%d,\"pstop_rebonds\":%lu,"
     "\"pstop_rtt_ms\":%lu,\"pstop_last_reply_ms\":%llu,"
     "\"rssi\":%d,\"tx_q\":%d,\"free_heap\":%lu,\"largest\":%lu,"
     "\"heap_min_int\":%lu,\"wg_pbuf_fails\":%lu,\"wg_dedup_drops\":%lu,"
@@ -269,6 +269,7 @@ static esp_err_t page_state(httpd_req_t * req)
     (unsigned long)atomic_load(&g_dcs_pstop_send_fail),
     (unsigned long)atomic_load(&g_dcs_pstop_sf_nomem),
     (unsigned long)atomic_load(&g_dcs_pstop_sf_route),
+    (unsigned long)atomic_load(&g_dcs_pstop_sf_txdrv),
     (unsigned long)atomic_load(&g_dcs_pstop_sf_other),
     (int)atomic_load(&g_dcs_pstop_sf_last_errno),
     (unsigned long)atomic_load(&g_dcs_pstop_rebonds),

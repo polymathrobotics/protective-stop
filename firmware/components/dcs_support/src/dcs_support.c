@@ -92,6 +92,7 @@ atomic_uint_fast32_t g_dcs_pstop_mismatch;
 atomic_uint_fast32_t g_dcs_pstop_send_fail;
 atomic_uint_fast32_t g_dcs_pstop_sf_nomem;
 atomic_uint_fast32_t g_dcs_pstop_sf_route;
+atomic_uint_fast32_t g_dcs_pstop_sf_txdrv;
 atomic_uint_fast32_t g_dcs_pstop_sf_other;
 atomic_int g_dcs_pstop_sf_last_errno;
 atomic_uint_fast32_t g_dcs_pstop_rtt_ms;
@@ -358,10 +359,11 @@ void dcs_publish_comparator(
   atomic_store(&g_dcs_pstop_rtt_ms, rtt_ms);
 }
 
-void dcs_publish_pstop_sf_causes(uint32_t nomem, uint32_t route, uint32_t other, int last_errno)
+void dcs_publish_pstop_sf_causes(uint32_t nomem, uint32_t route, uint32_t txdrv, uint32_t other, int last_errno)
 {
   atomic_store(&g_dcs_pstop_sf_nomem, nomem);
   atomic_store(&g_dcs_pstop_sf_route, route);
+  atomic_store(&g_dcs_pstop_sf_txdrv, txdrv);
   atomic_store(&g_dcs_pstop_sf_other, other);
   atomic_store(&g_dcs_pstop_sf_last_errno, last_errno);
 }
