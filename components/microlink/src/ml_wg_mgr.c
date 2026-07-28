@@ -1377,8 +1377,7 @@ static void process_disco_ping(
   if (!pkt->via_derp && pkt->src_ip != 0 && pkt->src_port != 0 && !p->has_direct_path) {
     bool known = false;
     for (int i = 0; i < p->endpoint_count; i++) {
-      if (!p->endpoints[i].is_ipv6 && p->endpoints[i].ip == pkt->src_ip &&
-          p->endpoints[i].port == pkt->src_port) {
+      if (!p->endpoints[i].is_ipv6 && p->endpoints[i].ip == pkt->src_ip && p->endpoints[i].port == pkt->src_port) {
         known = true;
         break;
       }
@@ -1388,10 +1387,7 @@ static void process_disco_ping(
       p->endpoints[p->endpoint_count].port = pkt->src_port;
       p->endpoints[p->endpoint_count].is_ipv6 = false;
       p->endpoint_count++;
-      ESP_LOGI(
-        TAG,
-        "Learned candidate endpoint for %s from inbound direct ping",
-        p->hostname);
+      ESP_LOGI(TAG, "Learned candidate endpoint for %s from inbound direct ping", p->hostname);
     }
     disco_send_ping_to_peer(ml, peer_idx, true);
   }

@@ -689,8 +689,7 @@ int main(int argc, char * argv[])
   if (g_cfg.announce_url[0] != '\0') {
     if (pthread_create(&announce_tid, NULL, announce_thread, NULL) == 0) {
       announce_started = true;
-      fprintf(
-        stderr, "announce: every %ds to %s\n", g_cfg.announce_interval_s, g_cfg.announce_url);
+      fprintf(stderr, "announce: every %ds to %s\n", g_cfg.announce_interval_s, g_cfg.announce_url);
     } else {
       fprintf(stderr, "announce: thread create failed — continuing without\n");
     }
