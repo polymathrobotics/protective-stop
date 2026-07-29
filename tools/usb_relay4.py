@@ -51,9 +51,9 @@ OP_QUERY = 0x02
 CHANNELS = (1, 2, 3, 4)
 
 # STM32 virtual COM port as enumerated on this bench; --port overrides.
-PORT_GLOB = "/dev/serial/by-id/usb-STMicroelectronics_STM32_Virtual_ComPort*"
+PORT_GLOB = '/dev/serial/by-id/usb-STMicroelectronics_STM32_Virtual_ComPort*'
 
-_ACK_RE = re.compile(rb"CH(\d+):(ON|OFF)")
+_ACK_RE = re.compile(rb'CH(\d+):(ON|OFF)')
 
 
 def _frame(addr: int, op: int) -> bytes:
@@ -63,9 +63,9 @@ def _frame(addr: int, op: int) -> bytes:
 def find_port() -> str:
     matches = sorted(glob.glob(PORT_GLOB))
     if not matches:
-        raise RuntimeError(f"no relay board found (looked for {PORT_GLOB})")
+        raise RuntimeError(f'no relay board found (looked for {PORT_GLOB})')
     if len(matches) > 1:
-        raise RuntimeError(f"multiple STM32 VCP devices, pass --port: {matches}")
+        raise RuntimeError(f'multiple STM32 VCP devices, pass --port: {matches}')
     return matches[0]
 
 
@@ -80,7 +80,7 @@ class UsbRelay4:
     def close(self) -> None:
         self._ser.close()
 
-    def __enter__(self) -> "UsbRelay4":
+    def __enter__(self) -> 'UsbRelay4':
         return self
 
     def __exit__(self, *exc) -> None:
@@ -100,23 +100,23 @@ class UsbRelay4:
             states: dict[int, bool] = {}
             deadline = time.monotonic() + 1.0
             while len(states) < expect_lines and time.monotonic() < deadline:
-                line = self._ser.read_until(b"\n")
+                line = self._ser.read_until(b'\n')
                 m = _ACK_RE.search(line)
                 if m:
-                    states[int(m.group(1))] = m.group(2) == b"ON"
+                    states[int(m.group(1))] = m.group(2) == b'ON'
             if len(states) >= expect_lines:
                 return states
         raise RuntimeError(
-            f"relay board acked {len(states)}/{expect_lines} lines "
-            f"for cmd addr=0x{addr:02X} op=0x{op:02X} (after retry)"
+            f'relay board acked {len(states)}/{expect_lines} lines '
+            f'for cmd addr=0x{addr:02X} op=0x{op:02X} (after retry)'
         )
 
     def set(self, channel: int, on: bool) -> None:
         if channel not in CHANNELS:
-            raise ValueError(f"channel must be 1..4, got {channel}")
+            raise ValueError(f'channel must be 1..4, got {channel}')
         ack = self._xfer(channel, OP_ON if on else OP_OFF, expect_lines=1)
         if ack.get(channel) != on:
-            raise RuntimeError(f"relay {channel}: commanded {on}, board acked {ack}")
+            raise RuntimeError(f'relay {channel}: commanded {on}, board acked {ack}')
 
     def set_many(self, states: dict[int, bool]) -> None:
         """Switch several channels as near-simultaneously as the board
@@ -126,25 +126,23 @@ class UsbRelay4:
         together. Acks for every channel are collected and verified."""
         bad = [ch for ch in states if ch not in CHANNELS]
         if bad:
-            raise ValueError(f"channels must be 1..4, got {bad}")
+            raise ValueError(f'channels must be 1..4, got {bad}')
         if not states:
             return
         time.sleep(0.02)
         self._ser.reset_input_buffer()
-        self._ser.write(
-            b"".join(_frame(ch, OP_ON if on else OP_OFF) for ch, on in states.items())
-        )
+        self._ser.write(b''.join(_frame(ch, OP_ON if on else OP_OFF) for ch, on in states.items()))
         self._ser.flush()
         acked: dict[int, bool] = {}
         deadline = time.monotonic() + 1.0
         while len(acked) < len(states) and time.monotonic() < deadline:
-            line = self._ser.read_until(b"\n")
+            line = self._ser.read_until(b'\n')
             m = _ACK_RE.search(line)
             if m:
-                acked[int(m.group(1))] = m.group(2) == b"ON"
+                acked[int(m.group(1))] = m.group(2) == b'ON'
         wrong = {ch: on for ch, on in states.items() if acked.get(ch) != on}
         if wrong:
-            raise RuntimeError(f"set_many: bad/missing acks for {wrong} (got {acked})")
+            raise RuntimeError(f'set_many: bad/missing acks for {wrong} (got {acked})')
 
     def on(self, channel: int) -> None:
         self.set(channel, True)
@@ -163,7 +161,7 @@ class UsbRelay4:
         ack = self._xfer(ADDR_ALL, OP_ON if on else OP_OFF, expect_lines=8)
         wrong = [ch for ch in CHANNELS if ack.get(ch) != on]
         if wrong:
-            raise RuntimeError(f"all-{'on' if on else 'off'}: bad ack for {wrong}: {ack}")
+            raise RuntimeError(f'all-{"on" if on else "off"}: bad ack for {wrong}: {ack}')
 
     def status(self) -> dict[int, bool]:
         """Query the board; returns {channel: is_on} for channels 1..4."""
@@ -181,45 +179,45 @@ class UsbRelay4:
 
 def _parse_channel(text: str) -> list[int] | None:
     """'all' -> None; '2' -> [2]; '1,2' -> [1, 2] (gang-switched)."""
-    if text.lower() == "all":
+    if text.lower() == 'all':
         return None
     try:
-        chans = [int(part) for part in text.split(",")]
+        chans = [int(part) for part in text.split(',')]
     except ValueError:
         raise argparse.ArgumentTypeError("channel must be 1..4, a list like 1,2, or 'all'")
     if len(set(chans)) != len(chans) or any(ch not in CHANNELS for ch in chans):
-        raise argparse.ArgumentTypeError("channels must be unique and each 1..4")
+        raise argparse.ArgumentTypeError('channels must be unique and each 1..4')
     return chans
 
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("--port", help="serial port (default: auto-detect STM32 VCP)")
-    sub = ap.add_subparsers(dest="cmd", required=True)
-    for verb in ("on", "off"):
+    ap.add_argument('--port', help='serial port (default: auto-detect STM32 VCP)')
+    sub = ap.add_subparsers(dest='cmd', required=True)
+    for verb in ('on', 'off'):
         p = sub.add_parser(verb)
-        p.add_argument("channel", type=_parse_channel, help="1..4, a list like 1,2, or 'all'")
-    p = sub.add_parser("pulse")
-    p.add_argument("channel", type=_parse_channel, help="1..4")
-    p.add_argument("--seconds", type=float, default=1.0)
-    sub.add_parser("status")
+        p.add_argument('channel', type=_parse_channel, help="1..4, a list like 1,2, or 'all'")
+    p = sub.add_parser('pulse')
+    p.add_argument('channel', type=_parse_channel, help='1..4')
+    p.add_argument('--seconds', type=float, default=1.0)
+    sub.add_parser('status')
     args = ap.parse_args(argv)
 
     with UsbRelay4(args.port) as board:
-        if args.cmd in ("on", "off"):
-            want_on = args.cmd == "on"
+        if args.cmd in ('on', 'off'):
+            want_on = args.cmd == 'on'
             if args.channel is None:
                 board.all_on() if want_on else board.all_off()
             else:
                 board.set_many({ch: want_on for ch in args.channel})
-        elif args.cmd == "pulse":
+        elif args.cmd == 'pulse':
             if args.channel is None or len(args.channel) != 1:
-                ap.error("pulse needs a single channel")
+                ap.error('pulse needs a single channel')
             board.pulse(args.channel[0], args.seconds)
         for ch, on in sorted(board.status().items()):
-            print(f"relay {ch}: {'ON' if on else 'off'}")
+            print(f'relay {ch}: {"ON" if on else "off"}')
     return 0
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     sys.exit(main())

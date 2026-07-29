@@ -23,39 +23,40 @@ import urllib.request
 from pathlib import Path
 
 # Machine-runner stderr vocabulary (host/machine_app_runner.c).
-STATUS_RE = re.compile(r"\*\*\* ROBOT STATUS -> (OK|STOP)")
-STATUS_OK_RE = re.compile(r"\*\*\* ROBOT STATUS -> OK")
-STATUS_STOP_RE = re.compile(r"\*\*\* ROBOT STATUS -> STOP")
-RX_RE = re.compile(r"RX <- remote 0x[0-9A-Fa-f]+\s+now sending (STOP|OK)")
-RX_STOP_RE = re.compile(r"now sending STOP")
-RX_OK_RE = re.compile(r"now sending OK")
-LIVENESS_RE = re.compile(r"declared lost \[MISSED_HEARTBEATS\]")
-DEFERRED_RE = re.compile(r"ANOMALY: arming DEFERRED")
+STATUS_RE = re.compile(r'\*\*\* ROBOT STATUS -> (OK|STOP)')
+STATUS_OK_RE = re.compile(r'\*\*\* ROBOT STATUS -> OK')
+STATUS_STOP_RE = re.compile(r'\*\*\* ROBOT STATUS -> STOP')
+RX_RE = re.compile(r'RX <- remote 0x[0-9A-Fa-f]+\s+now sending (STOP|OK)')
+RX_STOP_RE = re.compile(r'now sending STOP')
+RX_OK_RE = re.compile(r'now sending OK')
+LIVENESS_RE = re.compile(r'declared lost \[MISSED_HEARTBEATS\]')
+DEFERRED_RE = re.compile(r'ANOMALY: arming DEFERRED')
 
 
-def discover_chip_ip(iface: str = "esp-pstop0", timeout: float = 15.0) -> str:
+def discover_chip_ip(iface: str = 'esp-pstop0', timeout: float = 15.0) -> str:
     """Return the chip's USB-NCM IP from the kernel neighbor table.
 
     Retries: right after a chip (re)boot the NCM interface and its neighbor
     entry can lag USB enumeration by several seconds."""
     deadline = time.monotonic() + timeout
-    last = "no attempt"
+    last = 'no attempt'
     while time.monotonic() < deadline:
         r = subprocess.run(
-            ["ip", "-4", "neigh", "show", "dev", iface],
-            capture_output=True, text=True,
+            ['ip', '-4', 'neigh', 'show', 'dev', iface],
+            capture_output=True,
+            text=True,
         )
         if r.returncode != 0:
-            last = f"interface {iface} not present"
+            last = f'interface {iface} not present'
         else:
-            candidates = [ln.split()[0] for ln in r.stdout.splitlines() if "lladdr" in ln]
+            candidates = [ln.split()[0] for ln in r.stdout.splitlines() if 'lladdr' in ln]
             if len(candidates) == 1:
                 return candidates[0]
-            last = f"neighbors on {iface}: {candidates}"
+            last = f'neighbors on {iface}: {candidates}'
             if len(candidates) > 1:
-                raise RuntimeError(f"multiple neighbors on {iface}: {candidates}")
+                raise RuntimeError(f'multiple neighbors on {iface}: {candidates}')
         time.sleep(0.5)
-    raise RuntimeError(f"chip discovery failed after {timeout}s — {last}")
+    raise RuntimeError(f'chip discovery failed after {timeout}s — {last}')
 
 
 class ChipUnreachable(Exception):
@@ -66,7 +67,7 @@ class Chip:
     """The DUT's HTTP admin API."""
 
     def __init__(self, host: str, timeout: float = 2.0):
-        self.base = f"http://{host}"
+        self.base = f'http://{host}'
         self.timeout = timeout
 
     def _get(self, path: str) -> str:
@@ -74,18 +75,18 @@ class Chip:
             with urllib.request.urlopen(self.base + path, timeout=self.timeout) as r:
                 return r.read().decode()
         except (urllib.error.URLError, OSError, TimeoutError) as e:
-            raise ChipUnreachable(f"GET {path}: {e}") from e
+            raise ChipUnreachable(f'GET {path}: {e}') from e
 
     def _post(self, path: str) -> str:
-        req = urllib.request.Request(self.base + path, method="POST", data=b"")
+        req = urllib.request.Request(self.base + path, method='POST', data=b'')
         try:
             with urllib.request.urlopen(req, timeout=self.timeout) as r:
                 return r.read().decode()
         except (urllib.error.URLError, OSError, TimeoutError) as e:
-            raise ChipUnreachable(f"POST {path}: {e}") from e
+            raise ChipUnreachable(f'POST {path}: {e}') from e
 
     def state(self) -> dict:
-        return json.loads(self._get("/state.json"))
+        return json.loads(self._get('/state.json'))
 
     def reachable(self) -> bool:
         try:
@@ -98,11 +99,11 @@ class Chip:
         """(channel_a_closed, channel_b_closed) from the loop health bits."""
         s = self.state()
         return (
-            bool(s["e_hi0"]) and bool(s["e_lo0"]),
-            bool(s["e_hi1"]) and bool(s["e_lo1"]),
+            bool(s['e_hi0']) and bool(s['e_lo0']),
+            bool(s['e_hi1']) and bool(s['e_lo1']),
         )
 
-    def wait_state(self, pred, timeout: float, poll: float = 0.25, what: str = "condition"):
+    def wait_state(self, pred, timeout: float, poll: float = 0.25, what: str = 'condition'):
         """Poll state() until pred(state) is truthy; returns the state dict."""
         deadline = time.monotonic() + timeout
         last_exc: Exception | None = None
@@ -115,10 +116,10 @@ class Chip:
             except ChipUnreachable as e:
                 last_exc = e
             time.sleep(poll)
-        raise TimeoutError(f"chip: {what} not met within {timeout}s (last error: {last_exc})")
+        raise TimeoutError(f'chip: {what} not met within {timeout}s (last error: {last_exc})')
 
     def wait_reachable(self, timeout: float) -> dict:
-        return self.wait_state(lambda s: True, timeout, what="reachable")
+        return self.wait_state(lambda s: True, timeout, what='reachable')
 
     def wait_gone(self, timeout: float) -> None:
         deadline = time.monotonic() + timeout
@@ -126,21 +127,19 @@ class Chip:
             if not self.reachable():
                 return
             time.sleep(0.25)
-        raise TimeoutError(f"chip still reachable {timeout}s after power cut")
+        raise TimeoutError(f'chip still reachable {timeout}s after power cut')
 
     def set_peer_slot(self, slot: int, ip: str, port: int, machine_id: int) -> None:
         # The firmware parses id with strtoul(base=0): the 0x prefix is
         # REQUIRED — a bare "01020390" would be read as octal (= 4227).
-        resp = json.loads(
-            self._post(f"/api/pstop_peers?slot={slot}&ip={ip}&port={port}&id=0x{machine_id:08X}")
-        )
-        if not resp.get("ok") or resp.get("id") != machine_id:
-            raise RuntimeError(f"set_peer_slot({slot}) failed or id mismatch: {resp}")
+        resp = json.loads(self._post(f'/api/pstop_peers?slot={slot}&ip={ip}&port={port}&id=0x{machine_id:08X}'))
+        if not resp.get('ok') or resp.get('id') != machine_id:
+            raise RuntimeError(f'set_peer_slot({slot}) failed or id mismatch: {resp}')
 
     def clear_peer_slot(self, slot: int) -> None:
-        resp = json.loads(self._post(f"/api/pstop_peers?slot={slot}&clear=1"))
-        if not resp.get("ok"):
-            raise RuntimeError(f"clear_peer_slot({slot}) failed: {resp}")
+        resp = json.loads(self._post(f'/api/pstop_peers?slot={slot}&clear=1'))
+        if not resp.get('ok'):
+            raise RuntimeError(f'clear_peer_slot({slot}) failed: {resp}')
 
 
 class RelayRig:
@@ -148,10 +147,10 @@ class RelayRig:
 
     def __init__(self, board, relays_cfg: dict):
         self.board = board
-        self.ch = {"a": relays_cfg["channel_a"], "b": relays_cfg["channel_b"]}
-        self.power_ch = relays_cfg["dut_power"]
-        self.press_energizes = relays_cfg["press_energizes"]
-        self.cut_energizes = relays_cfg["power_cut_energizes"]
+        self.ch = {'a': relays_cfg['channel_a'], 'b': relays_cfg['channel_b']}
+        self.power_ch = relays_cfg['dut_power']
+        self.press_energizes = relays_cfg['press_energizes']
+        self.cut_energizes = relays_cfg['power_cut_energizes']
 
     def open_loop(self, channel: str) -> None:
         """Open one E-stop loop — half (or all) of a button press."""
@@ -163,14 +162,10 @@ class RelayRig:
     def press(self) -> None:
         """Open BOTH loops in one serial write — like a real DPST press,
         both poles move together (skew ~= relay mechanics, not protocol)."""
-        self.board.set_many(
-            {self.ch["a"]: self.press_energizes, self.ch["b"]: self.press_energizes}
-        )
+        self.board.set_many({self.ch['a']: self.press_energizes, self.ch['b']: self.press_energizes})
 
     def release(self) -> None:
-        self.board.set_many(
-            {self.ch["a"]: not self.press_energizes, self.ch["b"]: not self.press_energizes}
-        )
+        self.board.set_many({self.ch['a']: not self.press_energizes, self.ch['b']: not self.press_energizes})
 
     def power_off(self) -> None:
         self.board.set(self.power_ch, self.cut_energizes)
@@ -199,21 +194,21 @@ class MachineRunner:
         self._reader: threading.Thread | None = None
 
     def _write_config(self) -> Path:
-        cfg = self.workdir / "hil_machine.toml"
+        cfg = self.workdir / 'hil_machine.toml'
         cfg.write_text(
-            "[network]\n"
-            f"port = {self.port}\n"
+            '[network]\n'
+            f'port = {self.port}\n'
             'bind = "0.0.0.0"\n'
-            "[machine]\n"
-            f"machine_device_id = 0x{self.device_id:08X}\n"
-            "[limits]\n"
-            "max_lost_messages = 10\n"
-            f"max_missed_heartbeats = {self.timing['max_missed_heartbeats']}\n"
-            "max_remotes = 3\n"
-            "[policy]\n"
-            "allow_unlisted = true\n"
-            f"default_heartbeat_ms = {self.timing['heartbeat_ms']}\n"
-            f"min_stop_ms = {self.timing['min_stop_ms']}\n"
+            '[machine]\n'
+            f'machine_device_id = 0x{self.device_id:08X}\n'
+            '[limits]\n'
+            'max_lost_messages = 10\n'
+            f'max_missed_heartbeats = {self.timing["max_missed_heartbeats"]}\n'
+            'max_remotes = 3\n'
+            '[policy]\n'
+            'allow_unlisted = true\n'
+            f'default_heartbeat_ms = {self.timing["heartbeat_ms"]}\n'
+            f'min_stop_ms = {self.timing["min_stop_ms"]}\n'
         )
         return cfg
 
@@ -233,16 +228,14 @@ class MachineRunner:
         time.sleep(0.3)
         if self._proc.poll() is not None:
             with self._cond:
-                tail = "\n".join(line for _, line in self.events[-5:])
-            raise RuntimeError(
-                f"machine_app_runner exited rc={self._proc.returncode} at startup:\n{tail}"
-            )
+                tail = '\n'.join(line for _, line in self.events[-5:])
+            raise RuntimeError(f'machine_app_runner exited rc={self._proc.returncode} at startup:\n{tail}')
 
     def _pump(self) -> None:
         assert self._proc is not None and self._proc.stderr is not None
         for line in self._proc.stderr:
             with self._cond:
-                self.events.append((time.monotonic(), line.rstrip("\n")))
+                self.events.append((time.monotonic(), line.rstrip('\n')))
                 self._cond.notify_all()
 
     def stop(self) -> None:
@@ -275,10 +268,8 @@ class MachineRunner:
                     idx += 1
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
-                    tail = "\n".join(line for _, line in self.events[-8:])
-                    raise TimeoutError(
-                        f"no /{pattern.pattern}/ within {timeout}s; log tail:\n{tail}"
-                    )
+                    tail = '\n'.join(line for _, line in self.events[-8:])
+                    raise TimeoutError(f'no /{pattern.pattern}/ within {timeout}s; log tail:\n{tail}')
                 self._cond.wait(remaining)
 
     def find(self, pattern: re.Pattern, since: int = 0):

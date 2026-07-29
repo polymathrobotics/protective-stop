@@ -24,59 +24,62 @@ from usb_relay4 import UsbRelay4  # noqa: E402
 
 def pytest_addoption(parser):
     parser.addoption(
-        "--hil-config", default=str(HIL_DIR / "hil.toml"),
-        help="rig description TOML (default: tools/hil/hil.toml)",
+        '--hil-config',
+        default=str(HIL_DIR / 'hil.toml'),
+        help='rig description TOML (default: tools/hil/hil.toml)',
     )
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture(scope='session')
 def cfg(request) -> dict:
-    with open(request.config.getoption("--hil-config"), "rb") as f:
+    with open(request.config.getoption('--hil-config'), 'rb') as f:
         return tomllib.load(f)
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture(scope='session')
 def rig(cfg):
     """Relay board mapped onto rig functions. Enters and leaves bench-normal
     (loops closed, DUT powered)."""
     board = UsbRelay4()
-    r = RelayRig(board, cfg["relays"])
+    r = RelayRig(board, cfg['relays'])
     r.idle()
     yield r
     r.idle()
     board.close()
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture(scope='session')
 def chip(cfg, rig) -> Chip:
-    host = cfg["rig"]["chip_host"]
-    if host == "auto":
-        host = discover_chip_ip(cfg["rig"].get("ncm_iface", "esp-pstop0"))
+    host = cfg['rig']['chip_host']
+    if host == 'auto':
+        host = discover_chip_ip(cfg['rig'].get('ncm_iface', 'esp-pstop0'))
     c = Chip(host)
     try:
         # Generous: the chip may still be booting from a previous run's
         # power-cycle teardown (USB enumerate + DHCP + httpd ~ 15 s).
         c.wait_reachable(timeout=30.0)
     except TimeoutError:
-        pytest.skip(f"chip not reachable at {host}")
+        pytest.skip(f'chip not reachable at {host}')
     return c
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture(scope='session')
 def wired(cfg, rig, chip):
     """Prove the relays are actually in the E-stop loops: open loop A, watch
     the chip report it open, close it, watch it close. Skips the wired-only
     tests on an unwired bench instead of failing them confusingly."""
     try:
-        rig.open_loop("a")
+        rig.open_loop('a')
         chip.wait_state(
-            lambda s: not (s["e_hi0"] and s["e_lo0"]), timeout=3.0,
-            what="loop A open after relay",
+            lambda s: not (s['e_hi0'] and s['e_lo0']),
+            timeout=3.0,
+            what='loop A open after relay',
         )
-        rig.close_loop("a")
+        rig.close_loop('a')
         chip.wait_state(
-            lambda s: s["e_hi0"] and s["e_lo0"], timeout=3.0,
-            what="loop A closed after relay",
+            lambda s: s['e_hi0'] and s['e_lo0'],
+            timeout=3.0,
+            what='loop A closed after relay',
         )
     except TimeoutError:
         rig.idle()
@@ -88,25 +91,25 @@ def machine(cfg, chip, rig, tmp_path):
     """Fresh dedicated machine instance per test: spawn the runner, claim the
     chip's HIL peer slot, wait for the chip's first message, and tear both
     down afterwards. Fresh per test => arming state starts clean."""
-    r = cfg["rig"]
+    r = cfg['rig']
     m = MachineRunner(
-        binary=HIL_DIR / r["machine_binary"],
+        binary=HIL_DIR / r['machine_binary'],
         workdir=tmp_path,
-        port=r["machine_port"],
-        device_id=r["machine_device_id"],
-        timing=cfg["timing"],
+        port=r['machine_port'],
+        device_id=r['machine_device_id'],
+        timing=cfg['timing'],
     )
     m.start()
-    chip.set_peer_slot(r["peer_slot"], r["host_ip"], r["machine_port"], r["machine_device_id"])
+    chip.set_peer_slot(r['peer_slot'], r['host_ip'], r['machine_port'], r['machine_device_id'])
     try:
-        m.wait_for(RX_RE, timeout=cfg["timing"]["bond_timeout_s"])
+        m.wait_for(RX_RE, timeout=cfg['timing']['bond_timeout_s'])
     except TimeoutError:
-        chip.clear_peer_slot(r["peer_slot"])
+        chip.clear_peer_slot(r['peer_slot'])
         m.stop()
         raise
     yield m
     try:
-        chip.clear_peer_slot(r["peer_slot"])
+        chip.clear_peer_slot(r['peer_slot'])
     finally:
         m.stop()
         rig.idle()
@@ -120,6 +123,6 @@ def do_arming_gesture(machine: MachineRunner, rig: RelayRig, cfg: dict) -> None:
 
     since = machine.mark()
     rig.press()
-    time.sleep(cfg["timing"]["min_stop_ms"] / 1000 + 0.3)
+    time.sleep(cfg['timing']['min_stop_ms'] / 1000 + 0.3)
     rig.release()
     machine.wait_for(STATUS_OK_RE, timeout=5.0, since=since)
