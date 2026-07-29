@@ -8,7 +8,6 @@ half-verdict, never stay armed."""
 import time
 
 import pytest
-
 from conftest import do_arming_gesture
 from rig import LIVENESS_RE, RX_STOP_RE
 

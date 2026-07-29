@@ -7,7 +7,6 @@ with -m 'not power' for a quicker loop-only run)."""
 import time
 
 import pytest
-
 from conftest import do_arming_gesture
 from rig import LIVENESS_RE, RX_RE, STATUS_OK_RE
 

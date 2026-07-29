@@ -233,7 +233,7 @@ class MachineRunner:
         time.sleep(0.3)
         if self._proc.poll() is not None:
             with self._cond:
-                tail = "\n".join(l for _, l in self.events[-5:])
+                tail = "\n".join(line for _, line in self.events[-5:])
             raise RuntimeError(
                 f"machine_app_runner exited rc={self._proc.returncode} at startup:\n{tail}"
             )
@@ -275,7 +275,7 @@ class MachineRunner:
                     idx += 1
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
-                    tail = "\n".join(l for _, l in self.events[-8:])
+                    tail = "\n".join(line for _, line in self.events[-8:])
                     raise TimeoutError(
                         f"no /{pattern.pattern}/ within {timeout}s; log tail:\n{tail}"
                     )

@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import sys
+
 try:
     import tomllib
 except ModuleNotFoundError:
@@ -17,8 +18,8 @@ HIL_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(HIL_DIR.parent))  # tools/ — for usb_relay4
 sys.path.insert(0, str(HIL_DIR))
 
+from rig import RX_RE, Chip, MachineRunner, RelayRig, discover_chip_ip  # noqa: E402
 from usb_relay4 import UsbRelay4  # noqa: E402
-from rig import Chip, MachineRunner, RelayRig, RX_RE, discover_chip_ip  # noqa: E402
 
 
 def pytest_addoption(parser):
@@ -114,6 +115,7 @@ def machine(cfg, chip, rig, tmp_path):
 def do_arming_gesture(machine: MachineRunner, rig: RelayRig, cfg: dict) -> None:
     """Press (>= min_stop), release, wait for ROBOT STATUS -> OK."""
     import time
+
     from rig import STATUS_OK_RE
 
     since = machine.mark()
