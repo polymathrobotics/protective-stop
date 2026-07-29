@@ -28,6 +28,7 @@ CLI use:
 
     usb_relay4.py on 1|2|3|4|all
     usb_relay4.py off 1|2|3|4|all
+    usb_relay4.py on 1,2                  # gang: both in one write (~2 ms apart)
     usb_relay4.py pulse 2 --seconds 0.5   # on, hold, off (power-blip a DUT)
     usb_relay4.py status
 """
@@ -178,13 +179,17 @@ class UsbRelay4:
             self.off(channel)
 
 
-def _parse_channel(text: str) -> int | None:
+def _parse_channel(text: str) -> list[int] | None:
+    """'all' -> None; '2' -> [2]; '1,2' -> [1, 2] (gang-switched)."""
     if text.lower() == "all":
         return None
-    ch = int(text)
-    if ch not in CHANNELS:
-        raise argparse.ArgumentTypeError("channel must be 1..4 or 'all'")
-    return ch
+    try:
+        chans = [int(part) for part in text.split(",")]
+    except ValueError:
+        raise argparse.ArgumentTypeError("channel must be 1..4, a list like 1,2, or 'all'")
+    if len(set(chans)) != len(chans) or any(ch not in CHANNELS for ch in chans):
+        raise argparse.ArgumentTypeError("channels must be unique and each 1..4")
+    return chans
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -193,7 +198,7 @@ def main(argv: list[str] | None = None) -> int:
     sub = ap.add_subparsers(dest="cmd", required=True)
     for verb in ("on", "off"):
         p = sub.add_parser(verb)
-        p.add_argument("channel", type=_parse_channel, help="1..4 or 'all'")
+        p.add_argument("channel", type=_parse_channel, help="1..4, a list like 1,2, or 'all'")
     p = sub.add_parser("pulse")
     p.add_argument("channel", type=_parse_channel, help="1..4")
     p.add_argument("--seconds", type=float, default=1.0)
@@ -206,11 +211,11 @@ def main(argv: list[str] | None = None) -> int:
             if args.channel is None:
                 board.all_on() if want_on else board.all_off()
             else:
-                board.set(args.channel, want_on)
+                board.set_many({ch: want_on for ch in args.channel})
         elif args.cmd == "pulse":
-            if args.channel is None:
+            if args.channel is None or len(args.channel) != 1:
                 ap.error("pulse needs a single channel")
-            board.pulse(args.channel, args.seconds)
+            board.pulse(args.channel[0], args.seconds)
         for ch, on in sorted(board.status().items()):
             print(f"relay {ch}: {'ON' if on else 'off'}")
     return 0
