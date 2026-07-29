@@ -163,6 +163,14 @@ static esp_err_t page_state(httpd_req_t * req)
   (void)esp_ota_get_state_partition(esp_ota_get_running_partition(), &ota_st);
   int pstop_num = dcs_nvs_read_pstop_unit_num(); /* 0 = auto (chip-ID derived) */
 
+  /* Running-build identity, so test harnesses (HIL/CI) can verify the DUT is
+     * actually executing the build under test before trusting a result:
+     * fw_ver = PROJECT_VER (git short hash), fw_sha = truncated ELF SHA-256
+     * (unique per build even when two builds share a dirty version tag). */
+  const esp_app_desc_t * app_desc = esp_app_get_description();
+  char fw_sha[17] = "";
+  (void)esp_app_get_elf_sha256(fw_sha, sizeof(fw_sha));
+
   /* local_ip = the IP of the currently active uplink (eth/usb/wifi). The
      * per-iface fields below already carry each one, but a single "which LAN
      * address am I actually on right now" value is what management tooling shows and
@@ -211,6 +219,7 @@ static esp_err_t page_state(httpd_req_t * req)
     "\"derp_paused\":%d,\"derp_delay_ms\":%d,\"wg_paused\":%d,"
     "\"usb_enabled\":%d,\"ts_boot_en\":%d,\"derp_only\":%d,"
     "\"boot_count\":%u,\"reset_reason\":%u,"
+    "\"fw_ver\":\"%s\",\"fw_sha\":\"%s\","
     "\"ml_state\":%d,\"vpn_ip\":%lu,\"public_ip\":%lu,\"derp_region\":%d,"
     "\"pstop_peer_ip\":%lu,\"pstop_peer_port\":%lu,"
     "\"pstop_sent\":%lu,\"pstop_replies\":%lu,\"pstop_last_msg\":%lu,\"pstop_mismatch\":%lu,"
@@ -256,6 +265,8 @@ static esp_err_t page_state(httpd_req_t * req)
     g_dcs.derp_only_mode ? 1 : 0,
     (unsigned int)g_dcs.boot_count,
     (unsigned int)g_dcs.reset_reason,
+    (app_desc != NULL) ? app_desc->version : "",
+    fw_sha,
     ml_state,
     (unsigned long)vpn_ip,
     (unsigned long)public_ip,

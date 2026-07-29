@@ -14,7 +14,7 @@ Query parameters are shown where required. Unless noted, POST bodies are empty.
 | Method | Route | Purpose |
 |--------|-------|---------|
 | GET  | `/` | Diagnostic HTML page |
-| GET  | `/state.json` | Telemetry snapshot (uptime, ml_state, pstop counters, heap, E-stop channels, `public_ip`/`derp_region` for management-side geolocation, `local_ip` = active-uplink LAN address) |
+| GET  | `/state.json` | Telemetry snapshot (uptime, ml_state, pstop counters, heap, E-stop channels, `public_ip`/`derp_region` for management-side geolocation, `local_ip` = active-uplink LAN address, `fw_ver`/`fw_sha` = running build identity — version tag + truncated ELF SHA-256 — so test harnesses can verify the DUT runs the build under test) |
 | GET  | `/api/last_log` | Tail of the previous boot's log (RTC ring) |
 | POST | `/api/derp` | Toggle the DERP TX worker |
 | POST | `/api/derp_delay?ms=N` | Set the DERP loop yield (ms) |
