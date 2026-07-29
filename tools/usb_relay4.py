@@ -86,23 +86,29 @@ class UsbRelay4:
         self.close()
 
     def _xfer(self, addr: int, op: int, expect_lines: int) -> dict[int, bool]:
-        """Send one frame, collect `expect_lines` CHn:ON/OFF ack lines."""
-        self._ser.reset_input_buffer()
-        self._ser.write(_frame(addr, op))
-        self._ser.flush()
-        states: dict[int, bool] = {}
-        deadline = time.monotonic() + 1.0
-        while len(states) < expect_lines and time.monotonic() < deadline:
-            line = self._ser.read_until(b"\n")
-            m = _ACK_RE.search(line)
-            if m:
-                states[int(m.group(1))] = m.group(2) == b"ON"
-        if len(states) < expect_lines:
-            raise RuntimeError(
-                f"relay board acked {len(states)}/{expect_lines} lines "
-                f"for cmd addr=0x{addr:02X} op=0x{op:02X}"
-            )
-        return states
+        """Send one frame, collect `expect_lines` CHn:ON/OFF ack lines.
+
+        The board occasionally swallows a command that lands right after it
+        finished transmitting a reply, so an incomplete ack is retried once
+        (every command is idempotent)."""
+        for attempt in (1, 2):
+            time.sleep(0.02)  # breathing room after the previous reply
+            self._ser.reset_input_buffer()
+            self._ser.write(_frame(addr, op))
+            self._ser.flush()
+            states: dict[int, bool] = {}
+            deadline = time.monotonic() + 1.0
+            while len(states) < expect_lines and time.monotonic() < deadline:
+                line = self._ser.read_until(b"\n")
+                m = _ACK_RE.search(line)
+                if m:
+                    states[int(m.group(1))] = m.group(2) == b"ON"
+            if len(states) >= expect_lines:
+                return states
+        raise RuntimeError(
+            f"relay board acked {len(states)}/{expect_lines} lines "
+            f"for cmd addr=0x{addr:02X} op=0x{op:02X} (after retry)"
+        )
 
     def set(self, channel: int, on: bool) -> None:
         if channel not in CHANNELS:

@@ -1,0 +1,39 @@
+# pstop HIL rig configuration. Values here describe THIS bench; the test
+# suite reads it via conftest.py (override path with --hil-config).
+
+[rig]
+# Chip admin/API host. "auto" discovers the USB-NCM neighbor on esp-pstop0.
+chip_host = "auto"
+# This host's IP as the chip sees it (USB-NCM host side).
+host_ip = "10.42.0.1"
+# machine_app_runner binary, relative to this file's directory.
+machine_binary = "../../host/machine_app_runner"
+# Chip peer-table slot the suite claims for its dedicated machine instance.
+# Slot 0 is the bench machine (10.42.0.1:8890) — never touch it.
+peer_slot = 3
+# UDP port + device id of the suite's dedicated machine instance. The id
+# must differ from every real machine's (bench default is 0x01020304).
+machine_port = 8894
+machine_device_id = 0x01020390
+
+[relays]
+# usb_relay4 channel numbers (1..4).
+channel_a = 1 # in the chip's E-stop loop A (GPIO39 -> GPIO40)
+channel_b = 2 # in the chip's E-stop loop B (GPIO41 -> GPIO42)
+dut_power = 3 # in the DUT's USB power feed
+# Polarity. Recommended wiring uses the relays' NC contacts so the
+# DE-ENERGIZED rig leaves the bench normal (loops closed via the real
+# button, DUT powered):
+#   press_energizes = true      energize relay -> loop opens  ("press")
+#   power_cut_energizes = true  energize relay -> USB power cut
+press_energizes = true
+power_cut_energizes = true
+
+[timing]
+# Must match the machine config the suite generates (conftest does this).
+heartbeat_ms = 400
+max_missed_heartbeats = 3
+min_stop_ms = 500
+# Rig-level allowances.
+bond_timeout_s = 20 # slot set -> first message at the HIL machine
+boot_timeout_s = 60 # power restore -> chip HTTP reachable again
