@@ -851,8 +851,8 @@ int main(int argc, char * argv[])
           uint64_t held = s_stop_episode_valid ? machine_now_ms() - s_stop_episode_start : 0U;
           fprintf(
             stderr,
-            "ANOMALY: arming DEFERRED for 0x%08X — OK %llu ms after STOP "
-            "< %llu ms library minimum (blip?)\n",
+            "ANOMALY: arming DEFERRED for 0x%08X — OK refused, episode age "
+            "%llu ms (library requires %llu ms of quiet after the LAST STOP)\n",
             req_msg.id.data,
             (unsigned long long)held,
             (unsigned long long)g_cfg.min_stop_ms);
