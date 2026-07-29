@@ -50,9 +50,13 @@ def rig(cfg):
 def chip(cfg, rig) -> Chip:
     host = cfg["rig"]["chip_host"]
     if host == "auto":
-        host = discover_chip_ip()
+        host = discover_chip_ip(cfg["rig"].get("ncm_iface", "esp-pstop0"))
     c = Chip(host)
-    if not c.reachable():
+    try:
+        # Generous: the chip may still be booting from a previous run's
+        # power-cycle teardown (USB enumerate + DHCP + httpd ~ 15 s).
+        c.wait_reachable(timeout=30.0)
+    except TimeoutError:
         pytest.skip(f"chip not reachable at {host}")
     return c
 

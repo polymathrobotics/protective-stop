@@ -7,9 +7,13 @@ import time
 
 
 def test_relay_board_roundtrip(rig):
-    """Every relay channel acks and reads back both states."""
+    """Every relay channel acks and reads back both states — EXCEPT the
+    DUT power channel, which must not be blipped outside the power tests
+    (toggling it reboots the chip and poisons the tests that follow)."""
     board = rig.board
     for ch in (1, 2, 3, 4):
+        if ch == rig.power_ch:
+            continue
         before = board.status()[ch]
         board.set(ch, not before)
         assert board.status()[ch] == (not before)

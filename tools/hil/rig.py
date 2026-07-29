@@ -33,18 +33,29 @@ LIVENESS_RE = re.compile(r"declared lost \[MISSED_HEARTBEATS\]")
 DEFERRED_RE = re.compile(r"ANOMALY: arming DEFERRED")
 
 
-def discover_chip_ip(iface: str = "esp-pstop0") -> str:
-    """Return the chip's USB-NCM IP from the kernel neighbor table."""
-    out = subprocess.run(
-        ["ip", "-4", "neigh", "show", "dev", iface],
-        capture_output=True, text=True, check=True,
-    ).stdout
-    candidates = [ln.split()[0] for ln in out.splitlines() if "lladdr" in ln]
-    if not candidates:
-        raise RuntimeError(f"no neighbor with lladdr on {iface} — chip not up?")
-    if len(candidates) > 1:
-        raise RuntimeError(f"multiple neighbors on {iface}: {candidates}")
-    return candidates[0]
+def discover_chip_ip(iface: str = "esp-pstop0", timeout: float = 15.0) -> str:
+    """Return the chip's USB-NCM IP from the kernel neighbor table.
+
+    Retries: right after a chip (re)boot the NCM interface and its neighbor
+    entry can lag USB enumeration by several seconds."""
+    deadline = time.monotonic() + timeout
+    last = "no attempt"
+    while time.monotonic() < deadline:
+        r = subprocess.run(
+            ["ip", "-4", "neigh", "show", "dev", iface],
+            capture_output=True, text=True,
+        )
+        if r.returncode != 0:
+            last = f"interface {iface} not present"
+        else:
+            candidates = [ln.split()[0] for ln in r.stdout.splitlines() if "lladdr" in ln]
+            if len(candidates) == 1:
+                return candidates[0]
+            last = f"neighbors on {iface}: {candidates}"
+            if len(candidates) > 1:
+                raise RuntimeError(f"multiple neighbors on {iface}: {candidates}")
+        time.sleep(0.5)
+    raise RuntimeError(f"chip discovery failed after {timeout}s — {last}")
 
 
 class ChipUnreachable(Exception):
@@ -118,11 +129,13 @@ class Chip:
         raise TimeoutError(f"chip still reachable {timeout}s after power cut")
 
     def set_peer_slot(self, slot: int, ip: str, port: int, machine_id: int) -> None:
+        # The firmware parses id with strtoul(base=0): the 0x prefix is
+        # REQUIRED — a bare "01020390" would be read as octal (= 4227).
         resp = json.loads(
-            self._post(f"/api/pstop_peers?slot={slot}&ip={ip}&port={port}&id={machine_id:08X}")
+            self._post(f"/api/pstop_peers?slot={slot}&ip={ip}&port={port}&id=0x{machine_id:08X}")
         )
-        if not resp.get("ok"):
-            raise RuntimeError(f"set_peer_slot({slot}) failed: {resp}")
+        if not resp.get("ok") or resp.get("id") != machine_id:
+            raise RuntimeError(f"set_peer_slot({slot}) failed or id mismatch: {resp}")
 
     def clear_peer_slot(self, slot: int) -> None:
         resp = json.loads(self._post(f"/api/pstop_peers?slot={slot}&clear=1"))
@@ -215,6 +228,15 @@ class MachineRunner:
         )
         self._reader = threading.Thread(target=self._pump, daemon=True)
         self._reader.start()
+        # Fail fast on startup errors (bad config, port already bound, ...)
+        # instead of letting callers time out waiting for a dead process.
+        time.sleep(0.3)
+        if self._proc.poll() is not None:
+            with self._cond:
+                tail = "\n".join(l for _, l in self.events[-5:])
+            raise RuntimeError(
+                f"machine_app_runner exited rc={self._proc.returncode} at startup:\n{tail}"
+            )
 
     def _pump(self) -> None:
         assert self._proc is not None and self._proc.stderr is not None

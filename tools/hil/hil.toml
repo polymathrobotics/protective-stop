@@ -2,10 +2,13 @@
 # suite reads it via conftest.py (override path with --hil-config).
 
 [rig]
-# Chip admin/API host. "auto" discovers the USB-NCM neighbor on esp-pstop0.
+# Chip admin/API host. "auto" discovers the USB-NCM neighbor on ncm_iface.
 chip_host = "auto"
-# This host's IP as the chip sees it (USB-NCM host side).
-host_ip = "10.42.0.1"
+# Host interface of the TEST unit's USB-NCM tether (NOT the soak unit's
+# esp-pstop0 — two pstops are attached to this bench).
+ncm_iface = "usb0"
+# This host's IP as the chip sees it (USB-NCM host side of ncm_iface).
+host_ip = "10.43.0.1"
 # machine_app_runner binary, relative to this file's directory.
 machine_binary = "../../host/machine_app_runner"
 # Chip peer-table slot the suite claims for its dedicated machine instance.
@@ -21,13 +24,13 @@ machine_device_id = 0x01020390
 channel_a = 1 # in the chip's E-stop loop A (GPIO39 -> GPIO40)
 channel_b = 2 # in the chip's E-stop loop B (GPIO41 -> GPIO42)
 dut_power = 3 # in the DUT's USB power feed
-# Polarity. Recommended wiring uses the relays' NC contacts so the
-# DE-ENERGIZED rig leaves the bench normal (loops closed via the real
-# button, DUT powered):
-#   press_energizes = true      energize relay -> loop opens  ("press")
-#   power_cut_energizes = true  energize relay -> USB power cut
-press_energizes = true
-power_cut_energizes = true
+# Polarity, as built (verified 2026-07-28): all three use NO contacts, so
+# the fully DE-ENERGIZED rig is the fail-safe state — loops open ("button
+# pressed") and DUT unpowered. Bench-normal requires relays 1-3 energized.
+#   press_energizes = false      de-energize relay -> loop opens ("press")
+#   power_cut_energizes = false  de-energize relay -> USB power cut
+press_energizes = false
+power_cut_energizes = false
 
 [timing]
 # Must match the machine config the suite generates (conftest does this).
