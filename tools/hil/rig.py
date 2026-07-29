@@ -148,12 +148,16 @@ class RelayRig:
         self.board.set(self.ch[channel], not self.press_energizes)
 
     def press(self) -> None:
-        self.open_loop("a")
-        self.open_loop("b")
+        """Open BOTH loops in one serial write — like a real DPST press,
+        both poles move together (skew ~= relay mechanics, not protocol)."""
+        self.board.set_many(
+            {self.ch["a"]: self.press_energizes, self.ch["b"]: self.press_energizes}
+        )
 
     def release(self) -> None:
-        self.close_loop("a")
-        self.close_loop("b")
+        self.board.set_many(
+            {self.ch["a"]: not self.press_energizes, self.ch["b"]: not self.press_energizes}
+        )
 
     def power_off(self) -> None:
         self.board.set(self.power_ch, self.cut_energizes)

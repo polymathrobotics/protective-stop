@@ -117,6 +117,34 @@ class UsbRelay4:
         if ack.get(channel) != on:
             raise RuntimeError(f"relay {channel}: commanded {on}, board acked {ack}")
 
+    def set_many(self, states: dict[int, bool]) -> None:
+        """Switch several channels as near-simultaneously as the board
+        allows: all command frames go out in ONE serial write, so the MCU
+        actuates them back-to-back (~1 ms apart; relay mechanics dominate).
+        Use for DPST-style gestures where both E-stop loops must move
+        together. Acks for every channel are collected and verified."""
+        bad = [ch for ch in states if ch not in CHANNELS]
+        if bad:
+            raise ValueError(f"channels must be 1..4, got {bad}")
+        if not states:
+            return
+        time.sleep(0.02)
+        self._ser.reset_input_buffer()
+        self._ser.write(
+            b"".join(_frame(ch, OP_ON if on else OP_OFF) for ch, on in states.items())
+        )
+        self._ser.flush()
+        acked: dict[int, bool] = {}
+        deadline = time.monotonic() + 1.0
+        while len(acked) < len(states) and time.monotonic() < deadline:
+            line = self._ser.read_until(b"\n")
+            m = _ACK_RE.search(line)
+            if m:
+                acked[int(m.group(1))] = m.group(2) == b"ON"
+        wrong = {ch: on for ch, on in states.items() if acked.get(ch) != on}
+        if wrong:
+            raise RuntimeError(f"set_many: bad/missing acks for {wrong} (got {acked})")
+
     def on(self, channel: int) -> None:
         self.set(channel, True)
 
