@@ -95,6 +95,14 @@ class Chip:
         except ChipUnreachable:
             return False
 
+    def fw(self) -> tuple[str, str] | None:
+        """(fw_ver, fw_sha) of the running build, or None on firmware
+        older than 4c90711 (which does not report identity)."""
+        s = self.state()
+        if 'fw_ver' not in s or 'fw_sha' not in s:
+            return None
+        return str(s['fw_ver']), str(s['fw_sha'])
+
     def loops_closed(self) -> tuple[bool, bool]:
         """(channel_a_closed, channel_b_closed) from the loop health bits."""
         s = self.state()

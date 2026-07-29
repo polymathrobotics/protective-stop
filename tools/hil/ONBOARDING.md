@@ -99,11 +99,16 @@ path there:
    Fleet-server URL and API key are PROPRIETARY: provide them to the runner
    as environment/secret (`PSTOP_FLEET_URL`, key file) — they must never
    appear in committed files (same rule as `sdkconfig.credentials`).
-3. **Flash verification — firmware gap to close first**: `state.json` does
-   not yet expose a firmware version/sha. Add a `fw_sha` (or app-desc
-   version) field so CI can assert "the DUT is actually running the build
-   under test" before trusting the results. Until then, verification is
-   indirect (fleet console's reported sha).
+3. **Flash verification — DONE (firmware >= 4c90711)**: `state.json`
+   reports `fw_ver` (git short hash) and `fw_sha` (truncated ELF SHA-256).
+   CI runs the suite with the build under test pinned:
+
+       ./run.sh --expect-fw $(git rev-parse --short HEAD)
+
+   The session hard-fails before any test if the DUT runs anything else
+   (matched against `fw_ver`, or as a prefix of `fw_sha`). NOTE the hash
+   domains: the fleet console's image sha is the flashed-binary SHA-256 and
+   does NOT equal the on-chip `fw_sha` (ELF) — pin CI on the git hash.
 4. **Suite shape for CI**: `run.sh -m 'not power'` (~33 s) as the
    per-commit gate; the full run with power cycles (~86 s) on merge to
    `pstop`/`main` or nightly. Add `--junitxml=report.xml` for annotations.

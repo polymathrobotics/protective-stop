@@ -48,3 +48,17 @@ def test_both_loops_wired(rig, chip, wired):
             what=f'loop {mine.upper()} closed',
         )
     time.sleep(0.5)
+
+
+def test_firmware_reports_identity(chip):
+    """The DUT reports which build it runs (fw_ver + fw_sha) — the CI gate
+    (`--expect-fw`) depends on it. Skips (with a nudge) on firmware older
+    than 4c90711; under `--expect-fw` the session already hard-failed."""
+    import pytest
+
+    fw = chip.fw()
+    if fw is None:
+        pytest.skip('DUT firmware predates fw_ver/fw_sha (< 4c90711) — update it')
+    ver, sha = fw
+    assert ver and sha, f'empty firmware identity: fw_ver={ver!r} fw_sha={sha!r}'
+    print(f'DUT running fw_ver={ver} fw_sha={sha}')

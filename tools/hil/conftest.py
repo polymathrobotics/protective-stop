@@ -28,6 +28,14 @@ def pytest_addoption(parser):
         default=str(HIL_DIR / 'hil.toml'),
         help='rig description TOML (default: tools/hil/hil.toml)',
     )
+    parser.addoption(
+        '--expect-fw',
+        default=None,
+        metavar='VER_OR_SHA',
+        help="require the DUT to run this build: matched against the chip's "
+        'fw_ver (git short hash) or as a prefix of fw_sha. CI passes '
+        'the commit under test here so results are trustworthy.',
+    )
 
 
 @pytest.fixture(scope='session')
@@ -49,7 +57,7 @@ def rig(cfg):
 
 
 @pytest.fixture(scope='session')
-def chip(cfg, rig) -> Chip:
+def chip(cfg, rig, request) -> Chip:
     host = cfg['rig']['chip_host']
     if host == 'auto':
         host = discover_chip_ip(cfg['rig'].get('ncm_iface', 'esp-pstop0'))
@@ -60,6 +68,20 @@ def chip(cfg, rig) -> Chip:
         c.wait_reachable(timeout=30.0)
     except TimeoutError:
         pytest.skip(f'chip not reachable at {host}')
+
+    # CI gate: results are meaningless if the DUT isn't running the build
+    # under test — HARD failure, not a skip.
+    expect = request.config.getoption('--expect-fw')
+    if expect:
+        fw = c.fw()
+        if fw is None:
+            pytest.fail(
+                f'--expect-fw {expect}: DUT firmware predates fw_ver/fw_sha '
+                'reporting (< 4c90711) — cannot verify the build under test'
+            )
+        ver, sha = fw
+        if expect != ver and not sha.startswith(expect):
+            pytest.fail(f'DUT runs fw_ver={ver} fw_sha={sha}, expected {expect} — flash/OTA did not take effect')
     return c
 
 
