@@ -7,31 +7,32 @@ asserts the safety behavior at a **dedicated real machine instance**
 the loop GPIOs, the lockstep comparator, the wire protocol, and the
 machine-side arming policy are all the shipping code paths.
 
-## Rig wiring
+## Rig wiring (as built, verified 2026-07-28)
 
-Relay board: STM32 VCP (`0483:5740`), auto-detected. Use each relay's
-**NC contact** so the de-energized rig leaves the bench completely
-normal (button works, DUT powered):
+Relay board: STM32 VCP (`0483:5740`), auto-detected. All three channels
+use the relays' **NO contacts**, so the fully de-energized rig is the
+fail-safe state: loops open ("button pressed"), DUT unpowered.
+Bench-normal requires relays 1–3 energized — `rig.idle()` and every
+fixture teardown put the rig there.
 
-| Relay | NC contact in series with            | Energized means      |
-|-------|--------------------------------------|----------------------|
-| 1     | E-stop loop A: GPIO39 → GPIO40       | loop A open ("press")|
-| 2     | E-stop loop B: GPIO41 → GPIO42       | loop B open ("press")|
-| 3     | DUT USB power feed (VBUS)            | DUT power cut        |
-| 4     | spare                                |                      |
+| Relay | NO contact in series with            | De-energized means    |
+|-------|--------------------------------------|-----------------------|
+| 1     | E-stop loop A: GPIO39 → GPIO40       | loop A open ("press") |
+| 2     | E-stop loop B: GPIO41 → GPIO42       | loop B open ("press") |
+| 3     | DUT USB power feed (VBUS)            | DUT power cut         |
+| 4     | spare                                |                       |
 
-Keep the physical DPST button in the loops — the relay contacts sit in
-series with its poles, so both the button and the rig can open a loop.
-If you wire NO contacts instead, flip `press_energizes` /
-`power_cut_energizes` in `hil.toml`.
+If a future rig wires NC contacts instead, flip `press_energizes` /
+`power_cut_energizes` in `hil.toml` — the suite is polarity-agnostic.
 
-The DUT stays on USB-NCM (`esp-pstop0`, host = 10.42.0.1); the suite
-finds its IP from the neighbor table and talks to `state.json` +
-`/api/pstop_peers`. The suite claims **peer slot 3** on the chip for its
-own machine instance (port 8894, id 0x01020390) and clears it on
-teardown — the bench machine in slot 0 (port 8890) is never touched.
-Bench side effect: while a test holds a "press" or cuts power, the
-bench machine will also see STOPs. That is real behavior, not damage.
+The DUT is tethered on USB-NCM; `hil.toml` names the host interface
+(`ncm_iface`) and the suite finds the chip's IP from the kernel
+neighbor table, then talks to `state.json` + `/api/pstop_peers`. This
+bench has TWO pstops attached (soak unit on `esp-pstop0`/10.42.0.x,
+test unit on `usb0`/10.43.0.x) — the iface setting is what keeps the
+suite pointed at the right one. The suite claims **peer slot 3** on the
+chip for its own machine instance (port 8894, id 0x01020390) and clears
+it on teardown; slot 0 belongs to whatever real bench machine exists.
 
 ## Running
 
