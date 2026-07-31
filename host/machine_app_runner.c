@@ -883,7 +883,7 @@ int main(int argc, char * argv[])
                  * The larger gap is the culprit direction. */
         pstop_remote_data_t * c = pstop_remote_get(&machine.remotes, &req_msg.id);
         if (c) {
-          long r2m = (long)req_msg.counter - (long)c->remote_data.last_sent_counter;
+          long r2m = (long)req_msg.counter - (long)c->remote_data.last_received_counter;
           long lag = (long)c->remote_data.msg_counter - (long)req_msg.received_counter;
           fprintf(
             stderr,
@@ -893,7 +893,7 @@ int main(int argc, char * argv[])
             msg_name(req_msg.message),
             err_name(err),
             r2m,
-            c->remote_data.last_sent_counter,
+            c->remote_data.last_received_counter,
             req_msg.counter,
             lag,
             c->remote_data.msg_counter,
