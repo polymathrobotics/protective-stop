@@ -1,7 +1,7 @@
 # pstop machine on ESP32-S3 — design sketch (v0, for review)
 
-**Status:** draft for comment, 2026-07-31. Deliberately short — structure
-over detail. Nothing implemented yet.
+**Status:** v0.1 — review answers folded in, 2026-07-31. Deliberately
+short — structure over detail. Nothing implemented yet.
 
 ## Goal
 
@@ -46,36 +46,42 @@ transmit only on agreement. The machine inverts it:
 
 ## Relay output + feedback (replaces the remote's button inputs)
 
-Two relays, contacts **wired in series** in the robot's stop circuit —
-either core alone can break the circuit:
+Two opto-isolated relays, contacts **wired in series** in the robot's
+stop circuit — either core alone can break the circuit:
 
-- Core 0 drives relay A, core 1 drives relay B (one GPIO each, reusing
-  the remote's E-stop loop pins). **Energized = circuit closed = robot
-  may run; de-energized = STOP.** Power loss, brownout, reset, or a hung
-  core all fail to STOP.
-- Each relay provides an aux (ideally force-guided) **feedback contact**;
-  BOTH cores read BOTH feedbacks. After any commanded transition, the
-  observed state must match within `RELAY_FEEDBACK_MS` (~50 ms, TBD by
-  relay datasheet) or the machine declares a **relay fault**: both
-  outputs open, fault latched (requires reboot or explicit admin clear —
-  TBD), fault visible in telemetry and to the remotes (replies STOP).
-- Feedback is also monitored continuously at the comparator tick, not
-  just on transitions — a welded or externally-forced contact is caught
-  within one tick.
+- Core 0 drives relay A, core 1 drives relay B (one GPIO each through
+  opto-isolated drivers, reusing the remote's E-stop loop pins).
+  **Energized = circuit closed = robot may run; de-energized = STOP.**
+  Power loss, brownout, reset, or a hung core all fail to STOP.
+- **Feedback = output-voltage sensing**: a resistor divider on each
+  relay's switched output, read as a digital input by BOTH cores. After
+  any commanded transition the observed voltage must match within
+  `RELAY_FEEDBACK_MS` (TBD from relay switching time) and is also
+  checked continuously at every comparator tick.
+- **Fault semantics — nothing latches.** Transient conditions (a
+  momentary core disagreement, a momentary loss of remote signal)
+  already self-recover exactly as on the remote: the comparator
+  withholds/opens for the duration and resumes when agreement returns.
+  A *feedback contradiction* (e.g. output still live after commanding
+  open — welded contact / shorted driver) raises a persistent
+  **relay-fault indication** for as long as the condition is observed:
+  telemetry flag, fault counter, and the machine keeps both outputs
+  commanded open. Safety does not depend on latching — the series
+  partner relay breaks the circuit — but the indication persists so a
+  single-channel box gets serviced; it clears by itself when feedback
+  returns to sanity.
 
 ## Reporting to the ROS2 computer
 
 The ESP32 machine replaces the runner's *decision* role but the robot
 computer still needs live state. Two channels, both read-only:
 
-1. **`/state.json`** gains machine-role fields: robot verdict, restart
-   state, arming owner, per-remote table (bonded/heartbeat age), relay
-   commanded/observed states, mismatch + fault counters.
-2. A small **UDP status stream** (JSON datagram, ~5 Hz, to a configured
-   `status_host:port`) so the ROS2 side gets sub-second state without
-   polling. A thin ROS2 node (successor of the archived
-   `protective_stop_node`) subscribes and republishes as topics —
-   `robot_status`, `relay_state`, `fault`. Schema TBD in v1.
+**`/state.json`** gains machine-role fields: robot verdict, restart
+state, arming owner, per-remote table (bonded/heartbeat age), relay
+commanded/observed states, mismatch + fault counters. A thin **ROS2
+node** (successor of the archived `protective_stop_node`) polls it at
+5 Hz and republishes as topics — `robot_status`, `relay_state`,
+`fault`. No new firmware surface; no UDP stream.
 
 The stop circuit itself is the relay chain — the ROS2 reporting path
 carries **no safety responsibility**.
@@ -91,8 +97,8 @@ carries **no safety responsibility**.
   item to the console session before any machine unit ships.
 - Belt-and-braces on the device: machine builds set `auto_update`
   default **off**, and the OTA-apply path verifies the incoming image's
-  project name (`pmach_machine` vs `pstop_remote` in the app descriptor)
-  and rejects a mismatch regardless of what the server says.
+  project name (`machn_machine` vs `pstop_remote` in the app
+  descriptor) and rejects a mismatch regardless of what the server says.
 - Direct OTA (`/admin/api/ota`) remains the recovery path, same as today.
 
 ## Config
@@ -110,15 +116,14 @@ already handles up to 4 machines — an ESP32 machine is just one of
 them); LED ring on the machine box (onboard RGB only for v1, TBD);
 console MACHINES-tab integration beyond the existing announce.
 
-## Open questions for review
+## Resolved in review (2026-07-31)
 
-1. Relay hardware: specific part (force-guided aux contacts, coil
-   voltage from VBUS/5 V?) — drives the feedback-timing constant and
-   enclosure work.
-2. Fault latch semantics: reboot-to-clear, admin-API clear, or
-   power-cycle only?
-3. Status stream transport: raw UDP JSON (proposed) vs. the ROS2 node
-   polling `/state.json` at 2–5 Hz (no new firmware surface)?
-4. Should the machine box have a physical reset/arm input of its own,
-   or is arming exclusively via remote gestures (proposed: remotes only)?
-5. Project/image naming: `pmach` prefix OK?
+1. Relay: opto-isolated module; feedback via resistor divider on the
+   switched output read as digital IO. Exact part TBD during hardware
+   pass; `RELAY_FEEDBACK_MS` set from its switching time.
+2. No fault latching: transients self-recover; a persistent feedback
+   contradiction shows a persistent (self-clearing) fault indication —
+   series redundancy carries the safety.
+3. ROS2 reporting: poll `/state.json` at 5 Hz; no UDP stream.
+4. Arming: remote gestures only — the machine box has no arm input.
+5. Naming: remotes keep `pstop`; machines use `machn`.
