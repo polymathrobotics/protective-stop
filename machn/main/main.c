@@ -83,6 +83,7 @@ typedef struct
   pstop_msg_t resp;
   uint8_t resp_bytes[PSTOP_MESSAGE_SIZE];
   int robot_state; /* ROBOT_STATE_OK / ROBOT_STATE_STOPPED after the op */
+  uint32_t seq; /* cycle these outputs belong to (g_cycle_seq) */
 } machn_core_t;
 
 static machn_core_t g_core[2];
@@ -103,6 +104,23 @@ static uint64_t now_ms(void)
 {
   return (uint64_t)(esp_timer_get_time() / 1000);
 }
+
+/* Tick-latched wall clock. The library stamps REPLY BYTES with
+ * get_time_cb() and takes every time-boundary decision (heartbeat
+ * timeouts, the min STOP->OK delay) from it; if each core reads the live
+ * clock they straddle millisecond boundaries ~25% of the time and the
+ * comparator sees divergent replies — a mismatch storm that withheld a
+ * quarter of all replies and re-bonded the remote every few seconds
+ * (bench, 2026-07-31). The comparator latches the time ONCE per cycle;
+ * both cores compute from the identical value, like the remote's TX
+ * lockstep. */
+static volatile uint64_t g_tick_now_ms;
+
+/* Sequence tag: outputs are only comparable if both cores processed the
+ * SAME cycle. A core that missed its window leaves a stale done-semaphore
+ * give behind; without the tag the next cycle compares one core's fresh
+ * result against the other's previous one — permanently desynced. */
+static volatile uint32_t g_cycle_seq;
 
 /* === pstop_c callbacks (per-core trampolines — the lib passes no ctx) ==== */
 
@@ -140,7 +158,8 @@ static void log_noop(uint64_t timestamp, const device_id_t * client, uint8_t mes
 
 static uint64_t lib_now_core(void)
 {
-  return now_ms();
+  uint64_t t = g_tick_now_ms;
+  return (t != 0u) ? t : now_ms();
 }
 
 static void core_instance_init(int c)
@@ -172,6 +191,7 @@ static void core_task(void * arg)
   for (;;) {
     (void)ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
     tick++;
+    const uint32_t seq = g_cycle_seq;
 
     mc->err = PSTOP_ERROR_INVALID_ID; /* placeholder; meaningful only when a datagram was staged */
     if (g_rx_pending != 0) {
@@ -196,6 +216,7 @@ static void core_task(void * arg)
     (void)gpio_set_level(drive, (mc->robot_state == ROBOT_STATE_OK) ? 1 : 0);
 
     dcs_publish_core_tick(c, tick, (mc->robot_state == ROBOT_STATE_OK) ? 1u : 0u);
+    mc->seq = seq;
     (void)xSemaphoreGive(g_done[c]);
   }
 }
@@ -292,11 +313,22 @@ static void comparator_task(void * arg)
              * ticks — remotes publish at >= 200 ms spacing per unit. */
     }
 
-    /* Run both cores against the staged op (or a bare liveness tick). */
+    /* Run both cores against the staged op (or a bare liveness tick).
+         * Latch the cycle clock FIRST (identical time for both instances),
+         * drain any stale done-gives from a previously missed window, and
+         * tag the cycle so stale outputs can never be compared as fresh. */
+    g_tick_now_ms = now_ms();
+    g_cycle_seq++;
+    while (xSemaphoreTake(g_done[0], 0) == pdTRUE) {
+    }
+    while (xSemaphoreTake(g_done[1], 0) == pdTRUE) {
+    }
     (void)xTaskNotifyGive(g_core_h[0]);
     (void)xTaskNotifyGive(g_core_h[1]);
     bool ok0 = (xSemaphoreTake(g_done[0], pdMS_TO_TICKS(CORE_WINDOW_MS)) == pdTRUE);
     bool ok1 = (xSemaphoreTake(g_done[1], pdMS_TO_TICKS(CORE_WINDOW_MS)) == pdTRUE);
+    ok0 = ok0 && (g_core[0].seq == g_cycle_seq);
+    ok1 = ok1 && (g_core[1].seq == g_cycle_seq);
 
     if (!ok0 || !ok1) {
       /* A core missed its window — internal fault, treat as disagreement:
