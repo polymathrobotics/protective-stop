@@ -355,6 +355,29 @@ static esp_err_t page_state(httpd_req_t * req)
       (unsigned long long)atomic_load(&g_dcs_pstop_m_last_reply_ms[i]));
     CLAMP_N();
   }
+  /* Machine-role bonded remotes (empty array on remotes). */
+  n += snprintf(buf + n, cap - n, "],\"bonded_remotes\":[");
+  CLAMP_N();
+  {
+    bool first = true;
+    for (int i = 0; i < DCS_MACHN_MAX_REMOTES; i++) {
+      uint32_t rid = (uint32_t)atomic_load(&g_dcs_machn_r_id[i]);
+      if (rid == 0u) {
+        continue;
+      }
+      n += snprintf(
+        buf + n,
+        cap - n,
+        "%s{\"id\":%lu,\"state\":%lu,\"age_ms\":%lu,\"rtt_ms\":%lu}",
+        first ? "" : ",",
+        (unsigned long)rid,
+        (unsigned long)atomic_load(&g_dcs_machn_r_state[i]),
+        (unsigned long)atomic_load(&g_dcs_machn_r_age_ms[i]),
+        (unsigned long)atomic_load(&g_dcs_machn_r_rtt_ms[i]));
+      CLAMP_N();
+      first = false;
+    }
+  }
   n += snprintf(buf + n, cap - n, "],\"tk0\":");
   CLAMP_N();
   n += emit_bucket(buf + n, cap - n, &snap.b[0]);

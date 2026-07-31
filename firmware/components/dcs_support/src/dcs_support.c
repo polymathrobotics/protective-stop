@@ -131,6 +131,10 @@ atomic_uint_fast32_t g_dcs_pstop_rebonds;
 atomic_uint_fast32_t g_dcs_relay_fault_a;
 atomic_uint_fast32_t g_dcs_relay_fault_b;
 atomic_uint_fast32_t g_dcs_relay_stop;
+atomic_uint_fast32_t g_dcs_machn_r_id[DCS_MACHN_MAX_REMOTES];
+atomic_uint_fast32_t g_dcs_machn_r_state[DCS_MACHN_MAX_REMOTES];
+atomic_uint_fast32_t g_dcs_machn_r_age_ms[DCS_MACHN_MAX_REMOTES];
+atomic_uint_fast32_t g_dcs_machn_r_rtt_ms[DCS_MACHN_MAX_REMOTES];
 
 static void pstop_slot_pins_sync(void);
 
@@ -372,6 +376,17 @@ void dcs_publish_relay_fault(uint32_t fault_a_ticks, uint32_t fault_b_ticks, boo
   atomic_store(&g_dcs_relay_fault_a, fault_a_ticks);
   atomic_store(&g_dcs_relay_fault_b, fault_b_ticks);
   atomic_store(&g_dcs_relay_stop, stop_active ? 1u : 0u);
+}
+
+void dcs_publish_machn_remote(int slot, uint32_t remote_id, uint32_t state, uint32_t age_ms, uint32_t rtt_ms)
+{
+  if ((slot < 0) || (slot >= DCS_MACHN_MAX_REMOTES)) {
+    return;
+  }
+  atomic_store(&g_dcs_machn_r_id[slot], remote_id);
+  atomic_store(&g_dcs_machn_r_state[slot], state);
+  atomic_store(&g_dcs_machn_r_age_ms[slot], age_ms);
+  atomic_store(&g_dcs_machn_r_rtt_ms[slot], rtt_ms);
 }
 
 void dcs_publish_pstop_sf_causes(uint32_t nomem, uint32_t route, uint32_t txdrv, uint32_t other, int last_errno)

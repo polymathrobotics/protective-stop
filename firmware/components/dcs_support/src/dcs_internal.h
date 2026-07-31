@@ -133,6 +133,15 @@ extern "C"
   extern atomic_uint_fast32_t g_dcs_relay_fault_a;
   extern atomic_uint_fast32_t g_dcs_relay_fault_b;
   extern atomic_uint_fast32_t g_dcs_relay_stop;
+
+  /* Machine-role bonded-remote table (all 0 on remotes): per entry the
+   * remote's device id (0 = empty), pstop_remote_state_t, ms since last
+   * accepted message, and stamp-echo RTT (includes the remote's hold time
+   * between our reply and its next send — an upper bound, not a path RTT). */
+  extern atomic_uint_fast32_t g_dcs_machn_r_id[DCS_MACHN_MAX_REMOTES];
+  extern atomic_uint_fast32_t g_dcs_machn_r_state[DCS_MACHN_MAX_REMOTES];
+  extern atomic_uint_fast32_t g_dcs_machn_r_age_ms[DCS_MACHN_MAX_REMOTES];
+  extern atomic_uint_fast32_t g_dcs_machn_r_rtt_ms[DCS_MACHN_MAX_REMOTES];
   extern atomic_uint_fast32_t g_dcs_pstop_rtt_ms;
   extern atomic_uint_fast64_t g_dcs_pstop_last_reply_ms;
   extern atomic_uint_fast32_t g_dcs_pstop_peer_ip;

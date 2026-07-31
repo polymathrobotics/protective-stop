@@ -106,6 +106,69 @@ static uint32_t g_relay_fault[2]; /* consecutive contradiction ticks */
 static uint32_t g_relay_fault_total;
 static volatile int g_relay_fault_stop; /* persistent-fault stop engaged */
 
+/* Live bonded-remote view for the landing page (comparator-owned; read
+ * against core 0's instance BETWEEN core windows so it never races the
+ * cores). rtt is the stamp-echo delta: our reply's stamp comes back in the
+ * remote's next message's received_stamp, so (now - received_stamp)
+ * bounds the true RTT plus the remote's inter-send hold (<= its period). */
+typedef struct
+{
+  uint32_t id;
+  uint64_t last_rx_ms;
+  uint32_t rtt_ms;
+} machn_seen_t;
+
+static machn_seen_t g_seen[DCS_MACHN_MAX_REMOTES];
+
+static void seen_note(uint32_t id, uint64_t now, uint64_t received_stamp)
+{
+  int free_slot = -1;
+  int slot = -1;
+  for (int i = 0; i < DCS_MACHN_MAX_REMOTES; i++) {
+    if (g_seen[i].id == id) {
+      slot = i;
+      break;
+    }
+    if ((free_slot < 0) && (g_seen[i].id == 0u)) {
+      free_slot = i;
+    }
+  }
+  if (slot < 0) {
+    slot = free_slot;
+  }
+  if (slot < 0) {
+    return; /* table full — telemetry only, never blocks the protocol */
+  }
+  g_seen[slot].id = id;
+  g_seen[slot].last_rx_ms = now;
+  if ((received_stamp != 0u) && (now >= received_stamp) && ((now - received_stamp) < 60000u)) {
+    g_seen[slot].rtt_ms = (uint32_t)(now - received_stamp);
+  }
+}
+
+static void seen_publish(uint64_t now)
+{
+  for (int i = 0; i < DCS_MACHN_MAX_REMOTES; i++) {
+    if (g_seen[i].id == 0u) {
+      dcs_publish_machn_remote(i, 0u, 0u, 0u, 0u);
+      continue;
+    }
+    uint64_t age = now - g_seen[i].last_rx_ms;
+    if (age > 30000u) { /* gone half a minute: drop from the page */
+      g_seen[i].id = 0u;
+      dcs_publish_machn_remote(i, 0u, 0u, 0u, 0u);
+      continue;
+    }
+    uint32_t st = 0u;
+    device_id_t rid = {.data = g_seen[i].id};
+    const pstop_remote_data_t * rd = machine_get_remote_data(&g_core[0].machine, &rid);
+    if (rd != NULL) {
+      st = (uint32_t)rd->remote_state;
+    }
+    dcs_publish_machn_remote(i, g_seen[i].id, st, (uint32_t)age, g_seen[i].rtt_ms);
+  }
+}
+
 static uint64_t now_ms(void)
 {
   return (uint64_t)(esp_timer_get_time() / 1000);
@@ -393,6 +456,17 @@ static void comparator_task(void * arg)
     } else {
       /* Quiet tick: liveness + relays already handled by the cores. */
     }
+
+    if (g_rx_pending != 0) {
+      /* Landing-page peer view — decode is cheap (40 B) and phase-safe
+             * here: both cores are idle between windows. */
+      pstop_msg_t peek;
+      pstop_message_decode(&peek, g_rx_bytes);
+      if (peek.checksum == peek.calculated_checksum) {
+        seen_note(peek.id.data, g_tick_now_ms, peek.received_stamp);
+      }
+    }
+    seen_publish(g_tick_now_ms);
 
     relay_note_commands();
     relay_feedback_check();
