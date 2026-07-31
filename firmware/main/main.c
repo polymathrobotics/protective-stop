@@ -724,7 +724,7 @@ static uint32_t sess_drain_replies(pstop_sess_t * s, int slot, uint64_t now_ms)
       /* Bond response: adopt the machine's counter/stamp so the first OK
              * heartbeat carries the right context (mirrors the handshake in
              * pstop_c/examples/client/client_app.c). */
-      s->pd.last_sent_counter = resp.counter;
+      s->pd.last_received_counter = resp.counter;
       s->pd.last_timestamp = resp.stamp;
       s->pd.msg_counter = s->bond_counter + 1u;
       s->state = SESS_BONDED;
@@ -736,7 +736,7 @@ static uint32_t sess_drain_replies(pstop_sess_t * s, int slot, uint64_t now_ms)
         (unsigned long)resp.counter,
         (unsigned long long)resp.stamp);
     } else {
-      s->pd.last_sent_counter = resp.counter;
+      s->pd.last_received_counter = resp.counter;
       s->pd.last_timestamp = resp.stamp;
       if ((resp.received_counter > 0u) && (resp.received_counter <= s->pd.msg_counter)) {
         uint64_t sent_ms = s->tx_stamp_history[resp.received_counter & 15];
@@ -815,7 +815,7 @@ static void comparator_task(void * arg)
       if (g_tick[i].active) {
         g_tick[i].stamp_ms = now_ms;
         g_tick[i].counter = s->pd.msg_counter;
-        g_tick[i].received_counter = s->pd.last_sent_counter;
+        g_tick[i].received_counter = s->pd.last_received_counter;
         g_tick[i].received_stamp = s->pd.last_timestamp;
         g_tick[i].receiver_id = s->machine_id;
         s->tx_stamp_history[s->pd.msg_counter & 15] = now_ms;

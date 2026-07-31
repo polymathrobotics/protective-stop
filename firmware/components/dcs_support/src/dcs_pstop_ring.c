@@ -27,15 +27,17 @@
  *     RED    = STOP          connected; the machine's last reply was STOP — a
  *                            commanded stop (E-stop pressed, or the NEED_STOP
  *                            arming cycle not yet completed).
- *     PURPLE = MISMATCH      the two lockstep cores are disagreeing (their
- *                            encoded messages differ) — e.g. ONE E-stop loop
- *                            channel opened/faulted while the other stayed
- *                            closed. The comparator sends nothing on a mismatch,
- *                            so the link would otherwise just time out to
- *                            yellow; purple flags the real cause. Shows only
- *                            while the disagreement is present (a lone blip =
- *                            about one ring frame). Takes priority over every
- *                            other colour.
+ *     PURPLE = MISMATCH      the two lockstep cores are PERSISTENTLY
+ *                            disagreeing (their encoded messages differ) —
+ *                            e.g. ONE E-stop loop channel opened/faulted while
+ *                            the other stayed closed. The comparator sends
+ *                            nothing on a mismatch, so the link would
+ *                            otherwise just time out to yellow; purple flags
+ *                            the real cause. Paints only after the
+ *                            disagreement persists ~3 consecutive ring frames
+ *                            (~750 ms); momentary blips never flash the ring
+ *                            (see pstop_mismatch in /state.json for those).
+ *                            Takes priority over every other colour.
  *
  * Additionally, a DIM PURPLE comet (much dimmer than the mismatch purple)
  * spins around the ring from the very top of boot via
@@ -76,12 +78,16 @@ static const char * TAG = "dcs_ring";
 
 #define RING_REFRESH_MS 250 /* re-evaluate state + repaint; also the WS2812 reset gap */
 #define LINK_FRESH_MS 2000u /* no machine reply within this -> not connected (re-bond is 1.5s) */
+#define MISMATCH_PERSIST_FRAMES \
+  3u /* PURPLE trigger threshold: the mismatch counter must advance across \
+      * this many CONSECUTIVE ring frames (3 x 250 ms ~= 750 ms of continuous \
+      * core disagreement) before the ring paints purple. Momentary blips \
+      * (1-2 disagreeing ticks) never flash the ring — they stay visible in \
+      * the pstop_mismatch counter only. */
 #define MISMATCH_HOLD_MS \
-  300u /* PURPLE bridging window: just over one ring frame (250 ms), so a \
-                                * SUSTAINED fault (counter increments every 100 ms comparator tick) \
-                                * paints solid purple with no flicker, while a single transient blip \
-                                * clears within ~one frame. Deliberately NOT longer: purple must only \
-                                * show while the disagreement is actually present. */
+  300u /* PURPLE bridging window once triggered: just over one ring frame, \
+                                * so a persistent fault paints solid purple with no flicker and the \
+                                * ring clears within ~one frame of the disagreement ending. */
 #define PULSE_PERIOD_MS 2400u /* slow RED pulse period when a configured host is unreachable */
 #define PULSE_FRAME_MS 60 /* repaint step while pulsing, for a smooth ramp */
 
@@ -269,6 +275,7 @@ static void ring_task(void * arg)
   ESP_LOGI(TAG, "WS2812 PSTOP ring (%d LEDs) on GPIO%d", RING_LEDS, RING_GPIO);
 
   uint32_t prev_mismatch = atomic_load(&g_dcs_pstop_mismatch);
+  uint32_t mm_streak = 0; /* consecutive frames the mismatch counter advanced */
   uint64_t mismatch_until = 0;
   int last_logged = -1;
   int ota_head = 0;
@@ -319,15 +326,24 @@ static void ring_task(void * arg)
       locate_showing = false;
     }
 
-    /* PURPLE: track the mismatch counter poll-to-poll. A sustained fault
-         * increments it every 100 ms comparator tick, so each 250 ms frame
-         * sees a change and keeps the ring purple; a single transient blip
-         * shows for at most ~one frame and clears. No longer hold — purple
-         * means the disagreement is present NOW. */
+    /* PURPLE: only for a PERSISTENT core disagreement. A sustained fault
+         * increments the mismatch counter every 100 ms comparator tick, so
+         * every 250 ms ring frame sees a change; require the counter to have
+         * advanced across MISMATCH_PERSIST_FRAMES consecutive frames (~750 ms
+         * of continuous disagreement) before painting. Momentary blips (a
+         * tick or two of disagreement) no longer flash the ring at all —
+         * they remain visible in /state.json's pstop_mismatch counter. */
     uint32_t mm = atomic_load(&g_dcs_pstop_mismatch);
     if (mm != prev_mismatch) {
       prev_mismatch = mm;
-      mismatch_until = now + MISMATCH_HOLD_MS;
+      if (mm_streak < MISMATCH_PERSIST_FRAMES) {
+        mm_streak++;
+      }
+      if (mm_streak >= MISMATCH_PERSIST_FRAMES) {
+        mismatch_until = now + MISMATCH_HOLD_MS;
+      }
+    } else {
+      mm_streak = 0;
     }
     bool recent_mismatch = now < mismatch_until;
 

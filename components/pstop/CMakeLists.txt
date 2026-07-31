@@ -59,3 +59,10 @@ idf_component_register(
         # esp_timer — for our port/pstop_time_esp.c
         esp_timer
 )
+
+# Upstream's debug logging (protocol.c, 2026-07-30 requirements-app change)
+# prints uint64 stamps with %ld, which is a hard -Werror=format under the
+# xtensa toolchain (32-bit long). The library is NOT ours to modify — relax
+# format diagnostics for the vendored sources only; our own components keep
+# the full warning set.
+target_compile_options(${COMPONENT_LIB} PRIVATE -Wno-format)
