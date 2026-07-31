@@ -74,7 +74,7 @@ send_msg(udp_transport_data_t *transport, pstop_os_env_t *env, protocol_data_t *
     pstop_create_generic_message(&req_msg, msg,
         now, machine->last_timestamp,
         uuid, &(machine->remote_id),
-        machine->msg_counter + 1U, machine->last_sent_counter);
+        machine->msg_counter + 1U, machine->last_received_counter);
 
     machine->msg_counter++;
     pstop_message_encode(&req_msg, reqbytes);
@@ -86,7 +86,7 @@ send_msg(udp_transport_data_t *transport, pstop_os_env_t *env, protocol_data_t *
         return 0;
     }
     fprintf(stderr, "Received msg: %d counter=%d\n", resp_msg.message, resp_msg.counter);
-    machine->last_sent_counter = resp_msg.counter;
+    machine->last_received_counter = resp_msg.counter;
     machine->last_timestamp = resp_msg.stamp;
 
     return 1;
