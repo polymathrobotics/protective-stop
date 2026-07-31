@@ -538,11 +538,45 @@ static uint32_t fleet_server_ip_cached(void)
  * large tailnet (100s of peers, trimmed to ML_MAX_PEERS) either could
  * otherwise fall out of the table, leaving the chip unable to reach the
  * machine (unsafe) or the management server (no OTA/coordination). */
+/* Additional always-pinned VPN IPs registered by the application — e.g.
+ * every configured pstop machine slot. Without this, a machine that joins
+ * the tailnet after the chip's last full netmap (or that has no recent
+ * activity) gets trimmed by the ML_MAX_PEERS cap and the remote can never
+ * bond to it (observed: EHOSTUNREACH on every BOND, bench 2026-07-31). */
+#define ML_EXTRA_PINS 8
+static uint32_t s_extra_pins[ML_EXTRA_PINS];
+
+void microlink_pin_peer_ip(microlink_t * ml, uint32_t vpn_ip, bool pin)
+{
+  (void)ml;
+  if (vpn_ip == 0) return;
+  for (int i = 0; i < ML_EXTRA_PINS; i++) {
+    if (pin && s_extra_pins[i] == vpn_ip) return; /* already pinned */
+    if (!pin && s_extra_pins[i] == vpn_ip) {
+      s_extra_pins[i] = 0;
+      return;
+    }
+  }
+  if (pin) {
+    for (int i = 0; i < ML_EXTRA_PINS; i++) {
+      if (s_extra_pins[i] == 0) {
+        s_extra_pins[i] = vpn_ip;
+        return;
+      }
+    }
+  }
+}
+
 static bool is_pinned_peer(microlink_t * ml, uint32_t vpn_ip)
 {
   if (vpn_ip == 0) return false;
   if (ml->config.priority_peer_ip != 0 && vpn_ip == ml->config.priority_peer_ip) {
     return true;
+  }
+  for (int i = 0; i < ML_EXTRA_PINS; i++) {
+    if (s_extra_pins[i] != 0 && vpn_ip == s_extra_pins[i]) {
+      return true;
+    }
   }
   uint32_t fip = fleet_server_ip_cached();
   return (fip != 0 && vpn_ip == fip);

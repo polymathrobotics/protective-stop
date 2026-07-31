@@ -280,6 +280,15 @@ extern "C"
  */
   const char * microlink_default_device_name(void);
 
+  /**
+ * @brief Pin (or unpin) a VPN IP in the WireGuard peer table.
+ *
+ * Pinned peers survive the ML_MAX_PEERS trim and evict an LRU peer to
+ * enter a full table. Register every peer the SAFETY path depends on
+ * (e.g. all configured pstop machine targets). Up to 8 extra pins.
+ */
+  void microlink_pin_peer_ip(microlink_t * ml, uint32_t vpn_ip, bool pin);
+
   /* ============================================================================
  * MagicDNS — Resolve Tailnet hostnames to VPN IPs
  *

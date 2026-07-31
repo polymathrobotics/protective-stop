@@ -129,6 +129,8 @@ atomic_int g_dcs_active_iface;
 atomic_uint_fast32_t g_dcs_rgb_cycles;
 atomic_uint_fast32_t g_dcs_pstop_rebonds;
 
+static void pstop_slot_pins_sync(void);
+
 /* === Public API ============================================================ */
 
 dcs_boot_state_t dcs_support_init(void)
@@ -272,6 +274,9 @@ dcs_boot_state_t dcs_support_init(void)
     atomic_store(&g_dcs_pstop_peer_ip, peers[0].configured ? peers[0].ip : 0u);
     atomic_store(&g_dcs_pstop_peer_port, peers[0].port);
   }
+  /* Pin every configured machine target in the WG peer table so the cap
+     * trim can never orphan a safety link (see pstop_slot_pins_sync). */
+  pstop_slot_pins_sync();
 
   /* Register the admin pages now that ml_app is up. */
   dcs_admin_pages_register(g_dcs.app);
@@ -378,14 +383,52 @@ void dcs_publish_pstop_peer(uint32_t peer_ip, uint16_t peer_port)
   }
 }
 
+/* Pin every configured slot target in the WG peer table (and unpin an IP
+ * only when NO remaining slot uses it — two slots may target one host on
+ * different ports). Without the pin, a machine that joined the tailnet
+ * after this chip's last full netmap — or one with no recent traffic —
+ * is trimmed by the peer cap and every BOND dies with EHOSTUNREACH. */
+static void pstop_slot_pins_sync(void)
+{
+  if (g_dcs.ml_handle == NULL) {
+    return;
+  }
+  for (int i = 0; i < DCS_PSTOP_MAX_MACHINES; i++) {
+    uint64_t ep = (uint64_t)atomic_load(&g_dcs_pstop_slot_ep[i]);
+    bool cfg = (ep & PSTOP_EP_CONFIGURED) != 0ULL;
+    uint32_t ip = (uint32_t)((ep >> 16) & 0xFFFFFFFFULL);
+    if (cfg && (ip != 0u)) {
+      microlink_pin_peer_ip(g_dcs.ml_handle, ip, true);
+    }
+  }
+}
+
 esp_err_t dcs_pstop_set_peer_slot(int slot, bool configured, uint32_t ip, uint16_t port, uint32_t machine_id)
 {
   if ((slot < 0) || (slot >= DCS_PSTOP_MAX_MACHINES)) {
     return ESP_ERR_INVALID_ARG;
   }
+  /* Unpin the OLD target if this slot had one and no other slot shares it. */
+  uint64_t old_ep = (uint64_t)atomic_load(&g_dcs_pstop_slot_ep[slot]);
+  uint32_t old_ip = (uint32_t)((old_ep >> 16) & 0xFFFFFFFFULL);
+  if (((old_ep & PSTOP_EP_CONFIGURED) != 0ULL) && (old_ip != 0u) && (g_dcs.ml_handle != NULL)) {
+    bool shared = false;
+    for (int i = 0; i < DCS_PSTOP_MAX_MACHINES; i++) {
+      if (i == slot) continue;
+      uint64_t ep = (uint64_t)atomic_load(&g_dcs_pstop_slot_ep[i]);
+      if (((ep & PSTOP_EP_CONFIGURED) != 0ULL) && ((uint32_t)((ep >> 16) & 0xFFFFFFFFULL) == old_ip)) {
+        shared = true;
+        break;
+      }
+    }
+    if (!shared && !(configured && (ip == old_ip))) {
+      microlink_pin_peer_ip(g_dcs.ml_handle, old_ip, false);
+    }
+  }
   /* Live update first (comparator picks it up next tick)... */
   atomic_store(&g_dcs_pstop_slot_id[slot], machine_id);
   atomic_store(&g_dcs_pstop_slot_ep[slot], pstop_ep_pack(configured, ip, port));
+  pstop_slot_pins_sync();
   if (slot == 0) {
     atomic_store(&g_dcs_pstop_peer_ip, configured ? ip : 0u);
     atomic_store(&g_dcs_pstop_peer_port, port);
