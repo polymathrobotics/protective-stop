@@ -187,6 +187,13 @@ extern "C"
   void dcs_publish_pstop_sf_causes(uint32_t nomem, uint32_t route, uint32_t txdrv, uint32_t other, int last_errno);
 
   /**
+ * @brief Publish machine-role relay supervision (consecutive contradiction
+ * ticks per channel; stop_active = persistent-fault stop engaged). Shown in
+ * /state.json as relay_fault_a / relay_fault_b / relay_stop (0 on remotes).
+ */
+  void dcs_publish_relay_fault(uint32_t fault_a_ticks, uint32_t fault_b_ticks, bool stop_active);
+
+  /**
  * @brief Tell the transport whether the pstop link to the machine is alive.
  *
  * Thin wrapper over microlink_notify_priority_health(). Call with true on every

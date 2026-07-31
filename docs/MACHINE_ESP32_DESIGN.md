@@ -121,9 +121,14 @@ console MACHINES-tab integration beyond the existing announce.
 1. Relay: opto-isolated module; feedback via resistor divider on the
    switched output read as digital IO. Exact part TBD during hardware
    pass; `RELAY_FEEDBACK_MS` set from its switching time.
-2. No fault latching: transients self-recover; a persistent feedback
-   contradiction shows a persistent (self-clearing) fault indication —
-   series redundancy carries the safety.
+2. ~~No fault latching: indication only~~ **Revised 2026-07-31 after
+   bench test** (disconnected feedback looked fully green): a feedback
+   contradiction persisting ≥ ~1 s now **stops the robot** — both
+   relays open, replies STOP, re-arming refused while the fault is
+   present. Still no latch: clears with the fault; re-arm requires a
+   fresh remote gesture. Named telemetry: `relay_fault_a/b` (consecutive
+   contradiction ticks) + `relay_stop` in `/state.json`; commanded/
+   observed in `e_hi*/e_lo*`.
 3. ROS2 reporting: poll `/state.json` at 5 Hz; no UDP stream.
 4. Arming: remote gestures only — the machine box has no arm input.
 5. Naming: remotes keep `pstop`; machines use `machn`.

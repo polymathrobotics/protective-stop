@@ -128,6 +128,9 @@ atomic_uint_fast32_t g_dcs_heap_min_internal = UINT32_MAX;
 atomic_int g_dcs_active_iface;
 atomic_uint_fast32_t g_dcs_rgb_cycles;
 atomic_uint_fast32_t g_dcs_pstop_rebonds;
+atomic_uint_fast32_t g_dcs_relay_fault_a;
+atomic_uint_fast32_t g_dcs_relay_fault_b;
+atomic_uint_fast32_t g_dcs_relay_stop;
 
 static void pstop_slot_pins_sync(void);
 
@@ -362,6 +365,13 @@ void dcs_publish_comparator(
   atomic_store(&g_dcs_pstop_send_fail, send_fail);
   atomic_store(&g_dcs_pstop_last_reply_ms, last_reply_ms);
   atomic_store(&g_dcs_pstop_rtt_ms, rtt_ms);
+}
+
+void dcs_publish_relay_fault(uint32_t fault_a_ticks, uint32_t fault_b_ticks, bool stop_active)
+{
+  atomic_store(&g_dcs_relay_fault_a, fault_a_ticks);
+  atomic_store(&g_dcs_relay_fault_b, fault_b_ticks);
+  atomic_store(&g_dcs_relay_stop, stop_active ? 1u : 0u);
 }
 
 void dcs_publish_pstop_sf_causes(uint32_t nomem, uint32_t route, uint32_t txdrv, uint32_t other, int last_errno)

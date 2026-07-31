@@ -127,6 +127,12 @@ extern "C"
   extern atomic_uint_fast32_t g_dcs_pstop_sf_other;
   extern atomic_int g_dcs_pstop_sf_last_errno;
   extern atomic_uint_fast32_t g_dcs_pstop_rebonds; /* link re-syncs after reply loss */
+  /* Machine-role relay supervision (always 0 on remotes): consecutive
+   * contradiction ticks per channel + whether the persistent-fault stop
+   * is currently forcing the robot STOPPED. */
+  extern atomic_uint_fast32_t g_dcs_relay_fault_a;
+  extern atomic_uint_fast32_t g_dcs_relay_fault_b;
+  extern atomic_uint_fast32_t g_dcs_relay_stop;
   extern atomic_uint_fast32_t g_dcs_pstop_rtt_ms;
   extern atomic_uint_fast64_t g_dcs_pstop_last_reply_ms;
   extern atomic_uint_fast32_t g_dcs_pstop_peer_ip;

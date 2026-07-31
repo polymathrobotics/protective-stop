@@ -67,6 +67,11 @@ static const char * TAG = "machn";
 #define RELAY_B_DRIVE 41 /* core 1 -> relay 2 coil driver */
 #define RELAY_B_SENSE 42 /* divider on relay 2's switched output */
 #define RELAY_FEEDBACK_MS 100u /* commanded->observed settle allowance (TBD by part) */
+#define RELAY_FAULT_STOP_TICKS \
+  10u /* persistent-fault stop: this many CONSECUTIVE contradiction ticks \
+       * (~1 s) forces the robot STOPPED — both relays open, replies STOP, \
+       * re-arming refused — until the contradiction clears (no latch). \
+       * Degraded redundancy = don't run (operator decision 2026-07-31). */
 
 #define TICK_MS 100u /* comparator/liveness cadence, matches the remote */
 #define CORE_WINDOW_MS 80u /* per-core processing budget within a tick */
@@ -99,6 +104,7 @@ static volatile int g_relay_cmd[2]; /* last commanded level per channel */
 static uint64_t g_relay_cmd_ms[2]; /* when it was commanded (settle window) */
 static uint32_t g_relay_fault[2]; /* consecutive contradiction ticks */
 static uint32_t g_relay_fault_total;
+static volatile int g_relay_fault_stop; /* persistent-fault stop engaged */
 
 static uint64_t now_ms(void)
 {
@@ -208,6 +214,16 @@ static void core_task(void * arg)
 
     /* Native liveness on this core's own instance/clock. */
     (void)machine_validate_heartbeats(&mc->machine);
+
+    /* Persistent relay-fault stop: force STOPPED via the library's public
+         * API every tick while the contradiction persists. Replies become
+         * STOP, arming gestures cannot complete, and this core's relay drive
+         * follows the STOPPED verdict below. Identical flag on both cores =
+         * identical verdicts = no comparator divergence. Clears with the
+         * fault (no latch). */
+    if (g_relay_fault_stop != 0) {
+      machine_stop_robot(&mc->machine);
+    }
 
     /* This core's verdict drives THIS core's relay, independent of the
          * other core: the series wiring makes any single-core STOP a real
@@ -380,6 +396,19 @@ static void comparator_task(void * arg)
 
     relay_note_commands();
     relay_feedback_check();
+
+    bool fault_now = (g_relay_fault[0] >= RELAY_FAULT_STOP_TICKS) || (g_relay_fault[1] >= RELAY_FAULT_STOP_TICKS);
+    if (fault_now && (g_relay_fault_stop == 0)) {
+      ESP_LOGE(
+        TAG,
+        "RELAY FAULT persistent (A=%u B=%u ticks) — forcing STOP until it clears",
+        (unsigned)g_relay_fault[0],
+        (unsigned)g_relay_fault[1]);
+    } else if (!fault_now && (g_relay_fault_stop != 0)) {
+      ESP_LOGW(TAG, "relay fault cleared — STOP force released (re-arm via remote gesture)");
+    }
+    g_relay_fault_stop = fault_now ? 1 : 0;
+    dcs_publish_relay_fault(g_relay_fault[0], g_relay_fault[1], fault_now);
 
     dcs_publish_comparator(processed, mismatch, g_relay_fault_total, last_rx_ms, 0);
   }
