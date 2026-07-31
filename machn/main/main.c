@@ -415,7 +415,6 @@ void app_main(void);
 void app_main(void)
 {
   dcs_boot_state_t bs = dcs_support_init();
-  (void)bs;
 
   relay_gpio_init(); /* relays open (STOP) before anything else runs */
   core_instance_init(0);
@@ -449,6 +448,12 @@ void app_main(void)
     vTaskDelay(pdMS_TO_TICKS(50));
     esp_restart();
   }
+
+  /* Finalize platform bring-up: marks the running OTA image VALID (else
+     * the bootloader rolls back on the next reboot — bit us on the bench:
+     * every machn OTA bounced straight back), starts the boot-count
+     * age-out, and applies any deferred Tailscale pause. */
+  dcs_support_finalize(&bs);
 
   ESP_LOGI(
     TAG,
