@@ -47,3 +47,28 @@ jobs:
           esp_idf_version: v5.5
           target: esp32s3
           path: firmware
+
+  build_machn:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          submodules: recursive
+
+      # Same credentials seeding as the remote build (machn merges its own
+      # sdkconfig.credentials when present; CI builds generic).
+      - name: Seed sdkconfig.credentials
+        run: |
+          if [ -f firmware/sdkconfig.credentials.example ]; then
+            cp firmware/sdkconfig.credentials.example machn/sdkconfig.credentials
+          else
+            touch machn/sdkconfig.credentials
+          fi
+
+      - name: Build with ESP-IDF v5.5
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v5.5
+          target: esp32s3
+          path: machn
