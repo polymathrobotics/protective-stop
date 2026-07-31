@@ -157,6 +157,25 @@ menu "MicroLink V2 Configuration"
                 Generate a reusable + ephemeral key for development.
                 This is stored in sdkconfig which should be git-ignored.
 
+        config ML_DEVICE_TYPE
+            string "Device type reported to the management backend"
+            default "remote"
+            help
+                Sent as device_type in every check-in so the backend can
+                type-gate firmware assignments (e.g. never offer a remote
+                image to a "machine" device). Leave "remote" for pstop
+                remotes; machine-role builds set "machine".
+
+        config ML_OTA_REQUIRE_PROJECT
+            string "Required project name in accepted OTA images"
+            default ""
+            help
+                If non-empty, an OTA image whose app-descriptor
+                project_name differs is rejected before activation —
+                device-side backstop against a wrong-lineage rollout
+                (e.g. a remote image pushed to a machine). Empty
+                disables the check.
+
         config ML_DEVICE_NAME
             string "Device Name"
             default ""

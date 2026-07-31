@@ -12,6 +12,7 @@
 #include <string.h>
 
 #include "cJSON.h"
+#include "esp_app_format.h"
 #include "esp_crt_bundle.h"
 #include "esp_event.h"
 #include "esp_heap_caps.h"
@@ -443,6 +444,9 @@ static bool fleet_ota_checkin(
   cJSON_AddStringToObject(body, "idf_version", desc ? desc->idf_ver : "");
   cJSON_AddNumberToObject(body, "free_heap", esp_get_free_heap_size());
   cJSON_AddNumberToObject(body, "uptime_s", (double)(esp_timer_get_time() / 1000000));
+  /* Device class, so the backend can type-gate firmware assignments
+   * (absent in pre-2026-07 firmware = "remote"). */
+  cJSON_AddStringToObject(body, "device_type", CONFIG_ML_DEVICE_TYPE);
   /* Advertise our own cadence so the backend can judge staleness without
    * polling the device for its configured interval. */
   cJSON_AddNumberToObject(body, "check_interval_s", app->check_interval_s);
@@ -619,6 +623,26 @@ static bool fleet_ota_download_and_apply(
     }
 
     mbedtls_sha256_update(&sha_ctx, (const unsigned char *)buf, read_len);
+    /* Wrong-lineage backstop: the app descriptor sits at a fixed offset in
+         * the image; verify project_name on the first chunk, before most of
+         * the image is even downloaded. Configured empty = check disabled. */
+    if (
+      (total == 0) &&
+      (read_len > (int)(sizeof(esp_image_header_t) + sizeof(esp_image_segment_header_t) + sizeof(esp_app_desc_t))) &&
+      (CONFIG_ML_OTA_REQUIRE_PROJECT[0] != '\0'))
+    {
+      const esp_app_desc_t * img_desc =
+        (const esp_app_desc_t *)(buf + sizeof(esp_image_header_t) + sizeof(esp_image_segment_header_t));
+      if (strncmp(img_desc->project_name, CONFIG_ML_OTA_REQUIRE_PROJECT, sizeof(img_desc->project_name)) != 0) {
+        ESP_LOGE(
+          TAG,
+          "OTA: image project '%.32s' != required '%s' — wrong lineage, REJECTED",
+          img_desc->project_name,
+          CONFIG_ML_OTA_REQUIRE_PROJECT);
+        success = false;
+        break;
+      }
+    }
     total += read_len;
 
     int pct = content_len > 0 ? (total * 100 / content_len) : 0;

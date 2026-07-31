@@ -28,3 +28,7 @@ tools/production_image/
 *.pyc
 *.FCBak
 nohup.out
+machn/build/
+machn/sdkconfig
+machn/sdkconfig.credentials
+machn/sdkconfig.old

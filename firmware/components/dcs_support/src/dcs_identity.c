@@ -10,7 +10,14 @@
 /* Cached after first derivation. device_id is always non-zero (top byte 0x01),
  * so it doubles as the "computed yet?" flag. */
 static uint32_t s_device_id = 0;
-static char s_hostname[16] = {0}; /* "pstop-" + 8 hex + NUL = 15 */
+static char s_hostname[16] = {0}; /* "<prefix>-" + 8 hex + NUL */
+
+/* Identity prefix: "pstop" for remotes; machine-role builds override to
+ * "machn" (see machn/sdkconfig.defaults). Doubles as the role tag on the
+ * tailnet and the console. */
+#ifndef DCS_ID_PREFIX
+  #define DCS_ID_PREFIX "pstop"
+#endif
 
 static void ensure_derived(void)
 {
@@ -21,7 +28,7 @@ static void ensure_derived(void)
   esp_read_mac(mac, ESP_MAC_WIFI_STA);
   uint32_t unit24 = ((uint32_t)mac[3] << 16) | ((uint32_t)mac[4] << 8) | (uint32_t)mac[5];
   s_device_id = 0x01000000u | unit24; /* 0x01 = pstop remote type tag */
-  snprintf(s_hostname, sizeof(s_hostname), "pstop-%08x", (unsigned)s_device_id);
+  snprintf(s_hostname, sizeof(s_hostname), DCS_ID_PREFIX "-%08x", (unsigned)s_device_id);
 }
 
 uint32_t dcs_identity_device_id(void)
