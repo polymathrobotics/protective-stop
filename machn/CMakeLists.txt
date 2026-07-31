@@ -25,7 +25,11 @@ project(machn_machine)
 # Identity prefix: machn-01<mac24> instead of pstop-01<mac24>.
 idf_component_get_property(dcs_lib dcs_support COMPONENT_LIB)
 if(dcs_lib)
-    target_compile_definitions(${dcs_lib} PRIVATE DCS_ID_PREFIX="machn")
+    target_compile_definitions(${dcs_lib} PRIVATE
+        DCS_ID_PREFIX="machn"
+        DCS_PAGE_TITLE="PSTOP Machine"
+        DCS_PAGE_ICON="%F0%9F%A4%96" # robot
+    )
 endif()
 
 # Same lwIP pbuf-pool override as the remote (see rationale there).

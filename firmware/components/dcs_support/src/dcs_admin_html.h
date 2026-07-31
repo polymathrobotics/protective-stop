@@ -9,11 +9,25 @@
 
 #pragma once
 
+/* Role branding — the same page serves both device roles. The remote is
+ * the default; the machn project overrides both macros from its CMake
+ * (target_compile_definitions on dcs_support). Icon = a percent-encoded
+ * emoji inside an inline SVG data URI (no external assets; the admin
+ * server ships no favicon file). */
+#ifndef DCS_PAGE_TITLE
+  #define DCS_PAGE_TITLE "PSTOP Remote"
+#endif
+#ifndef DCS_PAGE_ICON
+  #define DCS_PAGE_ICON "%F0%9F%9B%91" /* stop sign */
+#endif
+
 static const char k_index_html[] =
   "<!DOCTYPE html><html><head>"
   "<meta charset='utf-8'>"
   "<meta name='viewport' content='width=device-width,initial-scale=1'>"
-  "<title>Dual-Core Safety</title>"
+  "<title>" DCS_PAGE_TITLE "</title>"
+  "<link rel='icon' href=\"data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'>"
+  "<text y='.9em' font-size='90'>" DCS_PAGE_ICON "</text></svg>\">"
   "<style>body{font-family:system-ui;background:#0d1117;color:#e6edf3;"
   "display:flex;justify-content:center;align-items:center;min-height:100vh;margin:0}"
   ".card{background:#161b22;border:1px solid #30363d;border-radius:12px;"
@@ -29,7 +43,7 @@ static const char k_index_html[] =
   ".bd .row{display:flex;justify-content:space-between;gap:8px}"
   ".bd .row.dim{color:#6e7681}"
   "p{color:#8b949e}a{color:#58a6ff}</style></head><body>"
-  "<div class='card'><h1>Dual-Core Safety</h1>"
+  "<div class='card'><h1>" DCS_PAGE_TITLE "</h1>"
   "<table>"
   "<tr><th></th><th>Core 0 (D0)</th><th>Core 1 (D1)</th></tr>"
   "<tr><th>ticks</th><td id='t0'>-</td><td id='t1'>-</td></tr>"
