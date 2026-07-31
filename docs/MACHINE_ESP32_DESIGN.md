@@ -17,7 +17,7 @@ machine form factor, not a replacement.
 - **Hardware**: Waveshare ESP32-S3-ETH (PoE), same enclosure family.
 - **Connectivity**: microlink (Tailscale/WireGuard/DERP), eth → wifi
   supervised uplinks. Own tailnet identity derived from eFuse MAC, prefix
-  distinguishes the role: **`pmach-01<mac24>`**.
+  distinguishes the role: **`machn-01<mac24>`** (remotes keep `pstop-`).
 - **Platform services**: NVS-persisted settings + admin UI, boot-count
   safety ladder, direct OTA (`/admin/api/ota`), `/state.json` telemetry
   (with `fw_ver`/`fw_sha`), reset-history, panic log.
@@ -106,8 +106,8 @@ carries **no safety responsibility**.
 The `machine.toml` knobs move to NVS + admin UI (same pattern as the
 remote's settings): operator allowlist (`allow_unlisted`, per-remote
 `stop_only`/`heartbeat_ms`), `max_missed_heartbeats`, `min_stop_ms`
-(→ library `delay_between_stop_ms`), `machine_device_id`, listen port,
-status-stream target. Persisted, live-applied where safe.
+(→ library `delay_between_stop_ms`), `machine_device_id`, listen port.
+Persisted, live-applied where safe.
 
 ## Out of scope for v1
 
