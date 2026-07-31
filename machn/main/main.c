@@ -62,10 +62,10 @@ static const char * TAG = "machn";
 #define MACHN_DEFAULT_HEARTBEAT_MS 400u /* advertised: remotes publish at /2 */
 
 /* === Relay I/O (reuses the remote's E-stop loop pins) ===================== */
-#define RELAY_A_DRIVE 40 /* core 0 */
-#define RELAY_A_SENSE 39 /* divider on relay A's switched output */
-#define RELAY_B_DRIVE 42 /* core 1 */
-#define RELAY_B_SENSE 41
+#define RELAY_A_DRIVE 39 /* core 0 -> relay 1 coil driver */
+#define RELAY_A_SENSE 40 /* divider on relay 1's switched output */
+#define RELAY_B_DRIVE 41 /* core 1 -> relay 2 coil driver */
+#define RELAY_B_SENSE 42 /* divider on relay 2's switched output */
 #define RELAY_FEEDBACK_MS 100u /* commanded->observed settle allowance (TBD by part) */
 
 #define TICK_MS 100u /* comparator/liveness cadence, matches the remote */
