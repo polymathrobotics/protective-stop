@@ -227,27 +227,46 @@ static void relay_feedback_check(void)
 {
   const gpio_num_t sense[2] = {RELAY_A_SENSE, RELAY_B_SENSE};
   uint64_t t = now_ms();
+  /* SERIES-CHAIN expectations (supply -> relay A -> relay B -> load):
+     * the divider after A sees A alone; the divider after B sees the whole
+     * chain, i.e. A AND B. A naive per-channel compare would raise a
+     * phantom fault on B every time A opens while B is still closed. */
+  int expected[2];
+  int observed[2];
+  expected[0] = g_relay_cmd[0];
+  expected[1] = ((g_relay_cmd[0] != 0) && (g_relay_cmd[1] != 0)) ? 1 : 0;
   for (int ch = 0; ch < 2; ch++) {
-    int observed = gpio_get_level(sense[ch]);
-    if (observed == g_relay_cmd[ch]) {
+    observed[ch] = gpio_get_level(sense[ch]);
+    if (observed[ch] == expected[ch]) {
       g_relay_fault[ch] = 0; /* matches — indication self-clears */
       continue;
     }
-    if ((t - g_relay_cmd_ms[ch]) < RELAY_FEEDBACK_MS) {
-      continue; /* still inside the settle window after a transition */
+    /* Settle window applies after EITHER channel's transition (a change
+         * on A moves B's expectation too). */
+    uint64_t last_cmd = (g_relay_cmd_ms[0] > g_relay_cmd_ms[1]) ? g_relay_cmd_ms[0] : g_relay_cmd_ms[1];
+    if ((t - last_cmd) < RELAY_FEEDBACK_MS) {
+      continue;
     }
     g_relay_fault[ch]++;
     g_relay_fault_total++;
     if (g_relay_fault[ch] == 1u || (g_relay_fault[ch] % 50u) == 0u) {
       ESP_LOGE(
         TAG,
-        "RELAY FAULT ch%c: commanded %d, divider reads %d (x%u) — series partner carries the stop",
+        "RELAY FAULT ch%c: chain-expected %d, divider reads %d (x%u) — series partner carries the stop",
         'A' + ch,
-        g_relay_cmd[ch],
-        observed,
+        expected[ch],
+        observed[ch],
         (unsigned)g_relay_fault[ch]);
     }
   }
+  /* Publish commanded/observed per channel into /state.json NOW by
+     * reusing the (machine-role-unused) E-stop channel atomics:
+     *   e_hi0 = relay A commanded   e_lo0 = relay A divider observed
+     *   e_hi1 = relay B commanded   e_lo1 = relay B divider observed
+     * Lets bench/HIL tests assert relay state over HTTP. Deliberate,
+     * clearly-labeled reuse until machn-specific state fields land. */
+  dcs_publish_estop(0, g_relay_cmd[0] != 0, observed[0] != 0);
+  dcs_publish_estop(1, g_relay_cmd[1] != 0, observed[1] != 0);
 }
 
 /* Track what the cores commanded this tick (for the feedback window). */
