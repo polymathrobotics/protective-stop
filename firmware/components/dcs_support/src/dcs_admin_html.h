@@ -89,6 +89,12 @@ static const char k_index_html[] =
   "<p>SAFETY: boot # <span id='bc'>-</span> &nbsp;|&nbsp;"
   " reset reason: <span id='rr'>-</span> &nbsp;|&nbsp;"
   " valid-mark: <span id='vm'>-</span></p>"
+#ifdef DCS_PAGE_MACHINE
+  "<p style='margin-top:1em'><b>Stop-circuit relays</b> <small>(series chain: either opens = STOP)</small></p>"
+  "<div id='relays' class='bd'>-</div>"
+  "<p id='rstop' class='bad' style='display:none;font-weight:bold'>&#9888; RELAY FAULT &mdash; robot stop forced "
+  "until feedback recovers</p>"
+#endif
   "<p style='margin-top:1em'><b>PSTOP peers</b> <small>(bonded devices, live)</small></p>"
   "<div id='peers' class='bd'>-</div>"
   "<p><a href='/admin/'>Admin Panel</a></p>"
@@ -118,6 +124,19 @@ static const char k_index_html[] =
   "if(other>0){"
   "html+='<div class=\"row dim\"><span>(other)</span><span>'+other+'%</span></div>';}"
   "el.innerHTML=html||'-';}"
+#ifdef DCS_PAGE_MACHINE
+  "function relayRow(name,cmd,obs,fault){"
+  "const match=(fault||0)===0;"
+  "const cls=match?(cmd?'ok':''):'bad';"
+  "let st=match?(cmd?'RUN':'open'):('FAULT \u00d7'+fault);"
+  "return '<div class=\"row\"><span>relay '+name+' &nbsp; coil: '+(cmd?'energized':'released')"
+  "+' &nbsp;&middot;&nbsp; feedback: '+(obs?'live':'dead')+'</span>'"
+  "+'<span class=\"'+cls+'\">'+st+'</span></div>';}"
+  "function renderRelays(j){"
+  "const el=document.getElementById('relays');if(!el)return;"
+  "el.innerHTML=relayRow('A',j.e_hi0,j.e_lo0,j.relay_fault_a)+relayRow('B',j.e_hi1,j.e_lo1,j.relay_fault_b);"
+  "document.getElementById('rstop').style.display=j.relay_stop?'block':'none';}"
+#endif
   "const MS=['idle','bonding','bonded'];"
   "const RS=['initing','bonded','OK','STOP'];"
   "function ip4(v){return[(v>>>24)&255,(v>>>16)&255,(v>>>8)&255,v&255].join('.');}"
@@ -142,6 +161,9 @@ static const char k_index_html[] =
   "const r=await fetch('/state.json',{cache:'no-store'});"
   "const j=await r.json();"
   "renderPeers(j);"
+#ifdef DCS_PAGE_MACHINE
+  "renderRelays(j);"
+#endif
   "document.getElementById('t0').textContent=j.t0;"
   "document.getElementById('t1').textContent=j.t1;"
   "document.getElementById('l0').textContent=j.l0;"

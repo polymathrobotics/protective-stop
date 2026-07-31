@@ -29,6 +29,8 @@ if(dcs_lib)
         DCS_ID_PREFIX="machn"
         DCS_PAGE_TITLE="PSTOP Machine"
         DCS_PAGE_ICON="%F0%9F%A4%96" # robot
+        DCS_PAGE_MACHINE=1
+
     )
 endif()
 
