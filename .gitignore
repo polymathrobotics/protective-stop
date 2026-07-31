@@ -32,3 +32,4 @@ machn/build/
 machn/sdkconfig
 machn/sdkconfig.credentials
 machn/sdkconfig.old
+machn/managed_components/

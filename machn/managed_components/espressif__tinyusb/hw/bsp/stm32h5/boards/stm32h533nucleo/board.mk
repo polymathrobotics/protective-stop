@@ -1,9 +1,0 @@
-MCU_VARIANT = stm32h533xx
-
-CFLAGS += \
-	-DSTM32H533xx \
-	-DHSE_VALUE=24000000 \
-	-DCFG_EXAMPLE_VIDEO_READONLY \
-
-# For flash-jlink target
-JLINK_DEVICE = stm32h533re

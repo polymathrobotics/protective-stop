@@ -1,2 +1,0 @@
-mcu:STM32G4
-mcu:STM32U5
