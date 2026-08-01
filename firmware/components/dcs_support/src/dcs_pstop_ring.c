@@ -16,10 +16,10 @@
  *
  *     WHITE  = IDLE          no pstop peer (machine) configured — the remote has
  *                            nothing to connect to (fresh unit, or peer cleared).
- *     RED    = UNREACHABLE   a peer IS configured but no fresh reply — SLOW RED
- *              (pulsing)      PULSE (never bonded / machine down / went away /
- *                            comparator stopped after a lockstep fault). Distinct
- *                            from a solid-red commanded STOP.
+ *     YELLOW = UNREACHABLE   a peer IS configured but no fresh reply — FLASHING
+ *              (flashing)     YELLOW (never bonded / machine down / went away /
+ *                            comparator stopped after a lockstep fault). Clearly
+ *                            distinct from a solid-red commanded STOP.
  *     BLUE   = BOND/UNBOND   connected; the machine's last reply was BOND or
  *                            UNBOND — just (re)bonded, not yet armed to OK.
  *     GREEN  = OK            connected; the machine's last reply was OK — the
@@ -88,8 +88,8 @@ static const char * TAG = "dcs_ring";
   300u /* PURPLE bridging window once triggered: just over one ring frame, \
                                 * so a persistent fault paints solid purple with no flicker and the \
                                 * ring clears within ~one frame of the disagreement ending. */
-#define PULSE_PERIOD_MS 2400u /* slow RED pulse period when a configured host is unreachable */
-#define PULSE_FRAME_MS 60 /* repaint step while pulsing, for a smooth ramp */
+#define PULSE_PERIOD_MS 1000u /* flashing YELLOW cycle (50% duty) when a configured host is unreachable */
+#define PULSE_FRAME_MS 60 /* repaint step while flashing, keeps edges crisp */
 
 #define RING_BOOT_BRIGHTNESS \
   10 /* dim power-on sign-of-life; well below the state colours (40)
@@ -366,7 +366,7 @@ static void ring_task(void * arg)
     /* Per-machine segments: the ring is divided evenly among the CONFIGURED
          * peer slots, in slot order (one machine = the whole ring, matching the
          * old single-machine display). Per segment, the classic colours apply:
-         *   red pulse = configured but no fresh reply (bonding / unreachable)
+         *   yellow flash = configured but no fresh reply (bonding / unreachable)
          *   blue      = bonded, machine's last reply was BOND/UNBOND
          *   green     = machine's last reply was OK
          *   red       = machine's last reply was STOP
@@ -386,11 +386,11 @@ static void ring_task(void * arg)
     if (ncfg == 0) {
       ring_fill(B, B, B); /* white: nothing to connect to */
     } else {
-      /* Pulse level shared by every unreachable segment: triangle ramp
-             * 0..B..0 over PULSE_PERIOD_MS; repaint fast so it is smooth. */
+      /* Flash phase shared by every unreachable segment: hard 50% duty
+             * on/off — a blink reads as "trying to connect" at a glance and
+             * can't be confused with the smooth STOP/OK comet or solid red. */
       uint32_t ph = (uint32_t)(now % PULSE_PERIOD_MS);
-      uint32_t half = PULSE_PERIOD_MS / 2u;
-      uint32_t pulse = (ph < half) ? (ph * B / half) : ((PULSE_PERIOD_MS - ph) * B / half);
+      uint8_t pulse = (ph < (PULSE_PERIOD_MS / 2u)) ? B : 0u;
 
       (void)memset(s_grb, 0, sizeof(s_grb));
       for (int j = 0; j < ncfg; j++) {
@@ -405,7 +405,8 @@ static void ring_task(void * arg)
         ring_state_t st;
         if (!connected) {
           st = RING_UNREACHABLE;
-          r = (uint8_t)pulse;
+          r = (uint8_t)pulse; /* r+g = yellow */
+          g = (uint8_t)pulse;
           frame_ms = PULSE_FRAME_MS;
         } else if (lastmsg == PSTOP_MESSAGE_STOP) {
           st = RING_STOP;
