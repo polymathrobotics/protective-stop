@@ -1,9 +1,11 @@
-# Machine ROS 2 Lifecycle Node — Design v0.1
+# Machine ROS 2 Lifecycle Node — Design v0.2
 
-Status: **DRAFT for review** (2026-08-01). Decisions locked from Q&A:
+Status: **READY TO IMPLEMENT** (2026-08-01). Decisions locked from Q&A:
 role = **bridge + control**; software backend = **node hosts pstop_c itself**;
-distro = **Jazzy**; interfaces = **machine-state + relay/fault + remotes/RTT**.
-Arming stays **remote-only** (not a service — see §2, §8).
+distro = **Jazzy**; interfaces = **machine-state + relay/fault + remotes/RTT**;
+arming stays **remote-only** (§2, §8). Implementation decisions resolved in §10:
+extend `protective_stop_msg`, in-repo `ros2/` workspace, **full control-proxy**
+hardware backend, keep `machine_app_runner`.
 
 ---
 
@@ -209,22 +211,33 @@ only observe, report, and tighten.
 
 ---
 
-## 10. Open decisions for implementation
+## 10. Decisions (resolved 2026-08-01)
 
-1. **Message ownership** — extend `protective_stop_msg` (restore from archive)
-   vs a new `protective_stop_machine_msgs`? (Leaning: extend the shared package.)
-2. **Where does the package live** — restore a `ros2/` workspace at repo root, or
-   a separate colcon overlay repo? (The #53 restructure archived ROS 2; this
-   revives it.)
-3. **Hardware control depth** — is proxying ESP32 peer-slot config through the
-   node in-scope for v1, or monitor-only for hardware with control limited to the
-   software backend at first?
-4. **`machine_app_runner`** — retire it in favour of the node's software backend,
-   or keep it as a headless fallback?
+1. **Message ownership** — **extend `protective_stop_msg`** (restored from
+   `archive/`); add `MachineRelayStatus` + `BondedRemoteArray` there so remote
+   and machine share one interface package.
+2. **Package location** — **in-repo `ros2/` colcon workspace** at repo root. The
+   archived packages already live here and CI can build it; accepts re-adding
+   ROS 2 build deps that #53 slimmed out.
+3. **Hardware backend scope** — **full control proxy**: the hardware backend not
+   only publishes state but proxies config/peer-slot changes to the ESP32 via
+   its admin API, so `~/configure_machine` and target management work uniformly
+   across both backends (§5). Still bounded by the safety validator (§4): proxied
+   config can only tighten, never arm.
+4. **`machine_app_runner`** — **kept** as a headless / CI tool. The node's
+   software backend shares its pstop_c glue, but the runner stays because the
+   wire-protocol suites (`pstop_multi_remote_test.py`, `stop_reset_battery.py`)
+   depend on it.
+
+## 11. Rollout note (perf / fleet, 2026-08-01)
+Firmware perf track is `-O2`-only for the near term (validated); `-O3`-on-crypto
+is deferred to its own change. Verified builds are uploaded to the fleet build
+server so the flashing station's "latest" tracks real work; "starring" not
+adopted (station uses newest).
 
 ---
 
-## 11. Example `config/machine_params.yaml`
+## 12. Example `config/machine_params.yaml`
 
 ```yaml
 /machine_bridge:
