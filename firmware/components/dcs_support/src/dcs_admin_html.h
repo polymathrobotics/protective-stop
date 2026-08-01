@@ -18,7 +18,10 @@
   #define DCS_PAGE_TITLE "PSTOP Remote"
 #endif
 #ifndef DCS_PAGE_ICON
-  #define DCS_PAGE_ICON "%F0%9F%9B%91" /* stop sign */
+  #define DCS_PAGE_ICON "%F0%9F%9B%91" /* stop sign, percent-encoded for the data URI */
+#endif
+#ifndef DCS_PAGE_EMOJI
+  #define DCS_PAGE_EMOJI "\xF0\x9F\x9B\x91" /* the same glyph, literal UTF-8, for the heading */
 #endif
 
 static const char k_index_html[] =
@@ -43,7 +46,7 @@ static const char k_index_html[] =
   ".bd .row{display:flex;justify-content:space-between;gap:8px}"
   ".bd .row.dim{color:#6e7681}"
   "p{color:#8b949e}a{color:#58a6ff}</style></head><body>"
-  "<div class='card'><h1>" DCS_PAGE_TITLE "</h1>"
+  "<div class='card'><h1>" DCS_PAGE_EMOJI " " DCS_PAGE_TITLE "</h1>"
   "<table>"
   "<tr><th></th><th>Core 0 (D0)</th><th>Core 1 (D1)</th></tr>"
   "<tr><th>ticks</th><td id='t0'>-</td><td id='t1'>-</td></tr>"

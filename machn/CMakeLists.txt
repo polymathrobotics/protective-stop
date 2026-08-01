@@ -28,7 +28,8 @@ if(dcs_lib)
     target_compile_definitions(${dcs_lib} PRIVATE
         DCS_ID_PREFIX="machn"
         DCS_PAGE_TITLE="PSTOP Machine"
-        DCS_PAGE_ICON="%F0%9F%A4%96" # robot
+        DCS_PAGE_ICON="%F0%9F%A4%96"    # robot, percent-encoded (favicon data URI)
+        DCS_PAGE_EMOJI="\\xF0\\x9F\\xA4\\x96" # robot, literal UTF-8 (page heading)
         DCS_PAGE_MACHINE=1
 
     )
