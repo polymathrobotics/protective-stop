@@ -60,6 +60,9 @@ IMAGES = [
 ]
 CHIP = "esp32s3"
 BAUD = "460800"
+CONNECT_ATTEMPTS = "3"    # esptool's own per-invocation sync retries
+READ_MAC_TRIES = 4        # outer retries reading the MAC (>= 3)
+FLASH_TRIES = 3           # outer retries of the whole flash on failure
 ESP_VID = "303a"          # Espressif
 RUNNING_PID = "4001"      # a booted pstop app (USB-CDC) — NOT flashable
 HOST_PREFIX = "pstop-01"  # node name = pstop-01<mac24>, mac24 = last 3 MAC bytes
@@ -148,19 +151,35 @@ def wait_for_blank(known):
         time.sleep(0.4)
 
 
-def read_mac(cmd, port):
-    """Return (mac_str, mac24_hex) or (None, None)."""
-    try:
-        out = subprocess.run(cmd + ["--chip", CHIP, "-p", port, "read_mac"],
-                             capture_output=True, text=True, timeout=30)
-        m = re.search(r"MAC:\s*([0-9a-fA-F:]{17})", out.stdout + out.stderr)
-        if not m:
-            return None, None
-        mac = m.group(1).lower()
-        mac24 = mac.replace(":", "")[-6:]
-        return mac, mac24
-    except Exception:
-        return None, None
+def read_mac(cmd, port, v5=False, tries=READ_MAC_TRIES):
+    """Return (mac_str, mac24_hex) or (None, None).
+
+    Retries: an ESP32-S3 in USB-JTAG download mode very often fails to sync on
+    the first attempt right after it enumerates (a fresh /dev/ttyACM* that isn't
+    settled yet). Each attempt also lets esptool retry the sync itself
+    (--connect-attempts), and we back off + retry the whole call `tries` times.
+    """
+    sub = "read-mac" if v5 else "read_mac"
+    last = ""
+    for i in range(tries):
+        try:
+            out = subprocess.run(
+                cmd + ["--chip", CHIP, "--connect-attempts", CONNECT_ATTEMPTS,
+                       "-p", port, sub],
+                capture_output=True, text=True, timeout=40)
+            m = re.search(r"MAC:\s*([0-9a-fA-F:]{17})", out.stdout + out.stderr)
+            if m:
+                mac = m.group(1).lower()
+                return mac, mac.replace(":", "")[-6:]
+            last = (out.stderr or out.stdout).strip().splitlines()[-1:] or [""]
+            last = last[0][:80]
+        except Exception as e:
+            last = str(e)[:80]
+        if i + 1 < tries:
+            line(f"  {C.DIM}chip didn't answer on {port} ({last}); "
+                 f"retry {i + 2}/{tries}…{C.X}")
+            time.sleep(1.0 + i)      # settle + linear backoff
+    return None, None
 
 
 # --- the flash, with a byte-accurate progress bar -------------------------
@@ -190,40 +209,52 @@ def flash(cmd, port, v5, erase, on_progress):
 
     if erase:
         on_progress(0.0, "erase")
-        r = subprocess.run(cmd + ["--chip", CHIP, "-p", port, "-b", BAUD, EF],
-                           capture_output=True, text=True)
+        r = subprocess.run(
+            cmd + ["--chip", CHIP, "--connect-attempts", CONNECT_ATTEMPTS,
+                   "-p", port, "-b", BAUD, EF],
+            capture_output=True, text=True)
         if r.returncode != 0:
             return False, "erase failed: " + (r.stderr or r.stdout)[-200:].strip()
 
-    args = cmd + ["--chip", CHIP, "-p", port, "-b", BAUD,
+    args = cmd + ["--chip", CHIP, "--connect-attempts", CONNECT_ATTEMPTS,
+                  "-p", port, "-b", BAUD,
                   "--before", BEFORE, "--after", AFTER,
                   WF, MODE, "dio", SIZE, "8MB", FREQ, "80m"]
     for base, fn in IMAGES:
         args += [hex(base), os.path.join(IMG, fn)]
 
-    proc = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                            text=True, bufsize=1)
-    tail = []
-    buf = ""
-    while True:
-        ch = proc.stdout.read(1)
-        if ch == "":
-            break
-        if ch in ("\r", "\n"):
-            if buf.strip():
-                tail.append(buf.strip())
-                tail[:] = tail[-8:]
-                m = re.search(r"Writing at 0x([0-9a-fA-F]+)", buf)
-                if m:
-                    on_progress(done_bytes(int(m.group(1), 16)) / total, "flash")
-            buf = ""
-        else:
-            buf += ch
-    proc.wait()
-    if proc.returncode != 0:
-        return False, "esptool: " + " | ".join(tail[-4:])
-    on_progress(1.0, "flash")
-    return True, ""
+    # Retry the whole flash: a re-flash is idempotent (esptool re-syncs and
+    # rewrites from scratch), so a transient connect/sync/write hiccup is
+    # recovered rather than failing the unit.
+    last_err = ""
+    for attempt in range(1, FLASH_TRIES + 1):
+        proc = subprocess.Popen(args, stdout=subprocess.PIPE,
+                                stderr=subprocess.STDOUT, text=True, bufsize=1)
+        tail, buf = [], ""
+        while True:
+            ch = proc.stdout.read(1)
+            if ch == "":
+                break
+            if ch in ("\r", "\n"):
+                if buf.strip():
+                    tail.append(buf.strip())
+                    tail[:] = tail[-8:]
+                    m = re.search(r"Writing at 0x([0-9a-fA-F]+)", buf)
+                    if m:
+                        on_progress(done_bytes(int(m.group(1), 16)) / total, "flash")
+                buf = ""
+            else:
+                buf += ch
+        proc.wait()
+        if proc.returncode == 0:
+            on_progress(1.0, "flash")
+            return True, ""
+        last_err = " | ".join(tail[-4:])
+        if attempt < FLASH_TRIES:
+            line(f"  {C.DIM}flash attempt {attempt}/{FLASH_TRIES} failed "
+                 f"({last_err[-80:]}); retrying…{C.X}")
+            time.sleep(1.0 + attempt)
+    return False, f"esptool (after {FLASH_TRIES} tries): {last_err}"
 
 
 # --- Tailscale IP discovery ----------------------------------------------
@@ -307,10 +338,10 @@ def confirm_hardware(ip):
 def flash_one(cmd, v5, port, erase, ip_timeout, app_ver="?"):
     line(f"{C.BOLD}▶ unit on {port}{C.X}  (app {app_ver})")
     bar(0.02, "read-mac")
-    mac, mac24 = read_mac(cmd, port)
+    mac, mac24 = read_mac(cmd, port, v5)
     if not mac24:
-        line(f"  {C.R}✗ chip not responding on {port} (bad cable / not in download "
-             f"mode).{C.X}")
+        line(f"  {C.R}✗ chip not responding on {port} after {READ_MAC_TRIES} tries "
+             f"(bad cable, or not in download mode — hold BOOT, tap RESET).{C.X}")
         return False, {"port": port, "stage": "read-mac"}
     host = HOST_PREFIX + mac24
     line(f"  MAC {mac}  →  node {C.B}{host}{C.X}")
