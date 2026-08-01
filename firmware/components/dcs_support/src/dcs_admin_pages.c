@@ -368,9 +368,10 @@ static esp_err_t page_state(httpd_req_t * req)
       n += snprintf(
         buf + n,
         cap - n,
-        "%s{\"id\":%lu,\"state\":%lu,\"age_ms\":%lu,\"rtt_ms\":%lu}",
+        "%s{\"id\":%lu,\"ip\":%lu,\"state\":%lu,\"age_ms\":%lu,\"rtt_ms\":%lu}",
         first ? "" : ",",
         (unsigned long)rid,
+        (unsigned long)atomic_load(&g_dcs_machn_r_ip[i]),
         (unsigned long)atomic_load(&g_dcs_machn_r_state[i]),
         (unsigned long)atomic_load(&g_dcs_machn_r_age_ms[i]),
         (unsigned long)atomic_load(&g_dcs_machn_r_rtt_ms[i]));

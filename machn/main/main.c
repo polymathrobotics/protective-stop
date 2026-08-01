@@ -114,13 +114,14 @@ static volatile int g_relay_fault_stop; /* persistent-fault stop engaged */
 typedef struct
 {
   uint32_t id;
+  uint32_t ip; /* UDP source (host order) = the remote's tailnet IP */
   uint64_t last_rx_ms;
   uint32_t rtt_ms;
 } machn_seen_t;
 
 static machn_seen_t g_seen[DCS_MACHN_MAX_REMOTES];
 
-static void seen_note(uint32_t id, uint64_t now, uint64_t received_stamp)
+static void seen_note(uint32_t id, uint32_t ip, uint64_t now, uint64_t received_stamp)
 {
   int free_slot = -1;
   int slot = -1;
@@ -140,6 +141,7 @@ static void seen_note(uint32_t id, uint64_t now, uint64_t received_stamp)
     return; /* table full — telemetry only, never blocks the protocol */
   }
   g_seen[slot].id = id;
+  g_seen[slot].ip = ip;
   g_seen[slot].last_rx_ms = now;
   if ((received_stamp != 0u) && (now >= received_stamp) && ((now - received_stamp) < 60000u)) {
     g_seen[slot].rtt_ms = (uint32_t)(now - received_stamp);
@@ -150,13 +152,13 @@ static void seen_publish(uint64_t now)
 {
   for (int i = 0; i < DCS_MACHN_MAX_REMOTES; i++) {
     if (g_seen[i].id == 0u) {
-      dcs_publish_machn_remote(i, 0u, 0u, 0u, 0u);
+      dcs_publish_machn_remote(i, 0u, 0u, 0u, 0u, 0u);
       continue;
     }
     uint64_t age = now - g_seen[i].last_rx_ms;
     if (age > 30000u) { /* gone half a minute: drop from the page */
       g_seen[i].id = 0u;
-      dcs_publish_machn_remote(i, 0u, 0u, 0u, 0u);
+      dcs_publish_machn_remote(i, 0u, 0u, 0u, 0u, 0u);
       continue;
     }
     uint32_t st = 0u;
@@ -165,7 +167,7 @@ static void seen_publish(uint64_t now)
     if (rd != NULL) {
       st = (uint32_t)rd->remote_state;
     }
-    dcs_publish_machn_remote(i, g_seen[i].id, st, (uint32_t)age, g_seen[i].rtt_ms);
+    dcs_publish_machn_remote(i, g_seen[i].id, g_seen[i].ip, st, (uint32_t)age, g_seen[i].rtt_ms);
   }
 }
 
@@ -463,7 +465,10 @@ static void comparator_task(void * arg)
       pstop_msg_t peek;
       pstop_message_decode(&peek, g_rx_bytes);
       if (peek.checksum == peek.calculated_checksum) {
-        seen_note(peek.id.data, g_tick_now_ms, peek.received_stamp);
+        /* Real arrival time (not the tick-latched clock): the telemetry
+                 * table is comparator-only, and the latched clock would inflate
+                 * the echo-RTT bound by up to a whole tick. */
+        seen_note(peek.id.data, ntohl(from.sin_addr.s_addr), now_ms(), peek.received_stamp);
       }
     }
     seen_publish(g_tick_now_ms);
