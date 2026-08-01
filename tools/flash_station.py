@@ -359,6 +359,26 @@ def unit_state(ip):
         return None
 
 
+PEER_SLOTS = 4   # DCS_PSTOP_MAX_MACHINES
+
+
+def reset_peers_fleet_only(ip):
+    """Clear every pstop machine-peer slot so a (re)flashed unit is fleet-only —
+    no machine bond — while keeping wifi/keys/other NVS. The fleet re-assigns
+    peers on check-in. Returns the count of slots cleared."""
+    cleared = 0
+    for s in range(PEER_SLOTS):
+        try:
+            req = urllib.request.Request(
+                f"http://{ip}/api/pstop_peers?slot={s}&clear=1", method="POST")
+            with urllib.request.urlopen(req, timeout=4) as r:
+                if r.status == 200:
+                    cleared += 1
+        except Exception:
+            pass
+    return cleared
+
+
 # --- operator button/LED sign-off ----------------------------------------
 def confirm_hardware(ip):
     """Manual QA gate: operator verifies the button + LED ring physically."""
@@ -379,7 +399,7 @@ def confirm_hardware(ip):
 
 
 # --- one full unit cycle --------------------------------------------------
-def flash_one(cmd, v5, port, erase, ip_timeout, app_ver="?"):
+def flash_one(cmd, v5, port, erase, ip_timeout, app_ver="?", keep_peers=False):
     line(f"{C.BOLD}▶ unit on {port}{C.X}  (app {app_ver})")
     bar(0.02, "read-mac")
     mac, mac24 = read_mac(cmd, port, v5)
@@ -423,6 +443,12 @@ def flash_one(cmd, v5, port, erase, ip_timeout, app_ver="?"):
     if app_ver != "?" and run_fw and not run_fw.startswith(app_ver):
         line(f"  {C.Y}! running fw_ver {run_fw} != flashed {app_ver} — "
              f"boot slot / stale image?{C.X}")
+
+    # Peer reset: leave the unit fleet-only (clear any stale machine bond from
+    # preserved NVS). Keeps wifi/keys; the fleet re-assigns peers on check-in.
+    if not keep_peers:
+        n = reset_peers_fleet_only(ip)
+        line(f"  peers reset to fleet-only ({n}/{PEER_SLOTS} slots cleared)")
 
     good, note = confirm_hardware(ip)
     if not good:
@@ -498,6 +524,8 @@ def main():
                     help="build-source project name (default pstop_remote)")
     ap.add_argument("--no-refresh", action="store_true",
                     help="fetch latest once at startup, don't re-check per unit")
+    ap.add_argument("--keep-peers", action="store_true",
+                    help="do NOT reset machine-peer slots (default: leave fleet-only)")
     ap.add_argument("--selftest", action="store_true", help="exercise plumbing, no hardware")
     args = ap.parse_args()
 
@@ -565,7 +593,8 @@ def main():
                     line(f"{C.B}  {_prov.LABEL}: newer build → {app_ver} "
                          f"({app_sha[:12]}); flashing it.{C.X}")
             line("")
-            ok, info = flash_one(cmd, v5, port, args.erase, args.ip_timeout, app_ver)
+            ok, info = flash_one(cmd, v5, port, args.erase, args.ip_timeout,
+                                 app_ver, args.keep_peers)
             if ok:
                 n_ok += 1
             else:
