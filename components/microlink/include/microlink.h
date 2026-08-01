@@ -308,6 +308,9 @@ extern "C"
  */
   uint32_t microlink_get_peer_rtt(microlink_t * ml, uint32_t vpn_ip, uint32_t * age_ms_out, bool * direct_out);
 
+  /** On-device perf micro-benchmark (x25519 + AEAD); writes JSON. */
+  int microlink_perf_bench(int iters, char * out, size_t cap);
+
   /* ============================================================================
  * MagicDNS — Resolve Tailnet hostnames to VPN IPs
  *

@@ -30,6 +30,7 @@
   #if SOC_TEMP_SENSOR_SUPPORTED
     #include "driver/temperature_sensor.h"
   #endif
+  #include <stdio.h>
   #include <string.h>
 
   #include "cJSON.h"
@@ -121,7 +122,7 @@ static void config_load_settings(ml_config_ctx_t * ctx)
   #define SEED_STR(field, kconfig)                      \
     do {                                                \
       if ((field)[0] == '\0' && strlen(kconfig) > 0) {  \
-        strncpy((field), (kconfig), sizeof(field) - 1); \
+        strlcpy((field), (kconfig), sizeof(field)); \
       }                                                 \
     } while (0)
 
@@ -253,8 +254,8 @@ static void config_load_wifi_list(ml_config_ctx_t * ctx)
     if (ctx->settings.wifi_ssid[0] != '\0') {
       ctx->wifi_list.count = 1;
       ctx->wifi_list.active_idx = 0;
-      strncpy(ctx->wifi_list.entries[0].ssid, ctx->settings.wifi_ssid, 32);
-      strncpy(ctx->wifi_list.entries[0].pass, ctx->settings.wifi_pass, 64);
+      strlcpy(ctx->wifi_list.entries[0].ssid, ctx->settings.wifi_ssid, sizeof(ctx->wifi_list.entries[0].ssid));
+      strlcpy(ctx->wifi_list.entries[0].pass, ctx->settings.wifi_pass, sizeof(ctx->wifi_list.entries[0].pass));
       ESP_LOGI(TAG, "WiFi list: migrated from settings (%s)", ctx->settings.wifi_ssid);
     } else {
       ESP_LOGI(TAG, "WiFi list: empty (no saved networks)");
@@ -573,7 +574,7 @@ static esp_err_t handler_post_settings(httpd_req_t * req)
   #define COPY_STR_FIELD(field, val)              \
     do {                                          \
       memset((field), 0, sizeof(field));          \
-      strncpy((field), (val), sizeof(field) - 1); \
+      strlcpy((field), (val), sizeof(field)); \
     } while (0)
 
   /* Update only provided fields (don't clear fields not in the request) */
@@ -732,7 +733,7 @@ static esp_err_t handler_post_allowed(httpd_req_t * req)
       e->vpn_ip = vpn_ip;
       memset(e->label, 0, sizeof(e->label));
       if (label && cJSON_IsString(label)) {
-        strncpy(e->label, label->valuestring, sizeof(e->label) - 1);
+        strlcpy(e->label, label->valuestring, sizeof(e->label));
       }
       ctx->peer_list.count++;
     }
@@ -752,7 +753,7 @@ static esp_err_t handler_post_allowed(httpd_req_t * req)
         ml_config_peer_entry_t * e = &ctx->peer_list.entries[ctx->peer_list.count];
         e->vpn_ip = fleet_ip;
         memset(e->label, 0, sizeof(e->label));
-        strncpy(e->label, "mgmt-server", sizeof(e->label) - 1);
+        strlcpy(e->label, "mgmt-server", sizeof(e->label));
         ctx->peer_list.count++;
       }
     }
@@ -1254,7 +1255,7 @@ static esp_err_t handler_post_wifi(httpd_req_t * req)
 
     ml_config_wifi_entry_t * e = &ctx->wifi_list.entries[ctx->wifi_list.count];
     memset(e, 0, sizeof(*e));
-    strncpy(e->ssid, ssid->valuestring, sizeof(e->ssid) - 1);
+    strlcpy(e->ssid, ssid->valuestring, sizeof(e->ssid));
 
     if (pass && cJSON_IsString(pass)) {
       const char * pv = pass->valuestring;
@@ -1262,12 +1263,12 @@ static esp_err_t handler_post_wifi(httpd_req_t * req)
         /* Masked: find matching SSID in old list and copy password */
         for (int j = 0; j < old_list.count; j++) {
           if (strcmp(old_list.entries[j].ssid, e->ssid) == 0) {
-            strncpy(e->pass, old_list.entries[j].pass, sizeof(e->pass) - 1);
+            strlcpy(e->pass, old_list.entries[j].pass, sizeof(e->pass));
             break;
           }
         }
       } else if (pv[0] != '\0') {
-        strncpy(e->pass, pv, sizeof(e->pass) - 1);
+        strlcpy(e->pass, pv, sizeof(e->pass));
       }
     }
     ctx->wifi_list.count++;
@@ -1278,8 +1279,8 @@ static esp_err_t handler_post_wifi(httpd_req_t * req)
   if (ctx->wifi_list.count > 0) {
     memset(ctx->settings.wifi_ssid, 0, sizeof(ctx->settings.wifi_ssid));
     memset(ctx->settings.wifi_pass, 0, sizeof(ctx->settings.wifi_pass));
-    strncpy(ctx->settings.wifi_ssid, ctx->wifi_list.entries[0].ssid, sizeof(ctx->settings.wifi_ssid) - 1);
-    strncpy(ctx->settings.wifi_pass, ctx->wifi_list.entries[0].pass, sizeof(ctx->settings.wifi_pass) - 1);
+    strlcpy(ctx->settings.wifi_ssid, ctx->wifi_list.entries[0].ssid, sizeof(ctx->settings.wifi_ssid));
+    strlcpy(ctx->settings.wifi_pass, ctx->wifi_list.entries[0].pass, sizeof(ctx->settings.wifi_pass));
     config_save_settings(ctx);
   }
 
@@ -1339,8 +1340,8 @@ bool ml_config_get_wifi_list(ml_config_wifi_list_t * list)
   if (err == ESP_OK && settings->wifi_ssid[0] != '\0') {
     list->count = 1;
     list->active_idx = 0;
-    strncpy(list->entries[0].ssid, settings->wifi_ssid, 32);
-    strncpy(list->entries[0].pass, settings->wifi_pass, 64);
+    strlcpy(list->entries[0].ssid, settings->wifi_ssid, sizeof(list->entries[0].ssid));
+    strlcpy(list->entries[0].pass, settings->wifi_pass, sizeof(list->entries[0].pass));
     free(settings);
     return true;
   }

@@ -11,6 +11,7 @@ set(SRCS
     "src/ml_h2.c"
     "src/ml_udp.c"
     "src/ml_peer_nvs.c"
+    "src/ml_perf_bench.c"
     "src/nacl_box.c"
     "src/x25519.c"
     "src/ml_zerocopy.c"

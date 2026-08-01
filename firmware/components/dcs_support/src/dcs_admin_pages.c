@@ -686,6 +686,23 @@ static esp_err_t api_usb_enable_toggle(httpd_req_t * req)
   return ESP_OK;
 }
 
+/* === GET /api/perf ====================================================== */
+static esp_err_t page_perf(httpd_req_t * req)
+{
+  char q[32] = {0};
+  int iters = 20;
+  if (httpd_req_get_url_query_str(req, q, sizeof(q)) == ESP_OK) {
+    char v[8] = {0};
+    if (httpd_query_key_value(q, "iters", v, sizeof(v)) == ESP_OK) {
+      iters = atoi(v);
+    }
+  }
+  char body[160];
+  (void)microlink_perf_bench(iters, body, sizeof(body));
+  (void)httpd_resp_set_type(req, "application/json");
+  return httpd_resp_sendstr(req, body);
+}
+
 /* === GET /api/last_log =================================================== */
 static esp_err_t api_last_log(httpd_req_t * req)
 {
@@ -905,6 +922,7 @@ void dcs_admin_pages_register(ml_app_t * app)
   }
   (void)ml_app_add_page(app, "/", HTTP_GET, page_index);
   (void)ml_app_add_page(app, "/state.json", HTTP_GET, page_state);
+  (void)ml_app_add_page(app, "/api/perf", HTTP_GET, page_perf);
   (void)ml_app_add_page(app, "/api/derp", HTTP_POST, api_derp_toggle);
   (void)ml_app_add_page(app, "/api/derp_delay", HTTP_POST, api_derp_delay);
   (void)ml_app_add_page(app, "/api/wg", HTTP_POST, api_wg_toggle);

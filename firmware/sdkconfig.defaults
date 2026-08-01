@@ -176,3 +176,15 @@ CONFIG_ESP_COREDUMP_MAX_TASKS_NUM=64
 # datapath crypto, so the safety heartbeat path is unaffected.
 # See docs/INTERNAL_RAM_REDUCTION.md.
 CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC=y
+
+# === perf branch: performance tuning (A/B against -Og baseline) ===
+# App at -O2 (project default was -Og debug). Speeds crypto, lockstep,
+# packet processing, netmap parse, boot init — everything.
+CONFIG_COMPILER_OPTIMIZATION_PERF=y
+# Keep runtime assertions ON — this is a safety device; catching a bad
+# state is worth the cycles.
+CONFIG_COMPILER_OPTIMIZATION_ASSERTIONS_ENABLE=y
+# Flash Quad-I/O: ~2x read throughput -> faster bootloader app-load and
+# faster XIP (cache-miss) code execution.
+# Trim bootloader chatter (was INFO).
+CONFIG_BOOTLOADER_LOG_LEVEL_WARN=y

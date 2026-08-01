@@ -222,7 +222,7 @@ microlink_t * microlink_init(const microlink_config_t * config)
   if (ml->config_httpd) {
     const char * nvs_auth = ml_config_get_auth_key(ml->config_httpd);
     if (nvs_auth) {
-      strncpy(ml->nvs_auth_key, nvs_auth, sizeof(ml->nvs_auth_key) - 1);
+      strlcpy(ml->nvs_auth_key, nvs_auth, sizeof(ml->nvs_auth_key));
       ml->config.auth_key = ml->nvs_auth_key;
       ESP_LOGI(TAG, "Auth key overridden from NVS (len=%d)", (int)strlen(nvs_auth));
     }
@@ -230,7 +230,7 @@ microlink_t * microlink_init(const microlink_config_t * config)
     const char * nvs_full_name = ml_config_get_device_name_full(ml->config_httpd);
     if (nvs_full_name) {
       /* Full custom hostname (e.g. "pstop-tailscale") */
-      strncpy(ml->nvs_device_name, nvs_full_name, sizeof(ml->nvs_device_name) - 1);
+      strlcpy(ml->nvs_device_name, nvs_full_name, sizeof(ml->nvs_device_name));
       ml->config.device_name = ml->nvs_device_name;
       ESP_LOGI(TAG, "Device name from NVS (full): %s", ml->nvs_device_name);
     } else {
@@ -277,7 +277,7 @@ microlink_t * microlink_init(const microlink_config_t * config)
     }
     const char * nvs_ctrl = ml_config_get_ctrl_host(ml->config_httpd);
     if (nvs_ctrl) {
-      strncpy(ml->ctrl_host, nvs_ctrl, sizeof(ml->ctrl_host) - 1);
+      strlcpy(ml->ctrl_host, nvs_ctrl, sizeof(ml->ctrl_host));
       ESP_LOGI(TAG, "Control plane overridden from NVS: %s", ml->ctrl_host);
     }
     ml->debug_flags = ml_config_get_debug_flags(ml->config_httpd);
@@ -679,7 +679,7 @@ esp_err_t microlink_get_peer_info(const microlink_t * ml, int index, microlink_p
   }
   const ml_peer_t * p = &ml->peers[index];
   info->vpn_ip = p->vpn_ip;
-  strncpy(info->hostname, p->hostname, sizeof(info->hostname) - 1);
+  strlcpy(info->hostname, p->hostname, sizeof(info->hostname));
   memcpy(info->public_key, p->public_key, 32);
   info->online = p->active;
   info->direct_path = p->has_direct_path;
