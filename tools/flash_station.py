@@ -90,14 +90,34 @@ def line(msg):
 
 
 # --- esptool resolution + v4/v5 flag differences --------------------------
+def _esptool_works(c):
+    """True only if `c version` actually RUNS (exit 0 + prints a version).
+    `python3 -m esptool` on a system python without esptool exits non-zero —
+    that must be rejected, not silently accepted."""
+    try:
+        r = subprocess.run(c + ["version"], capture_output=True, text=True, timeout=15)
+        return r.returncode == 0 and bool(re.search(r"v?\d+\.\d+", r.stdout + r.stderr))
+    except Exception:
+        return False
+
+
 def esptool_cmd():
-    for c in (["esptool"], ["esptool.py"], [sys.executable, "-m", "esptool"]):
-        try:
-            subprocess.run(c + ["version"], capture_output=True, timeout=10)
+    import glob
+    cands = [["esptool"], ["esptool.py"], [sys.executable, "-m", "esptool"]]
+    # esptool.py shipped inside an ESP-IDF install — usable even when the IDF
+    # env isn't sourced (this is the common case: operator just runs the tool).
+    for p in sorted(glob.glob(os.path.expanduser(
+            "~/.espressif/python_env/*/bin/esptool.py")), reverse=True):
+        cands.append([p])
+    idf = os.environ.get("IDF_PATH")
+    if idf:
+        cands.append([os.path.join(idf, "components", "esptool_py",
+                                   "esptool", "esptool.py")])
+    for c in cands:
+        if _esptool_works(c):
             return c
-        except Exception:
-            continue
-    sys.exit(f"{C.R}ERROR: esptool not found — 'pip install esptool'.{C.X}")
+    sys.exit(f"{C.R}ERROR: no working esptool found. Install it "
+             f"(`pip install esptool`) or run inside the ESP-IDF environment.{C.X}")
 
 
 def esptool_v5(cmd):
@@ -136,15 +156,39 @@ def download_ports():
     return ports
 
 
+def running_ports():
+    """Espressif chips enumerated as a RUNNING app (303a:4001). Not flashable
+    until put into download mode."""
+    out = []
+    for base in ("/dev/ttyACM", "/dev/ttyUSB"):
+        for n in range(8):
+            p = f"{base}{n}"
+            if os.path.exists(p) and udev_prop(p, "ID_VENDOR_ID") == ESP_VID \
+                    and udev_prop(p, "ID_MODEL_ID") == RUNNING_PID:
+                out.append(p)
+    return out
+
+
 def wait_for_blank(known):
-    """Block until a download-mode port appears that isn't in `known`."""
+    """Block until a download-mode port appears that isn't in `known`.
+
+    An already-flashed unit that's booted enumerates as a running app (4001)
+    and can't be flashed over USB directly; while waiting we tell the operator
+    how to put it into download mode so it CAN be reflashed (config preserved).
+    """
     spin = "|/-\\"
     i = 0
+    hinted = set()
     while True:
         for p in download_ports():
             if p not in known:
                 return p
-        sys.stdout.write(f"\r  {C.DIM}waiting for a blank ESP32 in download mode "
+        fresh = [p for p in running_ports() if p not in hinted]
+        if fresh:
+            hinted.update(fresh)
+            line(f"  {C.Y}a running pstop is on {', '.join(fresh)} — to reflash it, "
+                 f"hold BOOT and tap RESET (stored config is preserved).{C.X}")
+        sys.stdout.write(f"\r  {C.DIM}waiting for an ESP32 in download mode "
                          f"{spin[i % 4]}{C.X}   ")
         sys.stdout.flush()
         i += 1
@@ -495,7 +539,10 @@ def main():
                         else "") + f".{C.X}")
         why = "--from-image" if args.from_image else "no build-source plugin"
         print(f"  app: {C.Y}local staged image{C.X} ({why})")
-    print("  Plug in a blank ESP32-S3 (download mode). Ctrl-C to quit.\n")
+    cfg_note = (f"{C.R}--erase WILL wipe stored config (NVS){C.X}" if args.erase
+                else "reflash preserves stored config (NVS)")
+    print(f"  Plug in an ESP32-S3 in download mode — blank, or an already-flashed "
+          f"unit (hold BOOT + tap RESET). {cfg_note}. Ctrl-C to quit.\n")
 
     n_ok = n_fail = 0
     fails = []
