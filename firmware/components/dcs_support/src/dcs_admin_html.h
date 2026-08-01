@@ -149,7 +149,12 @@ static const char k_index_html[] =
   "function renderPeers(j){"
   "const el=document.getElementById('peers');if(!el)return;"
   "let h='';"
+#ifdef DCS_PAGE_MACHINE
+  "for(const m of []){" /* a MACHINE has no machine peers — the dcs slot table
+                          * is a remote-role vestige; never render it here */
+#else
   "for(const m of(j.pstop_machines||[])){"
+#endif
   "if(!m.cfg)continue;"
   "const age=j.uptime_ms&&m.last_reply_ms?Math.max(0,j.uptime_ms-m.last_reply_ms):null;"
   "const live=m.state==2&&age!=null&&age<3000;"

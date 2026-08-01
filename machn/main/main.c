@@ -157,10 +157,16 @@ static void seen_publish(uint64_t now)
     }
     uint64_t age = (now > g_seen[i].last_rx_ms) ? (now - g_seen[i].last_rx_ms) : 0u;
     if (age > 30000u) { /* gone half a minute: drop from the page */
+      dcs_untrack_peer_health(g_seen[i].ip); /* stop heartbeat-pinging it */
       g_seen[i].id = 0u;
       dcs_publish_machn_remote(i, 0u, 0u, 0u, 0u, 0u);
       continue;
     }
+    /* Keep the disco heartbeat (and thus the path-RTT sample) alive toward
+         * every remote we're actively serving; 'healthy' while its messages
+         * are fresher than the library timeout, which also gives the
+         * machine->remote direction the zombie-session recovery kick. */
+    dcs_notify_peer_health(g_seen[i].ip, age < 2000u);
     uint32_t st = 0u;
     device_id_t rid = {.data = g_seen[i].id};
     const pstop_remote_data_t * rd = machine_get_remote_data(&g_core[0].machine, &rid);

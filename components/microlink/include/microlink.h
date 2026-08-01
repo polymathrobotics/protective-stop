@@ -297,6 +297,10 @@ extern "C"
  */
   void microlink_notify_peer_health(microlink_t * ml, uint32_t vpn_ip, bool healthy);
 
+  /** Remove a peer from the health registry (e.g. a remote that unbonded and
+ * aged out) so it stops receiving heartbeat pings. */
+  void microlink_untrack_peer_health(microlink_t * ml, uint32_t vpn_ip);
+
   /**
  * @brief Disco-layer path RTT to a peer (txid-matched ping->pong).
  * @return RTT in ms, 0 if unknown/never measured. age_ms_out = staleness

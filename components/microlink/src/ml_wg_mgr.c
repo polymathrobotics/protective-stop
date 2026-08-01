@@ -582,6 +582,25 @@ typedef struct
 
 static ml_health_ent_t s_health_peers[ML_EXTRA_PINS];
 
+static bool is_health_tracked(uint32_t vpn_ip)
+{
+  for (int i = 0; i < ML_EXTRA_PINS; i++) {
+    if ((s_health_peers[i].ip != 0) && (s_health_peers[i].ip == vpn_ip)) return true;
+  }
+  return false;
+}
+
+void microlink_untrack_peer_health(microlink_t * ml, uint32_t vpn_ip)
+{
+  (void)ml;
+  for (int i = 0; i < ML_EXTRA_PINS; i++) {
+    if (s_health_peers[i].ip == vpn_ip) {
+      s_health_peers[i].ip = 0;
+      return;
+    }
+  }
+}
+
 void microlink_notify_peer_health(microlink_t * ml, uint32_t vpn_ip, bool healthy)
 {
   (void)ml;
@@ -2247,7 +2266,10 @@ static void disco_periodic_probes(microlink_t * ml)
          * Inbound DISCO pings from any peer are still answered (don't break remote). */
     bool peer_allowed = ml_config_peer_is_allowed(ml->config_httpd, p->vpn_ip);
 
-    bool is_priority = (ml->config.priority_peer_ip != 0 && p->vpn_ip == ml->config.priority_peer_ip);
+    bool is_priority = (ml->config.priority_peer_ip != 0 && p->vpn_ip == ml->config.priority_peer_ip) ||
+                       is_health_tracked(p->vpn_ip); /* every pstop counterpart gets the
+                            * safety-peer treatment: 3 s disco heartbeats (which also keep
+                            * the path RTT sample fresh on BOTH ends) + pong watchdog. */
 
     /* Direct-path health. Two triggers:
          *  - trust-lease expiry (all peers, the original behaviour), and

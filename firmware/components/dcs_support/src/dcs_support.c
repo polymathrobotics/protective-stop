@@ -548,3 +548,10 @@ void dcs_notify_peer_health(uint32_t vpn_ip, bool healthy)
     microlink_notify_peer_health(g_dcs.ml_handle, vpn_ip, healthy);
   }
 }
+
+void dcs_untrack_peer_health(uint32_t vpn_ip)
+{
+  if (g_dcs.ml_handle != NULL) {
+    microlink_untrack_peer_health(g_dcs.ml_handle, vpn_ip);
+  }
+}
