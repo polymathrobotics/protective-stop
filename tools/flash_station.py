@@ -4,30 +4,50 @@
 """flash_station.py — production flashing station for pstop remotes.
 
 Runs as an unattended loop: plug in a blank ESP32-S3, it auto-detects the
-chip in download mode, flashes the known-good image from
-tools/production_image/ (same layout flash_pstop.sh uses), waits for the unit
-to boot and join Tailscale, prints its tailnet IP, then makes the operator
-confirm the button + LED ring work before the unit is called good. Unplug it,
-plug in the next one — repeat.
+chip in download mode, flashes the app, waits for the unit to boot and join
+Tailscale, prints its tailnet IP, then makes the operator confirm the button
++ LED ring work before the unit is called good. Unplug it, plug in the next
+one — repeat.
+
+The app image comes from a pluggable **build source**. If an optional local
+plugin `tools/app_source.py` is present, the station pulls the latest verified
+app from it by default (sha256-verified) and always flashes the freshest build;
+that plugin is intentionally NOT part of this repo. With no plugin (or with
+--from-image) the station flashes the locally-staged
+tools/production_image/pstop_remote.bin. The stable boot trio (bootloader,
+partition-table, ota_data) always comes from tools/production_image/.
 
 A live progress bar tracks each phase; every unit ends in a clear PASS/FAIL
 line and the session keeps a running tally. Nothing here rebuilds firmware or
-needs ESP-IDF — just esptool + the staged image.
+needs ESP-IDF — just esptool + the image.
 
-    tools/flash_station.py                 # loop forever, DIO 8MB
+    tools/flash_station.py                 # loop; use the build-source plugin if present
+    tools/flash_station.py --from-image    # flash the locally staged app, no fetch
+    tools/flash_station.py --fw-sha 40f2   # pin a specific build by sha prefix (plugin)
     tools/flash_station.py --once          # flash a single unit and exit
     tools/flash_station.py --erase         # full chip-erase before each flash
     tools/flash_station.py --selftest      # exercise the plumbing, no hardware
 
-The image in tools/production_image/ carries secrets (Tailscale key, WiFi
-creds, admin password) and is git-ignored — never commit it.
+tools/production_image/ carries secrets (Tailscale key, WiFi creds, admin
+password) and is git-ignored — never commit it.
 """
 import argparse
+import json
 import os
 import re
 import subprocess
 import sys
 import time
+import urllib.request
+
+# Optional LOCAL build-source plugin (e.g. an internal build server). It is
+# git-ignored and not shipped with this repo; when present it lets the station
+# flash the latest verified build. Contract: LABEL, status()->(ok,msg),
+# latest(project, pin_sha)->img|None, download(img, dest)->(ok,err).
+try:
+    import app_source as _prov  # noqa: E402  (local-only, git-ignored)
+except Exception:
+    _prov = None
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 IMG = os.path.join(HERE, "production_image")
@@ -255,13 +275,13 @@ def ts_ip(host):
         return None
 
 
-def reachable(ip):
+def unit_state(ip):
+    """Return the unit's /state.json dict, or None."""
     try:
-        import urllib.request
         with urllib.request.urlopen(f"http://{ip}/state.json", timeout=4) as r:
-            return r.status == 200
+            return json.loads(r.read().decode())
     except Exception:
-        return False
+        return None
 
 
 # --- operator button/LED sign-off ----------------------------------------
@@ -284,8 +304,8 @@ def confirm_hardware(ip):
 
 
 # --- one full unit cycle --------------------------------------------------
-def flash_one(cmd, v5, port, erase, ip_timeout):
-    line(f"{C.BOLD}▶ unit on {port}{C.X}")
+def flash_one(cmd, v5, port, erase, ip_timeout, app_ver="?"):
+    line(f"{C.BOLD}▶ unit on {port}{C.X}  (app {app_ver})")
     bar(0.02, "read-mac")
     mac, mac24 = read_mac(cmd, port)
     if not mac24:
@@ -320,9 +340,14 @@ def flash_one(cmd, v5, port, erase, ip_timeout):
         return False, {"port": port, "node": host, "stage": "tailscale"}
     if found != host:
         line(f"  {C.Y}! joined as {found} (expected {host}) — verify identity.{C.X}")
-    warm = reachable(ip)
+    st = unit_state(ip)
     line(f"  {C.G}✓ online at {C.BOLD}{ip}{C.X}{C.G} "
-         f"({'admin page reachable' if warm else 'no HTTP yet — may still be booting'}){C.X}")
+         f"({'admin page reachable' if st else 'no HTTP yet — may still be booting'}){C.X}")
+    # confirm the running build is the one we flashed
+    run_fw = (st or {}).get("fw_ver")
+    if app_ver != "?" and run_fw and not run_fw.startswith(app_ver):
+        line(f"  {C.Y}! running fw_ver {run_fw} != flashed {app_ver} — "
+             f"boot slot / stale image?{C.X}")
 
     good, note = confirm_hardware(ip)
     if not good:
@@ -330,6 +355,32 @@ def flash_one(cmd, v5, port, erase, ip_timeout):
         return False, {"port": port, "node": host, "ip": ip, "stage": "hw-check", "err": note}
     line(f"  {C.G}{C.BOLD}✓ PASS{C.X}{C.G}  {host} @ {ip} — button + LED confirmed.{C.X}\n")
     return True, {"port": port, "node": host, "ip": ip}
+
+
+# --- build source (optional plugin) --------------------------------------
+APP_BIN = os.path.join(IMG, "pstop_remote.bin")   # IMAGES[-1] target
+BOOT_TRIO = ["bootloader.bin", "partition-table.bin", "ota_data_initial.bin"]
+
+
+def source_refresh(project, pin_sha, current_sha):
+    """Via the plugin, refresh APP_BIN to the latest build if it changed.
+    Returns (img_dict, changed_bool); (None, False) if unavailable or on error."""
+    if _prov is None:
+        return None, False
+    try:
+        img = _prov.latest(project, pin_sha)
+    except Exception as e:
+        line(f"  {C.R}build source: {e}{C.X}")
+        return None, False
+    if not img:
+        return None, False
+    if img.get("sha256") == current_sha and os.path.isfile(APP_BIN):
+        return img, False
+    ok, err = _prov.download(img, APP_BIN)
+    if not ok:
+        line(f"  {C.R}build source: {err}{C.X}")
+        return None, False
+    return img, True
 
 
 # --- selftest (no hardware) ----------------------------------------------
@@ -345,6 +396,13 @@ def selftest(cmd, v5):
           f"online: {[h for h, up in hosts.items() if up] or 'none'}")
     for h in list(hosts)[:1]:
         print(f"  ts_ip({h}) = {ts_ip(h)}")
+    if _prov is None:
+        print(f"  build source: {C.Y}no plugin (tools/app_source.py) — "
+              f"staged image only{C.X}")
+    else:
+        ok, msg = _prov.status()
+        col = C.G if ok else C.Y
+        print(f"  build source: {col}{_prov.LABEL}: {msg}{C.X}")
     print("  progress-bar demo:")
     for i in range(0, 101, 5):
         bar(i / 100, "demo")
@@ -357,6 +415,14 @@ def main():
     ap.add_argument("--once", action="store_true", help="flash one unit and exit")
     ap.add_argument("--erase", action="store_true", help="full chip erase before each flash")
     ap.add_argument("--ip-timeout", type=int, default=90, help="seconds to wait for a tailnet IP")
+    ap.add_argument("--from-image", action="store_true",
+                    help="flash the locally-staged app; ignore the build-source plugin")
+    ap.add_argument("--fw-sha", metavar="PREFIX",
+                    help="pin a specific build by sha256 prefix (build-source plugin)")
+    ap.add_argument("--project", default="pstop_remote",
+                    help="build-source project name (default pstop_remote)")
+    ap.add_argument("--no-refresh", action="store_true",
+                    help="fetch latest once at startup, don't re-check per unit")
     ap.add_argument("--selftest", action="store_true", help="exercise plumbing, no hardware")
     args = ap.parse_args()
 
@@ -367,16 +433,37 @@ def main():
         selftest(cmd, v5)
         return
 
-    miss = [fn for _, fn in IMAGES if not os.path.isfile(os.path.join(IMG, fn))]
-    if miss:
-        sys.exit(f"{C.R}ERROR: staged image incomplete, missing {miss} in {IMG}{C.X}")
+    # The stable boot trio always comes from production_image/ (the plugin
+    # supplies only the app). Require it regardless of source.
+    boot_miss = [fn for fn in BOOT_TRIO if not os.path.isfile(os.path.join(IMG, fn))]
+    if boot_miss:
+        sys.exit(f"{C.R}ERROR: boot images {boot_miss} not staged in {IMG} "
+                 f"(stage bootloader/partition-table/ota_data once).{C.X}")
 
-    print(f"{C.BOLD}=== pstop flashing station ==={C.X}  image: {IMG}")
-    mani = os.path.join(IMG, "MANIFEST.txt")
-    if os.path.isfile(mani):
-        for ln in open(mani):
-            if ln.startswith(("version", "app sha256")):
-                print("  " + ln.strip())
+    print(f"{C.BOLD}=== pstop flashing station ==={C.X}")
+
+    # --- resolve the app source: build-source plugin (default) or staged image ---
+    use_plugin = _prov is not None and not args.from_image
+    app_sha = ""          # sha of the app currently in APP_BIN
+    app_ver = "?"
+    if use_plugin:
+        img, _ = source_refresh(args.project, args.fw_sha, app_sha)
+        if not img:
+            sys.exit(f"{C.R}ERROR: {_prov.LABEL} could not supply an app image "
+                     f"(project {args.project}"
+                     f"{', sha '+args.fw_sha if args.fw_sha else ''}).{C.X}\n"
+                     f"  Fix the source, or pass --from-image to flash the staged app.")
+        app_sha, app_ver = img["sha256"], img["version"]
+        print(f"  app: {C.G}{_prov.LABEL} {app_ver}{C.X} ({app_sha[:12]}, "
+              f"{'starred' if img.get('starred') else 'newest'})"
+              + (" [pinned]" if args.fw_sha else ""))
+    else:
+        if not os.path.isfile(APP_BIN):
+            sys.exit(f"{C.R}ERROR: no app image — {APP_BIN} is not staged"
+                     + (" and no build-source plugin is present" if _prov is None
+                        else "") + f".{C.X}")
+        why = "--from-image" if args.from_image else "no build-source plugin"
+        print(f"  app: {C.Y}local staged image{C.X} ({why})")
     print("  Plug in a blank ESP32-S3 (download mode). Ctrl-C to quit.\n")
 
     n_ok = n_fail = 0
@@ -390,8 +477,17 @@ def main():
     try:
         while True:
             port = wait_for_blank(known)
+            # keep "latest" honest: re-check the source before each unit unless
+            # pinned or told not to (cheap — one small query; re-download only
+            # if the sha changed).
+            if use_plugin and not args.no_refresh and not args.fw_sha:
+                img, changed = source_refresh(args.project, None, app_sha)
+                if img and changed:
+                    app_sha, app_ver = img["sha256"], img["version"]
+                    line(f"{C.B}  {_prov.LABEL}: newer build → {app_ver} "
+                         f"({app_sha[:12]}); flashing it.{C.X}")
             line("")
-            ok, info = flash_one(cmd, v5, port, args.erase, args.ip_timeout)
+            ok, info = flash_one(cmd, v5, port, args.erase, args.ip_timeout, app_ver)
             if ok:
                 n_ok += 1
             else:

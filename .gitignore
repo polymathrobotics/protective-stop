@@ -33,3 +33,7 @@ machn/sdkconfig
 machn/sdkconfig.credentials
 machn/sdkconfig.old
 machn/managed_components/
+
+# LOCAL build-source plugin for flash_station.py (fleet client + creds).
+# Nextcloud-only, never committed.
+tools/app_source.py
