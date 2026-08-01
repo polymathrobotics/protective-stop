@@ -541,3 +541,10 @@ void dcs_notify_priority_health(bool healthy)
     microlink_notify_priority_health(g_dcs.ml_handle, healthy);
   }
 }
+
+void dcs_notify_peer_health(uint32_t vpn_ip, bool healthy)
+{
+  if (g_dcs.ml_handle != NULL) {
+    microlink_notify_peer_health(g_dcs.ml_handle, vpn_ip, healthy);
+  }
+}

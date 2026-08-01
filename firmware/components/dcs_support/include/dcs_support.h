@@ -210,6 +210,8 @@ extern "C"
  * instead of waiting out a stale session. No-op before the transport is up.
  */
   void dcs_notify_priority_health(bool healthy);
+  /** Per-machine-target variant (see microlink_notify_peer_health). */
+  void dcs_notify_peer_health(uint32_t vpn_ip, bool healthy);
 
   /**
  * @brief Current Tailscale VPN IP (host byte order), 0 until registered.

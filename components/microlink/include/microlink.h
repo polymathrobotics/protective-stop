@@ -290,6 +290,14 @@ extern "C"
   void microlink_pin_peer_ip(microlink_t * ml, uint32_t vpn_ip, bool pin);
 
   /**
+ * @brief Per-peer variant of microlink_notify_priority_health(): report the
+ * application-level health of any pinned peer (e.g. each pstop machine
+ * target). While false, that peer's session wake forces fresh handshakes,
+ * recovering a rebooted/forgotten far end in seconds. Up to 8 peers.
+ */
+  void microlink_notify_peer_health(microlink_t * ml, uint32_t vpn_ip, bool healthy);
+
+  /**
  * @brief Disco-layer path RTT to a peer (txid-matched ping->pong).
  * @return RTT in ms, 0 if unknown/never measured. age_ms_out = staleness
  * of the sample; direct_out = whether it was measured over the direct path.

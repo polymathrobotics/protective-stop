@@ -1002,6 +1002,15 @@ static void comparator_task(void * arg)
         s->rtt_ms,
         s->last_msg,
         (uint8_t)s->state);
+      /* Per-machine transport health (multi-machine cold recovery): while
+             * THIS target is bonded-and-fresh report healthy; while it is
+             * configured but silent report unhealthy so microlink's wake
+             * forces fresh handshakes at that peer only. Fixes the >30 s
+             * re-bond after power-cycling one machine while another stayed
+             * healthy (the aggregate kick below deliberately never fires in
+             * the partial-health case). */
+      bool slot_fresh = (s->state == SESS_BONDED) && ((drain_now - s->last_reply_ms) <= sess_rebond_after_ms(s));
+      dcs_notify_peer_health(s->ip, slot_fresh);
     }
     if (any_stop) {
       agg_msg = PSTOP_MESSAGE_STOP; /* worst-of: any STOP shows as STOP */
@@ -1015,13 +1024,10 @@ static void comparator_task(void * arg)
     atomic_store(&g_dcs_pstop_replies, agg_replies);
     dcs_publish_comparator(agg_sent, mismatch, agg_fail, agg_last_reply, agg_rtt);
 
-    /* Healthy: replies arrived this tick. Unhealthy: EVERY configured
-         * session is silent — kick the transport on the old bond-retry cadence
-         * (a repeated false is what forces WG past a zombie keypair when the
-         * far peer forgot us; a single edge notification is not enough — see
-         * the cold-recovery notes in docs/TROUBLESHOOTING.md). A partially
-         * healthy device (one machine up, another down) does NOT kick: that
-         * would churn the shared transport under the healthy session. */
+    /* Aggregate PRIORITY-peer health (kept alongside the per-slot
+         * notifications above, which cover each machine target individually):
+         * healthy when any reply arrived; unhealthy at bond-retry cadence
+         * only when EVERY configured session is silent. */
     if (got_any > 0u) {
       dcs_notify_priority_health(true);
     } else if (any_cfg && !any_fresh && ((drain_now - last_unhealthy_kick_ms) >= (uint64_t)BOND_RETRY_MS)) {

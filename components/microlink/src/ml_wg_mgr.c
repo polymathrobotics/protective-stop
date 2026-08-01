@@ -566,6 +566,40 @@ uint32_t microlink_get_peer_rtt(microlink_t * ml, uint32_t vpn_ip, uint32_t * ag
   return p->disco_rtt_ms;
 }
 
+/* Per-peer application-level health, the multi-machine generalization of
+ * microlink_notify_priority_health(): the pstop layer reports, per machine
+ * TARGET, whether heartbeat replies are flowing. Each unhealthy entry gets
+ * the same zombie-keypair treatment as the priority peer — a disco-first
+ * wake forcing a fresh 1-RTT handshake — so a power-cycled machine
+ * re-bonds in seconds instead of waiting out WG rekey timers. Without
+ * this, only an ALL-machines-silent device recovered fast (the aggregate
+ * kick deliberately refused to churn a partially-healthy transport). */
+typedef struct
+{
+  uint32_t ip;
+  volatile bool healthy;
+} ml_health_ent_t;
+
+static ml_health_ent_t s_health_peers[ML_EXTRA_PINS];
+
+void microlink_notify_peer_health(microlink_t * ml, uint32_t vpn_ip, bool healthy)
+{
+  (void)ml;
+  if (vpn_ip == 0) return;
+  int free_slot = -1;
+  for (int i = 0; i < ML_EXTRA_PINS; i++) {
+    if (s_health_peers[i].ip == vpn_ip) {
+      s_health_peers[i].healthy = healthy;
+      return;
+    }
+    if ((free_slot < 0) && (s_health_peers[i].ip == 0)) free_slot = i;
+  }
+  if (free_slot >= 0) {
+    s_health_peers[free_slot].ip = vpn_ip;
+    s_health_peers[free_slot].healthy = healthy;
+  }
+}
+
 void microlink_pin_peer_ip(microlink_t * ml, uint32_t vpn_ip, bool pin)
 {
   (void)ml;
@@ -2177,6 +2211,13 @@ static void disco_periodic_probes(microlink_t * ml)
      * session (check-in silently fails). */
   disco_wake_peer(ml, ml->config.priority_peer_ip, ml->priority_link_healthy);
   disco_wake_peer(ml, fleet_server_ip_cached(), ml->fleet_link_healthy);
+  /* App-health-tracked peers (per-machine pstop targets). Skip an entry
+     * that duplicates the priority peer — it was already waked above. */
+  for (int hp = 0; hp < ML_EXTRA_PINS; hp++) {
+    if ((s_health_peers[hp].ip != 0) && (s_health_peers[hp].ip != ml->config.priority_peer_ip)) {
+      disco_wake_peer(ml, s_health_peers[hp].ip, s_health_peers[hp].healthy);
+    }
+  }
 
   /* Honor the runtime enable_disco config flag. Previously this flag was
      * stored but never read — the chip ran DISCO probes regardless. With a
