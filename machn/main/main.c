@@ -155,7 +155,7 @@ static void seen_publish(uint64_t now)
       dcs_publish_machn_remote(i, 0u, 0u, 0u, 0u, 0u);
       continue;
     }
-    uint64_t age = now - g_seen[i].last_rx_ms;
+    uint64_t age = (now > g_seen[i].last_rx_ms) ? (now - g_seen[i].last_rx_ms) : 0u;
     if (age > 30000u) { /* gone half a minute: drop from the page */
       g_seen[i].id = 0u;
       dcs_publish_machn_remote(i, 0u, 0u, 0u, 0u, 0u);
@@ -471,7 +471,8 @@ static void comparator_task(void * arg)
         seen_note(peek.id.data, ntohl(from.sin_addr.s_addr), now_ms(), peek.received_stamp);
       }
     }
-    seen_publish(g_tick_now_ms);
+    seen_publish(now_ms()); /* REAL clock: entries are stamped with now_ms() in seen_note; mixing in
+                                  * the tick-latched clock made age negative -> u64 wrap -> instant ageout */
 
     relay_note_commands();
     relay_feedback_check();
