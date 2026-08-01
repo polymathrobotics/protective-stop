@@ -1635,6 +1635,26 @@ static bool disco_pkt_from_priority(microlink_t * ml, const ml_rx_packet_t * pkt
   return false;
 }
 
+/* Is the sender's disco key one we already know? Known-key packets open
+ * with a CACHED shared key (~1 ms XSalsa20-Poly1305, no DH) — only
+ * unknown-key packets pay the full X25519 (the 2026-07-20 rotation
+ * rescue), which is what the per-pass budget exists to bound. Budgeting
+ * the cheap ones too made every legit peer's ping/pong queue behind
+ * tailnet chatter — measured as 300-450 ms disco RTT between two chips
+ * whose actual crypto cost was microseconds. */
+static bool disco_pkt_known_key(microlink_t * ml, const ml_rx_packet_t * pkt)
+{
+  if (pkt->len < 38) {
+    return false;
+  }
+  for (int i = 0; i < ml->peer_count; i++) {
+    if (ml->peers[i].active && (memcmp(ml->peers[i].disco_key, pkt->data + 6, 32) == 0)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 static void process_disco_packet(microlink_t * ml, const ml_rx_packet_t * pkt)
 {
   if (pkt->len < 62) return; /* magic(6) + key(32) + nonce(24) = 62 minimum */
@@ -2545,7 +2565,10 @@ void ml_wg_mgr_task(void * arg)
     int disco_budget = ML_DISCO_OPENS_PER_PASS;
     ml_rx_packet_t disco_pkt;
     while ((disco_budget > 0) && (xQueueReceive(ml->disco_rx_queue, &disco_pkt, 0) == pdTRUE)) {
-      if (!disco_pkt_from_priority(ml, &disco_pkt)) {
+      /* Only UNKNOWN-key packets consume budget: they cost a full X25519.
+             * Known-peer packets (cached DH, ~1 ms) flow freely, so pstop
+             * counterparts' pings/pongs never wait behind tailnet chatter. */
+      if (!disco_pkt_known_key(ml, &disco_pkt)) {
         disco_budget--;
       }
       process_disco_packet(ml, &disco_pkt);
