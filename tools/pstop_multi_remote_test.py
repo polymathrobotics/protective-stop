@@ -241,7 +241,7 @@ class Machine:
         deadline = time.monotonic() + 5
         while time.monotonic() < deadline:
             self.log.seek(0)
-            if 'listening on' in self.log.read():
+            if 'MACHINE node up' in self.log.read():
                 return
             time.sleep(0.05)
         raise RuntimeError('machine_app_runner did not come up')
@@ -325,14 +325,23 @@ def group_a_single(verbose):
         s = Session([a])
         r = s.run(1.2, {a: MSG_OK})
         check(r[a.id] == MSG_STOP, 'A1 OK-stream before arming stays STOP (I3)', NAMES.get(r[a.id]))
+        # A2/A4 semantics updated for pstop_c #59 (library-native min delay,
+        # adopted 2026-07-28): a short STOP->OK no longer LATCHES vetoed —
+        # the immediate OK is refused, but the steady OK stream arms once
+        # delay_between_stop_ms elapses (min_stop=500ms). So a blip pauses
+        # then self-re-arms, rather than requiring a fresh full press.
         s.run(0.2, {a: MSG_STOP})
-        r = s.run(1.2, {a: MSG_OK})
-        check(r[a.id] == MSG_STOP, 'A2 200ms STOP->OK vetoed (I4)', NAMES.get(r[a.id]))
+        r = s.run(0.1, {a: MSG_OK})  # immediate OK: still within min delay
+        check(r[a.id] == MSG_STOP, 'A2a 200ms STOP, immediate OK refused (I4)', NAMES.get(r[a.id]))
+        r = s.run(1.2, {a: MSG_OK})  # steady OK past the min delay
+        check(r[a.id] == MSG_OK, 'A2b steady OK arms after min delay (#59)', NAMES.get(r[a.id]))
         r = arm(s, a, [])
         check(r[a.id] == MSG_OK, 'A3 800ms STOP->OK arms', NAMES.get(r[a.id]))
         s.run(0.2, {a: MSG_STOP})
+        r = s.run(0.1, {a: MSG_OK})
+        check(r[a.id] == MSG_STOP, 'A4a blip while armed stops, immediate OK refused', NAMES.get(r[a.id]))
         r = s.run(1.2, {a: MSG_OK})
-        check(r[a.id] == MSG_STOP, 'A4 blip while armed stops + release vetoed', NAMES.get(r[a.id]))
+        check(r[a.id] == MSG_OK, 'A4b steady OK self-re-arms after delay (#59)', NAMES.get(r[a.id]))
         r = arm(s, a, [])
         check(r[a.id] == MSG_OK, 'A5 re-arm after veto', NAMES.get(r[a.id]))
         a.close()
