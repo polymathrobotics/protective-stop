@@ -546,6 +546,26 @@ static uint32_t fleet_server_ip_cached(void)
 #define ML_EXTRA_PINS 8
 static uint32_t s_extra_pins[ML_EXTRA_PINS];
 
+/* True path RTT to a peer from the disco layer (txid-matched ping->pong,
+ * identical semantics from either end of a link — unlike the pstop loop
+ * timings, which are quantized by protocol hold times). Returns 0 if the
+ * peer is unknown or never ponged; age_ms_out (optional) = how stale the
+ * measurement is; direct_out (optional) = measured over the direct path. */
+uint32_t microlink_get_peer_rtt(microlink_t * ml, uint32_t vpn_ip, uint32_t * age_ms_out, bool * direct_out)
+{
+  if (ml == NULL) return 0;
+  int idx = find_peer_by_ip(ml, vpn_ip);
+  if (idx < 0) return 0;
+  ml_peer_t * p = &ml->peers[idx];
+  if (p->last_pong_recv_ms == 0) return 0;
+  if (age_ms_out != NULL) {
+    uint64_t now = ml_get_time_ms();
+    *age_ms_out = (now > p->last_pong_recv_ms) ? (uint32_t)(now - p->last_pong_recv_ms) : 0u;
+  }
+  if (direct_out != NULL) *direct_out = p->disco_rtt_direct;
+  return p->disco_rtt_ms;
+}
+
 void microlink_pin_peer_ip(microlink_t * ml, uint32_t vpn_ip, bool pin)
 {
   (void)ml;
@@ -1437,6 +1457,8 @@ static void process_disco_pong(
       pkt->via_derp ? "DERP" : "direct");
 
     p->last_pong_recv_ms = now;
+    p->disco_rtt_ms = (uint32_t)rtt_ms;
+    p->disco_rtt_direct = !pkt->via_derp;
 
     /* If direct reply, update best path */
     if (!pkt->via_derp && pkt->src_ip != 0) {

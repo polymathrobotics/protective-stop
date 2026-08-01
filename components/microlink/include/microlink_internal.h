@@ -321,6 +321,8 @@ extern "C"
     /* DISCO state (rate limiting) */
     uint64_t last_ping_sent_ms; /* Last DISCO ping we sent */
     uint64_t last_pong_recv_ms; /* Last DISCO pong we received */
+    uint32_t disco_rtt_ms; /* txid-matched ping->pong RTT (true path metric) */
+    bool disco_rtt_direct; /* the measured pong came direct (not via DERP) */
     uint64_t trust_until_ms; /* Direct path trusted until */
     uint64_t last_send_ms; /* Last data sent to this peer */
     uint64_t last_upgrade_ms; /* Last path upgrade attempt */

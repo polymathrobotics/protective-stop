@@ -332,13 +332,16 @@ static esp_err_t page_state(httpd_req_t * req)
     bool cfg = false;
     uint32_t mip = 0, mid = 0;
     uint16_t mport = 0;
+    uint32_t wg_age = 0;
+    bool wg_dir = false;
     dcs_get_pstop_peer_slot(i, &cfg, &mip, &mport, &mid);
     n += snprintf(
       buf + n,
       cap - n,
       "%s{\"cfg\":%d,\"ip\":%lu,\"port\":%u,\"id\":%lu,\"state\":%lu,"
       "\"sent\":%lu,\"replies\":%lu,\"send_fail\":%lu,\"rebonds\":%lu,"
-      "\"rtt_ms\":%lu,\"hb_ms\":%lu,\"last_msg\":%lu,\"last_reply_ms\":%llu}",
+      "\"rtt_ms\":%lu,\"hb_ms\":%lu,\"last_msg\":%lu,\"last_reply_ms\":%llu,"
+      "\"wg_rtt_ms\":%lu,\"wg_rtt_age_ms\":%lu,\"wg_direct\":%d}",
       (i != 0) ? "," : "",
       cfg ? 1 : 0,
       (unsigned long)mip,
@@ -352,7 +355,11 @@ static esp_err_t page_state(httpd_req_t * req)
       (unsigned long)atomic_load(&g_dcs_pstop_m_rtt_ms[i]),
       (unsigned long)atomic_load(&g_dcs_pstop_m_hb_ms[i]),
       (unsigned long)atomic_load(&g_dcs_pstop_m_last_msg[i]),
-      (unsigned long long)atomic_load(&g_dcs_pstop_m_last_reply_ms[i]));
+      (unsigned long long)atomic_load(&g_dcs_pstop_m_last_reply_ms[i]),
+      (unsigned long)((g_dcs.ml_handle != NULL) && cfg ? microlink_get_peer_rtt(g_dcs.ml_handle, mip, &wg_age, &wg_dir)
+                                                       : 0u),
+      (unsigned long)wg_age,
+      wg_dir ? 1 : 0);
     CLAMP_N();
   }
   /* Machine-role bonded remotes (empty array on remotes). */
@@ -365,16 +372,25 @@ static esp_err_t page_state(httpd_req_t * req)
       if (rid == 0u) {
         continue;
       }
+      uint32_t rip = (uint32_t)atomic_load(&g_dcs_machn_r_ip[i]);
+      uint32_t wg_age2 = 0;
+      bool wg_dir2 = false;
+      uint32_t wg_rtt2 =
+        (g_dcs.ml_handle != NULL) ? microlink_get_peer_rtt(g_dcs.ml_handle, rip, &wg_age2, &wg_dir2) : 0u;
       n += snprintf(
         buf + n,
         cap - n,
-        "%s{\"id\":%lu,\"ip\":%lu,\"state\":%lu,\"age_ms\":%lu,\"rtt_ms\":%lu}",
+        "%s{\"id\":%lu,\"ip\":%lu,\"state\":%lu,\"age_ms\":%lu,\"rtt_ms\":%lu,"
+        "\"wg_rtt_ms\":%lu,\"wg_rtt_age_ms\":%lu,\"wg_direct\":%d}",
         first ? "" : ",",
         (unsigned long)rid,
-        (unsigned long)atomic_load(&g_dcs_machn_r_ip[i]),
+        (unsigned long)rip,
         (unsigned long)atomic_load(&g_dcs_machn_r_state[i]),
         (unsigned long)atomic_load(&g_dcs_machn_r_age_ms[i]),
-        (unsigned long)atomic_load(&g_dcs_machn_r_rtt_ms[i]));
+        (unsigned long)atomic_load(&g_dcs_machn_r_rtt_ms[i]),
+        (unsigned long)wg_rtt2,
+        (unsigned long)wg_age2,
+        wg_dir2 ? 1 : 0);
       CLAMP_N();
       first = false;
     }
