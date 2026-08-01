@@ -381,21 +381,23 @@ def reset_peers_fleet_only(ip):
 
 # --- operator button/LED sign-off ----------------------------------------
 def confirm_hardware(ip):
-    """Manual QA gate: operator verifies the button + LED ring physically."""
-    line(f"  {C.BOLD}Manual check:{C.X} open {C.B}http://{ip}/{C.X} and on the unit:")
-    line(f"    1. Watch the LED ring — it should light (yellow=disconnected → "
-         f"green/colour once bonded).")
-    line(f"    2. Press the STOP button — the ring should react and the page's "
-         f"status should change.")
+    """Manual QA gate: operator verifies the LED ring + button (per reality)."""
+    line(f"  {C.BOLD}Manual check:{C.X}")
+    line(f"    1. LED ring: on boot it plays a dim {C.B}purple comet{C.X}, then "
+         f"settles to {C.BOLD}solid white{C.X} (idle — no peer). Seeing that = ring OK.")
+    line(f"    2. Button: open {C.B}http://{ip}/{C.X} and press/release the STOP "
+         f"button — the {C.BOLD}STOP button panel{C.X} shows PRESSED / RELEASED.")
+    line(f"       {C.DIM}(The ring does NOT react to the button — check the web page.){C.X}")
     while True:
-        ans = input(f"  {C.BOLD}Do the button AND LED work? [y/N/r=retry link] {C.X}").strip().lower()
+        ans = input(f"  {C.BOLD}Ring (purple comet → white) AND button panel both "
+                    f"work? [y/N/r=retry link] {C.X}").strip().lower()
         if ans == "r":
             line(f"    → http://{ip}/   (tailnet IP {ip})")
             continue
         if ans in ("y", "yes"):
             return True, ""
         note = input("  Note the failure (what's wrong): ").strip()
-        return False, note or "operator reported button/LED not working"
+        return False, note or "operator reported ring/button not working"
 
 
 # --- one full unit cycle --------------------------------------------------

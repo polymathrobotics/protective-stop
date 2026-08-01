@@ -115,12 +115,6 @@ static atomic_uint_fast32_t s_ring_offset;
  * forgotten locate can't mask the safety state colours indefinitely. */
 static atomic_uint_fast64_t s_locate_until_ms;
 
-/* Config-check mode: ms-uptime deadline until which ALL LEDs are painted white,
- * so a provisioner can confirm every pixel lights (and the ring is powered/
- * wired) without needing a bonded peer. Highest display priority; auto-expires
- * like locate so it can't mask the safety colours forever. */
-static atomic_uint_fast64_t s_ringtest_until_ms;
-
 /* Stream the current s_grb frame, rotated so logical pixel 0 lands on the
  * physical LED-1 position. Static tx buffer: rmt_transmit is async until
  * rmt_tx_wait_all_done, and the two painting tasks never overlap (bootsign
@@ -287,7 +281,6 @@ static void ring_task(void * arg)
   int ota_head = 0;
   bool ota_showing = false;
   bool locate_showing = false;
-  bool ringtest_showing = false;
 
   for (;;) {
     /* OTA upload being flashed: reuse the boot comet so the operator sees
@@ -308,28 +301,6 @@ static void ring_task(void * arg)
     ota_showing = false;
 
     uint64_t now = (uint64_t)esp_timer_get_time() / 1000u;
-
-    /* Config-check (highest priority): every LED white. Confirms the whole ring
-         * is powered and each pixel works, with no peer bonded. */
-    if (now < (uint64_t)atomic_load(&s_ringtest_until_ms)) {
-      if (!ringtest_showing) {
-        ESP_LOGI(TAG, "ring -> CONFIG-CHECK (all white)");
-        ringtest_showing = true;
-        last_logged = -1;
-      }
-      for (int i = 0; i < RING_LEDS; i++) {
-        s_grb[i * 3 + 0] = RING_BRIGHTNESS; /* G */
-        s_grb[i * 3 + 1] = RING_BRIGHTNESS; /* R */
-        s_grb[i * 3 + 2] = RING_BRIGHTNESS; /* B — white */
-      }
-      ring_show();
-      DLY(RING_REFRESH_MS);
-      continue;
-    }
-    if (ringtest_showing) {
-      ESP_LOGI(TAG, "ring -> config-check off");
-      ringtest_showing = false;
-    }
 
     /* Locate mode (installer aid): only logical LED 1 in white, rotated by
          * the offset in ring_show(), so the installer sees exactly which
@@ -554,21 +525,4 @@ bool dcs_pstop_ring_locate_active(void)
 {
   uint64_t now = (uint64_t)esp_timer_get_time() / 1000u;
   return now < (uint64_t)atomic_load(&s_locate_until_ms);
-}
-
-/* All-white config-check: reuses the locate auto-expiry window. */
-void dcs_pstop_ring_test(bool on)
-{
-  if (on) {
-    uint64_t now = (uint64_t)esp_timer_get_time() / 1000u;
-    atomic_store(&s_ringtest_until_ms, now + DCS_RING_LOCATE_TIMEOUT_MS);
-  } else {
-    atomic_store(&s_ringtest_until_ms, 0u);
-  }
-}
-
-bool dcs_pstop_ring_test_active(void)
-{
-  uint64_t now = (uint64_t)esp_timer_get_time() / 1000u;
-  return now < (uint64_t)atomic_load(&s_ringtest_until_ms);
 }
