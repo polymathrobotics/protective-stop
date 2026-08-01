@@ -148,8 +148,8 @@ static void wifi_try_next(ml_app_t * app)
   wifi_config_t wifi_config = {
     .sta = {.threshold.authmode = WIFI_AUTH_WPA2_PSK},
   };
-  strncpy((char *)wifi_config.sta.ssid, e->ssid, sizeof(wifi_config.sta.ssid) - 1);
-  strncpy((char *)wifi_config.sta.password, e->pass, sizeof(wifi_config.sta.password) - 1);
+  strlcpy((char *)wifi_config.sta.ssid, e->ssid, sizeof(wifi_config.sta.ssid));
+  strlcpy((char *)wifi_config.sta.password, e->pass, sizeof(wifi_config.sta.password));
 
   ESP_LOGI(TAG, "WiFi trying #%d/%d: %s", app->current_wifi_idx + 1, app->wifi_list_count, e->ssid);
 
@@ -185,10 +185,10 @@ static void ap_fallback_start(ml_app_t * app)
         .pmf_cfg = {.required = false},
       },
   };
-  strncpy((char *)ap_cfg.ap.ssid, app->ap_ssid, sizeof(ap_cfg.ap.ssid) - 1);
-  ap_cfg.ap.ssid_len = strlen(app->ap_ssid);
+  strlcpy((char *)ap_cfg.ap.ssid, app->ap_ssid, sizeof(ap_cfg.ap.ssid));
+  ap_cfg.ap.ssid_len = strlen((char *)ap_cfg.ap.ssid);
   if (!open) {
-    strncpy((char *)ap_cfg.ap.password, password, sizeof(ap_cfg.ap.password) - 1);
+    strlcpy((char *)ap_cfg.ap.password, password, sizeof(ap_cfg.ap.password));
   }
 
   esp_err_t err = esp_wifi_set_mode(WIFI_MODE_APSTA);
@@ -310,8 +310,8 @@ static void wifi_init(ml_app_t * app)
   wifi_config_t wifi_config = {
     .sta = {.threshold.authmode = WIFI_AUTH_WPA2_PSK},
   };
-  strncpy((char *)wifi_config.sta.ssid, app->wifi_ssid, sizeof(wifi_config.sta.ssid) - 1);
-  strncpy((char *)wifi_config.sta.password, app->wifi_password, sizeof(wifi_config.sta.password) - 1);
+  strlcpy((char *)wifi_config.sta.ssid, app->wifi_ssid, sizeof(wifi_config.sta.ssid));
+  strlcpy((char *)wifi_config.sta.password, app->wifi_password, sizeof(wifi_config.sta.password));
 
   ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
   ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
@@ -374,7 +374,7 @@ static void ota_set_state(ml_app_t * app, int state, const char * msg)
 {
   app->ota_poll_state = state;
   if (msg) {
-    strncpy((char *)app->ota_poll_msg, msg, sizeof(app->ota_poll_msg) - 1);
+    strlcpy((char *)app->ota_poll_msg, msg, sizeof(app->ota_poll_msg));
     ((char *)app->ota_poll_msg)[sizeof(app->ota_poll_msg) - 1] = '\0';
   } else {
     app->ota_poll_msg[0] = '\0';
@@ -1063,8 +1063,8 @@ ml_app_t * ml_app_start(const ml_app_config_t * cfg)
     (unsigned long)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
 
   /* --- Load WiFi credentials (NVS -> Kconfig fallback) --- */
-  strncpy(app->wifi_ssid, CONFIG_ML_WIFI_SSID, sizeof(app->wifi_ssid) - 1);
-  strncpy(app->wifi_password, CONFIG_ML_WIFI_PASSWORD, sizeof(app->wifi_password) - 1);
+  strlcpy(app->wifi_ssid, CONFIG_ML_WIFI_SSID, sizeof(app->wifi_ssid));
+  strlcpy(app->wifi_password, CONFIG_ML_WIFI_PASSWORD, sizeof(app->wifi_password));
 
   memset(&app->wifi_list, 0, sizeof(app->wifi_list));
   app->wifi_list.active_idx = 0xFF;
@@ -1072,8 +1072,8 @@ ml_app_t * ml_app_start(const ml_app_config_t * cfg)
   if (ml_config_get_wifi_list(&app->wifi_list) && app->wifi_list.count > 1) {
     app->wifi_list_count = app->wifi_list.count;
     app->current_wifi_idx = 0;
-    strncpy(app->wifi_ssid, app->wifi_list.entries[0].ssid, sizeof(app->wifi_ssid) - 1);
-    strncpy(app->wifi_password, app->wifi_list.entries[0].pass, sizeof(app->wifi_password) - 1);
+    strlcpy(app->wifi_ssid, app->wifi_list.entries[0].ssid, sizeof(app->wifi_ssid));
+    strlcpy(app->wifi_password, app->wifi_list.entries[0].pass, sizeof(app->wifi_password));
     ESP_LOGI(TAG, "WiFi multi-SSID: %d networks (first: %s)", app->wifi_list_count, app->wifi_ssid);
   } else if (ml_config_get_nvs_wifi(
                app->wifi_ssid, sizeof(app->wifi_ssid), app->wifi_password, sizeof(app->wifi_password)))
@@ -1098,10 +1098,10 @@ ml_app_t * ml_app_start(const ml_app_config_t * cfg)
     if (seed) {
       seed->count = 2;
       seed->active_idx = 0xFF;
-      strncpy(seed->entries[0].ssid, CONFIG_ML_WIFI_SSID, sizeof(seed->entries[0].ssid) - 1);
-      strncpy(seed->entries[0].pass, CONFIG_ML_WIFI_PASSWORD, sizeof(seed->entries[0].pass) - 1);
-      strncpy(seed->entries[1].ssid, CONFIG_ML_WIFI_SSID_2, sizeof(seed->entries[1].ssid) - 1);
-      strncpy(seed->entries[1].pass, CONFIG_ML_WIFI_PASSWORD_2, sizeof(seed->entries[1].pass) - 1);
+      strlcpy(seed->entries[0].ssid, CONFIG_ML_WIFI_SSID, sizeof(seed->entries[0].ssid));
+      strlcpy(seed->entries[0].pass, CONFIG_ML_WIFI_PASSWORD, sizeof(seed->entries[0].pass));
+      strlcpy(seed->entries[1].ssid, CONFIG_ML_WIFI_SSID_2, sizeof(seed->entries[1].ssid));
+      strlcpy(seed->entries[1].pass, CONFIG_ML_WIFI_PASSWORD_2, sizeof(seed->entries[1].pass));
 
       nvs_handle_t h;
       if (nvs_open("ml_config", NVS_READWRITE, &h) == ESP_OK) {
@@ -1116,8 +1116,8 @@ ml_app_t * ml_app_start(const ml_app_config_t * cfg)
           app->wifi_list = *seed;
           app->wifi_list_count = 2;
           app->current_wifi_idx = 0;
-          strncpy(app->wifi_ssid, seed->entries[0].ssid, sizeof(app->wifi_ssid) - 1);
-          strncpy(app->wifi_password, seed->entries[0].pass, sizeof(app->wifi_password) - 1);
+          strlcpy(app->wifi_ssid, seed->entries[0].ssid, sizeof(app->wifi_ssid));
+          strlcpy(app->wifi_password, seed->entries[0].pass, sizeof(app->wifi_password));
         }
         nvs_close(h);
       }

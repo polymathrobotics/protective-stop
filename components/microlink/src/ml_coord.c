@@ -1092,7 +1092,7 @@ static void parse_peers_from_map_response(microlink_t * ml, cJSON * root)
     /* Hostname */
     cJSON * name = cJSON_GetObjectItem(peer, "Name");
     if (name && name->valuestring) {
-      strncpy(update->hostname, name->valuestring, sizeof(update->hostname) - 1);
+      strlcpy(update->hostname, name->valuestring, sizeof(update->hostname));
       /* Strip trailing dot from FQDN */
       size_t hlen = strlen(update->hostname);
       if (hlen > 0 && update->hostname[hlen - 1] == '.') {
@@ -1891,7 +1891,7 @@ static int do_fetch_peers(microlink_t * ml, ml_noise_state_t * noise)
 
         cJSON * rcode = cJSON_GetObjectItem(region_obj, "RegionCode");
         if (rcode && rcode->valuestring) {
-          strncpy(r->code, rcode->valuestring, sizeof(r->code) - 1);
+          strlcpy(r->code, rcode->valuestring, sizeof(r->code));
         }
 
         cJSON * avoid = cJSON_GetObjectItem(region_obj, "Avoid");
@@ -1909,17 +1909,17 @@ static int do_fetch_peers(microlink_t * ml, ml_noise_state_t * noise)
 
             cJSON * hn = cJSON_GetObjectItem(node_obj, "HostName");
             if (hn && hn->valuestring) {
-              strncpy(n->hostname, hn->valuestring, sizeof(n->hostname) - 1);
+              strlcpy(n->hostname, hn->valuestring, sizeof(n->hostname));
             }
 
             cJSON * ip4 = cJSON_GetObjectItem(node_obj, "IPv4");
             if (ip4 && ip4->valuestring) {
-              strncpy(n->ipv4, ip4->valuestring, sizeof(n->ipv4) - 1);
+              strlcpy(n->ipv4, ip4->valuestring, sizeof(n->ipv4));
             }
 
             cJSON * ip6 = cJSON_GetObjectItem(node_obj, "IPv6");
             if (ip6 && ip6->valuestring) {
-              strncpy(n->ipv6, ip6->valuestring, sizeof(n->ipv6) - 1);
+              strlcpy(n->ipv6, ip6->valuestring, sizeof(n->ipv6));
             }
 
             cJSON * sp = cJSON_GetObjectItem(node_obj, "STUNPort");

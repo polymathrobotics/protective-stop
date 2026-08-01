@@ -16,6 +16,7 @@
  */
 
 #include <errno.h>
+#include <stdio.h>
 #include <string.h>
 
 #include "arch/sys_arch.h"
@@ -857,8 +858,7 @@ static int add_peer(microlink_t * ml, const ml_peer_update_t * update)
   p->vpn_ip = update->vpn_ip;
   memcpy(p->public_key, update->public_key, 32);
   memcpy(p->disco_key, update->disco_key, 32);
-  strncpy(p->hostname, update->hostname, sizeof(p->hostname) - 1);
-  p->hostname[sizeof(p->hostname) - 1] = '\0';
+  strlcpy(p->hostname, update->hostname, sizeof(p->hostname));
   /* Preserve a previously-learned DERP region. Full peer re-syncs frequently
      * re-add a peer with derp_region=0 (the region is carried separately, via
      * PeersChangedPatch), and unconditionally overwriting wiped the pinned
@@ -1066,7 +1066,7 @@ static int add_peer(microlink_t * ml, const ml_peer_update_t * update)
       .online = true,
       .direct_path = false,
     };
-    strncpy(info.hostname, p->hostname, sizeof(info.hostname) - 1);
+    strlcpy(info.hostname, p->hostname, sizeof(info.hostname));
     memcpy(info.public_key, p->public_key, 32);
     ml->peer_cb(ml, &info, ml->peer_cb_data);
   }
