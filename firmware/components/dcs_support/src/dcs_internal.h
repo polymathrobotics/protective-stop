@@ -320,6 +320,10 @@ extern "C"
 #define DCS_RING_LOCATE_TIMEOUT_MS 300000u /* 5 min */
   void dcs_pstop_ring_locate(bool on);
   bool dcs_pstop_ring_locate_active(void);
+  /* All-white config-check: confirm every ring pixel lights (no peer needed).
+   * Reuses DCS_RING_LOCATE_TIMEOUT_MS for auto-expiry. */
+  void dcs_pstop_ring_test(bool on);
+  bool dcs_pstop_ring_test_active(void);
 
   /* dcs_net_liveness.c */
   void dcs_net_liveness_start(void); /* esp_ping + watchdog task */

@@ -227,7 +227,7 @@ dcs_boot_state_t dcs_support_init(void)
      * to register (observed: /api/pstop_num and /api/enter_download 404'd on
      * shipped firmware). 26 gives 42 total slots with headroom — re-check this
      * arithmetic whenever a route is added on either side. */
-  cfg.max_user_uri_handlers = 26;
+  cfg.max_user_uri_handlers = 27;   /* +1 for /api/ring_test */
   g_dcs.app = ml_app_start(&cfg);
   g_dcs.ml_handle = ml_app_get_microlink(g_dcs.app);
 

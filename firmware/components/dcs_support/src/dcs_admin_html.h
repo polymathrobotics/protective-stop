@@ -97,6 +97,12 @@ static const char k_index_html[] =
   "<div id='relays' class='bd'>-</div>"
   "<p id='rstop' class='bad' style='display:none;font-weight:bold'>&#9888; RELAY FAULT &mdash; robot stop forced "
   "until feedback recovers</p>"
+#else
+  "<p style='margin-top:1em'><b>STOP button</b> <small>(dual-channel DPST, live &mdash; no peer needed)</small></p>"
+  "<div id='btnstat' style='font-size:1.4em;font-weight:bold;margin:6px 0'>-</div>"
+  "<div id='btn' class='bd'>-</div>"
+  "<p><button id='ringtestbtn' type='button'>ring test (all white, 5 min)</button>"
+  " <button id='ringtestoff' type='button'>off</button></p>"
 #endif
   "<p style='margin-top:1em'><b>PSTOP peers</b> <small>(bonded devices, live)</small></p>"
   "<div id='peers' class='bd'>-</div>"
@@ -139,6 +145,25 @@ static const char k_index_html[] =
   "const el=document.getElementById('relays');if(!el)return;"
   "el.innerHTML=relayRow('A',j.e_hi0,j.e_lo0,j.relay_fault_a)+relayRow('B',j.e_hi1,j.e_lo1,j.relay_fault_b);"
   "document.getElementById('rstop').style.display=j.relay_stop?'block':'none';}"
+#else
+  /* Remote STOP-button panel: e_hi = drive-high reads high (loop closed),
+   * e_lo = drive-low reads low (pull-down intact). Loop OPEN (e_hi=0) = pressed;
+   * e_lo=0 = a wiring fault (can't pull the sense line low). No peer needed. */
+  "function btnRow(name,hi,lo){"
+  "let st,cls;"
+  "if(!lo){st='WIRING FAULT';cls='bad';}"
+  "else if(hi){st='closed';cls='ok';}"
+  "else{st='OPEN (pressed)';cls='';}"
+  "return '<div class=\"row\"><span>channel '+name+' &nbsp; drive-hi: '+(hi?'ok':'low')"
+  "+' &middot; drive-lo: '+(lo?'ok':'HIGH')+'</span><span class=\"'+cls+'\">'+st+'</span></div>';}"
+  "function renderBtn(j){"
+  "const el=document.getElementById('btn');if(!el)return;"
+  "el.innerHTML=btnRow('A',j.e_hi0,j.e_lo0)+btnRow('B',j.e_hi1,j.e_lo1);"
+  "const pressed=(!j.e_hi0)&&(!j.e_hi1),wok=j.e_lo0&&j.e_lo1;"
+  "const s=document.getElementById('btnstat');"
+  "if(!wok){s.textContent='⚠ WIRING FAULT';s.className='bad';}"
+  "else if(pressed){s.textContent='● PRESSED (STOP)';s.className='bad';}"
+  "else{s.textContent='○ RELEASED (run)';s.className='ok';}}"
 #endif
   "const MS=['idle','bonding','bonded'];"
   "const RS=['initing','bonded','OK','STOP'];"
@@ -174,6 +199,8 @@ static const char k_index_html[] =
   "renderPeers(j);"
 #ifdef DCS_PAGE_MACHINE
   "renderRelays(j);"
+#else
+  "renderBtn(j);"
 #endif
   "document.getElementById('t0').textContent=j.t0;"
   "document.getElementById('t1').textContent=j.t1;"
@@ -237,6 +264,12 @@ static const char k_index_html[] =
   "document.getElementById('dbtn').addEventListener('click',async()=>{"
   "try{await fetch('/api/derp',{method:'POST'});poll();}catch(e){}"
   "});"
+  "const rtb=document.getElementById('ringtestbtn');"
+  "if(rtb)rtb.addEventListener('click',async()=>{"
+  "try{await fetch('/api/ring_test?on=1',{method:'POST'});}catch(e){}});"
+  "const rto=document.getElementById('ringtestoff');"
+  "if(rto)rto.addEventListener('click',async()=>{"
+  "try{await fetch('/api/ring_test?on=0',{method:'POST'});}catch(e){}});"
   "document.getElementById('wgbtn').addEventListener('click',async()=>{"
   "try{await fetch('/api/wg',{method:'POST'});poll();}catch(e){}"
   "});"

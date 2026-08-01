@@ -896,6 +896,35 @@ static esp_err_t api_ring_led1(httpd_req_t * req)
   return httpd_resp_send(req, buf, len);
 }
 
+/* === POST /api/ring_test?on=0|1 =========================================== *
+ * Config-check: light the WHOLE ring white so a provisioner can confirm every
+ * pixel works and the ring is powered — without a bonded peer. Auto-expires
+ * (DCS_RING_LOCATE_TIMEOUT_MS). Highest display priority. */
+static esp_err_t api_ring_test(httpd_req_t * req)
+{
+  char query[24], val[4];
+  if (
+    (httpd_req_get_url_query_str(req, query, sizeof(query)) != ESP_OK) ||
+    (httpd_query_key_value(query, "on", val, sizeof(val)) != ESP_OK) ||
+    ((strcmp(val, "0") != 0) && (strcmp(val, "1") != 0)))
+  {
+    (void)httpd_resp_set_status(req, "400 Bad Request");
+    (void)httpd_resp_set_type(req, "application/json");
+    return httpd_resp_sendstr(req, "{\"ok\":false,\"error\":\"missing ?on=0|1\"}");
+  }
+  bool on = (val[0] == '1');
+  dcs_pstop_ring_test(on);
+  char buf[80];
+  int len = snprintf(
+    buf,
+    sizeof(buf),
+    "{\"ok\":true,\"ring_test\":%d,\"timeout_ms\":%lu}",
+    on ? 1 : 0,
+    on ? (unsigned long)DCS_RING_LOCATE_TIMEOUT_MS : 0UL);
+  (void)httpd_resp_set_type(req, "application/json");
+  return httpd_resp_send(req, buf, len);
+}
+
 /* === Public registration =================================================== */
 void dcs_admin_pages_register(ml_app_t * app)
 {
@@ -920,5 +949,6 @@ void dcs_admin_pages_register(ml_app_t * app)
   (void)ml_app_add_page(app, "/api/pstop_num", HTTP_POST, api_pstop_num);
   (void)ml_app_add_page(app, "/api/ring_offset", HTTP_POST, api_ring_offset);
   (void)ml_app_add_page(app, "/api/ring_led1", HTTP_POST, api_ring_led1);
+  (void)ml_app_add_page(app, "/api/ring_test", HTTP_POST, api_ring_test);
   (void)ml_app_add_page(app, "/api/enter_download", HTTP_POST, api_enter_download);
 }
