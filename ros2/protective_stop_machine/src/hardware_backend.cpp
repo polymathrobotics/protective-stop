@@ -124,29 +124,29 @@ void HardwareMachineBackend::poll_loop()
         s.relay.fault_a = root.bool_at("relay_fault_a", false);
         s.relay.fault_b = root.bool_at("relay_fault_b", false);
         s.relay.mismatch = static_cast<uint32_t>(root.num_at("pstop_mismatch", 0));
-        s.active_remotes =
-          static_cast<uint32_t>(root.num_at("bonded_remotes", 0));
-        s.need_stop = relay_stop && s.active_remotes > 0;
         s.status_reason = s.running ? "run (relay closed)" : "stop (relay open)";
 
-        // Optional per-remote array if the device exposes one.
-        for (const char * key : {"remotes", "bonded_remote_list"}) {
-          const jsonlite::Value * list = root.find(key);
-          if (list && list->is_arr()) {
-            for (const auto & item : list->arr) {
-              if (!item.is_obj()) {continue;}
-              RemoteInfo r;
-              r.device_id = item.str_at("id", item.str_at("device_id"));
-              r.bond_state = static_cast<uint8_t>(item.num_at("state", 2));
-              r.in_use = item.bool_at("in_use", false);
-              r.reply_age_ms = static_cast<uint32_t>(item.num_at("reply_age_ms", 0));
-              r.loop_rtt_ms = static_cast<uint32_t>(item.num_at("rtt_ms", 0));
-              r.rebonds = static_cast<uint32_t>(item.num_at("rebonds", 0));
-              s.remotes.push_back(std::move(r));
-            }
-            break;
+        // The machn exposes its bonded remotes as the "bonded_remotes" array;
+        // each item has a numeric id (format as hex), state, age_ms, rtt_ms and
+        // wg_rtt_ms. active_remotes is the array length.
+        const jsonlite::Value * list = root.find("bonded_remotes");
+        if (list && list->is_arr()) {
+          for (const auto & item : list->arr) {
+            if (!item.is_obj()) {continue;}
+            RemoteInfo r;
+            char buf[16];
+            std::snprintf(buf, sizeof(buf), "%08x",
+              static_cast<uint32_t>(item.num_at("id", 0)));
+            r.device_id = buf;
+            r.bond_state = static_cast<uint8_t>(item.num_at("state", 2));
+            r.reply_age_ms = static_cast<uint32_t>(item.num_at("age_ms", 0));
+            r.loop_rtt_ms = static_cast<uint32_t>(item.num_at("rtt_ms", 0));
+            r.disco_rtt_ms = static_cast<uint32_t>(item.num_at("wg_rtt_ms", 0));
+            s.remotes.push_back(std::move(r));
           }
         }
+        s.active_remotes = static_cast<uint32_t>(s.remotes.size());
+        s.need_stop = relay_stop && s.active_remotes > 0;
       } else {
         s.reachable = false;
         s.status_reason = "state.json parse error";

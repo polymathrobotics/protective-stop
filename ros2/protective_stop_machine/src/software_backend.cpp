@@ -189,7 +189,10 @@ void SoftwareMachineBackend::Impl::rebuild_snapshot()
 
   for (uint16_t i = 0; i < machine.remotes.max_remotes; ++i) {
     const pstop_remote_data_t * c = &machine.remotes.remotes[i];
-    if (c->local_remote_id == 0U) {continue;}   // empty slot
+    // Skip a slot that isn't a live bond: either never allocated
+    // (local_remote_id 0) or allocated without a real device id yet
+    // (remote_id 0) — the latter otherwise leaked "00000000" entries.
+    if (c->local_remote_id == 0U || c->remote_data.remote_id.data == 0U) {continue;}
     RemoteInfo r;
     char buf[16];
     std::snprintf(buf, sizeof(buf), "%08x", c->remote_data.remote_id.data);
