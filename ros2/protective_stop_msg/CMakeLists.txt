@@ -10,8 +10,6 @@ endif()
 find_package(ament_cmake REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
 find_package(builtin_interfaces REQUIRED)
-find_package(lifecycle_msgs REQUIRED)
-find_package(unique_identifier_msgs REQUIRED)
 
 rosidl_generate_interfaces(${PROJECT_NAME}
   # remote-side (restored)
@@ -27,7 +25,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/BondedRemote.msg"
   "msg/BondedRemoteArray.msg"
   "srv/ConfigureMachine.srv"
-  DEPENDENCIES builtin_interfaces lifecycle_msgs unique_identifier_msgs
+  DEPENDENCIES builtin_interfaces
 )
 
 if(BUILD_TESTING)

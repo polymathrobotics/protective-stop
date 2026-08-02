@@ -7,6 +7,12 @@ if(NOT CMAKE_CXX_STANDARD)
   set(CMAKE_CXX_STANDARD 17)
   set(CMAKE_CXX_STANDARD_REQUIRED ON)
 endif()
+# The vendored pstop_c sources use C11 (atomics, designated inits) — pin it so
+# we don't depend on the toolchain default (matches host/machine_app_runner).
+if(NOT CMAKE_C_STANDARD)
+  set(CMAKE_C_STANDARD 11)
+  set(CMAKE_C_STANDARD_REQUIRED ON)
+endif()
 add_compile_options(-Wall -Wextra)
 
 find_package(ament_cmake REQUIRED)
@@ -55,6 +61,10 @@ if(BUILD_TESTING)
   set(ament_cmake_copyright_FOUND TRUE)
   set(ament_cmake_cpplint_FOUND TRUE)
   ament_lint_auto_find_test_dependencies()
+
+  find_package(ament_cmake_gtest REQUIRED)
+  ament_add_gtest(test_json_lite test/test_json_lite.cpp)
+  target_include_directories(test_json_lite PRIVATE include)
 endif()
 
 ament_package()

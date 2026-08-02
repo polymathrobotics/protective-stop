@@ -50,21 +50,23 @@ void MachineBridgeNode::declare_all_parameters()
 
   declare_parameter<std::string>("backend", "software", ro());
   declare_parameter<int>("machine_id", 0x01020304, ro());
-  declare_parameter<std::string>("frame_id", "pstop_machine");
+  declare_parameter<std::string>("frame_id", "pstop_machine", ro());
 
   declare_parameter<std::string>("software.bind_addr", "0.0.0.0", ro());
   declare_parameter<int>("software.port", 8890, ro());
 
-  declare_parameter<std::string>("hardware.device_url", "http://127.0.0.1");
-  declare_parameter<std::string>("hardware.admin_user", "admin");
+  declare_parameter<std::string>("hardware.device_url", "http://127.0.0.1", ro());
+  declare_parameter<std::string>("hardware.admin_user", "admin", ro());
 
+  // Only the timing.* params are dynamic (validated + applied at runtime).
   declare_parameter<int>("timing.heartbeat_ms", 400);
   declare_parameter<int>("timing.max_missed", 3);
   declare_parameter<int>("timing.min_stop_ms", 500);
 
-  declare_parameter<double>("rates.publish_rate_hz", 10.0);
-  declare_parameter<double>("rates.state_poll_hz", 5.0);
-  declare_parameter<double>("rates.diagnostics_rate_hz", 1.0);
+  // Rates are read at configure/activate time; changing them needs a restart.
+  declare_parameter<double>("rates.publish_rate_hz", 10.0, ro());
+  declare_parameter<double>("rates.state_poll_hz", 5.0, ro());
+  declare_parameter<double>("rates.diagnostics_rate_hz", 1.0, ro());
 }
 
 bool MachineBridgeNode::validate_timing(const MachineTiming & t, std::string & reason) const
@@ -150,22 +152,25 @@ MachineBridgeNode::on_configure(const rclcpp_lifecycle::State &)
 MachineBridgeNode::CallbackReturn
 MachineBridgeNode::on_activate(const rclcpp_lifecycle::State & s)
 {
-  LifecycleNode::on_activate(s);   // activate managed publishers
-  state_pub_->on_activate();
-  relay_pub_->on_activate();
-  remotes_pub_->on_activate();
-
+  // Start the backend FIRST so a failure needs no rollback (publishers/timer
+  // not yet activated).
   if (!backend_ || !backend_->start()) {
     RCLCPP_ERROR(get_logger(), "backend %s failed to start", backend_kind_.c_str());
     return CallbackReturn::FAILURE;
   }
+
+  LifecycleNode::on_activate(s);   // activate managed publishers
+  state_pub_->on_activate();
+  relay_pub_->on_activate();
+  remotes_pub_->on_activate();
 
   const double hz = std::max(1.0, get_parameter("rates.publish_rate_hz").as_double());
   pub_timer_ = create_wall_timer(
     std::chrono::duration<double>(1.0 / hz),
     std::bind(&MachineBridgeNode::publish_tick, this));
 
-  diag_ = std::make_shared<diagnostic_updater::Updater>(this);
+  const double dhz = std::max(0.1, get_parameter("rates.diagnostics_rate_hz").as_double());
+  diag_ = std::make_shared<diagnostic_updater::Updater>(this, 1.0 / dhz);
   diag_->setHardwareID(backend_kind_);
   diag_->add("machine", this, &MachineBridgeNode::diagnostics);
 
@@ -210,8 +215,28 @@ MachineBridgeNode::on_shutdown(const rclcpp_lifecycle::State &)
 MachineBridgeNode::CallbackReturn
 MachineBridgeNode::on_error(const rclcpp_lifecycle::State &)
 {
-  if (backend_) {backend_->stop();}
-  RCLCPP_ERROR(get_logger(), "error transition: backend stopped");
+  // error -> unconfigured: the framework does NOT call on_cleanup afterward, so
+  // release everything here (a leaked timer would keep firing publish_tick).
+  if (pub_timer_) {pub_timer_->cancel(); pub_timer_.reset();}
+  diag_.reset();
+  if (backend_) {backend_->stop();}   // safe: machine stops -> remotes fail-safe
+  // Emit one explicit UNSTABLE before tearing down the publishers (design §8).
+  if (state_pub_ && state_pub_->is_activated()) {
+    ProtectiveStopStatus st;
+    st.status = static_cast<uint8_t>(MachineState::UNSTABLE);
+    st.message = "error transition";
+    state_pub_->publish(st);
+    state_pub_->on_deactivate();
+    relay_pub_->on_deactivate();
+    remotes_pub_->on_deactivate();
+  }
+  param_cb_handle_.reset();
+  configure_srv_.reset();
+  state_pub_.reset();
+  relay_pub_.reset();
+  remotes_pub_.reset();
+  backend_.reset();
+  RCLCPP_ERROR(get_logger(), "error transition: safe teardown + UNSTABLE published");
   return CallbackReturn::SUCCESS;
 }
 
@@ -300,6 +325,9 @@ MachineBridgeNode::on_set_parameters(const std::vector<rclcpp::Parameter> & para
       res.reason = "rejected (safety floor): " + reason;
       return res;
     }
+    // Apply. The software backend's configure() only stashes timing (the
+    // machine thread applies it), so this is non-blocking there. The hardware
+    // backend does a bounded admin POST — acceptable for a rare operator set.
     if (backend_) {
       std::string err;
       if (!backend_->configure(proposed, err)) {

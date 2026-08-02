@@ -3,7 +3,9 @@
 # the safety envelope past the compile-time floor (can only tighten).
 int64 heartbeat_ms        # advertised per-remote heartbeat window (<=0 = keep)
 int32 max_missed          # missed-heartbeat tolerance (<=0 = keep)
-int64 min_stop_ms         # min STOP->OK arming delay (<0 = keep, 0 = disable)
+int64 min_stop_ms         # min STOP->OK arming delay (<0 = keep). Subject to the
+                          # node's safety floor: values below it are rejected
+                          # (the floor cannot be disabled at runtime).
 ---
 bool success
 string message

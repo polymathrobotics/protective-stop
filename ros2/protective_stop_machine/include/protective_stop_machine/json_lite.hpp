@@ -74,7 +74,7 @@ public:
   bool parse(Value & out)
   {
     skip_ws();
-    if (!value(out)) {return false;}
+    if (!value(out, 0)) {return false;}
     skip_ws();
     return true;  // trailing junk tolerated
   }
@@ -82,6 +82,9 @@ public:
 private:
   const std::string & s_;
   size_t i_{0};
+  // Bound recursion so a hostile/malformed deeply-nested document (e.g. from a
+  // compromised device) can't overflow the stack. The device schema is flat.
+  static constexpr int kMaxDepth = 32;
 
   void skip_ws()
   {
@@ -89,13 +92,14 @@ private:
   }
   char peek() const {return i_ < s_.size() ? s_[i_] : '\0';}
 
-  bool value(Value & v)
+  bool value(Value & v, int depth)
   {
+    if (depth > kMaxDepth) {return false;}
     skip_ws();
     char c = peek();
     switch (c) {
-      case '{': return object(v);
-      case '[': return array(v);
+      case '{': return object(v, depth);
+      case '[': return array(v, depth);
       case '"': return string_val(v);
       case 't': case 'f': return boolean(v);
       case 'n': return null_val(v);
@@ -105,7 +109,7 @@ private:
     }
   }
 
-  bool object(Value & v)
+  bool object(Value & v, int depth)
   {
     v.type = Value::OBJ;
     ++i_;  // {
@@ -120,7 +124,7 @@ private:
       if (peek() != ':') {return false;}
       ++i_;
       Value val;
-      if (!value(val)) {return false;}
+      if (!value(val, depth + 1)) {return false;}
       v.obj[key.str] = std::move(val);
       skip_ws();
       char c = peek();
@@ -130,7 +134,7 @@ private:
     }
   }
 
-  bool array(Value & v)
+  bool array(Value & v, int depth)
   {
     v.type = Value::ARR;
     ++i_;  // [
@@ -138,7 +142,7 @@ private:
     if (peek() == ']') {++i_; return true;}
     while (true) {
       Value item;
-      if (!value(item)) {return false;}
+      if (!value(item, depth + 1)) {return false;}
       v.arr.push_back(std::move(item));
       skip_ws();
       char c = peek();

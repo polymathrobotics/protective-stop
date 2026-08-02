@@ -98,10 +98,16 @@ SoftwareMachineBackend::~SoftwareMachineBackend()
 bool SoftwareMachineBackend::start()
 {
   if (impl_->running.load()) {return true;}
+  // The pstop_c callbacks reach the instance through the file-scope g_impl.
+  // Refuse a second concurrent instance rather than silently clobber it.
+  if (g_impl != nullptr && g_impl != impl_.get()) {return false;}
   g_impl = impl_.get();
 
   constexpr uint16_t kMaxRemotes = 4;   // bonded-remote slot pool
   impl_->clients.assign(kMaxRemotes, pstop_remote_data_t{});
+  // Seed app_config from the latest stashed timing (configure() may have run
+  // while inactive); the machine thread keeps it current thereafter.
+  impl_->cfg.timing = impl_->timing;
 
   transport_udp_init(&impl_->udp);
   pstop_application_init(&impl_->app);
@@ -152,6 +158,15 @@ void SoftwareMachineBackend::Impl::run()
   pstop_msg_t resp_msg;
 
   while (running.load()) {
+    // Apply the latest timing HERE (machine thread) so app_config is only ever
+    // written by this thread — no cross-thread race with configure(). heartbeat
+    // reaches pstop_c via cb_remote_details, which reads `timing` under mtx.
+    {
+      std::lock_guard<std::mutex> lk(mtx);
+      app.app_config.max_missed_heartbeats = timing.max_missed;
+      app.app_config.delay_between_stop_ms =
+        static_cast<uint32_t>(timing.min_stop_ms);
+    }
     machine_validate_heartbeats(&machine);
 
     struct sockaddr_storage client;
@@ -189,15 +204,23 @@ void SoftwareMachineBackend::Impl::rebuild_snapshot()
 
   for (uint16_t i = 0; i < machine.remotes.max_remotes; ++i) {
     const pstop_remote_data_t * c = &machine.remotes.remotes[i];
-    // Skip a slot that isn't a live bond: either never allocated
-    // (local_remote_id 0) or allocated without a real device id yet
-    // (remote_id 0) — the latter otherwise leaked "00000000" entries.
-    if (c->local_remote_id == 0U || c->remote_data.remote_id.data == 0U) {continue;}
+    // A slot is a LIVE bond only if pstop_c hasn't marked it inactive.
+    // pstop_c leaves remote_id/local_remote_id intact when a remote times out
+    // or unbonds (it only sets remote_state = UNKNOWN, like the library's own
+    // is-free tests), so filtering on the ids alone reports ghost remotes.
+    // Also skip a never-populated slot (remote_id 0).
+    if (c->remote_state == PSTOP_REMOTE_UNKNOWN ||
+      c->remote_data.remote_id.data == 0U)
+    {
+      continue;
+    }
     RemoteInfo r;
     char buf[16];
     std::snprintf(buf, sizeof(buf), "%08x", c->remote_data.remote_id.data);
     r.device_id = buf;
-    r.bond_state = 2;
+    // Map pstop remote_state -> bond_state (1 connecting, 2 bonded, 3 stopped).
+    r.bond_state = c->remote_state == PSTOP_REMOTE_INITING ? 1
+      : (c->remote_state == PSTOP_REMOTE_STOPPED ? 3 : 2);
     r.in_use = rs->remote_stop_id == c->local_remote_id;
     r.stop_only = c->is_stop_only;
     // reply_age / rtt / rebonds are microlink-side metrics not tracked by
@@ -217,19 +240,12 @@ MachineSnapshot SoftwareMachineBackend::snapshot() const
 
 bool SoftwareMachineBackend::configure(const MachineTiming & timing, std::string & error)
 {
-  if (!impl_->running.load()) {
-    error = "backend not started";
-    return false;
-  }
-  {
-    std::lock_guard<std::mutex> lk(impl_->mtx);
-    impl_->timing = timing;   // heartbeat used by the remote-details callback
-  }
-  // app_config is read by the machine thread; these are word-sized scalar
-  // writes and the machine tolerates a one-cycle skew on a tightening change.
-  impl_->app.app_config.max_missed_heartbeats = timing.max_missed;
-  impl_->app.app_config.delay_between_stop_ms =
-    static_cast<uint32_t>(timing.min_stop_ms);
+  // Just stash the (node-validated) timing. The machine thread applies it to
+  // app_config each cycle (see run()), so this succeeds whether the backend is
+  // running or held inactive — an operator can pre-tighten before activating.
+  std::lock_guard<std::mutex> lk(impl_->mtx);
+  impl_->timing = timing;
+  impl_->cfg.timing = timing;   // so a later start() seeds from the latest
   error.clear();
   return true;
 }

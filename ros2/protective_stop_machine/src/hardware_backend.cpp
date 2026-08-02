@@ -25,13 +25,13 @@ static size_t write_cb(char * ptr, size_t size, size_t nmemb, void * userdata)
 HardwareMachineBackend::HardwareMachineBackend(const HardwareConfig & cfg)
 : cfg_(cfg)
 {
-  curl_global_init(CURL_GLOBAL_DEFAULT);
+  // curl_global_init/cleanup are process-global and not thread-safe; they are
+  // done once in main() rather than per backend instance.
 }
 
 HardwareMachineBackend::~HardwareMachineBackend()
 {
   stop();
-  curl_global_cleanup();
 }
 
 bool HardwareMachineBackend::start()
@@ -133,10 +133,11 @@ void HardwareMachineBackend::poll_loop()
         if (list && list->is_arr()) {
           for (const auto & item : list->arr) {
             if (!item.is_obj()) {continue;}
+            const uint32_t id = static_cast<uint32_t>(item.num_at("id", 0));
+            if (id == 0U) {continue;}   // skip empty/malformed entries
             RemoteInfo r;
             char buf[16];
-            std::snprintf(buf, sizeof(buf), "%08x",
-              static_cast<uint32_t>(item.num_at("id", 0)));
+            std::snprintf(buf, sizeof(buf), "%08x", id);
             r.device_id = buf;
             r.bond_state = static_cast<uint8_t>(item.num_at("state", 2));
             r.reply_age_ms = static_cast<uint32_t>(item.num_at("age_ms", 0));
