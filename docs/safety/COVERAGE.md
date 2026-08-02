@@ -46,12 +46,26 @@ Only **2 of 114** instrumented translation units execute under the current test
 suite. The node + both backends have been HW-tested end-to-end but have **no unit
 tests** — that is the primary structural-coverage debt (task #10).
 
-## 2. Requirements coverage — pending
-Awaiting `TRACEABILITY.md` (task #9). Input ready: `SAFETY_REQUIREMENTS.md` marks
-18/39 requirements Satisfied-in-code (cited), 11 Gap, 8 Partial, 2
-Residual-accepted. Requirements coverage will report, per requirement, whether a
-**requirement-traced test** (`SR-<area>-nn-k` style, parallel to `pstop_c`'s
-`req_*` tests) exists and passes.
+## 2. Requirements coverage — baseline (`TRACEABILITY.md`)
+Two definitions, reported both ways to stay honest:
+
+| Metric | Value |
+|---|---|
+| SRs with ≥1 passing verifying test | **25/39 = 64.1%** |
+| SRs **strictly fully-verified** | **13/39 = 33.3%** |
+| Safety functions (F-xx) traced to ≥1 SR | **22/27 = 81.5%** (88% excl. 2 declared-non-safety) |
+
+Status of the 39 SRs: **13 Verified · 11 Partial · 13 Unverified-gap · 2 Residual-accepted.**
+`SR-R` (remote firmware) is the weak spot — 8/15 unverified, holding 5 of the 6
+top DU gaps. Full matrix + test-gap register + function→SR reverse map in
+`TRACEABILITY.md`. SIL3/PLe stays **allocated, not achieved**.
+
+**P0 test/implementation gaps** (drive task #10): SR-H-03 host config-floor
+(DU-4, cheapest), SR-R-09 GPIO re-verify (DU-1), SR-H-04 frozen-clock (DU-2),
+SR-R-03 diversity anti-common-cause **non-identity** (note: `test_estop_verdict.c`
+proves diversity *equivalence*, not the fault-injection *divergence* B needs —
+that's the DU-3 gap), SR-R-08 memcmp self-test (DU-7), SR-R-12/SR-I-01
+golden-vector encode (DU-5).
 
 ## 3. How to reproduce
 

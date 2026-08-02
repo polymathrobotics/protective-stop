@@ -72,10 +72,13 @@ Full report: **`docs/safety/COVERAGE.md`**.
 | Remote firmware (decision core `estop_verdict.c`) | host harness gcc-14 | **100% line/branch/MC-DC** (39/39) | Hybrid (on-target JTAG infeasible). Extracted from main.c behavior-preserving; firmware builds clean. **On-bench smoke of this build DEFERRED** — bench DERP-relayed, DUT HTTP unreachable. |
 | `pstop_c` | Bullseye (own CI) | referenced | Pre-qualified; not re-measured here. |
 
-**Deferred:** [ ] HIL smoke of the refactored firmware build on PSTOP06 (press→STOP, discordance, arm) once a direct tailnet path is available — the bench is currently DERP-relayed and HTTP/OTA won't complete.
+**Deferred:** [ ] HIL smoke of the refactored firmware build on PSTOP06 (press→STOP, discordance, arm) — blocked by DUT reachability (diagnosed below).
 
-- [x] `docs/safety/COVERAGE.md` started (host + ROS2 baselines). CI gate pending (task #10).
-- [ ] Requirements-driven coverage (task #9) — requirements now exist; build `TRACEABILITY.md` next.
+**DUT reachability diagnosis (2026-08-02).** From this host, PSTOP06 (pstop-01d7f344 @ 100.75.70.74) is reachable only via **DERP(sfo) relay** — `tailscale ping` succeeds (~40-120 ms) but **no direct path forms** (8/8 relayed, "direct connection not established"). Over DERP, disco pings + the TCP 3-way handshake complete, but **HTTP data never returns** ("Empty reply"/timeout), independent of HTTP version, an MSS clamp (1140), or a relay-3 power-cycle. Ruled out: httpd wedge (power-cycle didn't fix), MTU size (path MTU ~1250; clamp didn't fix), HTTP/1.1 keep-alive (HTTP/1.0 also fails). My NAT is friendly (`MappingVariesByDestIP: false`), and the **DUT fw already has the direct-path-healing + send-fail fixes (66df9ae)** — so the blocker is the **remote bench's NAT/firewall preventing direct WireGuard hole-punching**, forcing a DERP path that carries tiny packets but not the DUT's HTTP responses. (Earlier this session the direct path *did* form intermittently — 16 ms — so it's flaky, not permanently blocked.) The DUT's **outbound** path is fine (fleet check-ins work). **Not fixable by reflashing.** Remediation: run the HIL suite **on the bench host** (local USB-NCM, direct) as designed; or fix bench-side direct connectivity (subnet router / open WG UDP / DERP alignment). Fleet-push can still update DUT firmware (DUT pulls outbound) but won't give interactive HTTP for the smoke.
+
+- [x] `docs/safety/COVERAGE.md` (host + ROS2 + firmware-core baselines). CI gate pending (task #10).
+- [x] **Requirements-driven coverage (task #9) DONE** — `TRACEABILITY.md`: **25/39 SRs have a test (64.1%), 13/39 strictly verified (33.3%); 22/27 functions traced (81.5%)**. 13 unverified-gap SRs = the task #10 roadmap. `SR-R` firmware is weakest (8/15 unverified).
+- **Function→SR holes to resolve:** F-R-10 admin/web needs a *non-interference* SR; F-H-04, F-M-01, F-M-06 need an SR or explicit non-safety scoping.
 
 ## 6. Deferred from prior safety work (A/B implementation)
 - [ ] Design + FMEA doc — **now being produced** by this effort (supersedes the earlier deferred item).
