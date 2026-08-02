@@ -1153,6 +1153,13 @@ static void comparator_task(void * arg)
       /* all OK: agg_msg stays OK */
     }
     dcs_publish_pstop_sf_causes(g_sf_nomem, g_sf_route, g_sf_txdrv, g_sf_other, g_sf_last_errno);
+    /* Dual-core cross-check liveness: publish the per-core heartbeats every
+         * tick (healthy or not) so /state.json shows them advancing — positive
+         * evidence the cross-check is running, not just a fault indicator. */
+    dcs_publish_xcheck(
+      (uint32_t)atomic_load(&g_xcheck_fault),
+      (uint32_t)atomic_load(&g_xcheck_hb[0]),
+      (uint32_t)atomic_load(&g_xcheck_hb[1]));
     atomic_store(&g_dcs_pstop_last_msg, agg_msg);
     atomic_store(&g_dcs_pstop_replies, agg_replies);
     dcs_publish_comparator(agg_sent, mismatch, agg_fail, agg_last_reply, agg_rtt);
