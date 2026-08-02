@@ -718,7 +718,9 @@ int main(int argc, char * argv[])
          * driven by the machine's monotonic clock, issues the STOP (status_cb)
          * and clears the timed-out remote so a fresh BOND re-bonds. Called every
          * poll cycle (~10 ms) so detection is prompt; the timeout is each
-         * operator's heartbeat_ms x (max_missed_heartbeats + 1). */
+         * operator's heartbeat_ms x max_missed_heartbeats (machine.c:290-298;
+         * e.g. 400 ms x 3 ~= 1.2 s). [Reconciled 2026-08-02: was
+         * "x (max_missed_heartbeats + 1)" — corrected to the library math.] */
     if (machine_validate_heartbeats(&machine) != PSTOP_OK) {
       /* A remote timed out: the library already stopped the robot and
              * reset the arming cycle — a stale episode timestamp must not

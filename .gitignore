@@ -37,3 +37,13 @@ machn/managed_components/
 # LOCAL build-source plugin for flash_station.py (fleet client + creds).
 # Nextcloud-only, never committed.
 tools/app_source.py
+
+# coverage artifacts
+*.gcda
+*.gcno
+*.gcov
+docs/safety/coverage/*.html
+docs/safety/coverage/*.css
+ros2/build-cov/
+ros2/install-cov/
+ros2/log/

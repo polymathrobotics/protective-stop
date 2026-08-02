@@ -1,5 +1,10 @@
 # Many-Remotes-to-One-Machine Validation (2026-07-22)
 
+> **[Reconciled 2026-08-02]** The heartbeat-timeout formula below is corrected to
+> the library math `heartbeat_ms × max_missed_heartbeats` (`machine.c:290-298`);
+> it previously read `× (max_missed_heartbeats + 1)`. Full register:
+> `docs/safety/RECONCILIATION.md` (R-07).
+
 Validates the pstop_c machine logic when **multiple remotes** heartbeat one
 machine, across the corner cases a fleet actually hits. Two-part (hybrid):
 exhaustive software remotes for coverage, plus the two real chips end-to-end
@@ -12,7 +17,7 @@ over the real transport.
 following drives STOP:
 
 - a remote sends STOP,
-- a remote goes silent past `heartbeat_ms x (max_missed_heartbeats+1)`,
+- a remote goes silent past `heartbeat_ms x max_missed_heartbeats` (`machine.c:290-298`),
 - a remote unbonds (disconnect),
 - a remote sends a malformed / bad-CRC / invalid-type message (rejected; its
   heartbeat is not fed, so it times out to STOP),

@@ -1,10 +1,28 @@
 # Protective-Stop (pstop) Integrity Chain — Safety Design
 
+> **Reconciliation status — updated 2026-08-02.** This document has been
+> reconciled against the current firmware and **predates the shipped code**. It
+> is **SIL2-framed**; the program target is now **SIL 3 / PL e**
+> (`docs/safety/SYSTEM_DEFINITION.md`). Its **§5–§10 describe the DROPPED
+> "Option C" integrity chain** (LFSR/PRNG challenge, `S ^= (Cn ^ En)` liveness
+> accumulator, stamp echo-signature) and an **unimplemented GPIO
+> config-integrity check** as if live. The **implemented** stuck-at/systematic
+> controls are **Option A** (fresh both-phase physical sample every tick) +
+> **Option B** (two cores form the verdict by diverse expressions; a byte
+> `memcmp` of the two 40-byte encodings detects divergence). Inline
+> `> **[Reconciled 2026-08-02]**` notes and bold status markers
+> (**DROPPED 2026-07** / **NOT IMPLEMENTED**) below correct each claim **without
+> deleting the original design rationale**. Full register:
+> `docs/safety/RECONCILIATION.md`. Ground truth: `SYSTEM_DEFINITION.md`.
+
 **Status:** design record. §2 describes what is implemented today
 (verified against `firmware/main/main.c`); §4–§8 are the SIL2 hardening
 roadmap, still awaiting decisions. Merged from the former
 ESTOP_SAFETY_DESIGN.md + ESTOP_SAFETY_DECISIONS.md.
 **Standard frame:** IEC 61508 (SIL2 target, HFT=1, de-energize-to-safe).
+> **[Reconciled 2026-08-02]** Program target is now **SIL 3 / PL e**
+> (SYSTEM_DEFINITION; HARA §6). The SIL2 rationale throughout this doc is
+> retained as design history; read the integrity level as **SIL 3 / PL e**.
 **Scope:** the remote's stop-switch sensing → verdict → pstop message
 path. `pstop_c` (machine *and* remote protocol library,
 `components/pstop/upstream`, certification track) stays byte-for-byte
@@ -34,12 +52,21 @@ STOP within the process safety time.
   DPST pole 1 → IO40 sense); core 1 owns channel B (IO41 →
   pole 2 → IO42). Sense inputs are pulled DOWN, so an open loop
   reads 0 (STOP) — fail-safe idle.
-- **Rolling drive level.** Each tick the owning core drives its OUT pin
+- **Rolling drive level.** *(superseded — see reconciled note.)* Each tick
+  the owning core drives its OUT pin
   with the tick counter's LSB (10 µs settle, `ESTOP_SETTLE_US`) and
   verifies the echo. The loop counts as closed only when the most recent
   drive-high echoed high (continuity) AND the most recent drive-low
   echoed low (no stuck-high short). Until both phases have been sampled
   the channel reads OPEN.
+  > **[Reconciled 2026-08-02]** **Superseded by Option A both-phase.** The
+  > current code (`main.c:265-308`) samples **both phases every tick** — drive
+  > HIGH → read → drive LOW → read, in one call — and **ignores the tick
+  > counter** (`(void)counter;` "both phases are sampled every tick; no rolling
+  > phase", `main.c:269`). The verdict is thus fresh each tick with no two-tick
+  > latency. The "rolling counter-LSB, one phase per tick" text above is the
+  > *predecessor* design and is what SYSTEM_DEFINITION means by "not the old
+  > rolling `counter&1`".
 - **Asymmetric release debounce** (`LOOP_RECLOSE_DEBOUNCE_TICKS = 3`).
   The open→STOP edge is single-tick — the stop path is never filtered.
   The closed→OK edge requires 3 consecutive healthy reads, so
@@ -86,7 +113,28 @@ GPIO fault breaks a chain the *machine* polices, not just the remote.
 | G3 | **Predictable challenge.** `counter&1` is a known toggle; a fault that happens to track it isn't forced to reveal itself. | Lowers diagnostic coverage (DC). |
 | G4 | **Loose coupling to the message.** The verdict is computed *beside* the message, not woven into the data that round-trips. | A stale/forged value can ride the protocol. |
 
-## 5. Proposed integrity-chain architecture
+> **[Reconciled 2026-08-02]** How these gaps were actually dispositioned:
+> **G3** is **moot as written** — the predictable `counter&1` was *not* fixed by
+> the dropped LFSR challenge; the adopted compensating measure is **Option A**
+> both-phase sampling (a stuck pin fails the high *or* low phase without any
+> unpredictable challenge; `counter` is ignored, `main.c:269`). **G1**
+> (common-cause) is addressed by **Option B** diverse expressions, **not** the
+> §5.4 semantic comparator (see the §5.4 note). **G2/G4** were targets of the
+> dropped Option-C chain and remain **residuals** tracked in HARA (H-06/H-09)
+> and FMEA (DU-3/DU-5), not closed controls.
+
+## 5. Proposed integrity-chain architecture — **DROPPED 2026-07 (Option C)**
+
+> **[Reconciled 2026-08-02]** **The entire §5 integrity chain below was assessed
+> and NOT adopted (Option C, dropped 2026-07).** The LFSR/PRNG challenge (§5.1),
+> the `S ^= (Cn ^ En)` liveness accumulator (§5.2), the stamp echo-signature
+> (§5.3), the semantic-1oo2D comparator (§5.4), and the runtime GPIO
+> config-integrity check (§5.5) are **not in the code**. The implemented controls
+> are **Option A** (fresh both-phase physical sample per tick, `main.c:265-308`)
+> + **Option B** (two cores form the verdict by diverse expressions — arithmetic
+> image `:305` vs boolean `:307` — with a byte `memcmp` of the two 40-byte
+> encodings, `:890`, detecting divergence). The text is kept as design rationale;
+> see per-subsection notes and `docs/safety/RECONCILIATION.md` (R-01/R-02/R-04).
 
 One token must circulate the **entire** physical+logical loop every
 cycle, and must come back fresh and correct to keep `OK` alive:
@@ -147,7 +195,28 @@ proof, fresh sequence}; the comparator checks they agree on meaning AND
 each proof is valid+fresh, then emits the single canonical pstop message.
 Any disagreement, stale proof, or missing proof → send nothing → STOP.
 
-### 5.5 Supporting hardware diagnostics (raise DC)
+> **[Reconciled 2026-08-02] — Framing correction.** The implemented comparator
+> is a **byte-identical `memcmp`** of the two 40-byte encodings (`main.c:890`),
+> **not** a semantic 1oo2D. This is **sufficient by design, not a skipped
+> control**: **Option B** makes the two cores emit **byte-identical** encodings
+> when healthy (core 0 arithmetic image `k_estop_msg[((rb_hi^1)|rb_lo)&1]` `:305`
+> vs core 1 boolean `(rb_hi==1)&&(rb_lo==0)` `:307` — the *same* OK/STOP codeword
+> when correct), and any caught fault makes one core's bytes **differ**, which
+> the memcmp catches. The semantic comparator was therefore rendered
+> **unnecessary**, not omitted. **Do not overclaim:** this rests on the two
+> source expressions staying non-convergent through one toolchain/ISA, and the
+> shared code *after* codeword selection (override/debounce, encode) is β≈1.
+> Common-cause coverage is **not quantified** — it requires FMEDA **and** the
+> §10 row-9 fault-injection proof (HARA §6; FMEA DU-3/DU-5).
+
+### 5.5 Supporting hardware diagnostics (raise DC) — **NOT IMPLEMENTED**
+> **[Reconciled 2026-08-02]** **None of the §5.5 diagnostics are in the code.**
+> In particular the GPIO config-integrity check below is **NOT IMPLEMENTED —
+> open gap (FMEA DU-1, the highest-priority DU row).** Pad direction/mux/pulldown
+> are configured **once** at `estop_init` (`main.c:229-247`) and **never
+> re-verified at runtime**. A dropped pulldown → an open loop floats and can read
+> as closed → **false OK with no on-line detection**. Do not cite §5.5 as an
+> existing control anywhere in the safety case.
 - GPIO config integrity: periodically re-read/verify pin direction, mux,
   and the input pulldown (a dropped pulldown is a classic
   dangerous-undetected fault: an open loop would float, not read 0).
@@ -164,14 +233,30 @@ Any disagreement, stale proof, or missing proof → send nothing → STOP.
   heartbeat-timeout).
 - Diagnostic test interval = one 10 Hz tick (100 ms). Detection→STOP is
   bounded by the machine heartbeat timeout =
-  `heartbeat_ms × (max_missed_heartbeats + 1)` — today 1000 × 2 ≈ 1–2 s.
+  `heartbeat_ms × max_missed_heartbeats` — today 400 × 3 ≈ **1.2 s**
+  (`machine.c:290-298`; defaults per SYSTEM_DEFINITION §2).
+  <!-- [Reconciled 2026-08-02] Was `heartbeat_ms × (max_missed_heartbeats + 1)`,
+  "1000 × 2 ≈ 1–2 s" — stale formula AND values; corrected to the library math
+  (OK while diff ≤ hb; STOP when diff/hb ≥ max_missed). See RECONCILIATION R-03. -->
 - Machine-side liveness is the library's own `check_heartbeats` on the
   machine's own `CLOCK_MONOTONIC` (`get_time_cb`). There is no wrapper
   watchdog and no "follow the remote's clock" option — the library never
   compares the remote's stamp (it only echoes it), and following it
   would freeze the machine clock during silence, disabling the watchdog.
 
-## 6. Fault → reaction map (target state)
+## 6. Fault → reaction map (target state) — **Option-C mechanisms DROPPED**
+
+> **[Reconciled 2026-08-02]** The "Detected by" column cites **Option C
+> mechanisms that are not in the code**: the `S` liveness accumulator, the
+> low-/high-phase *challenge* mismatch, the *config-integrity check*, and the
+> *stamp signature* were **dropped 2026-07** or **never implemented**. The STOP
+> *reactions* are still correct; read the *detection* as: open loop / stuck pin →
+> **Option A both-phase mismatch** → cores diverge → `memcmp` → send nothing →
+> machine heartbeat-timeout STOP; systematic sensing bug → **Option B diverse
+> expressions** diverge; stale/replayed packet → **not** a stamp signature but
+> `pstop_c` native counter-monotonic + `MSG_LOST`/`OUT_OF_ORDER` (F-P-04);
+> pulldown lost → **currently UNDETECTED (FMEA DU-1)**, *not* caught by any
+> config-integrity check.
 
 | Fault | Detected by | Reaction |
 |-------|-------------|----------|
@@ -186,6 +271,14 @@ Any disagreement, stale proof, or missing proof → send nothing → STOP.
 | **Systematic SW bug in sensing** | **diverse cores don't fail identically** | STOP |
 
 ## 7. Residual limitations (state in the safety case)
+
+> **[Reconciled 2026-08-02]** This section is written around the **dropped
+> Option C** (`En==Cn` challenge/echo, stamp echo-signature); those specific
+> mechanisms are **not implemented**. The *structural* residual it names is real
+> and now larger: the machine runs **unchanged** `pstop_c` and cannot recompute
+> the GPIO verdict; remote-side correctness rests on **Option A/B**, and
+> anti-replay rests **solely** on `pstop_c` native counter/`MSG_LOST` (the stamp
+> signature that would have tightened it was dropped — HARA H-06, FMEA §5).
 
 - The machine runs **unchanged** pstop_c, so it cannot itself compute
   whether `En==Cn` (it doesn't know the challenge). The GPIO-correctness
@@ -203,6 +296,16 @@ Any disagreement, stale proof, or missing proof → send nothing → STOP.
 ## 8. Open decisions (condensed worksheet)
 
 Recommended defaults marked ⭐. None of these change `pstop_c`.
+
+> **[Reconciled 2026-08-02]** **These decisions are resolved and the ⭐ marks are
+> stale.** The A1/A2/A3 LFSR-challenge family, B1/B2 liveness accumulator,
+> C1/C2/C3 stamp-signature family, D1 semantic-1oo2D comparator, and E1 GPIO
+> config-integrity were **NOT adopted (Option C, dropped 2026-07)**. What *was*
+> adopted: **Option A** both-phase sampling (supersedes A1/A2/A3), **Option B**
+> source-diverse verdict expressions with **byte `memcmp`** (supersedes D1), and
+> machine-side `min_stop_ms` arming (adjacent to B3). **E1 config-integrity
+> remains an open gap (FMEA DU-1)**, not a shipped default. Rows kept for
+> decision traceability.
 
 | # | Decision | Options (⭐ = recommended) |
 |---|---|---|
@@ -228,6 +331,15 @@ Recommended defaults marked ⭐. None of these change `pstop_c`.
 
 ## 9. IEC 61508 mapping (for the assessor)
 
+> **[Reconciled 2026-08-02]** Integrity target is now **SIL 3 / PL e** (was
+> SIL2). The DC bullet's "challenge–response loopback + config-integrity +
+> cross-read" describes **dropped/unimplemented** Option C mechanisms; the actual
+> online diagnostic is the **Option A both-phase loopback per tick** plus the
+> round-trip counter/heartbeat checks. **Config-integrity and cross-channel read
+> are NOT implemented.** The β bullet's core-diversity lever is **Option B
+> (source-level only)**, not the §5.4 semantic comparator. **No FMEDA exists**, so
+> DC/SFF/β/PFH are unquantified — no numeric SIL claim is yet supported (HARA §6).
+
 - **Architecture:** 1oo2D for the stop function (either channel trips),
   2oo2 to enable. HFT = 1.
 - **Diagnostic coverage:** continuous online challenge–response loopback
@@ -245,6 +357,16 @@ Recommended defaults marked ⭐. None of these change `pstop_c`.
   why the integrity chain is built *around* it).
 
 ## 10. Verification / fault-injection plan
+
+> **[Reconciled 2026-08-02]** Two rows test **dropped/unimplemented** features.
+> **Row 7** (replay → *stamp-signature* mismatch): the stamp signature was
+> **dropped**; re-scope to the real anti-replay = `pstop_c` counter/`MSG_LOST`.
+> **Row 8** (corrupt GPIO pulldown config → *integrity check* → STOP): that check
+> is **NOT IMPLEMENTED (FMEA DU-1)** — today this fault is **undetected**; keep
+> the row as a *gap-demonstration* until the check exists. Rows 1–6 and **row 9
+> (inject an identical logic fault into both cores' sensing — the Option B
+> diversity proof)** remain the live plan; **row 9 is a gating SIL 3 evidence
+> item** (HARA §7).
 
 Each row is a bench test (observable via the LED ring + `/state.json` +
 `machine_app_runner -v`):
