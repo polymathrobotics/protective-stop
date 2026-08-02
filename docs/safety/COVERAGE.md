@@ -19,7 +19,7 @@ _Baselines as of 2026-08-02. Numbers are first measurements, not targets met._
 
 | Codebase | Tool | Line | Branch | MC/DC | Driver |
 |---|---|---|---|---|---|
-| **Host machine** `machine_app_runner.c` | gcov-11 / gcovr | **70.4%** (311/442) | **56.8%** (187/329) | pending (gcc-14 re-run) | `tools/pstop_multi_remote_test.py` (34/34 invariant checks) |
+| **Host machine** `machine_app_runner.c` | gcov-14 / gcovr | **71.4%** (332/465) | **57.9%** (202/349) | **58.3%** (189/324) | `pstop_multi_remote_test.py` (34/34) + `test_config_floor.py` (7/7, SR-H-03) |
 | **ROS2 machine** (hand-written) | gcov-11 / gcovr | see per-module | — | — | `test_json_lite` (4/4) only |
 | **Remote firmware — decision core** `estop_verdict.c` | **host harness, gcc-14** | **100%** (26/26) | **100%** (36/36) | **100% MC/DC** (36/36) | `firmware/test/test_estop_verdict` (39/39) |
 
@@ -60,8 +60,9 @@ Status of the 39 SRs: **13 Verified · 11 Partial · 13 Unverified-gap · 2 Resi
 top DU gaps. Full matrix + test-gap register + function→SR reverse map in
 `TRACEABILITY.md`. SIL3/PLe stays **allocated, not achieved**.
 
-**P0 test/implementation gaps** (drive task #10): SR-H-03 host config-floor
-(DU-4, cheapest), SR-R-09 GPIO re-verify (DU-1), SR-H-04 frozen-clock (DU-2),
+**P0 test/implementation gaps** (drive task #10): ~~SR-H-03 host config-floor
+(DU-4)~~ **DONE 2026-08-02** (`cfg_validate` + `test_config_floor.py`, 7/7),
+SR-R-09 GPIO re-verify (DU-1), SR-H-04 frozen-clock (DU-2),
 SR-R-03 diversity anti-common-cause **non-identity** (note: `test_estop_verdict.c`
 proves diversity *equivalence*, not the fault-injection *divergence* B needs —
 that's the DU-3 gap), SR-R-08 memcmp self-test (DU-7), SR-R-12/SR-I-01

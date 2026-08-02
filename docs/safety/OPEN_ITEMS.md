@@ -38,7 +38,7 @@ _Last updated: 2026-08-02._
 - [ ] **G-SC3** — systematic-capability (SC 3) process evidence beyond MISRA not yet demonstrated (static analysis in CI, unit + fault-injection tests, traceability — this effort).
 
 ### 3b. Dangerous-Undetected register (from FMEA — prioritized)
-- [ ] **DU-4 (F-H-02) — CHEAP, HIGH VALUE:** host runner does no timing-config validation → `min_stop_ms=0` defeats arming (SF-3); huge heartbeat defeats stop latency (SF-1). ROS2 node validates; host does not. **Fix: port the ROS2 validation to the host runner.**
+- [x] **DU-4 (F-H-02) / SR-H-03 — DONE 2026-08-02:** host runner now validates timing config at startup (`cfg_validate`, floors mirror the ROS2 node: heartbeat [50,1000], max_missed [1,5], min_stop ≥100) and **refuses to start** on unsafe values. Test `tools/test_config_floor.py` (7/7). Host coverage 70.4→71.4% L / 56.8→57.9% B / 58.3% MC-DC.
 - [ ] **DU-1 (F-R-01) — SMALL:** lost GPIO pull-down → open loop reads *closed* → false OK, no runtime detection. Pad config set once at `estop_init`, never re-verified. **Fix: periodic pull-down / pin-config re-verification → STOP on mismatch.** (This is the "GPIO config-integrity check" the design doc claims but code never implemented.)
 - [ ] **DU-2 (F-H-03 / F-P-03):** frozen `get_time_cb` (CLOCK_MONOTONIC) silently disables the heartbeat watchdog. Mitigation options: independent clock cross-check / sanity on time advance.
 - [ ] **DU-3 (F-R-02):** Option B diversity may be compiler-erasable. **Action: verify against object code** whether reads go through `volatile`/`esp_rom` barriers before treating as real.

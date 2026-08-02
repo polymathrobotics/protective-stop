@@ -604,6 +604,48 @@ static pstop_application_t pstop_app;
 static pstop_machine_t machine;
 static udp_transport_data_t udp_transport;
 
+/* SR-H-03 / FMEA DU-4: refuse unsafe timing config at startup. The ROS2 node
+ * validates these floors (machine_bridge_node.cpp validate_timing); the host
+ * runner previously did not, so a machine.toml with min_stop_ms=0 defeated the
+ * arming gesture (SF-3) and an over-large heartbeat window defeated the stop
+ * latency (SF-1). Fail-safe: a machine that cannot enforce arming/latency must
+ * refuse to run rather than silently accept the setting. Floors mirror
+ * machine_bridge_node.cpp floor::. */
+#define CFG_HB_MIN_MS 50U
+#define CFG_HB_MAX_MS 1000U        /* liveness window can't exceed 1 s        */
+#define CFG_MAX_MISSED_MIN 1U
+#define CFG_MAX_MISSED_MAX 5U      /* can't tolerate more than 5 withheld ticks */
+#define CFG_MIN_STOP_FLOOR_MS 100U /* anti-blip arming-delay floor             */
+
+static int cfg_validate(const machine_cfg_t * c, char * reason, size_t rlen)
+{
+  if (c->default_heartbeat_ms < CFG_HB_MIN_MS || c->default_heartbeat_ms > CFG_HB_MAX_MS) {
+    snprintf(reason, rlen, "default_heartbeat_ms %llu out of [%u,%u]",
+             (unsigned long long)c->default_heartbeat_ms, CFG_HB_MIN_MS, CFG_HB_MAX_MS);
+    return -1;
+  }
+  if (c->max_missed_heartbeats < CFG_MAX_MISSED_MIN ||
+      c->max_missed_heartbeats > CFG_MAX_MISSED_MAX) {
+    snprintf(reason, rlen, "max_missed_heartbeats %u out of [%u,%u]",
+             c->max_missed_heartbeats, CFG_MAX_MISSED_MIN, CFG_MAX_MISSED_MAX);
+    return -1;
+  }
+  if (c->min_stop_ms < CFG_MIN_STOP_FLOOR_MS) {
+    snprintf(reason, rlen, "min_stop_ms %llu below safety floor %u",
+             (unsigned long long)c->min_stop_ms, CFG_MIN_STOP_FLOOR_MS);
+    return -1;
+  }
+  for (int i = 0; i < c->n_operators; i++) {
+    const uint64_t hb = c->operators[i].heartbeat_ms; /* 0 => inherit default */
+    if (hb != 0U && (hb < CFG_HB_MIN_MS || hb > CFG_HB_MAX_MS)) {
+      snprintf(reason, rlen, "operator[%d] heartbeat_ms %llu out of [%u,%u]",
+               i, (unsigned long long)hb, CFG_HB_MIN_MS, CFG_HB_MAX_MS);
+      return -1;
+    }
+  }
+  return 0;
+}
+
 int main(int argc, char * argv[])
 {
   cfg_defaults(&g_cfg);
@@ -641,6 +683,13 @@ int main(int argc, char * argv[])
     return 1;
   }
   if (g_cfg.max_remotes == 0) g_cfg.max_remotes = 1;
+  {
+    char vreason[128];
+    if (cfg_validate(&g_cfg, vreason, sizeof(vreason)) != 0) {
+      fprintf(stderr, "*** UNSAFE CONFIG REFUSED (SR-H-03): %s ***\n", vreason);
+      return 1;
+    }
+  }
   cfg_dump(&g_cfg);
 
   signal(SIGINT, on_sig);
