@@ -288,9 +288,24 @@ static uint8_t estop_channel_closed(int core_id, uint32_t counter)
    * of OK/STOP to far-Hamming values. (OK==0 today is fail-danger polarity
    * inherited from pstop_c; this live-sample derivation is the compensating
    * measure — document in the FMEA. Per-core diversity + unpredictable
-   * challenge are staged separately, pending bench validation.) */
+   * challenge are staged separately, pending bench validation.)
+   *
+   * DIVERSITY (Option B): the two cores form the verdict by INDEPENDENT
+   * expressions of the same physical reads. Core 0 selects the codeword by the
+   * arithmetic image (table-index); core 1 by a boolean of the same reads. They
+   * are logically identical when correct (so no lockstep-divergence in normal
+   * operation), but a SYSTEMATIC bug in either expression makes only that core
+   * wrong -> the comparator's memcmp diverges -> nothing is sent -> the machine
+   * stops on heartbeat liveness. This turns the lockstep compare from mere
+   * redundancy (identical code, identical error) into real diversity against a
+   * common-mode interpretation fault. */
   static const uint8_t k_estop_msg[2] = {PSTOP_MESSAGE_OK, PSTOP_MESSAGE_STOP};
-  uint8_t msg = k_estop_msg[(unsigned)((rb_hi ^ 1) | rb_lo) & 1u];
+  uint8_t msg;
+  if (core_id == 0) {
+    msg = k_estop_msg[(unsigned)((rb_hi ^ 1) | rb_lo) & 1u];
+  } else {
+    msg = ((rb_hi == 1) && (rb_lo == 0)) ? PSTOP_MESSAGE_OK : PSTOP_MESSAGE_STOP;
+  }
 
   g_estop_st[core_id].high_ok = (rb_hi == 1);
   g_estop_st[core_id].low_ok = (rb_lo == 0);
