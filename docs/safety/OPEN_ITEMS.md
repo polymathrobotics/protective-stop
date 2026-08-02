@@ -84,7 +84,7 @@ Full report: **`docs/safety/COVERAGE.md`**.
 - [ ] Design + FMEA doc — **now being produced** by this effort (supersedes the earlier deferred item).
 - [ ] Upstream `pstop_c` far-Hamming status-encoding memo (for maintainers).
 - [ ] Automated diversity HIL regression (fault-injection build → assert divergence).
-- [ ] **GitHub push + `pstop`→`main` PR still HELD** pending reviewer sign-off. `origin/pstop` = `acf775a` (pre A+B). A+B validated + in Nextcloud (`eed75f3`).
+- [x] **GitHub push DONE 2026-08-02** (per user): `origin/pstop` = `e40191d` — A+B safety work, full `docs/safety/` chain, coverage + gap closures. Secrets-audited clean (no fleet IP/creds; internal test IPs consistent with existing repo norm). [ ] `pstop`→`main` PR still open for reviewer sign-off.
 
 ## 6b. Safety requirements (DONE 2026-08-02 — task #5)
 **`docs/safety/SAFETY_REQUIREMENTS.md`** — 39 requirements (`SR-<area>-nn`): SYS 8, R 15,
