@@ -103,4 +103,5 @@ Every DU-1..9 discharged; SG-6 fully discharged, SG-1..5 partial. SIL3/PLe kept
 2. **Structural coverage baselines:** re-run host under **gcc-14** (line+branch+MC/DC); ROS2 (task #7); firmware on-target (task #8).
 3. **Requirements-traceability + coverage** (task #9): map each SR → code → test; report % SRs with a verifying test + % safety lines traced to an SR.
 4. **Implement Gap requirements** (SR-H-03, SR-R-09 first) as SR-traced tests land — drives both coverages up.
-5. Aggregate report + CI gate (task #10). Curate HARA/FMEA residual caveats (DU-3 object-code check).
+5. ~~Aggregate report + CI gate (task #10)~~ — **DONE 2026-08-02**: `scripts/coverage.sh` + `.github/workflows/coverage.yml` (ros:humble + gcc-14), CI green (2m27s). Aggregate: firmware core 100% / host 71.4% / ROS2 52.4% line.
+6. Remaining: drive coverage higher (thinner — spun-executor tests, host paths); firmware HIL press/discordance/arm + SR-R-09 (bench-blocked); SR-H-04 frozen-clock (design); curate DU-3 object-code check; `pstop`→`main` PR (reviewer).
