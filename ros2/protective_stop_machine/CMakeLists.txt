@@ -72,6 +72,10 @@ if(BUILD_TESTING)
   ament_add_gtest(test_hardware_parse test/test_hardware_parse.cpp src/hardware_backend.cpp)
   target_include_directories(test_hardware_parse PRIVATE include)
   target_link_libraries(test_hardware_parse CURL::libcurl)
+
+  # Timing-floor validator (SR-M-01) — header-only, no ROS runtime.
+  ament_add_gtest(test_timing_floors test/test_timing_floors.cpp)
+  target_include_directories(test_timing_floors PRIVATE include)
 endif()
 
 ament_package()

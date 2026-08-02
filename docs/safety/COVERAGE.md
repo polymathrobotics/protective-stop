@@ -39,7 +39,8 @@ specific build is pending a direct tailnet path (bench currently DERP-relayed)._
 | `json_lite.hpp` | 119 | **84.0%** | 53.4% | only unit-tested module (functions 100%) |
 | `software_backend.cpp` | 222 | **0%** | — | no unit test executes it |
 | `hardware_backend.cpp` | 180 | **24.4%** | 22.4% | `parse_state` covered by `test_hardware_parse` (10/10, SR-M-03/DU-9); rest is HTTP/curl plumbing |
-| `machine_bridge_node.cpp` | 334 | **0%** | — | no unit test executes it |
+| `timing_floors.hpp` | 14 | **100%** | 65.6% | `test_timing_floors` (8/8) — the runtime-config safety envelope (SR-M-01) |
+| `machine_bridge_node.cpp` | 233 | **0%** | — | `validate_timing` logic extracted to `timing_floors.hpp` (tested); node lifecycle still needs an rclcpp-level test |
 | `main.cpp` | 24 | **0%** | — | no unit test executes it |
 
 Only **2 of 114** instrumented translation units execute under the current test

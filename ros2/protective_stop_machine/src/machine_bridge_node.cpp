@@ -13,6 +13,7 @@
 
 #include "protective_stop_machine/hardware_backend.hpp"
 #include "protective_stop_machine/software_backend.hpp"
+#include "protective_stop_machine/timing_floors.hpp"
 
 namespace protective_stop_machine
 {
@@ -23,16 +24,8 @@ using BondedRemoteArray = protective_stop_msg::msg::BondedRemoteArray;
 using BondedRemote = protective_stop_msg::msg::BondedRemote;
 using ConfigureMachine = protective_stop_msg::srv::ConfigureMachine;
 
-// Compile-time safety envelope. A runtime timing change may only stay INSIDE
-// this — the validator rejects anything that would loosen it (design §4).
-namespace floor
-{
-constexpr uint64_t kMinHeartbeatMs = 50;
-constexpr uint64_t kMaxHeartbeatMs = 1000;      // window can't exceed 1 s
-constexpr uint16_t kMinMaxMissed = 1;
-constexpr uint16_t kMaxMaxMissed = 5;           // can't tolerate more than 5
-constexpr uint64_t kMinStopFloorMs = 100;       // anti-blip arming delay floor
-}  // namespace floor
+// Timing safety floors + the pure validator now live in timing_floors.hpp so
+// they are unit-testable without a live node (SR-M-01).
 
 MachineBridgeNode::MachineBridgeNode(const rclcpp::NodeOptions & options)
 : rclcpp_lifecycle::LifecycleNode("machine_bridge", options)
@@ -71,22 +64,7 @@ void MachineBridgeNode::declare_all_parameters()
 
 bool MachineBridgeNode::validate_timing(const MachineTiming & t, std::string & reason) const
 {
-  if (t.heartbeat_ms < floor::kMinHeartbeatMs || t.heartbeat_ms > floor::kMaxHeartbeatMs) {
-    reason = "heartbeat_ms out of [" + std::to_string(floor::kMinHeartbeatMs) + "," +
-      std::to_string(floor::kMaxHeartbeatMs) + "]";
-    return false;
-  }
-  if (t.max_missed < floor::kMinMaxMissed || t.max_missed > floor::kMaxMaxMissed) {
-    reason = "max_missed out of [" + std::to_string(floor::kMinMaxMissed) + "," +
-      std::to_string(floor::kMaxMaxMissed) + "]";
-    return false;
-  }
-  if (t.min_stop_ms < floor::kMinStopFloorMs) {
-    reason = "min_stop_ms below safety floor " + std::to_string(floor::kMinStopFloorMs);
-    return false;
-  }
-  reason.clear();
-  return true;
+  return timing_within_floors(t, reason);
 }
 
 bool MachineBridgeNode::build_backend(std::string & error)
