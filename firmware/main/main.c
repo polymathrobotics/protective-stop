@@ -47,6 +47,7 @@
 #include "esp_rom_sys.h"
 #include "esp_system.h"
 #include "esp_timer.h"
+#include "estop_verdict.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
@@ -181,23 +182,12 @@ static TaskHandle_t g_core_h[2]; /* comparator → core_id */
 
 #define ESTOP_SETTLE_US 10 /* propagation through the wire + switch contacts */
 
-/* Release-direction debounce: after ANY unhealthy read, this many consecutive
- * healthy ticks are required before the channel reports closed again. The
- * open->STOP edge stays SINGLE-TICK — the stop path is never filtered; this
- * only extends how long a STOP episode lasts, so EMC-induced blips (measured
- * 100-200 ms both-channel flaps under WiFi TX, 2026-07-21) produce a >=300 ms
- * episode instead of chattering — defence-in-depth under the machine-side
- * min-STOP-duration arming policy (which is the enforcement point). */
-#define LOOP_RECLOSE_DEBOUNCE_TICKS 3U
-
-/* Boot warm-up: the comparator sends NOTHING until each channel has settled —
- * either one full closed-debounce cycle (loops proven healthy) or this many
- * CONSECUTIVE open reads (button genuinely held at boot -> STOP flows, just
- * ~500 ms later, well before the pstop bond completes). Without the
- * consecutive-open requirement, the first loop sample glitching open for a
- * tick (observed on every boot of this board) put a ~200 ms STOP->OK episode
- * on the wire — the arming gesture — at every power-on. */
-#define LOOP_BOOT_OPEN_CONFIRM_TICKS 5U
+/* The debounce/boot constants (LOOP_RECLOSE_DEBOUNCE_TICKS,
+ * LOOP_BOOT_OPEN_CONFIRM_TICKS), the per-core state struct (estop_state_t), and
+ * the verdict/debounce/priming logic now live in estop_verdict.{h,c} so the
+ * SIL-critical decision core is host-unit-testable to branch + MC/DC (the
+ * on-target Xtensa build can't be gcov'd — JTAG pins ARE the loop pins). See
+ * firmware/test/ and docs/safety/COVERAGE.md. */
 
 static const struct
 {
@@ -208,23 +198,7 @@ static const struct
   {GPIO_NUM_41, GPIO_NUM_42}, /* core 1 — channel B */
 };
 
-static struct
-{
-  bool high_ok; /* most recent drive-high tick read IN==1 (closed)      */
-  bool low_ok; /* most recent drive-low  tick read IN==0 (not shorted) */
-  bool primed_high;
-  bool primed_low;
-  uint8_t closed_streak; /* consecutive healthy ticks (release debounce) */
-  uint8_t open_streak; /* consecutive unhealthy ticks (boot warm-up only) */
-  bool settled; /* debounce warm-up done: one full closed-debounce
-                             * cycle observed, OR LOOP_BOOT_OPEN_CONFIRM_TICKS
-                             * consecutive open reads (button held at boot).
-                             * Until BOTH channels settle, the comparator's
-                             * boot-priming hold sends nothing — the first
-                             * boot samples glitch open on this board, and
-                             * without the hold that put a STOP->OK episode
-                             * (the arming gesture) on the wire every boot. */
-} g_estop_st[2];
+static estop_state_t g_estop_st[2]; /* per-core state; type in estop_verdict.h */
 
 static void estop_init(void)
 {
@@ -278,73 +252,11 @@ static uint8_t estop_channel_closed(int core_id, uint32_t counter)
   esp_rom_delay_us(ESTOP_SETTLE_US);
   const int rb_lo = gpio_get_level(in);
 
-  /* The OK codeword is selected by the ARITHMETIC IMAGE of both fresh reads —
-   * index 0 (OK) iff rb_hi==1 AND rb_lo==0, computed with no interpretable
-   * boolean (`(rb_hi^1) | rb_lo` is 0 only when both physically matched what we
-   * drove THIS tick). So OK cannot be produced by a stale/latched flag or by a
-   * fault in the health/debounce logic below — every check there is a STOP-ONLY
-   * override (may raise msg to STOP, never lower it to OK). Encoding-agnostic:
-   * the physical image is only a table INDEX, so this survives an upstream move
-   * of OK/STOP to far-Hamming values. (OK==0 today is fail-danger polarity
-   * inherited from pstop_c; this live-sample derivation is the compensating
-   * measure — document in the FMEA. Per-core diversity + unpredictable
-   * challenge are staged separately, pending bench validation.)
-   *
-   * DIVERSITY (Option B): the two cores form the verdict by INDEPENDENT
-   * expressions of the same physical reads. Core 0 selects the codeword by the
-   * arithmetic image (table-index); core 1 by a boolean of the same reads. They
-   * are logically identical when correct (so no lockstep-divergence in normal
-   * operation), but a SYSTEMATIC bug in either expression makes only that core
-   * wrong -> the comparator's memcmp diverges -> nothing is sent -> the machine
-   * stops on heartbeat liveness. This turns the lockstep compare from mere
-   * redundancy (identical code, identical error) into real diversity against a
-   * common-mode interpretation fault. */
-  static const uint8_t k_estop_msg[2] = {PSTOP_MESSAGE_OK, PSTOP_MESSAGE_STOP};
-  uint8_t msg;
-  if (core_id == 0) {
-    msg = k_estop_msg[(unsigned)((rb_hi ^ 1) | rb_lo) & 1u];
-  } else {
-    msg = ((rb_hi == 1) && (rb_lo == 0)) ? PSTOP_MESSAGE_OK : PSTOP_MESSAGE_STOP;
-  }
-
-  g_estop_st[core_id].high_ok = (rb_hi == 1);
-  g_estop_st[core_id].low_ok = (rb_lo == 0);
-  g_estop_st[core_id].primed_high = true;
-  g_estop_st[core_id].primed_low = true;
-
+  /* Decide the verdict + update debounce/priming in the pure, host-testable
+   * core (estop_verdict.c — carries the full safety rationale). This function
+   * stays thin HAL glue: drive/read both phases (above), decide, publish. */
+  const uint8_t msg = estop_decide(&g_estop_st[core_id], core_id, rb_hi, rb_lo);
   dcs_publish_estop(core_id, g_estop_st[core_id].high_ok, g_estop_st[core_id].low_ok);
-
-  const bool raw_closed = g_estop_st[core_id].high_ok && g_estop_st[core_id].low_ok;
-
-  /* Asymmetric release debounce: open reports IMMEDIATELY (streak reset),
-     * closed only after LOOP_RECLOSE_DEBOUNCE_TICKS consecutive healthy
-     * ticks. Both cores run this identically on their own channel, so the
-     * lockstep encodings stay in agreement through the debounce window. */
-  if (raw_closed) {
-    if (g_estop_st[core_id].closed_streak < (uint8_t)255U) {
-      g_estop_st[core_id].closed_streak++;
-    }
-    g_estop_st[core_id].open_streak = 0U;
-    if (g_estop_st[core_id].closed_streak >= LOOP_RECLOSE_DEBOUNCE_TICKS) {
-      g_estop_st[core_id].settled = true;
-    }
-  } else {
-    g_estop_st[core_id].closed_streak = 0U;
-    if (g_estop_st[core_id].open_streak < (uint8_t)255U) {
-      g_estop_st[core_id].open_streak++;
-    }
-    if (g_estop_st[core_id].open_streak >= LOOP_BOOT_OPEN_CONFIRM_TICKS) {
-      g_estop_st[core_id].settled = true; /* held open: STOP flows */
-    }
-  }
-
-  /* STOP-ONLY overrides: the two-phase integrity + release debounce may only
-   * RAISE msg to STOP — they can never lower it to OK. `msg` is already STOP
-   * whenever this tick's live sample didn't match the driven level, so a fault
-   * in this health/debounce logic cannot manufacture an OK. */
-  if (!(raw_closed && (g_estop_st[core_id].closed_streak >= LOOP_RECLOSE_DEBOUNCE_TICKS))) {
-    msg = PSTOP_MESSAGE_STOP;
-  }
   return msg;
 }
 
@@ -358,8 +270,7 @@ static uint8_t estop_channel_closed(int core_id, uint32_t counter)
  * so this gate only affects the ~2-tick startup window.) */
 static bool estop_primed(void)
 {
-  return g_estop_st[0].primed_high && g_estop_st[0].primed_low && g_estop_st[1].primed_high &&
-         g_estop_st[1].primed_low && g_estop_st[0].settled && g_estop_st[1].settled;
+  return estop_channels_primed(g_estop_st);
 }
 
 /* ============================================================================

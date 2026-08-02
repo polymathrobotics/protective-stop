@@ -15,6 +15,7 @@ _Last updated: 2026-08-02._
 
 | Date | Decision | Notes |
 |---|---|---|
+| 2026-08-02 | **Firmware coverage = HYBRID only** (host logic-harness for branch+MC/DC; on-target = functional/HIL smoke) | On-target gcov needs JTAG+OpenOCD (ESP-IDF), but **both JTAG routes are blocked by the design**: the physical JTAG pins GPIO39–42 *are* the E-stop loop pins (`main.c:207`), and USB-Serial-JTAG is displaced by the TinyUSB/NCM tether on the native USB. No no-solder JTAG path exists, and any external JTAG would break the safety wiring under test. (Side note: JTAG being consumed by the safety loops is a mild field-integrity property.) |
 | 2026-08-02 | **MC/DC toolchain = GCC 14** (`-fcondition-coverage`) | Installed 14.3.0 via ubuntu-toolchain-r/test PPA; gcov-14 + gcovr condition coverage confirmed. No Bullseye license needed. |
 | 2026-08-01 | Safety standard = **IEC 61508 (SIL) + ISO 13849 (PL)** | |
 | 2026-08-01 | `pstop_c` = **pre-qualified** (referenced, not re-verified) | Add only interface/integration requirements at its boundary. |
@@ -68,8 +69,10 @@ Full report: **`docs/safety/COVERAGE.md`**.
 |---|---|---|---|
 | Host machine (`machine_app_runner.c`) | gcov/gcovr (→ gcc-14 MC/DC) | **70.4% line / 56.8% branch** (fn 90.5%) | Baseline done; re-run under gcc-14 for condition coverage; drive branch up. |
 | ROS2 machine | colcon + gcov/gcovr | **`json_lite` 84% line / 53% branch; node+backends 0%** | Baseline done. Only 2/114 TUs execute — node/backends have no unit tests (primary debt). |
-| Remote firmware | on-target ESP32 gcov | — | Not started (task #8). Transport decision pending (JTAG on bench?). |
+| Remote firmware (decision core `estop_verdict.c`) | host harness gcc-14 | **100% line/branch/MC-DC** (39/39) | Hybrid (on-target JTAG infeasible). Extracted from main.c behavior-preserving; firmware builds clean. **On-bench smoke of this build DEFERRED** — bench DERP-relayed, DUT HTTP unreachable. |
 | `pstop_c` | Bullseye (own CI) | referenced | Pre-qualified; not re-measured here. |
+
+**Deferred:** [ ] HIL smoke of the refactored firmware build on PSTOP06 (press→STOP, discordance, arm) once a direct tailnet path is available — the bench is currently DERP-relayed and HTTP/OTA won't complete.
 
 - [x] `docs/safety/COVERAGE.md` started (host + ROS2 baselines). CI gate pending (task #10).
 - [ ] Requirements-driven coverage (task #9) — requirements now exist; build `TRACEABILITY.md` next.

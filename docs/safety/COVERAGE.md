@@ -21,7 +21,17 @@ _Baselines as of 2026-08-02. Numbers are first measurements, not targets met._
 |---|---|---|---|---|---|
 | **Host machine** `machine_app_runner.c` | gcov-11 / gcovr | **70.4%** (311/442) | **56.8%** (187/329) | pending (gcc-14 re-run) | `tools/pstop_multi_remote_test.py` (34/34 invariant checks) |
 | **ROS2 machine** (hand-written) | gcov-11 / gcovr | see per-module | — | — | `test_json_lite` (4/4) only |
-| **Remote firmware** | on-target ESP32 gcov | not started (task #8) | | | transport decision pending |
+| **Remote firmware — decision core** `estop_verdict.c` | **host harness, gcc-14** | **100%** (26/26) | **100%** (36/36) | **100% MC/DC** (36/36) | `firmware/test/test_estop_verdict` (39/39) |
+
+**Firmware = hybrid (decided 2026-08-02).** On-target gcov is infeasible — the
+ESP32-S3 JTAG pins *are* the E-stop loop pins (GPIO39–42) and USB-Serial-JTAG is
+displaced by the USB-NCM tether, and ESP-IDF gcov needs JTAG. So the SIL-critical
+decision logic (both-phase sampling → Option A+B verdict → debounce → priming)
+was extracted from `main.c` into the pure, HAL-free `estop_verdict.c` and covered
+on the host with GCC-14 (`-fcondition-coverage` = MC/DC). The extraction is a
+behaviour-preserving refactor: firmware rebuilds + links clean, and the on-target
+path is validated functionally (the A/B HIL bench runs). _On-bench smoke of this
+specific build is pending a direct tailnet path (bench currently DERP-relayed)._
 
 ### ROS2 per-module (the gap is stark and expected)
 | Module | Lines | Line cov | Branch cov | Note |

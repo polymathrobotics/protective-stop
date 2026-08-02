@@ -47,3 +47,5 @@ docs/safety/coverage/*.css
 ros2/build-cov/
 ros2/install-cov/
 ros2/log/
+firmware/test/test_estop_verdict
+firmware/test/coverage-summary.json
