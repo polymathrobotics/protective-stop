@@ -38,7 +38,7 @@ specific build is pending a direct tailnet path (bench currently DERP-relayed)._
 |---|---|---|---|---|
 | `json_lite.hpp` | 119 | **84.0%** | 53.4% | only unit-tested module (functions 100%) |
 | `software_backend.cpp` | 222 | **0%** | — | no unit test executes it |
-| `hardware_backend.cpp` | 180 | **0%** | — | no unit test executes it |
+| `hardware_backend.cpp` | 180 | **24.4%** | 22.4% | `parse_state` covered by `test_hardware_parse` (10/10, SR-M-03/DU-9); rest is HTTP/curl plumbing |
 | `machine_bridge_node.cpp` | 334 | **0%** | — | no unit test executes it |
 | `main.cpp` | 24 | **0%** | — | no unit test executes it |
 

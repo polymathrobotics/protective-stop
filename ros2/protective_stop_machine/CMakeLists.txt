@@ -65,6 +65,13 @@ if(BUILD_TESTING)
   find_package(ament_cmake_gtest REQUIRED)
   ament_add_gtest(test_json_lite test/test_json_lite.cpp)
   target_include_directories(test_json_lite PRIVATE include)
+
+  # Unit-test the pure /state.json -> MachineSnapshot mapping (SR-M-03 / DU-9).
+  # Links hardware_backend.cpp (parse_state lives there) + libcurl for its HTTP
+  # helpers; no ROS runtime is exercised by the test.
+  ament_add_gtest(test_hardware_parse test/test_hardware_parse.cpp src/hardware_backend.cpp)
+  target_include_directories(test_hardware_parse PRIVATE include)
+  target_link_libraries(test_hardware_parse CURL::libcurl)
 endif()
 
 ament_package()

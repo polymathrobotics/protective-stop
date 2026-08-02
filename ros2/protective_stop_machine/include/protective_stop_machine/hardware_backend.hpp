@@ -40,6 +40,13 @@ public:
   bool configure(const MachineTiming & timing, std::string & error) override;
   const char * name() const override {return "hardware";}
 
+  // Pure /state.json -> MachineSnapshot mapping (no HTTP, no threading),
+  // extracted so the safety-relevant parse (relay_stop -> run/stop, mismatch,
+  // bonded-remote enumeration) is unit-testable. Sets out.reachable=false on a
+  // parse error (fail-safe: an unparseable device reads as blind, not "run").
+  // Ref: SR-M-03 / FMEA DU-9.
+  static void parse_state(const std::string & body, MachineSnapshot & out);
+
 private:
   void poll_loop();
   // HTTP helpers (libcurl). Return true + body on 2xx.
