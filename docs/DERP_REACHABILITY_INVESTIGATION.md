@@ -109,3 +109,81 @@ for management so inbound reachability is never required.
 
 - 2026-08-02: opened. Root cause not yet fixed; investigation handed to the
   firmware networking subagent (branch work). **Update this file with the fix.**
+
+- 2026-08-02: **ROOT CAUSE FOUND + FIXED IN FIRMWARE.** Remote DUT
+  `100.75.70.74` now reachable over DERP. Branch `fix/derp-firmware-reachability`,
+  build `ad75887-dirty` (sha256 `8dfbf4ef…`), fleet-pushed to `3c0f02d7f344`.
+
+  ### Root cause — the chip installed an UNVALIDATED direct endpoint as the live WG endpoint
+  This was candidate #2 (not #1). The chip was trusting the netmap/STUN-advertised
+  endpoint as a working direct path *without any DISCO validation*:
+
+  1. `ml_wg_mgr.c::add_peer()` passed the first netmap endpoint
+     (`p->endpoints[0]`) into `wg_peer.endpoint_ip` for every peer that
+     advertised one.
+  2. `wireguardif_add_peer()` (`wireguardif.c:1084-1087`) copies that straight
+     into `peer->ip` / `peer->port` — the *live* endpoint.
+  3. `wireguardif_peer_output()` (`wireguardif.c:158`) routes on that field:
+     `peer->ip` non-any ⇒ send via **direct UDP** (`wg_udp_output_cb`), and the
+     DERP relay callback (`wg_derp_output_cb`) is used *only* when the endpoint
+     is blank. So **every WG packet — including the handshake RESPONSE — went to
+     the unvalidated direct endpoint and never to DERP.**
+
+  Behind the DUT's hard / endpoint-dependent NAT that endpoint is unreachable in
+  the peer→chip direction, so everything the chip sent blackholed. Meanwhile
+  relayed **DISCO pongs still worked** because `process_disco_ping()` sends the
+  pong *explicitly over DERP* (`ml_derp_queue_send`), bypassing the WG endpoint
+  selection entirely. That is precisely the observed asymmetry: **`tailscale
+  ping` OK / TCP + HTTP dead**, relay `rx` stuck at ~368 B.
+
+  Worse, for a **non-priority** peer this state was *permanent*: the direct→DERP
+  fallback in `disco_periodic_probes()` is gated on `has_direct_path`, but that
+  flag is only ever set by a validated DISCO pong — never by the netmap install.
+  So the peer had `peer->ip = <dead direct>` with `has_direct_path = false`, and
+  the fallback that would have reverted it to DERP never fired.
+
+  Full Tailscale never hits this: magicsock is **DERP-homed** and only promotes a
+  direct endpoint after DISCO validates it **both ways**. The chip did endpoint
+  *learning* but skipped that validation gate — exactly the firmware gap §3
+  predicted.
+
+  ### The fix (one site, `ml_wg_mgr.c::add_peer`)
+  Never install a netmap-advertised endpoint as the live WG endpoint. Always add
+  the peer DERP-only (`wg_peer.endpoint_ip = any`, `port = 0`); keep the netmap
+  endpoints in `p->endpoints[]` purely as DISCO probe candidates. The live direct
+  endpoint is now installed **only on proof of bidirectional reachability**:
+  - a txid-matched DISCO **direct pong** → `process_disco_pong()` →
+    `wireguardif_update_endpoint()` + `wireguardif_connect()`, or
+  - a genuinely **received direct WG packet** → `update_peer_addr()` roaming
+    (DERP-injected packets carry src `0.0.0.0` and are correctly skipped).
+
+  DISCO probing of `p->endpoints[]` is unchanged, so genuinely reachable direct
+  paths still upgrade within one probe interval; the existing lease/pong-watchdog
+  reversion (`wireguardif_connect_derp`) still demotes a dead direct path back to
+  DERP. This is the magicsock model: DERP-home first, upgrade only after
+  validation. Priority (safety) peer is unaffected in spirit — it already gets an
+  immediate forced DISCO probe on add plus `dual_path` mirroring over DERP during
+  any direct transition, so its failover window is if anything *safer* (no
+  blackhole window from a bogus netmap endpoint).
+
+  ### Evidence (before → after)
+  | | Before (`3ba0633`) | After (`ad75887-dirty`) |
+  |---|---|---|
+  | `curl http://100.75.70.74/state.json` | timeout / empty reply | **HTTP 200, 10/10, ~0.16 s** |
+  | TCP `connect :80` | timed out | connects |
+  | relay counters | `tx 2784 rx 368` (rx flat) | `tx 9668 rx 33324` (rx climbing) |
+  | path | DERP(sfo), no direct | DERP(sfo), no direct (same NAT condition) |
+  | admin monitor (2216 B body) | dead | HTTP 200 |
+
+  Reproduced the *same* DERP-only condition that failed before
+  (`tailscale ping … via DERP(sfo)`, "direct connection not established") and it
+  now serves HTTP reliably. `wg_pbuf_fails=0`, `wg_dedup_drops=0`,
+  `free_heap≈8.1 MB` — no resource pressure.
+
+  ### Files changed
+  - `components/microlink/src/ml_wg_mgr.c` — `add_peer()`: start every peer
+    DERP-only; do not install unvalidated netmap endpoints.
+
+  Note: candidate #1 (fleet-configured peer) was **not** needed — inbound HTTP
+  from an arbitrary tailnet host is restored purely in firmware. No infra
+  workaround (subnet router / self-hosted DERP) required.
