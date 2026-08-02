@@ -76,6 +76,18 @@ if(BUILD_TESTING)
   # Timing-floor validator (SR-M-01) — header-only, no ROS runtime.
   ament_add_gtest(test_timing_floors test/test_timing_floors.cpp)
   target_include_directories(test_timing_floors PRIVATE include)
+
+  # Lifecycle transitions (configure/activate/.../reject unsafe config). Links
+  # the node + both backends + pstop_c, same as the executable but with its own
+  # main(). SR-M-01 / SR-M-07.
+  ament_add_gtest(test_lifecycle test/test_lifecycle.cpp
+    src/machine_bridge_node.cpp src/software_backend.cpp src/hardware_backend.cpp
+    ${PSTOP_SRCS} ${TRANSPORT_SRCS})
+  target_include_directories(test_lifecycle PRIVATE
+    include ${PSTOP_ROOT}/pstop/include ${PSTOP_ROOT}/transport/include)
+  ament_target_dependencies(test_lifecycle
+    rclcpp rclcpp_lifecycle lifecycle_msgs diagnostic_updater diagnostic_msgs protective_stop_msg)
+  target_link_libraries(test_lifecycle CURL::libcurl)
 endif()
 
 ament_package()

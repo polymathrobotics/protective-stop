@@ -37,15 +37,17 @@ specific build is pending a direct tailnet path (bench currently DERP-relayed)._
 | Module | Lines | Line cov | Branch cov | Note |
 |---|---|---|---|---|
 | `json_lite.hpp` | 119 | **84.0%** | 53.4% | only unit-tested module (functions 100%) |
-| `software_backend.cpp` | 222 | **0%** | — | no unit test executes it |
+| `software_backend.cpp` | 121 | **66.1%** | — | `test_lifecycle` — full software lifecycle (construct / start / stop) |
 | `hardware_backend.cpp` | 180 | **24.4%** | 22.4% | `parse_state` covered by `test_hardware_parse` (10/10, SR-M-03/DU-9); rest is HTTP/curl plumbing |
 | `timing_floors.hpp` | 14 | **100%** | 65.6% | `test_timing_floors` (8/8) — the runtime-config safety envelope (SR-M-01) |
-| `machine_bridge_node.cpp` | 233 | **0%** | — | `validate_timing` logic extracted to `timing_floors.hpp` (tested); node lifecycle still needs an rclcpp-level test |
-| `main.cpp` | 24 | **0%** | — | no unit test executes it |
+| `machine_bridge_node.cpp` | 233 | **45.5%** | 27.7% | `test_lifecycle` (5/5) — configure/activate/deactivate/cleanup + reject unsafe-config / unknown-backend (SR-M-01/07) |
+| `main.cpp` | 11 | **0%** | — | entry point only |
 
-Only **2 of 114** instrumented translation units execute under the current test
-suite. The node + both backends have been HW-tested end-to-end but have **no unit
-tests** — that is the primary structural-coverage debt (task #10).
+Hand-written ROS2 is now **~53% line** (334/633) across **4 test suites (27 tests)**
+— up from ~11% (json_lite-only) at the start. Remaining gaps are the harder
+paths: `publish_tick`/`diagnostics`/`on_set_parameters`/the configure service
+(need a spun executor), the hardware-backend HTTP plumbing, and
+`on_error`/`on_shutdown`.
 
 ## 2. Requirements coverage — baseline (`TRACEABILITY.md`)
 Two definitions, reported both ways to stay honest:
