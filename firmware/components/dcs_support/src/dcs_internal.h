@@ -112,6 +112,13 @@ extern "C"
   extern atomic_uint_fast32_t g_dcs_estop_high_ok[2];
   extern atomic_uint_fast32_t g_dcs_estop_low_ok[2];
 
+  /* Dual-core mutual clock cross-check (SR-H-04 / DU-2). fault: 0=healthy,
+   * 1=peer task/heartbeat stalled, 2=peer esp_timer clock frozen/backward.
+   * hb[c] = the per-core heartbeat counter core c last published. Read by
+   * /state.json so a cross-check trip is visible before the controlled reset. */
+  extern atomic_uint_fast32_t g_dcs_xcheck_fault;
+  extern atomic_uint_fast32_t g_dcs_xcheck_hb[2];
+
   extern atomic_uint_fast32_t g_dcs_pstop_sent;
   extern atomic_uint_fast32_t g_dcs_pstop_replies; /* machine replies received */
   extern atomic_uint_fast32_t g_dcs_pstop_last_msg; /* last message TYPE from the machine (PSTOP_MESSAGE_*) */

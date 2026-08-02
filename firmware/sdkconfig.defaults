@@ -93,8 +93,49 @@ CONFIG_ESP_WIFI_AMPDU_RX_ENABLED=y
 # CPU
 CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
 
-# Watchdog
-CONFIG_ESP_TASK_WDT_TIMEOUT_S=30
+# === Watchdogs (SR-H-04 / FMEA DU-2: frozen-clock / frozen-task) ============
+# Three built-in hardware/software watchdogs form the last-resort backstop
+# behind the software dual-core clock cross-check (main.c). Rationale for every
+# value is in docs/WATCHDOG_CLOCK_PROTECTION.md.
+#
+# Task Watchdog Timer (TWDT). Auto-inits at startup and subscribes both idle
+# tasks, so a safety task that spins (never yields) starves its core's idle
+# task and trips the WDT. The two lockstep cores + the comparator ALSO
+# subscribe explicitly (main.c) and feed once per 100 ms tick, so a wedged
+# safety task is caught within TIMEOUT_S. PANIC=y makes a timeout reset the
+# chip (reset_reason ESP_RST_TASK_WDT — counted toward the OTA rollback ladder
+# in dcs_safety.c) instead of only printing a warning. 5 s: the fast safety
+# reactions are the 0.5 s cross-check and the 1 s machine heartbeat timeout;
+# the TWDT is the recovery-reset backstop, so a few seconds (50 missed ticks
+# of feed margin) avoids false resets during TLS/WireGuard bursts while still
+# resetting a genuinely wedged task promptly.
+CONFIG_ESP_TASK_WDT_EN=y
+CONFIG_ESP_TASK_WDT_INIT=y
+CONFIG_ESP_TASK_WDT_PANIC=y
+CONFIG_ESP_TASK_WDT_TIMEOUT_S=5
+CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU0=y
+CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU1=y
+#
+# Interrupt Watchdog (IWDT). FED BY THE FreeRTOS TICK ISR. Catches interrupts
+# being blocked too long (a runaway ISR or an over-long critical section — e.g.
+# a lwIP core-lock section or a wedged WG-crypto ISR). Crucially it ALSO catches
+# a total systimer freeze: if the systimer stops, the FreeRTOS tick interrupt
+# stops firing, the IWDT stops being fed, and it fires. Two-stage design — stage
+# 1 invokes the panic handler; stage 2 is wired to the RTC watchdog, which
+# HARD-RESETS the chip if the panic handler itself hangs. That RTC-WDT second
+# stage IS the ultimate last-resort backstop on the ESP32-S3 (the rtc_wdt feed
+# API is ESP32/ESP32-S2-only, so a manual user-code RTC feed is not available
+# here — the INT-WDT/RTC coupling provides it instead). 300 ms is the IDF
+# default, comfortably longer than any critical section on the safety path (the
+# E-stop loop uses only two esp_rom_delay_us(10) settles).
+CONFIG_ESP_INT_WDT=y
+CONFIG_ESP_INT_WDT_TIMEOUT_MS=300
+#
+# RTC (main system) Watchdog — enabled by the bootloader to protect the boot
+# path (a stalled boot auto-resets and retries). It is disabled early in app
+# startup (IDF default) and, at runtime, is driven as the INT-WDT's stage-2
+# hard-reset backstop described above rather than being fed from user code.
+CONFIG_BOOTLOADER_WDT_ENABLE=y
 
 # SoftAP fallback. When the chip has no usable network after
 # CONFIG_ML_AP_FALLBACK_TIMEOUT_S seconds of WiFi-association attempts,
