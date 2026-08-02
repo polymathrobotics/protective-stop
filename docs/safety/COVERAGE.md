@@ -73,6 +73,12 @@ golden-vector encode (DU-5).
 
 ## 3. How to reproduce
 
+**One-shot:** `scripts/coverage.sh` runs all three in-scope codebases (gcc-14 for
+host + firmware-core MC/DC; colcon for ROS2) and writes
+`docs/safety/coverage/SUMMARY.md`. CI runs the same script in the `ros:humble`
+container on every push/PR (`.github/workflows/coverage.yml`) and posts the
+summary. `SKIP_ROS2=1` for a host+firmware-only run. Manual per-codebase steps:
+
 **Host** (statement+branch now; add `-fcondition-coverage` + `gcov-14` for MC/DC):
 ```
 cd host && gcc -O0 -g --coverage -I../pstop_c/pstop/include -I../pstop_c/transport/include \
