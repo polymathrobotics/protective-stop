@@ -262,28 +262,44 @@ static void estop_init(void)
  * its own pin pair, so the two cores never contend. Called exactly ONCE per
  * tick per core — the sampled verdict is then reused for every machine's
  * encoding, so all sessions carry the same tick verdict. */
-static bool estop_channel_closed(int core_id, uint32_t counter)
+static uint8_t estop_channel_closed(int core_id, uint32_t counter)
 {
   const gpio_num_t out = g_estop_ch[core_id].out;
   const gpio_num_t in = g_estop_ch[core_id].in;
-  const int level = ((counter & 1u) != 0u) ? 1 : 0;
+  (void)counter;   /* both phases are sampled every tick; no rolling phase */
 
-  gpio_set_level(out, level);
+  /* SAFETY — button integral to the message (external reviewer, 2026-08).
+   * Sample BOTH loop phases THIS tick: drive HIGH then LOW, reading each back.
+   * A healthy closed loop conducts as driven → rb_hi==1 AND rb_lo==0. */
+  gpio_set_level(out, 1);
   esp_rom_delay_us(ESTOP_SETTLE_US);
-  const int rb = gpio_get_level(in);
+  const int rb_hi = gpio_get_level(in);
+  gpio_set_level(out, 0);
+  esp_rom_delay_us(ESTOP_SETTLE_US);
+  const int rb_lo = gpio_get_level(in);
 
-  if (level != 0) {
-    g_estop_st[core_id].high_ok = (rb == 1);
-    g_estop_st[core_id].primed_high = true;
-  } else {
-    g_estop_st[core_id].low_ok = (rb == 0);
-    g_estop_st[core_id].primed_low = true;
-  }
+  /* The OK codeword is selected by the ARITHMETIC IMAGE of both fresh reads —
+   * index 0 (OK) iff rb_hi==1 AND rb_lo==0, computed with no interpretable
+   * boolean (`(rb_hi^1) | rb_lo` is 0 only when both physically matched what we
+   * drove THIS tick). So OK cannot be produced by a stale/latched flag or by a
+   * fault in the health/debounce logic below — every check there is a STOP-ONLY
+   * override (may raise msg to STOP, never lower it to OK). Encoding-agnostic:
+   * the physical image is only a table INDEX, so this survives an upstream move
+   * of OK/STOP to far-Hamming values. (OK==0 today is fail-danger polarity
+   * inherited from pstop_c; this live-sample derivation is the compensating
+   * measure — document in the FMEA. Per-core diversity + unpredictable
+   * challenge are staged separately, pending bench validation.) */
+  static const uint8_t k_estop_msg[2] = {PSTOP_MESSAGE_OK, PSTOP_MESSAGE_STOP};
+  uint8_t msg = k_estop_msg[(unsigned)((rb_hi ^ 1) | rb_lo) & 1u];
+
+  g_estop_st[core_id].high_ok = (rb_hi == 1);
+  g_estop_st[core_id].low_ok = (rb_lo == 0);
+  g_estop_st[core_id].primed_high = true;
+  g_estop_st[core_id].primed_low = true;
 
   dcs_publish_estop(core_id, g_estop_st[core_id].high_ok, g_estop_st[core_id].low_ok);
 
-  const bool raw_closed = g_estop_st[core_id].primed_high && g_estop_st[core_id].primed_low &&
-                          g_estop_st[core_id].high_ok && g_estop_st[core_id].low_ok;
+  const bool raw_closed = g_estop_st[core_id].high_ok && g_estop_st[core_id].low_ok;
 
   /* Asymmetric release debounce: open reports IMMEDIATELY (streak reset),
      * closed only after LOOP_RECLOSE_DEBOUNCE_TICKS consecutive healthy
@@ -307,7 +323,14 @@ static bool estop_channel_closed(int core_id, uint32_t counter)
     }
   }
 
-  return raw_closed && (g_estop_st[core_id].closed_streak >= LOOP_RECLOSE_DEBOUNCE_TICKS);
+  /* STOP-ONLY overrides: the two-phase integrity + release debounce may only
+   * RAISE msg to STOP — they can never lower it to OK. `msg` is already STOP
+   * whenever this tick's live sample didn't match the driven level, so a fault
+   * in this health/debounce logic cannot manufacture an OK. */
+  if (!(raw_closed && (g_estop_st[core_id].closed_streak >= LOOP_RECLOSE_DEBOUNCE_TICKS))) {
+    msg = PSTOP_MESSAGE_STOP;
+  }
+  return msg;
 }
 
 /* True once BOTH cores have sampled their loop on both rolling phases. The
@@ -334,7 +357,9 @@ static bool estop_primed(void)
  * ========================================================================== */
 static uint8_t compute_verdict(uint32_t counter, int core_id)
 {
-  return estop_channel_closed(core_id, counter) ? PSTOP_MESSAGE_OK : PSTOP_MESSAGE_STOP;
+  /* estop_channel_closed now returns the codeword directly (physical-image
+   * derived; OK only on a live sample that matched the driven level). */
+  return estop_channel_closed(core_id, counter);
 }
 
 /* ============================================================================
