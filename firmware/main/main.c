@@ -313,14 +313,19 @@ static uint8_t compute_verdict(uint32_t counter, int core_id)
  *   .pu = FUN_WPU (IO_MUX pull-up)       MUST be 0  (a pull-UP would actively
  *                                                    hold an open loop CLOSED)
  * Any mismatch latches a STICKY per-channel fault bit; the comparator then
- * fail-safes by halting all pstop TX -> every machine heartbeat-times-out to
- * STOP. A lost pull-down is a hardware-level fault a reset cannot repair, so
- * the latch is permanent: the device stays silent and every machine stays
- * STOPped until serviced (the same fail-safe-silence discipline the lockstep
- * comparator and the clock cross-check already use).
+ * fail-safes exactly like the clock cross-check: it halts all pstop TX (every
+ * machine heartbeat-times-out to STOP), then after a short STOP-settle grace
+ * does a CONTROLLED, CLEAN reset (esp_restart, reset_reason ESP_RST_SW — NOT
+ * counted toward the OTA rollback ladder). On reboot estop_init re-writes the
+ * pad config, so a TRANSIENT corruption (an SEU-flipped FUN_WPD bit) is
+ * recovered; a PERSISTENT hardware fault simply re-trips and loops, and the
+ * device stays safely silent (machines STOPped) the whole time. Using our own
+ * controlled reset preempts the cores' unfed-TWDT reset (which would otherwise
+ * fire ~5 s later as the rollback-counted ESP_RST_TASK_WDT).
  * ========================================================================== */
 
 #define ESTOP_PADCFG_REVERIFY_TICKS 10u /* ~1 s at the 100 ms comparator tick */
+#define ESTOP_PADCFG_RESET_GRACE_MS 1500u /* STOP-settle (> heartbeat timeout) before the controlled reset */
 
 /* Sticky bitmask: bit c set once channel c's pad config is seen bad. */
 static atomic_uint_fast32_t g_gpio_cfg_fault;
@@ -945,6 +950,8 @@ static void comparator_task(void * arg)
   bool xc_announced = false;
   TickType_t xc_fault_tick = 0;
   uint32_t padcfg_tick = 0;   /* decimates the ~1 s GPIO pad-config re-verify */
+  bool padcfg_announced = false;
+  TickType_t padcfg_fault_tick = 0;
 
   TickType_t next = xTaskGetTickCount();
   for (;;) {
@@ -998,6 +1005,20 @@ static void comparator_task(void * arg)
     uint32_t padcfg_fault = (uint32_t)atomic_load(&g_gpio_cfg_fault);
     dcs_publish_gpio_cfg(padcfg_fault);
     if (padcfg_fault != 0u) {
+      if (!padcfg_announced) {
+        padcfg_announced = true;
+        padcfg_fault_tick = xTaskGetTickCount();
+        ESP_LOGE(
+          TAG,
+          "GPIO PADCFG FAULT 0x%lx — halting all pstop TX (machines will STOP); controlled reset in %lu ms",
+          (unsigned long)padcfg_fault,
+          (unsigned long)ESTOP_PADCFG_RESET_GRACE_MS);
+      }
+      if ((TickType_t)(xTaskGetTickCount() - padcfg_fault_tick) >= pdMS_TO_TICKS(ESTOP_PADCFG_RESET_GRACE_MS)) {
+        ESP_LOGE(TAG, "GPIO PADCFG FAULT: controlled reset now (re-init recovers an SEU; a persistent fault re-trips)");
+        vTaskDelay(pdMS_TO_TICKS(20)); /* flush the log line */
+        esp_restart();
+      }
       vTaskDelayUntil(&next, TICK_PERIOD);
       continue; /* fail-safe: send nothing -> machines STOP */
     }
