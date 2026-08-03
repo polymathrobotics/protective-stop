@@ -98,9 +98,20 @@ class Remote:
         self.counter = 0
         self.last_rx_counter = 0
         self.last_rx_stamp = 0
+        self.last_tx_stamp = 0
 
     def now_ms(self):
-        return time.monotonic_ns() // 1_000_000
+        # Strictly monotonic per-remote send stamp. now_ms() is ms-resolution,
+        # so two messages emitted in the same millisecond (e.g. BOND then the
+        # first STOP of an immediate arming gesture) would carry an identical
+        # stamp and pstop_c would REJECT the second as out-of-order/replay
+        # (MSG_OUT_OF_ORDER) — correctly, since real 10 Hz hardware never emits
+        # two frames inside one ms. Bump to last+1 to mirror that guarantee.
+        stamp = time.monotonic_ns() // 1_000_000
+        if stamp <= self.last_tx_stamp:
+            stamp = self.last_tx_stamp + 1
+        self.last_tx_stamp = stamp
+        return stamp
 
     def _encode(self, message):
         self.counter += 1
