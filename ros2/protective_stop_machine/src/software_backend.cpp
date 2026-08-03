@@ -74,7 +74,7 @@ static remote_details_t cb_remote_details(const device_id_t * /*id*/)
     hb = g_impl->timing.heartbeat_ms;
     allow = g_impl->cfg.allow_unlisted;
   }
-  remote_detail_set(&d, allow, hb, /*is_stop_only=*/false);
+  remote_detail_set(&d, allow, hb, /*is_stop_only=*/ false);
   return d;
 }
 
@@ -190,8 +190,9 @@ void SoftwareMachineBackend::Impl::run()
       if (known || req_msg.message == PSTOP_MESSAGE_BOND) {
         if (machine_process_message(&machine, &req_msg, &resp_msg) == PSTOP_OK) {
           pstop_message_encode(&resp_msg, respbytes);
-          transport_udp_write(&udp, respbytes, PSTOP_MESSAGE_SIZE,
-              reinterpret_cast<struct sockaddr_in *>(&client));
+          transport_udp_write(
+            &udp, respbytes, PSTOP_MESSAGE_SIZE,
+            reinterpret_cast<struct sockaddr_in *>(&client));
         }
       }
     }

@@ -91,9 +91,11 @@ TEST(HwBackend, ClosedPortUnreachable)
 {
   HardwareMachineBackend be(cfg_for(kClosedUrl));
   ASSERT_TRUE(be.start());
-  EXPECT_TRUE(wait_for(be, [](const MachineSnapshot & s) {
-      return !s.reachable && s.status_reason.find("unreachable") != std::string::npos;
-  }));
+  EXPECT_TRUE(
+    wait_for(
+      be, [](const MachineSnapshot & s) {
+        return !s.reachable && s.status_reason.find("unreachable") != std::string::npos;
+      }));
   be.stop();
 }
 

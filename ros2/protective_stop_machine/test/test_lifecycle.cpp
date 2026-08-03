@@ -61,8 +61,9 @@ TEST_F(Lifecycle, RejectsMinStopZero)
 TEST_F(Lifecycle, RejectsOversizeHeartbeat)
 {
   auto n = std::make_shared<MachineBridgeNode>(
-    with({rclcpp::Parameter("backend", "software"),
-      rclcpp::Parameter("timing.heartbeat_ms", 5000)}));
+    with(
+      {rclcpp::Parameter("backend", "software"),
+        rclcpp::Parameter("timing.heartbeat_ms", 5000)}));
   n->configure();
   EXPECT_EQ(n->get_current_state().id(), State::PRIMARY_STATE_UNCONFIGURED);
 }
