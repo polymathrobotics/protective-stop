@@ -49,6 +49,8 @@
 #include "esp_task_wdt.h"
 #include "esp_timer.h"
 #include "estop_verdict.h"
+#include "hal/gpio_ll.h"   /* gpio_ll_get_io_config — pad-config read-back (SR-R-09) */
+#include "soc/gpio_struct.h" /* GPIO peripheral instance for gpio_ll_* */
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
@@ -287,6 +289,79 @@ static uint8_t compute_verdict(uint32_t counter, int core_id)
   /* estop_channel_closed now returns the codeword directly (physical-image
    * derived; OK only on a live sample that matched the driven level). */
   return estop_channel_closed(core_id, counter);
+}
+
+/* ============================================================================
+ * E-stop GPIO pad-config re-verification — SR-R-09 / FMEA DU-1.
+ *
+ * The E-stop IN pins are configured ONCE in estop_init() as INPUT with the
+ * PULL-DOWN ENABLED, so an OPEN loop discharges to 0 and reads STOP. If that
+ * pull-down is lost at runtime (an SEU on the IO_MUX config register, a stray
+ * pad reconfig, ESD), an open loop FLOATS and can echo 1 on the drive-high
+ * phase -> false CLOSED -> false OK, with NO existing runtime detection: this
+ * is DU-1, the highest-priority dangerous-undetected gap. PSTOP_SAFETY_DESIGN
+ * claimed a runtime "config-integrity check"; the code never had one. This is
+ * it.
+ *
+ * Every ~1 s the comparator reads back each IN pad's configuration registers
+ * and confirms the safe setup is intact. Read-back primitive:
+ * gpio_ll_get_io_config() (ESP-IDF v5.5 hal/gpio_ll.h) decodes the very
+ * IO_MUX/GPIO registers gpio_config() wrote:
+ *   .pd = FUN_WPD (IO_MUX pull-down)     MUST be 1  <- the DU-1 bit
+ *   .ie = FUN_IE  (IO_MUX input-enable)  MUST be 1  (else the read is dead)
+ *   .oe = GPIO output-enable (direction) MUST be 0  (input, not driven output)
+ *   .pu = FUN_WPU (IO_MUX pull-up)       MUST be 0  (a pull-UP would actively
+ *                                                    hold an open loop CLOSED)
+ * Any mismatch latches a STICKY per-channel fault bit; the comparator then
+ * fail-safes exactly like the clock cross-check: it halts all pstop TX (every
+ * machine heartbeat-times-out to STOP), then after a short STOP-settle grace
+ * does a CONTROLLED, CLEAN reset (esp_restart, reset_reason ESP_RST_SW — NOT
+ * counted toward the OTA rollback ladder). On reboot estop_init re-writes the
+ * pad config, so a TRANSIENT corruption (an SEU-flipped FUN_WPD bit) is
+ * recovered; a PERSISTENT hardware fault simply re-trips and loops, and the
+ * device stays safely silent (machines STOPped) the whole time. Using our own
+ * controlled reset preempts the cores' unfed-TWDT reset (which would otherwise
+ * fire ~5 s later as the rollback-counted ESP_RST_TASK_WDT).
+ * ========================================================================== */
+
+#define ESTOP_PADCFG_REVERIFY_TICKS 10u /* ~1 s at the 100 ms comparator tick */
+#define ESTOP_PADCFG_RESET_GRACE_MS 1500u /* STOP-settle (> heartbeat timeout) before the controlled reset */
+
+/* Sticky bitmask: bit c set once channel c's pad config is seen bad. */
+static atomic_uint_fast32_t g_gpio_cfg_fault;
+
+/* True iff this IN pad still holds the safe E-stop config (input + pull-down). */
+static bool estop_padcfg_ok(gpio_num_t in)
+{
+  gpio_io_config_t cfg;
+  gpio_ll_get_io_config(&GPIO, (uint32_t)in, &cfg);
+  return cfg.pd && cfg.ie && !cfg.oe && !cfg.pu;
+}
+
+/* Re-verify BOTH E-stop IN pads; latch a sticky fault bit per bad channel.
+ * Returns the current latched fault bitmask (0 = healthy). */
+static uint32_t estop_padcfg_reverify(void)
+{
+  uint32_t bad = 0u;
+  for (int c = 0; c < 2; c++) {
+    if (!estop_padcfg_ok(g_estop_ch[c].in)) {
+      bad |= (1u << c);
+    }
+  }
+  if (bad != 0u) {
+    uint32_t prev = (uint32_t)atomic_fetch_or(&g_gpio_cfg_fault, bad);
+    if ((prev | bad) != prev) { /* newly-set bit(s) — log the transition once */
+      ESP_LOGE(
+        TAG,
+        "GPIO PADCFG FAULT mask 0x%lx (E-stop IN pins GPIO%d/GPIO%d): input-dir/"
+        "pull-down integrity LOST -> an open loop could read false-OK. FAIL-SAFE "
+        "STOP: halting all pstop TX (every machine heartbeat-times-out).",
+        (unsigned long)bad,
+        g_estop_ch[0].in,
+        g_estop_ch[1].in);
+    }
+  }
+  return (uint32_t)atomic_load(&g_gpio_cfg_fault);
 }
 
 /* ============================================================================
@@ -874,6 +949,9 @@ static void comparator_task(void * arg)
   uint64_t last_unhealthy_kick_ms = 0;
   bool xc_announced = false;
   TickType_t xc_fault_tick = 0;
+  uint32_t padcfg_tick = 0;   /* decimates the ~1 s GPIO pad-config re-verify */
+  bool padcfg_announced = false;
+  TickType_t padcfg_fault_tick = 0;
 
   TickType_t next = xTaskGetTickCount();
   for (;;) {
@@ -910,6 +988,39 @@ static void comparator_task(void * arg)
       }
       vTaskDelayUntil(&next, TICK_PERIOD);
       continue; /* send nothing this tick */
+    }
+
+    /* 0b. E-stop GPIO pad-config re-verification (SR-R-09 / DU-1). Read back
+         *     both IN pads ~once per second; if the input-direction/pull-down
+         *     integrity is lost (an open loop could then float to a false-OK),
+         *     latch a sticky fault. React the same way as the clock cross-check:
+         *     send NOTHING to any machine so every heartbeat times out to STOP.
+         *     No reset — a lost pull-down is a hardware fault a reboot cannot
+         *     fix (estop_init would re-enable it, transiently masking a real
+         *     silicon fault), so the device stays safely silent until serviced. */
+    if (++padcfg_tick >= ESTOP_PADCFG_REVERIFY_TICKS) {
+      padcfg_tick = 0;
+      (void)estop_padcfg_reverify();
+    }
+    uint32_t padcfg_fault = (uint32_t)atomic_load(&g_gpio_cfg_fault);
+    dcs_publish_gpio_cfg(padcfg_fault);
+    if (padcfg_fault != 0u) {
+      if (!padcfg_announced) {
+        padcfg_announced = true;
+        padcfg_fault_tick = xTaskGetTickCount();
+        ESP_LOGE(
+          TAG,
+          "GPIO PADCFG FAULT 0x%lx — halting all pstop TX (machines will STOP); controlled reset in %lu ms",
+          (unsigned long)padcfg_fault,
+          (unsigned long)ESTOP_PADCFG_RESET_GRACE_MS);
+      }
+      if ((TickType_t)(xTaskGetTickCount() - padcfg_fault_tick) >= pdMS_TO_TICKS(ESTOP_PADCFG_RESET_GRACE_MS)) {
+        ESP_LOGE(TAG, "GPIO PADCFG FAULT: controlled reset now (re-init recovers an SEU; a persistent fault re-trips)");
+        vTaskDelay(pdMS_TO_TICKS(20)); /* flush the log line */
+        esp_restart();
+      }
+      vTaskDelayUntil(&next, TICK_PERIOD);
+      continue; /* fail-safe: send nothing -> machines STOP */
     }
 
     /* 1. Refresh session configs from the peer slots (live /api updates)

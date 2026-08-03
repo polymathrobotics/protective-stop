@@ -119,6 +119,12 @@ extern "C"
   extern atomic_uint_fast32_t g_dcs_xcheck_fault;
   extern atomic_uint_fast32_t g_dcs_xcheck_hb[2];
 
+  /* E-stop GPIO pad-config re-verification (SR-R-09 / DU-1). 0=both channels'
+   * pad config verified good this cycle; nonzero=latched config-integrity fault
+   * (bit0 = channel A / GPIO40, bit1 = channel B / GPIO42). Read by /state.json
+   * as gpio_cfg_fault so a lost pull-down (open loop -> false-OK) is visible. */
+  extern atomic_uint_fast32_t g_dcs_gpio_cfg_fault;
+
   extern atomic_uint_fast32_t g_dcs_pstop_sent;
   extern atomic_uint_fast32_t g_dcs_pstop_replies; /* machine replies received */
   extern atomic_uint_fast32_t g_dcs_pstop_last_msg; /* last message TYPE from the machine (PSTOP_MESSAGE_*) */

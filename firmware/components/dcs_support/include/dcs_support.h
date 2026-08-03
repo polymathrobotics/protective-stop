@@ -125,6 +125,17 @@ extern "C"
   void dcs_publish_xcheck(uint32_t fault, uint32_t hb0, uint32_t hb1);
 
   /**
+ * @brief Publish the E-stop GPIO pad-config re-verification state (SR-R-09 /
+ * DU-1). Called by the comparator's periodic re-verify; reflected in
+ * /state.json as gpio_cfg_fault.
+ * @param fault 0=both E-stop IN pads verified (input dir + pull-down enabled);
+ *              nonzero=latched config-integrity fault (bit0=chA GPIO40,
+ *              bit1=chB GPIO42) — a lost pull-down would let an open loop
+ *              float to a false-closed/false-OK read.
+ */
+  void dcs_publish_gpio_cfg(uint32_t fault);
+
+  /**
  * @brief Publish comparator telemetry (called by the comparator task once
  * per tick after the memcmp).
  * @param sent           Total messages successfully sent to the machine.
