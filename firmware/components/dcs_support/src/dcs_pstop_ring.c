@@ -16,10 +16,13 @@
  *
  *     WHITE  = IDLE          no pstop peer (machine) configured — the remote has
  *                            nothing to connect to (fresh unit, or peer cleared).
- *     YELLOW = UNREACHABLE   a peer IS configured but no fresh reply — FLASHING
- *              (flashing)     YELLOW (never bonded / machine down / went away /
- *                            comparator stopped after a lockstep fault). Clearly
- *                            distinct from a solid-red commanded STOP.
+ *     AMBER  = UNREACHABLE   a peer IS configured but no fresh reply — AMBER
+ *              (N blinks)     blinking, where the blink COUNT names the deepest
+ *                            broken network layer (1 = bonded peer down / net OK;
+ *                            2 = no Tailscale; 3 = no Internet). Amber (r>g) is
+ *                            clearly distinct from a solid-red commanded STOP and
+ *                            from yellow. A REACHABLE machine still shows its real
+ *                            safety colour (same-LAN-direct needs no Internet).
  *     BLUE   = BOND/UNBOND   connected; the machine's last reply was BOND or
  *                            UNBOND — just (re)bonded, not yet armed to OK.
  *     GREEN  = OK            connected; the machine's last reply was OK — the
@@ -249,12 +252,40 @@ static uint32_t wave_scale_pct(int dist)
 typedef enum
 {
   RING_IDLE, /* no pstop peer configured — nothing to connect to (white) */
-  RING_UNREACHABLE, /* peer configured but no fresh reply (slow red pulse)       */
+  RING_UNREACHABLE, /* peer configured but no fresh reply (amber, N-blink layer)  */
   RING_BOND,
   RING_OK,
   RING_STOP,
   RING_MISMATCH
 } ring_state_t;
+
+/* Connectivity-loss indication (ring-only, decided 2026-08-03): an UNREACHABLE
+ * segment blinks AMBER, and the blink COUNT names the DEEPEST broken network
+ * layer so a tech sees WHERE the break is at a glance:
+ *   1 blink  = bonded peer down (Internet + Tailscale OK — go to the machine)
+ *   2 blinks = Tailscale / control-plane down (Internet OK)
+ *   3 blinks = no Internet at all (nothing reachable)
+ * "More blinks = deeper problem." The safety colours (purple mismatch, red STOP,
+ * green OK, blue bond, white idle) are unchanged and always win — this only
+ * refines the old generic yellow flash into a diagnostic. */
+#define AMBER_ON_MS 160u /* one blink on-time              */
+#define AMBER_OFF_MS 200u /* gap between blinks in a group  */
+#define AMBER_REST_MS 900u /* gap between blink groups (rest)*/
+#define AMBER_G_PCT 40u /* green as % of red -> amber hue (r>g; distinct from yellow r==g) */
+
+/* On (1) / off (0) for an N-blink amber group at time `now` (ms): N blinks then
+ * a REST gap, repeating. Device-level layer probe picks N; every unreachable
+ * segment shares it, so they blink in unison showing the same root cause. */
+static uint8_t amber_on(uint64_t now, int n)
+{
+  uint32_t group = AMBER_ON_MS + AMBER_OFF_MS;
+  uint32_t period = ((uint32_t)n * group) + AMBER_REST_MS;
+  uint32_t ph = (uint32_t)(now % period);
+  if (ph >= ((uint32_t)n * group)) {
+    return 0u; /* rest gap between groups */
+  }
+  return ((ph % group) < AMBER_ON_MS) ? 1u : 0u;
+}
 
 static void ring_task(void * arg)
 {
@@ -386,11 +417,16 @@ static void ring_task(void * arg)
     if (ncfg == 0) {
       ring_fill(B, B, B); /* white: nothing to connect to */
     } else {
-      /* Flash phase shared by every unreachable segment: hard 50% duty
-             * on/off — a blink reads as "trying to connect" at a glance and
-             * can't be confused with the smooth STOP/OK comet or solid red. */
-      uint32_t ph = (uint32_t)(now % PULSE_PERIOD_MS);
-      uint8_t pulse = (ph < (PULSE_PERIOD_MS / 2u)) ? B : 0u;
+      /* Deepest broken network layer -> amber blink count, shared by every
+             * unreachable segment (device-level probes). 3 = no Internet,
+             * 2 = no Tailscale, 1 = the machine is silent while the net is fine. */
+      int conn_blinks = 1;
+      if (dcs_net_inet_down()) {
+        conn_blinks = 3;
+      } else if ((g_dcs.ml_handle != NULL) && (microlink_get_state(g_dcs.ml_handle) != ML_STATE_CONNECTED)) {
+        conn_blinks = 2;
+      }
+      uint8_t amber = amber_on(now, conn_blinks) ? B : 0u;
 
       (void)memset(s_grb, 0, sizeof(s_grb));
       for (int j = 0; j < ncfg; j++) {
@@ -405,8 +441,8 @@ static void ring_task(void * arg)
         ring_state_t st;
         if (!connected) {
           st = RING_UNREACHABLE;
-          r = (uint8_t)pulse; /* r+g = yellow */
-          g = (uint8_t)pulse;
+          r = amber; /* amber = full red + low green (r>g): distinct from yellow (r==g) */
+          g = (uint8_t)(((uint32_t)amber * AMBER_G_PCT) / 100u);
           frame_ms = PULSE_FRAME_MS;
         } else if (lastmsg == PSTOP_MESSAGE_STOP) {
           st = RING_STOP;
