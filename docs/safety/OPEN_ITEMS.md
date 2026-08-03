@@ -146,7 +146,7 @@ Every DU-1..9 discharged; SG-6 fully discharged, SG-1..5 partial. SIL3/PLe kept
 - [ ] **OD-1:** confirm the two-tool coverage split is acceptable (Bullseye stays with `pstop_c`; GCC-14 gcov everywhere else).
 
 **Blocked on hardware / people:**
-- [ ] **machn (ESP32 machine) clock-guard HW validation** — needs a live machine node + relay HIL bench (host+machn logic done + host-tested).
+- [x] **machn (ESP32 machine) clock-guard HW validation — DONE 2026-08-02** (`docs/safety/MACHN_CLOCK_GUARD_HIL.md`). Live node `machn-01d77a1c` was running the pre-guard `6e7492f`; built HEAD, OTA'd the guard build `3dcd08d`, watched ~5.5 min: clean boot, **no false clock-fault trip**, cores in lockstep, and a full soft-remote arm→RUN (0.53 s)→STOP→re-arm→safe-STOP with the real series relays. Genuine esp_timer-freeze *detection* remains fault-injection-proven on the remote analog (`347de6f`) + host tests (freeze can't be injected on unmodified silicon).
 - [ ] **`pstop`→`main` PR** reviewer sign-off (your call; not reminding).
 
 **Open engineering, lower priority:**
