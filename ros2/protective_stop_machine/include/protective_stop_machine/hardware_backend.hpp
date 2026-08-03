@@ -57,7 +57,9 @@ private:
   // NOLINTNEXTLINE(runtime/int)
   bool http_get(const std::string & path, std::string & body, long & status);
   // NOLINTNEXTLINE(runtime/int)
-  bool http_post(const std::string & path, const std::string & json, std::string & body, long & status);
+  bool http_post(
+    const std::string & path, const std::string & json, std::string & body,
+    long & status);
 
   HardwareConfig cfg_;
   std::thread th_;

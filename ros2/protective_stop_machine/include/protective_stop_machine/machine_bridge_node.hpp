@@ -40,7 +40,8 @@ private:
   void publish_tick();
   void diagnostics(diagnostic_updater::DiagnosticStatusWrapper & stat);
   bool validate_timing(const MachineTiming & t, std::string & reason) const;
-  rcl_interfaces::msg::SetParametersResult on_set_parameters(const std::vector<rclcpp::Parameter> & params);
+  rcl_interfaces::msg::SetParametersResult on_set_parameters(
+    const std::vector<rclcpp::Parameter> & params);
   void handle_configure(
     const std::shared_ptr<protective_stop_msgs::srv::ConfigureMachine::Request> req,
     std::shared_ptr<protective_stop_msgs::srv::ConfigureMachine::Response> resp);
@@ -53,9 +54,12 @@ private:
 
   std::unique_ptr<IMachineBackend> backend_;
 
-  rclcpp_lifecycle::LifecyclePublisher<protective_stop_msgs::msg::ProtectiveStopStatus>::SharedPtr state_pub_;
-  rclcpp_lifecycle::LifecyclePublisher<protective_stop_msgs::msg::MachineRelayStatus>::SharedPtr relay_pub_;
-  rclcpp_lifecycle::LifecyclePublisher<protective_stop_msgs::msg::BondedRemoteArray>::SharedPtr remotes_pub_;
+  rclcpp_lifecycle::LifecyclePublisher<protective_stop_msgs::msg::ProtectiveStopStatus>::SharedPtr
+    state_pub_;
+  rclcpp_lifecycle::LifecyclePublisher<protective_stop_msgs::msg::MachineRelayStatus>::SharedPtr
+    relay_pub_;
+  rclcpp_lifecycle::LifecyclePublisher<protective_stop_msgs::msg::BondedRemoteArray>::SharedPtr
+    remotes_pub_;
   rclcpp::TimerBase::SharedPtr pub_timer_;
   rclcpp::Service<protective_stop_msgs::srv::ConfigureMachine>::SharedPtr configure_srv_;
   std::shared_ptr<diagnostic_updater::Updater> diag_;

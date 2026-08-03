@@ -1,6 +1,7 @@
 # SPDX-FileCopyrightText: 2026 Polymath Robotics, Inc.
 # SPDX-License-Identifier: Apache-2.0
-"""Bring up the machine bridge lifecycle node, optionally auto-activating it.
+"""
+Bring up the machine bridge lifecycle node, optionally auto-activating it.
 
 No nav2_lifecycle_manager dependency: we emit the configure/activate transitions
 from launch event handlers when autostart:=true (the default).
@@ -8,8 +9,8 @@ from launch event handlers when autostart:=true (the default).
 
 import os
 
-import launch
 from ament_index_python.packages import get_package_share_directory
+import launch
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, EmitEvent, RegisterEventHandler
 from launch.conditions import IfCondition

@@ -43,7 +43,7 @@ bool HardwareMachineBackend::start()
     return true;
   }
   running_ = true;
-  th_ = std::thread([this] { poll_loop(); });
+  th_ = std::thread([this] {poll_loop();});
   return true;
 }
 
@@ -222,7 +222,7 @@ bool HardwareMachineBackend::configure(const MachineTiming & timing, std::string
     return true;
   }
   error = "device did not accept timing config (http " + std::to_string(status) +
-          "); hardware timing is set via device config";
+    "); hardware timing is set via device config";
   return false;
 }
 

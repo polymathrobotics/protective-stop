@@ -1,6 +1,7 @@
 # SPDX-FileCopyrightText: 2026 Polymath Robotics, Inc.
 # SPDX-License-Identifier: Apache-2.0
 # !/usr/bin/env python3
+import os
 import time
 
 import launch_testing
@@ -17,6 +18,10 @@ from protective_stop_node.test_utils.base_test import BaseTestProtectiveStopNode
 Separating out the unsafe mode tests to a separate file to keep the test file clean and unlikely to suffer any kind of cross-test pollution.
 """
 
+# Isolate on a dedicated ROS_DOMAIN_ID (distinct from launch.test.py) so a
+# neighbouring test's node can never leak a stop=True heartbeat into the
+# unmonitored-mode assertions when colcon runs the suite in parallel.
+os.environ['ROS_DOMAIN_ID'] = '78'
 
 machine_uuid = 'machine-uuid'
 TEST_HEARTBEAT_TIMEOUT_S = 0.1

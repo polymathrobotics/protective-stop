@@ -13,8 +13,23 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        ros: [humble, jazzy, lyrical]
-    name: ROS 2 ${{ matrix.ros }}
+        # jazzy is the PRIMARY, REQUIRED target and is listed first: a failure
+        # on jazzy fails the whole workflow. humble and lyrical run for
+        # information only (optional: true -> continue-on-error), so a red leg
+        # there does not block a merge. Mark "ROS 2 jazzy (required)" as the
+        # required status check in branch protection.
+        include:
+          - ros: jazzy
+            optional: false
+            tier: required
+          - ros: humble
+            optional: true
+            tier: informational
+          - ros: lyrical
+            optional: true
+            tier: informational
+    name: ROS 2 ${{ matrix.ros }} (${{ matrix.tier }})
+    continue-on-error: ${{ matrix.optional }}
     container:
       image: polymathrobotics/ros:${{ matrix.ros }}-builder-ubuntu
     steps:
@@ -23,7 +38,17 @@ jobs:
         with:
           target-ros2-distro: ${{ matrix.ros }}
           coverage-result: false
+          # Pi-only / bench-only rosdep keys that do not resolve on CI hosts:
+          #   python3-rpi.gpio -> archive/protective_stop_remote (Pi GPIO)
+          #   python3-roslibpy -> archive/protective_stop_remote (local key)
+          # The archive packages still build, lint and test without them; the
+          # code paths importing RPi.GPIO / roslibpy are not exercised by any
+          # test. nav2_lifecycle_manager is intentionally NOT skipped: it
+          # resolves on jazzy and is required by protective_stop_node's launch
+          # tests.
+          rosdep-skip-keys: python3-rpi.gpio python3-roslibpy
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: colcon-logs-${{ matrix.ros }}
           path: ros_ws/log

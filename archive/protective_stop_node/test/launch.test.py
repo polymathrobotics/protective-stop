@@ -1,6 +1,7 @@
 # SPDX-FileCopyrightText: 2026 Polymath Robotics, Inc.
 # SPDX-License-Identifier: Apache-2.0
 # !/usr/bin/env python3
+import os
 import time
 import uuid
 
@@ -18,6 +19,14 @@ from protective_stop_node.models import PStopRemoteStatusEnum
 from protective_stop_node.test_utils.base_test import BaseTestProtectiveStopNode
 from protective_stop_node.test_utils.helpers import build_pstop_message
 from rcl_interfaces.srv import SetParameters
+
+# Isolate this launch test on its own ROS_DOMAIN_ID so its node graph never
+# cross-talks with the unmonitored-mode launch test (or any other concurrent ROS
+# traffic) when colcon runs the suite in parallel — a lingering node from a
+# neighbouring test used to leak a stop=True heartbeat into these assertions.
+# Read at rclpy.init()/launch time (runtime), so setting it here is sufficient;
+# it must differ from the value in unmonitored_mode.test.py.
+os.environ['ROS_DOMAIN_ID'] = '77'
 
 machine_uuid = 'machine-uuid'
 TEST_HEARTBEAT_TIMEOUT_S = 0.1
@@ -40,12 +49,6 @@ def generate_test_description():
         ),
         launch_testing.actions.ReadyToTest(),
     ])
-
-
-"""
-TODO(troy):
-- put launch test on different domain_id to maintain purity
-"""
 
 
 class TestProtectiveStopNode(BaseTestProtectiveStopNode):

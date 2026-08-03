@@ -35,7 +35,8 @@ TEST(TimingFloors, ValidDefaultsAccepted)
 TEST(TimingFloors, BoundariesAccepted)
 {
   std::string r;
-  EXPECT_TRUE(timing_within_floors(mk(floor::kMinHeartbeatMs, floor::kMinMaxMissed, floor::kMinStopFloorMs), r));
+  EXPECT_TRUE(timing_within_floors(mk(floor::kMinHeartbeatMs, floor::kMinMaxMissed,
+    floor::kMinStopFloorMs), r));
   EXPECT_TRUE(timing_within_floors(mk(floor::kMaxHeartbeatMs, floor::kMaxMaxMissed, 100000), r));
 }
 

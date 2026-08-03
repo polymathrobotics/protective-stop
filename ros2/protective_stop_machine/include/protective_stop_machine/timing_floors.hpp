@@ -33,12 +33,13 @@ inline bool timing_within_floors(const MachineTiming & t, std::string & reason)
 {
   if (t.heartbeat_ms < floor::kMinHeartbeatMs || t.heartbeat_ms > floor::kMaxHeartbeatMs) {
     reason = "heartbeat_ms out of [" + std::to_string(floor::kMinHeartbeatMs) + "," +
-             std::to_string(floor::kMaxHeartbeatMs) + "]";
+      std::to_string(floor::kMaxHeartbeatMs) + "]";
     return false;
   }
   if (t.max_missed < floor::kMinMaxMissed || t.max_missed > floor::kMaxMaxMissed) {
     reason =
-      "max_missed out of [" + std::to_string(floor::kMinMaxMissed) + "," + std::to_string(floor::kMaxMaxMissed) + "]";
+      "max_missed out of [" + std::to_string(floor::kMinMaxMissed) + "," +
+      std::to_string(floor::kMaxMaxMissed) + "]";
     return false;
   }
   if (t.min_stop_ms < floor::kMinStopFloorMs) {

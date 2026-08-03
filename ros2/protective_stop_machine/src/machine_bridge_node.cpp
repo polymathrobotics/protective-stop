@@ -38,10 +38,10 @@ MachineBridgeNode::MachineBridgeNode(const rclcpp::NodeOptions & options)
 void MachineBridgeNode::declare_all_parameters()
 {
   auto ro = []() {
-    rcl_interfaces::msg::ParameterDescriptor d;
-    d.read_only = true;
-    return d;
-  };
+      rcl_interfaces::msg::ParameterDescriptor d;
+      d.read_only = true;
+      return d;
+    };
 
   declare_parameter<std::string>("backend", "software", ro());
   declare_parameter<int>("machine_id", 0x01020304, ro());
@@ -120,10 +120,12 @@ MachineBridgeNode::CallbackReturn MachineBridgeNode::on_configure(const rclcpp_l
 
   configure_srv_ = create_service<ConfigureMachine>(
     "~/configure_machine",
-    std::bind(&MachineBridgeNode::handle_configure, this, std::placeholders::_1, std::placeholders::_2));
+    std::bind(&MachineBridgeNode::handle_configure, this, std::placeholders::_1,
+      std::placeholders::_2));
 
   param_cb_handle_ =
-    add_on_set_parameters_callback(std::bind(&MachineBridgeNode::on_set_parameters, this, std::placeholders::_1));
+    add_on_set_parameters_callback(std::bind(&MachineBridgeNode::on_set_parameters, this,
+      std::placeholders::_1));
 
   RCLCPP_INFO(get_logger(), "configured: backend=%s", backend_kind_.c_str());
   return CallbackReturn::SUCCESS;
@@ -145,7 +147,8 @@ MachineBridgeNode::CallbackReturn MachineBridgeNode::on_activate(const rclcpp_li
 
   const double hz = std::max(1.0, get_parameter("rates.publish_rate_hz").as_double());
   pub_timer_ =
-    create_wall_timer(std::chrono::duration<double>(1.0 / hz), std::bind(&MachineBridgeNode::publish_tick, this));
+    create_wall_timer(std::chrono::duration<double>(1.0 / hz),
+      std::bind(&MachineBridgeNode::publish_tick, this));
 
   const double dhz = std::max(0.1, get_parameter("rates.diagnostics_rate_hz").as_double());
   diag_ = std::make_shared<diagnostic_updater::Updater>(this, 1.0 / dhz);
@@ -156,7 +159,8 @@ MachineBridgeNode::CallbackReturn MachineBridgeNode::on_activate(const rclcpp_li
   return CallbackReturn::SUCCESS;
 }
 
-MachineBridgeNode::CallbackReturn MachineBridgeNode::on_deactivate(const rclcpp_lifecycle::State & s)
+MachineBridgeNode::CallbackReturn MachineBridgeNode::on_deactivate(
+  const rclcpp_lifecycle::State & s)
 {
   if (pub_timer_) {
     pub_timer_->cancel();
@@ -337,7 +341,8 @@ rcl_interfaces::msg::SetParametersResult MachineBridgeNode::on_set_parameters(
 }
 
 void MachineBridgeNode::handle_configure(
-  const std::shared_ptr<ConfigureMachine::Request> req, std::shared_ptr<ConfigureMachine::Response> resp)
+  const std::shared_ptr<ConfigureMachine::Request> req,
+  std::shared_ptr<ConfigureMachine::Response> resp)
 {
   MachineTiming proposed = timing_;
   if (req->heartbeat_ms > 0) {
