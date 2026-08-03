@@ -82,8 +82,29 @@ latency is unchanged.
 The transport changes did not regress the safety logic: arm / STOP / re-arm all
 correct, and every STOP transition mapped to a deliberate press.
 
-## Fleet
+## Protocol rebase to v1 (far-Hamming) + fleet migration
 
-`fa8b442` uploaded to the fleet as the verified build; all reachable units
-(PSTOP54, PSTOP42, DUT, machn) already OTA-updated; offline units adopt it on
-next check-in.
+While this work was in flight, `6276bf0` ("Changing message values to avoid bit
+flipping errors", J. Hinke) landed on `pstop`: `PSTOP_VERSION 0x00→0x01` and
+far-Hamming message codewords (`OK 0x00→0x55`, `STOP 0x01→0x92`, `BOND→0xAD`,
+`UNBOND→0x6A`) — the button-integrity safety improvement (zeroed/stuck/single-bit
+→ invalid → STOP). It touches only `pstop_c`, so the transport fix above rebased
+onto it cleanly (no conflict). **v0 and v1 are wire-incompatible** (version +
+codewords), so the fleet was migrated in one pass.
+
+The combined **v1 + transport-fix** build is `25c419f`. It was re-validated on the
+wire before rollout (the earlier fa8b442 results were v0):
+
+- **Bond on v1:** PSTOP54 ↔ machn re-bonded on the far-Hamming protocol, ~100 %
+  reply rate, `sent` climbing steadily; USB retry active (`recovered` incrementing).
+- **Armed on v1** (DUT via HIL relays + a v1 host runner): arm→RUN, press→STOP,
+  re-arm→RUN, both-phase open-detection — all correct, identical to v0.
+- **15-min stability** (all four units on `25c419f`): 0 reboots, 0 fault resets,
+  `pstop_mismatch=0` on the continuously-running units, heap stable. (The DUT's
+  transient mismatch count is an artifact of the armed test's sequential
+  loop-relay switching — the intended single-channel discordance→STOP — not a
+  fault.)
+
+**Fleet:** `25c419f` published to the fleet for **both** projects (`pstop_remote`
+and `machn_machine` — the first machn build ever on the fleet); all four reachable
+units OTA-migrated to v1; offline units adopt v1 on next check-in.
