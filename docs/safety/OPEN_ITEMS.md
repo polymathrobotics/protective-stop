@@ -143,15 +143,16 @@ Every DU-1..9 discharged; SG-6 fully discharged, SG-1..5 partial. SIL3/PLe kept
 
 **Needs your input (blocking, I cannot proceed without it):**
 - [ ] **FMEDA firm-up (OD-2):** real ESP32-S3 + relay part numbers, demand rate **W**, and proof-test interval — moves SIL 3 from *allocated/assumed* to *demonstrated*, and sets W2(SIL2) vs W3(SIL3). Also unblocks HARA **H-03** (DERP failover 5–9 s dark window vs process-safety-time budget; may then need a local-STOP latch mitigation). **HOW-TO written 2026-08-02:** `docs/safety/FMEDA_FIRMUP_GUIDE.md` — the full playbook for firming up the FMEDA *without* manufacturer λ data (data sources SN 29500/exida SERH/FMD-2016/FIDES, π-factor conversion, DC-from-IEC-61508 tables, B10d relay route, Annex D β, the assumptions register, sensitivity analysis, proven-in-use). Top pstop actions: protect the Type-B SFF-90 % boundary, **introduce relay diversity** (≈halves PFH since PFH≈β·λ_DU), and stand up a fleet field-hours + classified-fault log now for a future proven-in-use / Route-2H argument.
-- [ ] **OD-1:** confirm the two-tool coverage split is acceptable (Bullseye stays with `pstop_c`; GCC-14 gcov everywhere else).
+- [x] ~~**OD-1**~~ **SETTLED 2026-08-02 (user-confirmed):** two-tool split accepted — Bullseye stays with `pstop_c`, GCC-14 gcov everywhere else. Documented in COVERAGE.md policy note + Decisions log §1.
 
 **Blocked on hardware / people:**
 - [x] **machn (ESP32 machine) clock-guard HW validation — DONE 2026-08-02** (`docs/safety/MACHN_CLOCK_GUARD_HIL.md`). Live node `machn-01d77a1c` was running the pre-guard `6e7492f`; built HEAD, OTA'd the guard build `3dcd08d`, watched ~5.5 min: clean boot, **no false clock-fault trip**, cores in lockstep, and a full soft-remote arm→RUN (0.53 s)→STOP→re-arm→safe-STOP with the real series relays. Genuine esp_timer-freeze *detection* remains fault-injection-proven on the remote analog (`347de6f`) + host tests (freeze can't be injected on unmodified silicon).
 - [ ] **`pstop`→`main` PR** reviewer sign-off (your call; not reminding).
 
 **Open engineering, lower priority:**
-- [ ] Coverage headroom: ROS2 node/backends (need a spun executor) + host branch paths. Firmware core already 100%.
+- [x] **ROS2 node/backend coverage — DONE 2026-08-02** (`16649d1`): spun-executor + loopback-HTTP-stub suites raised the hand-written ROS2 package **~53 % → ~89 % line** (machine_bridge_node 43→98 %, hardware_backend 25→99 %), tests 27→56 all green; **SR-M-01 + SR-M-03 promoted to Verified** (requirements coverage 25→27/39 with a test, 13→15/39 strict). Residuals are honest (live-UDP-remote paths + OOM guards). Host branch-path headroom remains.
 - [ ] Remaining DU rows: **DU-5/7** comparator/encode common-mode (β≈1 shared downstream), **DU-6/8** pull-down CCF + settle, **SR-R-15** NVS peer-slot integrity.
 - [ ] On-bench fault-injection of SR-R-09 pad-config corruption (bench-blocked, low value).
-- [ ] Repo-wide pre-commit cosmetic cleanup (deferred maintainer-level debt; ~22 files reformat).
+- [ ] **Markdown normalization stays deferred (repo-wide).** Pre-commit *code* hooks (polymath-cpp clang-format + cpplint) were applied to this session's new C++ (`16649d1`). The *markdown* hook rewrites `-`→`+` list markers, but all ~30 committed docs use `-` and none use `+`, so applying it per-file creates inconsistency — it's a one-shot repo-wide reformat for a maintainer.
+- [ ] **ROS2 lint config mismatch (maintainer):** the package's `ament_lint_auto` runs `ament_uncrustify` in `colcon test` (14 failures across all files), but the repo standardizes on clang-format via `polymath_code_standard`. Align by skipping uncrustify or matching styles — pre-existing, not from this work.
 - [ ] Upstream `pstop_c` far-Hamming status-encoding memo (maintainers).
