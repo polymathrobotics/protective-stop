@@ -46,6 +46,7 @@
 #include "esp_log.h"
 #include "esp_rom_sys.h"
 #include "esp_system.h"
+#include "esp_task_wdt.h"
 #include "esp_timer.h"
 #include "estop_verdict.h"
 #include "freertos/FreeRTOS.h"
@@ -289,6 +290,125 @@ static uint8_t compute_verdict(uint32_t counter, int core_id)
 }
 
 /* ============================================================================
+ * Dual-core mutual clock cross-check — SR-H-04 / FMEA DU-2 (frozen clock /
+ * frozen task).
+ *
+ * The existing lockstep already fail-safes a core whose task WEDGES MID-TICK:
+ * it stops publishing its encoding, the comparator's `both_in` fails, nothing
+ * is sent, every machine STOPs. What it does NOT catch is a frozen esp_timer
+ * CLOCK while the scheduler keeps running: the per-session counter advances on
+ * every transmitting tick regardless of the clock, so the machine keeps
+ * accepting heartbeats even though the pstop `stamp` (taken from esp_timer)
+ * has frozen — a dangerous-undetected fault. This cross-check closes that gap.
+ *
+ * Each core, every tick, PUBLISHES two independent liveness signals for the
+ * OTHER core to observe:
+ *   - hb   : a heartbeat counter this core increments itself each loop pass
+ *            (task-liveness — freezes iff this core's task stops running);
+ *   - us   : an independent esp_timer_get_time() reading
+ *            (clock-liveness — freezes iff esp_timer stops advancing).
+ * Each core then VERIFIES the peer's two signals are advancing, gating on the
+ * FreeRTOS tick count (xTaskGetTickCount) — a DIFFERENT time base from
+ * esp_timer, so a frozen esp_timer is still measurable against the scheduler.
+ * Two independent stall timers:
+ *   - peer hb frozen  > XCHECK_STALL_TICKS  -> peer TASK wedged   (FAULT_PEER_HB)
+ *   - peer us frozen/backward               -> peer CLOCK frozen  (FAULT_PEER_CLK)
+ * Checking them separately is the point: if esp_timer freezes while the task
+ * still loops, hb keeps advancing (no HB fault, the task IS alive) but us
+ * freezes -> the clock timer fires. On a fault the detecting core latches
+ * g_xcheck_fault; the comparator then FAIL-SAFES: send nothing (machines
+ * heartbeat-time-out to STOP) then a controlled reset for recovery.
+ *
+ * Lock-free: g_xcheck_hb/us are single-writer-per-core atomics (same
+ * discipline as g_tick_roll); the per-core observation memory is private to
+ * each core task. A torn read across the un-paired hb/us atomics can only
+ * DELAY detection by a tick, never cause a false fault, because each signal
+ * has its own stall timer over a 500 ms window.
+ *
+ * Residual (documented): a total systimer freeze stops the scheduler itself,
+ * so the cores stop running and this software check cannot execute — that case
+ * is caught only by the hardware watchdogs (TWDT feed stops -> reset; the
+ * RTC WDT on its independent slow clock is the ultimate backstop). See
+ * docs/WATCHDOG_CLOCK_PROTECTION.md.
+ * ========================================================================== */
+
+#define XCHECK_STALL_TICKS pdMS_TO_TICKS(500) /* 5 ticks of no-advance tolerance */
+#define XCHECK_RESET_GRACE_MS 500u /* silent-STOP settle before controlled reset */
+#define XCHECK_FAULT_NONE 0u
+#define XCHECK_FAULT_PEER_HB 1u /* peer task/heartbeat stalled */
+#define XCHECK_FAULT_PEER_CLK 2u /* peer esp_timer clock frozen or ran backward */
+
+/* Published by core c, observed by core (1-c). Single-writer-per-core. */
+static atomic_uint_fast32_t g_xcheck_hb[2];
+static atomic_uint_fast64_t g_xcheck_us[2];
+/* Latched on the first detected fault; polled by the comparator. */
+static atomic_uint_fast32_t g_xcheck_fault;
+
+/* Private per-observer memory of the peer's last-seen signals + the tick at
+ * which each last advanced. Indexed by the OBSERVING core id. */
+static uint32_t s_xc_seen_hb[2];
+static uint64_t s_xc_seen_us[2];
+static TickType_t s_xc_hb_tick[2];
+static TickType_t s_xc_clk_tick[2];
+static bool s_xc_init[2];
+
+static void xcheck_raise(uint32_t code, int core_id, int peer, uint32_t peer_hb, uint64_t peer_us)
+{
+  uint32_t expect = XCHECK_FAULT_NONE;
+  if (atomic_compare_exchange_strong(&g_xcheck_fault, &expect, code)) {
+    ESP_LOGE(
+      TAG,
+      "XCHECK core%d: peer core%d %s (hb=%lu clk=%llu us) — FAIL-SAFE STOP + reset",
+      core_id,
+      peer,
+      (code == XCHECK_FAULT_PEER_HB) ? "TASK STALLED (heartbeat frozen)" : "CLOCK FROZEN/BACKWARD (esp_timer stalled)",
+      (unsigned long)peer_hb,
+      (unsigned long long)peer_us);
+  }
+}
+
+/* Publish MY liveness, then verify the PEER's. Called once per tick per core. */
+static void xcheck_publish_and_verify(int core_id, uint32_t hb, uint64_t now_us)
+{
+  atomic_store(&g_xcheck_hb[core_id], hb);
+  atomic_store(&g_xcheck_us[core_id], now_us);
+
+  const int peer = 1 - core_id;
+  const uint32_t peer_hb = (uint32_t)atomic_load(&g_xcheck_hb[peer]);
+  const uint64_t peer_us = (uint64_t)atomic_load(&g_xcheck_us[peer]);
+  const TickType_t now_tick = xTaskGetTickCount();
+
+  if (!s_xc_init[core_id]) {
+    s_xc_seen_hb[core_id] = peer_hb;
+    s_xc_seen_us[core_id] = peer_us;
+    s_xc_hb_tick[core_id] = now_tick;
+    s_xc_clk_tick[core_id] = now_tick;
+    s_xc_init[core_id] = true;
+    return;
+  }
+
+  /* Task-liveness: the peer's self-incremented heartbeat counter. */
+  if (peer_hb != s_xc_seen_hb[core_id]) {
+    s_xc_seen_hb[core_id] = peer_hb;
+    s_xc_hb_tick[core_id] = now_tick;
+  } else if ((TickType_t)(now_tick - s_xc_hb_tick[core_id]) > XCHECK_STALL_TICKS) {
+    xcheck_raise(XCHECK_FAULT_PEER_HB, core_id, peer, peer_hb, peer_us);
+  }
+
+  /* Clock-liveness: the peer's esp_timer microsecond stamp. Must be monotonic
+   * AND advancing. Gated on the FreeRTOS tick, so a frozen esp_timer (which
+   * also freezes THIS core's own esp_timer reads) is still caught. */
+  if (peer_us > s_xc_seen_us[core_id]) {
+    s_xc_seen_us[core_id] = peer_us;
+    s_xc_clk_tick[core_id] = now_tick;
+  } else if (peer_us < s_xc_seen_us[core_id]) {
+    xcheck_raise(XCHECK_FAULT_PEER_CLK, core_id, peer, peer_hb, peer_us); /* backward */
+  } else if ((TickType_t)(now_tick - s_xc_clk_tick[core_id]) > XCHECK_STALL_TICKS) {
+    xcheck_raise(XCHECK_FAULT_PEER_CLK, core_id, peer, peer_hb, peer_us); /* frozen */
+  }
+}
+
+/* ============================================================================
  * Per-core task — pinned to a single ESP32-S3 core.
  *
  * On each notification from the comparator: sample MY E-stop channel ONCE,
@@ -299,9 +419,21 @@ static uint8_t compute_verdict(uint32_t counter, int core_id)
 static void core_task(void * arg)
 {
   int core_id = (int)(intptr_t)arg;
+  uint32_t hb_local = 0; /* this core's private heartbeat (task-liveness) */
+  bool wdt_subscribed = false;
 
   for (;;) {
     ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+
+    /* Subscribe to the TWDT on the FIRST notification (not before — the
+         * comparator delays ~5 s at boot before it starts notifying, and a
+         * subscribed-but-unfed task would trip the 5 s TWDT during that window).
+         * From here on a wedged comparator (no notifications) also stops this
+         * feed -> TWDT resets the chip, a second path to catching a wedge. */
+    if (!wdt_subscribed) {
+      (void)esp_task_wdt_add(NULL);
+      wdt_subscribed = true;
+    }
 
     /* Snapshot the tick inputs the comparator just published. */
     tick_input_t in[PSTOP_MAX_MACHINES];
@@ -335,6 +467,16 @@ static void core_task(void * arg)
 
     g_verdict[core_id] = verdict;
     dcs_publish_core_tick(core_id, roll, verdict);
+
+    /* Dual-core clock cross-check: publish MY heartbeat + an independent
+         * esp_timer read, then verify the PEER core's are advancing. Runs every
+         * tick regardless of session activity, so clock monitoring is continuous
+         * even with no machines bonded. */
+    hb_local++;
+    xcheck_publish_and_verify(core_id, hb_local, (uint64_t)esp_timer_get_time());
+
+    /* Feed the TWDT — proves THIS core task ran to completion this tick. */
+    (void)esp_task_wdt_reset();
 
     xSemaphoreGive(g_done[core_id]);
   }
@@ -718,6 +860,11 @@ static void comparator_task(void * arg)
      * concurrently in ml_app — 5 s is enough on every bench config. */
   vTaskDelay(pdMS_TO_TICKS(5000));
 
+  /* Subscribe to the TWDT now (after the startup delay, so the unfed window
+     * above can't trip it). Fed every tick below — a wedged comparator stops
+     * the feed and the 5 s TWDT resets the chip. */
+  (void)esp_task_wdt_add(NULL);
+
   for (int i = 0; i < PSTOP_MAX_MACHINES; i++) {
     g_sess[i].sock = -1;
     g_sess[i].state = SESS_IDLE;
@@ -725,10 +872,45 @@ static void comparator_task(void * arg)
 
   uint32_t mismatch = 0;
   uint64_t last_unhealthy_kick_ms = 0;
+  bool xc_announced = false;
+  TickType_t xc_fault_tick = 0;
 
   TickType_t next = xTaskGetTickCount();
   for (;;) {
+    (void)esp_task_wdt_reset();
     uint64_t now_ms = (uint64_t)(esp_timer_get_time() / 1000);
+
+    /* 0. Dual-core clock cross-check reaction (SR-H-04 / DU-2). A core latched
+         *    a fault: the peer core's task or esp_timer clock stalled. FAIL-SAFE
+         *    — send NOTHING to any machine (each heartbeat-times-out to STOP),
+         *    let that STOP settle, then a controlled reset for recovery. The
+         *    grace deadline is measured in FreeRTOS ticks, NOT esp_timer, since
+         *    the fault may BE a frozen esp_timer. esp_restart() is a CLEAN reset
+         *    (reset_reason SW): a frozen clock is a hardware fault that an OTA
+         *    rollback cannot fix, so it is deliberately not counted toward the
+         *    rollback ladder — the device simply restarts, and while any fault
+         *    persists it stays silent and every machine stays safely STOPped. */
+    uint32_t xc_fault = (uint32_t)atomic_load(&g_xcheck_fault);
+    if (xc_fault != XCHECK_FAULT_NONE) {
+      if (!xc_announced) {
+        xc_announced = true;
+        xc_fault_tick = xTaskGetTickCount();
+        ESP_LOGE(
+          TAG,
+          "XCHECK FAULT %lu — halting all pstop TX (machines will STOP); controlled reset in %lu ms",
+          (unsigned long)xc_fault,
+          (unsigned long)XCHECK_RESET_GRACE_MS);
+      }
+      dcs_publish_xcheck(
+        xc_fault, (uint32_t)atomic_load(&g_xcheck_hb[0]), (uint32_t)atomic_load(&g_xcheck_hb[1]));
+      if ((TickType_t)(xTaskGetTickCount() - xc_fault_tick) >= pdMS_TO_TICKS(XCHECK_RESET_GRACE_MS)) {
+        ESP_LOGE(TAG, "XCHECK: controlled reset now");
+        vTaskDelay(pdMS_TO_TICKS(20)); /* flush the log line */
+        esp_restart();
+      }
+      vTaskDelayUntil(&next, TICK_PERIOD);
+      continue; /* send nothing this tick */
+    }
 
     /* 1. Refresh session configs from the peer slots (live /api updates)
          *    and run socket bring-up + the bond FSM for each. */
@@ -971,6 +1153,13 @@ static void comparator_task(void * arg)
       /* all OK: agg_msg stays OK */
     }
     dcs_publish_pstop_sf_causes(g_sf_nomem, g_sf_route, g_sf_txdrv, g_sf_other, g_sf_last_errno);
+    /* Dual-core cross-check liveness: publish the per-core heartbeats every
+         * tick (healthy or not) so /state.json shows them advancing — positive
+         * evidence the cross-check is running, not just a fault indicator. */
+    dcs_publish_xcheck(
+      (uint32_t)atomic_load(&g_xcheck_fault),
+      (uint32_t)atomic_load(&g_xcheck_hb[0]),
+      (uint32_t)atomic_load(&g_xcheck_hb[1]));
     atomic_store(&g_dcs_pstop_last_msg, agg_msg);
     atomic_store(&g_dcs_pstop_replies, agg_replies);
     dcs_publish_comparator(agg_sent, mismatch, agg_fail, agg_last_reply, agg_rtt);

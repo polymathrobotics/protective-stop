@@ -115,6 +115,16 @@ extern "C"
   void dcs_publish_estop(int core_id, bool high_ok, bool low_ok);
 
   /**
+ * @brief Publish the dual-core clock cross-check state (SR-H-04 / DU-2).
+ * Called by the comparator when a cross-check fault latches, and reflected in
+ * /state.json as xcheck_fault / xcheck_hb0 / xcheck_hb1.
+ * @param fault 0=healthy, 1=peer task/heartbeat stalled, 2=peer clock frozen.
+ * @param hb0   core 0's last published heartbeat counter.
+ * @param hb1   core 1's last published heartbeat counter.
+ */
+  void dcs_publish_xcheck(uint32_t fault, uint32_t hb0, uint32_t hb1);
+
+  /**
  * @brief Publish comparator telemetry (called by the comparator task once
  * per tick after the memcmp).
  * @param sent           Total messages successfully sent to the machine.

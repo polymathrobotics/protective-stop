@@ -81,6 +81,8 @@ dcs_state_t g_dcs;
 
 atomic_uint_fast32_t g_dcs_core_tick[2];
 atomic_uint_fast32_t g_dcs_core_verdict[2];
+atomic_uint_fast32_t g_dcs_xcheck_fault;
+atomic_uint_fast32_t g_dcs_xcheck_hb[2];
 atomic_uint_fast32_t g_dcs_load_pct[2];
 atomic_uint_fast32_t g_dcs_estop_high_ok[2];
 atomic_uint_fast32_t g_dcs_estop_low_ok[2];
@@ -351,6 +353,13 @@ void dcs_publish_core_tick(int core_id, uint32_t tick, uint8_t verdict)
   }
   atomic_store(&g_dcs_core_tick[core_id], tick);
   atomic_store(&g_dcs_core_verdict[core_id], verdict);
+}
+
+void dcs_publish_xcheck(uint32_t fault, uint32_t hb0, uint32_t hb1)
+{
+  atomic_store(&g_dcs_xcheck_fault, fault);
+  atomic_store(&g_dcs_xcheck_hb[0], hb0);
+  atomic_store(&g_dcs_xcheck_hb[1], hb1);
 }
 
 void dcs_publish_estop(int core_id, bool high_ok, bool low_ok)

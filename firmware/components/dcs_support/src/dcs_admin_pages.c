@@ -209,6 +209,7 @@ static esp_err_t page_state(httpd_req_t * req)
     buf,
     cap,
     "{\"t0\":%lu,\"t1\":%lu,\"l0\":%d,\"l1\":%d,"
+    "\"xcheck_fault\":%lu,\"xcheck_hb0\":%lu,\"xcheck_hb1\":%lu,"
     "\"load0\":%lu,\"load1\":%lu,"
     "\"e_hi0\":%lu,\"e_lo0\":%lu,\"e_hi1\":%lu,\"e_lo1\":%lu,"
     "\"active_iface\":%d,\"eth_link\":%d,"
@@ -237,6 +238,9 @@ static esp_err_t page_state(httpd_req_t * req)
     (unsigned long)atomic_load(&g_dcs_core_tick[1]),
     (int)atomic_load(&g_dcs_core_verdict[0]),
     (int)atomic_load(&g_dcs_core_verdict[1]),
+    (unsigned long)atomic_load(&g_dcs_xcheck_fault),
+    (unsigned long)atomic_load(&g_dcs_xcheck_hb[0]),
+    (unsigned long)atomic_load(&g_dcs_xcheck_hb[1]),
     (unsigned long)atomic_load(&g_dcs_load_pct[0]),
     (unsigned long)atomic_load(&g_dcs_load_pct[1]),
     (unsigned long)atomic_load(&g_dcs_estop_high_ok[0]),
