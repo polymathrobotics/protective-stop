@@ -41,12 +41,15 @@ jobs:
             touch firmware/sdkconfig.credentials
           fi
 
-      - name: Build with ESP-IDF v5.5
+      # Build, then assert Option B verdict diversity survived the optimizer
+      # (SR-R-03 / DU-3) — the xtensa objdump is on PATH inside the IDF action.
+      - name: Build + diversity check with ESP-IDF v5.5
         uses: espressif/esp-idf-ci-action@v1
         with:
           esp_idf_version: v5.5
           target: esp32s3
           path: firmware
+          command: idf.py build && bash ../scripts/check_estop_diversity.sh build/pstop_remote.elf
 
   build_machn:
     runs-on: ubuntu-latest
