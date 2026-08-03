@@ -13,9 +13,9 @@
 #include <utility>
 #include <vector>
 
+#include "lifecycle_msgs/msg/state.hpp"
 #include "protective_stop_machine/hardware_backend.hpp"
 #include "protective_stop_machine/software_backend.hpp"
-#include "protective_stop_machine/timing_floors.hpp"
 
 namespace protective_stop_machine
 {
@@ -24,76 +24,51 @@ using ProtectiveStopStatus = protective_stop_msgs::msg::ProtectiveStopStatus;
 using MachineRelayStatus = protective_stop_msgs::msg::MachineRelayStatus;
 using BondedRemoteArray = protective_stop_msgs::msg::BondedRemoteArray;
 using BondedRemote = protective_stop_msgs::msg::BondedRemote;
-using ConfigureMachine = protective_stop_msgs::srv::ConfigureMachine;
 
-// Timing safety floors + the pure validator now live in timing_floors.hpp so
-// they are unit-testable without a live node (SR-M-01).
+// The timing.* safety floors (SR-M-01) are enforced declaratively by the
+// generated ParamListener — the bounds<>/gt_eq<> ranges in
+// protective_stop_machine_params.yaml. An out-of-floor override is rejected at
+// declare time (construction throws) and a loosening set is rejected before it
+// applies, so no node code re-checks the floor.
 
 MachineBridgeNode::MachineBridgeNode(const rclcpp::NodeOptions & options)
-: rclcpp_lifecycle::LifecycleNode("machine_bridge", options)
+: rclcpp_lifecycle::LifecycleNode("machine_bridge", options),
+  param_listener_(get_node_parameters_interface()),
+  params_(param_listener_.get_params())
 {
-  declare_all_parameters();
-}
-
-void MachineBridgeNode::declare_all_parameters()
-{
-  auto ro = []() {
-      rcl_interfaces::msg::ParameterDescriptor d;
-      d.read_only = true;
-      return d;
-    };
-
-  declare_parameter<std::string>("backend", "software", ro());
-  declare_parameter<int>("machine_id", 0x01020304, ro());
-  declare_parameter<std::string>("frame_id", "pstop_machine", ro());
-
-  declare_parameter<std::string>("software.bind_addr", "0.0.0.0", ro());
-  declare_parameter<int>("software.port", 8890, ro());
-
-  declare_parameter<std::string>("hardware.device_url", "http://127.0.0.1", ro());
-  declare_parameter<std::string>("hardware.admin_user", "admin", ro());
-
-  // Only the timing.* params are dynamic (validated + applied at runtime).
-  declare_parameter<int>("timing.heartbeat_ms", 400);
-  declare_parameter<int>("timing.max_missed", 3);
-  declare_parameter<int>("timing.min_stop_ms", 500);
-
-  // Rates are read at configure/activate time; changing them needs a restart.
-  declare_parameter<double>("rates.publish_rate_hz", 10.0, ro());
-  declare_parameter<double>("rates.state_poll_hz", 5.0, ro());
-  declare_parameter<double>("rates.diagnostics_rate_hz", 1.0, ro());
-}
-
-bool MachineBridgeNode::validate_timing(const MachineTiming & t, std::string & reason) const
-{
-  return timing_within_floors(t, reason);
+  // Optional self-managed bring-up. Transitions run synchronously here; a
+  // failed configure just leaves us UNCONFIGURED (configure() returns state,
+  // it does not throw), so no activate() follows.
+  if (params_.autostart &&
+    configure().id() == lifecycle_msgs::msg::State::PRIMARY_STATE_INACTIVE)
+  {
+    activate();
+  }
 }
 
 bool MachineBridgeNode::build_backend(std::string & error)
 {
-  timing_.heartbeat_ms = static_cast<uint64_t>(get_parameter("timing.heartbeat_ms").as_int());
-  timing_.max_missed = static_cast<uint16_t>(get_parameter("timing.max_missed").as_int());
-  timing_.min_stop_ms = static_cast<uint64_t>(get_parameter("timing.min_stop_ms").as_int());
-  if (!validate_timing(timing_, error)) {
-    return false;
-  }
+  params_ = param_listener_.get_params();
+  timing_.heartbeat_ms = static_cast<uint64_t>(params_.timing.heartbeat_ms);
+  timing_.max_missed = static_cast<uint16_t>(params_.timing.max_missed);
+  timing_.min_stop_ms = static_cast<uint64_t>(params_.timing.min_stop_ms);
 
-  frame_id_ = get_parameter("frame_id").as_string();
-  backend_kind_ = get_parameter("backend").as_string();
+  frame_id_ = params_.frame_id;
+  backend_kind_ = params_.backend;
 
   if (backend_kind_ == "software") {
     SoftwareConfig sc;
-    sc.bind_addr = get_parameter("software.bind_addr").as_string();
-    sc.port = static_cast<int>(get_parameter("software.port").as_int());
-    sc.machine_id = static_cast<uint32_t>(get_parameter("machine_id").as_int());
+    sc.bind_addr = params_.software.bind_addr;
+    sc.port = static_cast<int>(params_.software.port);
+    sc.machine_id = static_cast<uint32_t>(params_.machine_id);
     sc.timing = timing_;
     backend_ = std::make_unique<SoftwareMachineBackend>(sc);
     return true;
   } else if (backend_kind_ == "hardware") {
     HardwareConfig hc;
-    hc.device_url = get_parameter("hardware.device_url").as_string();
-    hc.admin_user = get_parameter("hardware.admin_user").as_string();
-    hc.poll_hz = get_parameter("rates.state_poll_hz").as_double();
+    hc.device_url = params_.hardware.device_url;
+    hc.admin_user = params_.hardware.admin_user;
+    hc.poll_hz = params_.rates.state_poll_hz;
     // Admin password from the environment — never a parameter file.
     const char * pw = std::getenv("PSTOP_MACHINE_ADMIN_PASS");
     hc.admin_pass = pw ? pw : "";
@@ -117,12 +92,6 @@ MachineBridgeNode::CallbackReturn MachineBridgeNode::on_configure(const rclcpp_l
   state_pub_ = create_publisher<ProtectiveStopStatus>("~/machine_state", latched);
   relay_pub_ = create_publisher<MachineRelayStatus>("~/relay_status", data);
   remotes_pub_ = create_publisher<BondedRemoteArray>("~/remotes", data);
-
-  configure_srv_ = create_service<ConfigureMachine>(
-    "~/configure_machine",
-    std::bind(
-      &MachineBridgeNode::handle_configure, this, std::placeholders::_1,
-      std::placeholders::_2));
 
   param_cb_handle_ =
     add_on_set_parameters_callback(
@@ -148,13 +117,13 @@ MachineBridgeNode::CallbackReturn MachineBridgeNode::on_activate(const rclcpp_li
   relay_pub_->on_activate();
   remotes_pub_->on_activate();
 
-  const double hz = std::max(1.0, get_parameter("rates.publish_rate_hz").as_double());
+  const double hz = std::max(1.0, params_.rates.publish_rate_hz);
   pub_timer_ =
     create_wall_timer(
     std::chrono::duration<double>(1.0 / hz),
     std::bind(&MachineBridgeNode::publish_tick, this));
 
-  const double dhz = std::max(0.1, get_parameter("rates.diagnostics_rate_hz").as_double());
+  const double dhz = std::max(0.1, params_.rates.diagnostics_rate_hz);
   diag_ = std::make_shared<diagnostic_updater::Updater>(this, 1.0 / dhz);
   diag_->setHardwareID(backend_kind_);
   diag_->add("machine", this, &MachineBridgeNode::diagnostics);
@@ -185,7 +154,6 @@ MachineBridgeNode::CallbackReturn MachineBridgeNode::on_deactivate(
 MachineBridgeNode::CallbackReturn MachineBridgeNode::on_cleanup(const rclcpp_lifecycle::State &)
 {
   param_cb_handle_.reset();
-  configure_srv_.reset();
   state_pub_.reset();
   relay_pub_.reset();
   remotes_pub_.reset();
@@ -227,7 +195,6 @@ MachineBridgeNode::CallbackReturn MachineBridgeNode::on_error(const rclcpp_lifec
     remotes_pub_->on_deactivate();
   }
   param_cb_handle_.reset();
-  configure_srv_.reset();
   state_pub_.reset();
   relay_pub_.reset();
   remotes_pub_.reset();
@@ -322,12 +289,8 @@ rcl_interfaces::msg::SetParametersResult MachineBridgeNode::on_set_parameters(
     }
   }
   if (timing_changed) {
-    std::string reason;
-    if (!validate_timing(proposed, reason)) {
-      res.successful = false;
-      res.reason = "rejected (safety floor): " + reason;
-      return res;
-    }
+    // The floor is already enforced by the generated ParamListener's ranges,
+    // which run before this callback — anything reaching here is in-envelope.
     // Apply. The software backend's configure() only stashes timing (the
     // machine thread applies it), so this is non-blocking there. The hardware
     // backend does a bounded admin POST — acceptable for a rare operator set.
@@ -344,39 +307,7 @@ rcl_interfaces::msg::SetParametersResult MachineBridgeNode::on_set_parameters(
   return res;
 }
 
-void MachineBridgeNode::handle_configure(
-  const std::shared_ptr<ConfigureMachine::Request> req,
-  std::shared_ptr<ConfigureMachine::Response> resp)
-{
-  MachineTiming proposed = timing_;
-  if (req->heartbeat_ms > 0) {
-    proposed.heartbeat_ms = static_cast<uint64_t>(req->heartbeat_ms);
-  }
-  if (req->max_missed > 0) {
-    proposed.max_missed = static_cast<uint16_t>(req->max_missed);
-  }
-  if (req->min_stop_ms >= 0) {
-    proposed.min_stop_ms = static_cast<uint64_t>(req->min_stop_ms);
-  }
-
-  std::string reason;
-  if (!validate_timing(proposed, reason)) {
-    resp->success = false;
-    resp->message = "rejected (safety floor): " + reason;
-  } else if (!backend_) {
-    resp->success = false;
-    resp->message = "no backend";
-  } else if (!backend_->configure(proposed, reason)) {
-    resp->success = false;
-    resp->message = "backend refused: " + reason;
-  } else {
-    timing_ = proposed;
-    resp->success = true;
-    resp->message = "applied";
-  }
-  resp->heartbeat_ms = static_cast<int64_t>(timing_.heartbeat_ms);
-  resp->max_missed = static_cast<int32_t>(timing_.max_missed);
-  resp->min_stop_ms = static_cast<int64_t>(timing_.min_stop_ms);
-}
-
 }  // namespace protective_stop_machine
+
+#include "rclcpp_components/register_node_macro.hpp"
+RCLCPP_COMPONENTS_REGISTER_NODE(protective_stop_machine::MachineBridgeNode)

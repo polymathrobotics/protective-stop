@@ -1,0 +1,96 @@
+---
+protective_stop_machine:
+  backend:
+    type: string
+    default_value: software
+    read_only: true
+    description: Machine backend to run. 'software' hosts pstop_c in-process; 'hardware' polls the ESP32 machn over HTTP. Validated in build_backend().
+  machine_id:
+    type: int
+    default_value: 16909060  # 0x01020304
+    read_only: true
+    description: 32-bit machine identity advertised to bonded remotes.
+  frame_id:
+    type: string
+    default_value: pstop_machine
+    read_only: true
+    description: TF frame id stamped on published machine state.
+
+  software:
+    bind_addr:
+      type: string
+      default_value: 0.0.0.0
+      read_only: true
+      description: UDP bind address for the in-process software backend.
+    port:
+      type: int
+      default_value: 8890
+      read_only: true
+      description: UDP port for the in-process software backend.
+      validation:
+        bounds<>: [1, 65535]
+
+  hardware:
+    device_url:
+      type: string
+      default_value: http://127.0.0.1
+      read_only: true
+      description: Base URL of the ESP32 machn admin/state HTTP API.
+    admin_user:
+      type: string
+      default_value: admin
+      read_only: true
+      description: HTTP basic-auth user for the device admin API (password comes from PSTOP_MACHINE_ADMIN_PASS, never a param).
+
+  # timing.* is the only dynamic group: the bounds<>/gt_eq<> ranges below ARE the
+  # SR-M-01 safety floors — the generated ParamListener rejects any out-of-floor
+  # value (at declare time and on a live set) before it can apply.
+  timing:
+    heartbeat_ms:
+      type: int
+      default_value: 400
+      description: Remote heartbeat window (SF-1 stop latency). Floor SR-M-01.
+      validation:
+        bounds<>: [50, 1000]
+    max_missed:
+      type: int
+      default_value: 3
+      description: Missed heartbeats tolerated before STOP. Floor SR-M-01.
+      validation:
+        bounds<>: [1, 5]
+    min_stop_ms:
+      type: int
+      default_value: 500
+      description: Anti-blip arming-delay floor (SF-3). Floor SR-M-01.
+      validation:
+        gt_eq<>: 100
+
+  # Rates are read at configure/activate; changing them needs a restart.
+  rates:
+    publish_rate_hz:
+      type: double
+      default_value: 10.0
+      read_only: true
+      description: State publish rate.
+      validation:
+        gt_eq<>: 0.0
+    state_poll_hz:
+      type: double
+      default_value: 5.0
+      read_only: true
+      description: Hardware backend /state.json poll rate.
+      validation:
+        gt_eq<>: 0.0
+    diagnostics_rate_hz:
+      type: double
+      default_value: 1.0
+      read_only: true
+      description: diagnostic_updater refresh rate.
+      validation:
+        gt_eq<>: 0.0
+
+  autostart:
+    type: bool
+    default_value: false
+    read_only: true
+    description: If true, the node configures and activates itself on startup (launch sets this true; left false for tests and manual lifecycle control).

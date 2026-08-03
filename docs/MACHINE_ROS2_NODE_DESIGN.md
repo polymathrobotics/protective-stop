@@ -40,7 +40,7 @@ ROS 2 merely goes blind. This property is a design invariant, re-checked in §8.
 Allowed control, none of which can *create* an unsafe RUN state:
 
 - **Reconfigure timing** — heartbeat period, `max_missed`, `min_stop_ms`, poll
-  rate — via dynamic parameters and/or a `configure_machine` service. Tightening
+  rate — via dynamic parameters. Tightening
   these can only make the machine *more* conservative at runtime; validation
   (§4) refuses values looser than the compile-time safe envelope.
 - **Target/peer management** — which remotes the software machine expects, or
@@ -116,8 +116,10 @@ messages there so remote/machine share one interface package.
 ### Services (bridge + control)
 | Service | Type | Effect |
 |---|---|---|
-| `~/configure_machine` | extend `ProtectiveStop.srv` (carries `ProtectiveStopParams`) | push validated timing to the backend at runtime |
 | `~/get_status` | `Trigger`-like | synchronous snapshot for scripting |
+
+Runtime timing reconfiguration is done through dynamic parameters (validated
+against the safety floor on `on_set_parameters`), not a dedicated service.
 
 No `arm` service (see §2).
 
@@ -172,7 +174,7 @@ protective_stop_machine/                 # ament_cmake, C++17
     hardware_backend.cpp                 # libcurl + nlohmann/json
     main.cpp
   config/machine_params.yaml             # generate_parameter_library source + defaults
-  launch/machine_bridge.launch.py        # lifecycle bringup (+ optional lifecycle_manager)
+  launch/machine_bridge.launch.yaml      # lifecycle bringup (autostart via node param)
   test/                                   # gtest (backend logic) + launch_testing (transitions)
 protective_stop_msg/                      # restored from archive/, + MachineRelayStatus, BondedRemoteArray
 ```
@@ -223,7 +225,7 @@ only observe, report, and tighten.
    ROS 2 build deps that #53 slimmed out.
 3. **Hardware backend scope** — **full control proxy**: the hardware backend not
    only publishes state but proxies config/peer-slot changes to the ESP32 via
-   its admin API, so `~/configure_machine` and target management work uniformly
+   its admin API, so timing reconfiguration and target management work uniformly
    across both backends (§5). Still bounded by the safety validator (§4): proxied
    config can only tighten, never arm.
 4. **`machine_app_runner`** — **kept** as a headless / CI tool. The node's
