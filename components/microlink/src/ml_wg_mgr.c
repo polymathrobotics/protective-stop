@@ -961,18 +961,36 @@ static int add_peer(microlink_t * ml, const ml_peer_update_t * update)
     IP4_ADDR(&wg_peer.allowed_ip.u_addr.ip4, ip_a, ip_b, ip_c, ip_d);
     IP4_ADDR(&wg_peer.allowed_mask.u_addr.ip4, 255, 255, 255, 255);
 
-    /* Set endpoint if available, otherwise leave blank for DERP-only */
-    if (p->endpoint_count > 0 && p->endpoints[0].ip != 0) {
-      uint8_t ea = (p->endpoints[0].ip >> 24) & 0xFF;
-      uint8_t eb = (p->endpoints[0].ip >> 16) & 0xFF;
-      uint8_t ec = (p->endpoints[0].ip >> 8) & 0xFF;
-      uint8_t ed = p->endpoints[0].ip & 0xFF;
-      IP4_ADDR(&wg_peer.endpoint_ip.u_addr.ip4, ea, eb, ec, ed);
-      wg_peer.endport_port = p->endpoints[0].port;
-    } else {
-      ip_addr_set_any(false, &wg_peer.endpoint_ip);
-      wg_peer.endport_port = 0;
-    }
+    /* Start every peer DERP-only — NEVER install a netmap-advertised endpoint
+     * as the live WG endpoint.
+     *
+     * Root cause of the DERP-only-unreachable bug (2026-08-02): the
+     * netmap/STUN endpoints a peer advertises are UNVALIDATED candidates. We
+     * keep them in p->endpoints[] purely for DISCO probing. But
+     * wireguardif_add_peer() copies wg_peer.endpoint_ip straight into
+     * peer->ip (wireguardif.c:1084-1087), and wireguardif_peer_output()
+     * (wireguardif.c:158) then routes ALL WireGuard traffic — including the
+     * handshake RESPONSE — to peer->ip via direct UDP, bypassing DERP
+     * entirely whenever peer->ip is non-any.
+     *
+     * Behind a hard / endpoint-dependent NAT that advertised endpoint is
+     * unreachable in the peer->chip direction, so every reply the chip sends
+     * blackholes and the WG session never forms — while relayed DISCO pongs
+     * (which process_disco_ping sends *explicitly* over DERP) still return,
+     * producing the pathognomonic "tailscale ping OK / TCP+HTTP data dead"
+     * asymmetry (relay rx stuck at a few hundred bytes).
+     *
+     * Fix: leave the live endpoint blank so the peer is DERP-homed. The live
+     * direct endpoint is installed only after PROOF of bidirectional
+     * reachability — a txid-matched DISCO direct pong (process_disco_pong ->
+     * wireguardif_update_endpoint + wireguardif_connect) or a genuinely
+     * received direct WG packet (update_peer_addr roaming). This mirrors
+     * tailscaled/magicsock: DERP-home first, upgrade to a direct path only
+     * once it is validated both ways. DISCO probing of p->endpoints[]
+     * continues to run, so genuinely reachable direct paths still upgrade
+     * within one probe interval. */
+    ip_addr_set_any(false, &wg_peer.endpoint_ip);
+    wg_peer.endport_port = 0;
 
     wg_peer.keep_alive = 25;
 
