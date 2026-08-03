@@ -249,12 +249,29 @@ void dcs_nvs_read_pstop_peers(dcs_pstop_peer_rec_t out[DCS_PSTOP_MAX_MACHINES])
     return;
   }
 
-  /* Blob absent (first boot on this firmware) or unreadable: migrate the
-   * legacy single peer into slot 0 so existing installs keep working. */
-  out[0].configured = true;
-  out[0].ip = dcs_nvs_read_pstop_peer_ip();
-  out[0].port = dcs_nvs_read_pstop_peer_port();
-  out[0].machine_id = DCS_PSTOP_DEFAULT_MACHINE_ID;
+  /* Blob absent (first boot on this firmware) or unreadable: migrate a
+   * legacy single peer into slot 0 so existing installs keep working — but
+   * ONLY if one was actually persisted. A blank NVS (fresh production flash,
+   * fleet-only remote with no machine yet) has no ps_ip key; the legacy
+   * readers would substitute a hardcoded DEFAULT ip/port, fabricating a
+   * configured-but-unreachable machine slot that lights the safety ring
+   * yellow (UNREACHABLE) instead of white (IDLE). So probe for the real key:
+   * migrate only when it exists, otherwise leave the table zeroed = no
+   * machine configured. */
+  nvs_handle_t lh;
+  bool have_legacy = false;
+  uint32_t legacy_ip = 0;
+  if (nvs_open(DCS_NVS_NS, NVS_READONLY, &lh) == ESP_OK) {
+    have_legacy = (nvs_get_u32(lh, DCS_NVS_KEY_PSTOP_IP, &legacy_ip) == ESP_OK);
+    nvs_close(lh);
+  }
+  if (have_legacy) {
+    out[0].configured = true;
+    out[0].ip = legacy_ip;
+    out[0].port = dcs_nvs_read_pstop_peer_port();
+    out[0].machine_id = DCS_PSTOP_DEFAULT_MACHINE_ID;
+  }
+  /* else: no legacy peer -> whole table stays zeroed (no machine configured). */
 }
 
 esp_err_t dcs_nvs_write_pstop_peers(const dcs_pstop_peer_rec_t recs[DCS_PSTOP_MAX_MACHINES])
