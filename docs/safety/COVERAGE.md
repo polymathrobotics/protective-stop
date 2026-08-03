@@ -20,7 +20,7 @@ _Baselines as of 2026-08-02. Numbers are first measurements, not targets met._
 | Codebase | Tool | Line | Branch | MC/DC | Driver |
 |---|---|---|---|---|---|
 | **Host machine** `machine_app_runner.c` | gcov-14 / gcovr | **71.4%** (332/465) | **57.9%** (202/349) | **58.3%** (189/324) | `pstop_multi_remote_test.py` (34/34) + `test_config_floor.py` (7/7, SR-H-03) |
-| **ROS2 machine** (hand-written) | gcov-11 / gcovr | see per-module | — | — | `test_json_lite` (4/4) only |
+| **ROS2 machine** (hand-written) | gcov-11 / gcovr | **~89%** (624/703) | see per-module | — | 6 gtest suites (56 tests): `test_json_lite`, `test_timing_floors`, `test_hardware_parse`, `test_hardware_backend`, `test_lifecycle`, `test_node_runtime` |
 | **Remote firmware — decision core** `estop_verdict.c` | **host harness, gcc-14** | **100%** (26/26) | **100%** (36/36) | **100% MC/DC** (36/36) | `firmware/test/test_estop_verdict` (39/39) |
 
 **Firmware = hybrid (decided 2026-08-02).** On-target gcov is infeasible — the
@@ -33,32 +33,53 @@ behaviour-preserving refactor: firmware rebuilds + links clean, and the on-targe
 path is validated functionally (the A/B HIL bench runs). _On-bench smoke of this
 specific build is pending a direct tailnet path (bench currently DERP-relayed)._
 
-### ROS2 per-module (the gap is stark and expected)
+### ROS2 per-module — updated 2026-08-02 (executor + HTTP-seam suites added)
+Re-measured with gcovr 8.6 (line/branch counts differ slightly from the earlier
+snapshot — 8.6 counts inline/header lines differently — so the `json_lite.hpp`
+and `timing_floors.hpp` rows, untouched this round, are restated in the same
+tool for consistency). `2026-08-02 was:` shows the prior figure where a module
+was driven up this round.
+
 | Module | Lines | Line cov | Branch cov | Note |
 |---|---|---|---|---|
-| `json_lite.hpp` | 119 | **84.0%** | 53.4% | only unit-tested module (functions 100%) |
-| `software_backend.cpp` | 121 | **66.1%** | — | `test_lifecycle` — full software lifecycle (construct / start / stop) |
-| `hardware_backend.cpp` | 180 | **24.4%** | 22.4% | `parse_state` covered by `test_hardware_parse` (10/10, SR-M-03/DU-9); rest is HTTP/curl plumbing |
-| `timing_floors.hpp` | 14 | **100%** | 65.6% | `test_timing_floors` (8/8) — the runtime-config safety envelope (SR-M-01) |
-| `machine_bridge_node.cpp` | 233 | **45.5%** | 27.7% | `test_lifecycle` (5/5) — configure/activate/deactivate/cleanup + reject unsafe-config / unknown-backend (SR-M-01/07) |
-| `main.cpp` | 11 | **0%** | — | entry point only |
+| `json_lite.hpp` | 183 | **76.5%** | 56.8% | unit-tested (`test_json_lite`); functions 100% |
+| `software_backend.cpp` | 120 | **75.0%** (was 65.0%) | **40.0%** (was 34.0%) | `test_lifecycle` + `test_node_runtime` now run the machine loop live (start/activate/publish/stop); residual is pstop_c protocol callbacks + remote-enumeration, reachable only with live UDP remote traffic |
+| `hardware_backend.cpp` | 142 | **98.6%** (was 24.6%) | **59.5%** (was 22.4%) | `test_hardware_parse` (parse) + new `test_hardware_backend` drives `http_get`/`http_post`/`write_cb`/poll/start/stop/`configure` against a loopback HTTP stub + a closed port (SR-M-03). Only the two `curl_easy_init()==NULL` OOM guards remain |
+| `timing_floors.hpp` | 13 | **100%** | 65.6% | `test_timing_floors` (8/8) — runtime-config safety envelope (SR-M-01) |
+| `machine_bridge_node.cpp` | 245 | **98.4%** (was 43.3%) | **49.8%** (was 27.7%) | `test_lifecycle` + new `test_node_runtime` spin an executor: `publish_tick`, every `diagnostics` summary branch (OK/WARN/ERROR, driven off canned `/state.json`), `on_set_parameters` accept/reject, the `~/configure_machine` service (apply/reject/backend-refused), and `on_error`/`on_shutdown`/activate-start-failure (SR-M-01/03/07). Functions 100% |
+| `main.cpp` | 11 | **0%** | — | entry point only (deliberately excluded) |
 
-Hand-written ROS2 is now **~53% line** (334/633) across **4 test suites (27 tests)**
-— up from ~11% (json_lite-only) at the start. Remaining gaps are the harder
-paths: `publish_tick`/`diagnostics`/`on_set_parameters`/the configure service
-(need a spun executor), the hardware-backend HTTP plumbing, and
-`on_error`/`on_shutdown`.
+Hand-written ROS2 is now **~89% line** (624/703 across `src`+`include`, excluding
+the entry-point `main.cpp`) over **6 test suites (56 tests)** — up from ~53% line
+/ 4 suites (27 tests) at the start of this round. The remaining structural gaps
+are honest and bounded:
+- **software_backend.cpp** — the pstop_c C callbacks (`cb_remote_details`,
+  `cb_log`), the UDP message-processing branch in `run()`, and the
+  remote-enumeration loop in `rebuild_snapshot()` fire only when a live pstop
+  *remote* bonds over UDP. Covered functionally by the host `pstop_multi_remote`
+  E2E, not by these in-process node tests (no remote peer stood up).
+- **hardware_backend.cpp** — only the `curl_easy_init()==NULL` allocation-failure
+  guards (2 lines) are uncovered; not reachable without malloc fault injection.
+- **machine_bridge_node.cpp** — the residual lines are unreachable guards: the
+  `publish_tick` null-backend early-return (the timer only exists while a backend
+  does) and the `handle_configure` "no backend" branch (the service only exists
+  once a backend is built). Branch % is bounded by rclcpp-internal conditionals
+  in the message/QoS templates, not node logic.
+- Branch coverage still trails line coverage because the libcurl 2xx/auth
+  option-setting and the rclcpp publish/QoS machinery expand many
+  compiler-visible conditionals that a functional test does not fan out.
 
 ## 2. Requirements coverage — baseline (`TRACEABILITY.md`)
 Two definitions, reported both ways to stay honest:
 
 | Metric | Value |
 |---|---|
-| SRs with ≥1 passing verifying test | **25/39 = 64.1%** |
-| SRs **strictly fully-verified** | **13/39 = 33.3%** |
+| SRs with ≥1 passing verifying test | **27/39 = 69.2%** |
+| SRs **strictly fully-verified** | **15/39 = 38.5%** |
 | Safety functions (F-xx) traced to ≥1 SR | **22/27 = 81.5%** (88% excl. 2 declared-non-safety) |
 
-Status of the 39 SRs: **13 Verified · 11 Partial · 13 Unverified-gap · 2 Residual-accepted.**
+Status of the 39 SRs: **15 Verified · 11 Partial · 11 Unverified-gap · 2 Residual-accepted**
+(SR-M-01 + SR-M-03 verified 2026-08-02 by the new ROS 2 executor/HTTP-seam suites).
 `SR-R` (remote firmware) is the weak spot — 8/15 unverified, holding 5 of the 6
 top DU gaps. Full matrix + test-gap register + function→SR reverse map in
 `TRACEABILITY.md`. SIL3/PLe stays **allocated, not achieved**.
