@@ -1,12 +1,11 @@
 // SPDX-FileCopyrightText: 2026 Polymath Robotics, Inc.
 // SPDX-License-Identifier: Apache-2.0
-#include <memory>
-
 #include <curl/curl.h>
 
-#include "rclcpp/rclcpp.hpp"
+#include <memory>
 
 #include "protective_stop_machine/machine_bridge_node.hpp"
+#include "rclcpp/rclcpp.hpp"
 
 int main(int argc, char ** argv)
 {
@@ -18,8 +17,7 @@ int main(int argc, char ** argv)
   // callbacks (publish timer, service, params, diagnostics) without contending
   // with the machine loop.
   rclcpp::executors::MultiThreadedExecutor exec;
-  auto node = std::make_shared<protective_stop_machine::MachineBridgeNode>(
-    rclcpp::NodeOptions());
+  auto node = std::make_shared<protective_stop_machine::MachineBridgeNode>(rclcpp::NodeOptions());
   exec.add_node(node->get_node_base_interface());
   exec.spin();
   rclcpp::shutdown();

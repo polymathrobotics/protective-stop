@@ -6,9 +6,9 @@
 // (min_stop_ms below the floor) or the stop latency (heartbeat window too wide,
 // too many missed) must be rejected. Parity with the host runner's cfg_validate.
 
-#include <string>
-
 #include <gtest/gtest.h>
+
+#include <string>
 
 #include "protective_stop_machine/timing_floors.hpp"
 
@@ -29,16 +29,14 @@ TEST(TimingFloors, ValidDefaultsAccepted)
 {
   std::string r = "dirty";
   EXPECT_TRUE(timing_within_floors(mk(400, 3, 500), r));
-  EXPECT_TRUE(r.empty());   // reason cleared on success
+  EXPECT_TRUE(r.empty());  // reason cleared on success
 }
 
 TEST(TimingFloors, BoundariesAccepted)
 {
   std::string r;
-  EXPECT_TRUE(timing_within_floors(
-      mk(floor::kMinHeartbeatMs, floor::kMinMaxMissed, floor::kMinStopFloorMs), r));
-  EXPECT_TRUE(timing_within_floors(
-      mk(floor::kMaxHeartbeatMs, floor::kMaxMaxMissed, 100000), r));
+  EXPECT_TRUE(timing_within_floors(mk(floor::kMinHeartbeatMs, floor::kMinMaxMissed, floor::kMinStopFloorMs), r));
+  EXPECT_TRUE(timing_within_floors(mk(floor::kMaxHeartbeatMs, floor::kMaxMaxMissed, 100000), r));
 }
 
 TEST(TimingFloors, HeartbeatTooLowRejected)
@@ -48,7 +46,7 @@ TEST(TimingFloors, HeartbeatTooLowRejected)
   EXPECT_NE(r.find("heartbeat_ms"), std::string::npos);
 }
 
-TEST(TimingFloors, HeartbeatTooHighRejected)   // window > 1 s defeats SF-1 latency
+TEST(TimingFloors, HeartbeatTooHighRejected)  // window > 1 s defeats SF-1 latency
 {
   std::string r;
   EXPECT_FALSE(timing_within_floors(mk(floor::kMaxHeartbeatMs + 1, 3, 500), r));
@@ -76,7 +74,7 @@ TEST(TimingFloors, MinStopBelowFloorRejected)
   EXPECT_NE(r.find("min_stop_ms"), std::string::npos);
 }
 
-TEST(TimingFloors, MinStopZeroDefeatArmingRejected)   // SF-3
+TEST(TimingFloors, MinStopZeroDefeatArmingRejected)  // SF-3
 {
   std::string r;
   EXPECT_FALSE(timing_within_floors(mk(400, 3, 0), r));

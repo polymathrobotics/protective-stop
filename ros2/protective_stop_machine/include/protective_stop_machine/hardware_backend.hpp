@@ -16,9 +16,9 @@ namespace protective_stop_machine
 
 struct HardwareConfig
 {
-  std::string device_url{"http://127.0.0.1"};   // ESP32 machn admin/state URL
+  std::string device_url{"http://127.0.0.1"};  // ESP32 machn admin/state URL
   std::string admin_user{"admin"};
-  std::string admin_pass;                        // from env, never a param file
+  std::string admin_pass;  // from env, never a param file
   double poll_hz{5.0};
   double http_timeout_s{2.0};
 };
@@ -38,7 +38,11 @@ public:
   void stop() override;
   MachineSnapshot snapshot() const override;
   bool configure(const MachineTiming & timing, std::string & error) override;
-  const char * name() const override {return "hardware";}
+
+  const char * name() const override
+  {
+    return "hardware";
+  }
 
   // Pure /state.json -> MachineSnapshot mapping (no HTTP, no threading),
   // extracted so the safety-relevant parse (relay_stop -> run/stop, mismatch,
@@ -50,9 +54,10 @@ public:
 private:
   void poll_loop();
   // HTTP helpers (libcurl). Return true + body on 2xx.
+  // NOLINTNEXTLINE(runtime/int)
   bool http_get(const std::string & path, std::string & body, long & status);
-  bool http_post(const std::string & path, const std::string & json,
-    std::string & body, long & status);
+  // NOLINTNEXTLINE(runtime/int)
+  bool http_post(const std::string & path, const std::string & json, std::string & body, long & status);
 
   HardwareConfig cfg_;
   std::thread th_;

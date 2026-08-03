@@ -21,10 +21,10 @@ namespace protective_stop_machine
 namespace floor
 {
 constexpr uint64_t kMinHeartbeatMs = 50;
-constexpr uint64_t kMaxHeartbeatMs = 1000;      // window can't exceed 1 s
+constexpr uint64_t kMaxHeartbeatMs = 1000;  // window can't exceed 1 s
 constexpr uint16_t kMinMaxMissed = 1;
-constexpr uint16_t kMaxMaxMissed = 5;           // can't tolerate more than 5
-constexpr uint64_t kMinStopFloorMs = 100;       // anti-blip arming delay floor
+constexpr uint16_t kMaxMaxMissed = 5;  // can't tolerate more than 5
+constexpr uint64_t kMinStopFloorMs = 100;  // anti-blip arming delay floor
 }  // namespace floor
 
 // True iff t is within the safety floors; else false with a human-readable
@@ -33,12 +33,12 @@ inline bool timing_within_floors(const MachineTiming & t, std::string & reason)
 {
   if (t.heartbeat_ms < floor::kMinHeartbeatMs || t.heartbeat_ms > floor::kMaxHeartbeatMs) {
     reason = "heartbeat_ms out of [" + std::to_string(floor::kMinHeartbeatMs) + "," +
-      std::to_string(floor::kMaxHeartbeatMs) + "]";
+             std::to_string(floor::kMaxHeartbeatMs) + "]";
     return false;
   }
   if (t.max_missed < floor::kMinMaxMissed || t.max_missed > floor::kMaxMaxMissed) {
-    reason = "max_missed out of [" + std::to_string(floor::kMinMaxMissed) + "," +
-      std::to_string(floor::kMaxMaxMissed) + "]";
+    reason =
+      "max_missed out of [" + std::to_string(floor::kMinMaxMissed) + "," + std::to_string(floor::kMaxMaxMissed) + "]";
     return false;
   }
   if (t.min_stop_ms < floor::kMinStopFloorMs) {

@@ -34,7 +34,11 @@ public:
   void stop() override;
   MachineSnapshot snapshot() const override;
   bool configure(const MachineTiming & timing, std::string & error) override;
-  const char * name() const override {return "software";}
+
+  const char * name() const override
+  {
+    return "software";
+  }
 
   // Opaque; fully defined in the .cpp (hides the pstop_c C types). Public so the
   // file-scope C callbacks in the .cpp can reach it, but the instance is private.

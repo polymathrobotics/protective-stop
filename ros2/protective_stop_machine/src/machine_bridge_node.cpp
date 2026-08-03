@@ -6,9 +6,11 @@
 // IMachineBackend. See docs/MACHINE_ROS2_NODE_DESIGN.md.
 #include "protective_stop_machine/machine_bridge_node.hpp"
 
+#include <algorithm>
 #include <cstdlib>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "protective_stop_machine/hardware_backend.hpp"
@@ -36,10 +38,10 @@ MachineBridgeNode::MachineBridgeNode(const rclcpp::NodeOptions & options)
 void MachineBridgeNode::declare_all_parameters()
 {
   auto ro = []() {
-      rcl_interfaces::msg::ParameterDescriptor d;
-      d.read_only = true;
-      return d;
-    };
+    rcl_interfaces::msg::ParameterDescriptor d;
+    d.read_only = true;
+    return d;
+  };
 
   declare_parameter<std::string>("backend", "software", ro());
   declare_parameter<int>("machine_id", 0x01020304, ro());
@@ -72,7 +74,9 @@ bool MachineBridgeNode::build_backend(std::string & error)
   timing_.heartbeat_ms = static_cast<uint64_t>(get_parameter("timing.heartbeat_ms").as_int());
   timing_.max_missed = static_cast<uint16_t>(get_parameter("timing.max_missed").as_int());
   timing_.min_stop_ms = static_cast<uint64_t>(get_parameter("timing.min_stop_ms").as_int());
-  if (!validate_timing(timing_, error)) {return false;}
+  if (!validate_timing(timing_, error)) {
+    return false;
+  }
 
   frame_id_ = get_parameter("frame_id").as_string();
   backend_kind_ = get_parameter("backend").as_string();
@@ -100,8 +104,7 @@ bool MachineBridgeNode::build_backend(std::string & error)
   return false;
 }
 
-MachineBridgeNode::CallbackReturn
-MachineBridgeNode::on_configure(const rclcpp_lifecycle::State &)
+MachineBridgeNode::CallbackReturn MachineBridgeNode::on_configure(const rclcpp_lifecycle::State &)
 {
   std::string err;
   if (!build_backend(err)) {
@@ -117,18 +120,16 @@ MachineBridgeNode::on_configure(const rclcpp_lifecycle::State &)
 
   configure_srv_ = create_service<ConfigureMachine>(
     "~/configure_machine",
-    std::bind(&MachineBridgeNode::handle_configure, this,
-    std::placeholders::_1, std::placeholders::_2));
+    std::bind(&MachineBridgeNode::handle_configure, this, std::placeholders::_1, std::placeholders::_2));
 
-  param_cb_handle_ = add_on_set_parameters_callback(
-    std::bind(&MachineBridgeNode::on_set_parameters, this, std::placeholders::_1));
+  param_cb_handle_ =
+    add_on_set_parameters_callback(std::bind(&MachineBridgeNode::on_set_parameters, this, std::placeholders::_1));
 
   RCLCPP_INFO(get_logger(), "configured: backend=%s", backend_kind_.c_str());
   return CallbackReturn::SUCCESS;
 }
 
-MachineBridgeNode::CallbackReturn
-MachineBridgeNode::on_activate(const rclcpp_lifecycle::State & s)
+MachineBridgeNode::CallbackReturn MachineBridgeNode::on_activate(const rclcpp_lifecycle::State & s)
 {
   // Start the backend FIRST so a failure needs no rollback (publishers/timer
   // not yet activated).
@@ -137,15 +138,14 @@ MachineBridgeNode::on_activate(const rclcpp_lifecycle::State & s)
     return CallbackReturn::FAILURE;
   }
 
-  LifecycleNode::on_activate(s);   // activate managed publishers
+  LifecycleNode::on_activate(s);  // activate managed publishers
   state_pub_->on_activate();
   relay_pub_->on_activate();
   remotes_pub_->on_activate();
 
   const double hz = std::max(1.0, get_parameter("rates.publish_rate_hz").as_double());
-  pub_timer_ = create_wall_timer(
-    std::chrono::duration<double>(1.0 / hz),
-    std::bind(&MachineBridgeNode::publish_tick, this));
+  pub_timer_ =
+    create_wall_timer(std::chrono::duration<double>(1.0 / hz), std::bind(&MachineBridgeNode::publish_tick, this));
 
   const double dhz = std::max(0.1, get_parameter("rates.diagnostics_rate_hz").as_double());
   diag_ = std::make_shared<diagnostic_updater::Updater>(this, 1.0 / dhz);
@@ -156,12 +156,16 @@ MachineBridgeNode::on_activate(const rclcpp_lifecycle::State & s)
   return CallbackReturn::SUCCESS;
 }
 
-MachineBridgeNode::CallbackReturn
-MachineBridgeNode::on_deactivate(const rclcpp_lifecycle::State & s)
+MachineBridgeNode::CallbackReturn MachineBridgeNode::on_deactivate(const rclcpp_lifecycle::State & s)
 {
-  if (pub_timer_) {pub_timer_->cancel(); pub_timer_.reset();}
+  if (pub_timer_) {
+    pub_timer_->cancel();
+    pub_timer_.reset();
+  }
   diag_.reset();
-  if (backend_) {backend_->stop();}   // -> machine safe (remotes fail-safe)
+  if (backend_) {
+    backend_->stop();
+  }  // -> machine safe (remotes fail-safe)
   state_pub_->on_deactivate();
   relay_pub_->on_deactivate();
   remotes_pub_->on_deactivate();
@@ -170,8 +174,7 @@ MachineBridgeNode::on_deactivate(const rclcpp_lifecycle::State & s)
   return CallbackReturn::SUCCESS;
 }
 
-MachineBridgeNode::CallbackReturn
-MachineBridgeNode::on_cleanup(const rclcpp_lifecycle::State &)
+MachineBridgeNode::CallbackReturn MachineBridgeNode::on_cleanup(const rclcpp_lifecycle::State &)
 {
   param_cb_handle_.reset();
   configure_srv_.reset();
@@ -182,22 +185,29 @@ MachineBridgeNode::on_cleanup(const rclcpp_lifecycle::State &)
   return CallbackReturn::SUCCESS;
 }
 
-MachineBridgeNode::CallbackReturn
-MachineBridgeNode::on_shutdown(const rclcpp_lifecycle::State &)
+MachineBridgeNode::CallbackReturn MachineBridgeNode::on_shutdown(const rclcpp_lifecycle::State &)
 {
-  if (pub_timer_) {pub_timer_->cancel();}
-  if (backend_) {backend_->stop();}
+  if (pub_timer_) {
+    pub_timer_->cancel();
+  }
+  if (backend_) {
+    backend_->stop();
+  }
   return CallbackReturn::SUCCESS;
 }
 
-MachineBridgeNode::CallbackReturn
-MachineBridgeNode::on_error(const rclcpp_lifecycle::State &)
+MachineBridgeNode::CallbackReturn MachineBridgeNode::on_error(const rclcpp_lifecycle::State &)
 {
   // error -> unconfigured: the framework does NOT call on_cleanup afterward, so
   // release everything here (a leaked timer would keep firing publish_tick).
-  if (pub_timer_) {pub_timer_->cancel(); pub_timer_.reset();}
+  if (pub_timer_) {
+    pub_timer_->cancel();
+    pub_timer_.reset();
+  }
   diag_.reset();
-  if (backend_) {backend_->stop();}   // safe: machine stops -> remotes fail-safe
+  if (backend_) {
+    backend_->stop();
+  }  // safe: machine stops -> remotes fail-safe
   // Emit one explicit UNSTABLE before tearing down the publishers (design §8).
   if (state_pub_ && state_pub_->is_activated()) {
     ProtectiveStopStatus st;
@@ -220,7 +230,9 @@ MachineBridgeNode::on_error(const rclcpp_lifecycle::State &)
 
 void MachineBridgeNode::publish_tick()
 {
-  if (!backend_) {return;}
+  if (!backend_) {
+    return;
+  }
   last_snapshot_ = backend_->snapshot();
   const auto & s = last_snapshot_;
   const auto now = this->now();
@@ -262,7 +274,9 @@ void MachineBridgeNode::diagnostics(diagnostic_updater::DiagnosticStatusWrapper 
   const auto & s = last_snapshot_;
   using diagnostic_msgs::msg::DiagnosticStatus;
   if (!s.reachable) {
-    stat.summary(DiagnosticStatus::ERROR, "backend unreachable — ROS blind "
+    stat.summary(
+      DiagnosticStatus::ERROR,
+      "backend unreachable — ROS blind "
       "(machine still enforces independently)");
   } else if (s.relay.fault_a || s.relay.fault_b) {
     stat.summary(DiagnosticStatus::ERROR, "relay feedback fault");
@@ -280,8 +294,8 @@ void MachineBridgeNode::diagnostics(diagnostic_updater::DiagnosticStatusWrapper 
   stat.add("mismatch", s.relay.mismatch);
 }
 
-rcl_interfaces::msg::SetParametersResult
-MachineBridgeNode::on_set_parameters(const std::vector<rclcpp::Parameter> & params)
+rcl_interfaces::msg::SetParametersResult MachineBridgeNode::on_set_parameters(
+  const std::vector<rclcpp::Parameter> & params)
 {
   rcl_interfaces::msg::SetParametersResult res;
   res.successful = true;
@@ -289,11 +303,14 @@ MachineBridgeNode::on_set_parameters(const std::vector<rclcpp::Parameter> & para
   bool timing_changed = false;
   for (const auto & p : params) {
     if (p.get_name() == "timing.heartbeat_ms") {
-      proposed.heartbeat_ms = static_cast<uint64_t>(p.as_int()); timing_changed = true;
+      proposed.heartbeat_ms = static_cast<uint64_t>(p.as_int());
+      timing_changed = true;
     } else if (p.get_name() == "timing.max_missed") {
-      proposed.max_missed = static_cast<uint16_t>(p.as_int()); timing_changed = true;
+      proposed.max_missed = static_cast<uint16_t>(p.as_int());
+      timing_changed = true;
     } else if (p.get_name() == "timing.min_stop_ms") {
-      proposed.min_stop_ms = static_cast<uint64_t>(p.as_int()); timing_changed = true;
+      proposed.min_stop_ms = static_cast<uint64_t>(p.as_int());
+      timing_changed = true;
     }
   }
   if (timing_changed) {
@@ -320,13 +337,18 @@ MachineBridgeNode::on_set_parameters(const std::vector<rclcpp::Parameter> & para
 }
 
 void MachineBridgeNode::handle_configure(
-  const std::shared_ptr<ConfigureMachine::Request> req,
-  std::shared_ptr<ConfigureMachine::Response> resp)
+  const std::shared_ptr<ConfigureMachine::Request> req, std::shared_ptr<ConfigureMachine::Response> resp)
 {
   MachineTiming proposed = timing_;
-  if (req->heartbeat_ms > 0) {proposed.heartbeat_ms = static_cast<uint64_t>(req->heartbeat_ms);}
-  if (req->max_missed > 0) {proposed.max_missed = static_cast<uint16_t>(req->max_missed);}
-  if (req->min_stop_ms >= 0) {proposed.min_stop_ms = static_cast<uint64_t>(req->min_stop_ms);}
+  if (req->heartbeat_ms > 0) {
+    proposed.heartbeat_ms = static_cast<uint64_t>(req->heartbeat_ms);
+  }
+  if (req->max_missed > 0) {
+    proposed.max_missed = static_cast<uint16_t>(req->max_missed);
+  }
+  if (req->min_stop_ms >= 0) {
+    proposed.min_stop_ms = static_cast<uint64_t>(req->min_stop_ms);
+  }
 
   std::string reason;
   if (!validate_timing(proposed, reason)) {

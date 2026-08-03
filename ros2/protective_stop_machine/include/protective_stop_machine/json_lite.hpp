@@ -13,6 +13,7 @@
 #include <cstdlib>
 #include <map>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace jsonlite
@@ -20,7 +21,16 @@ namespace jsonlite
 
 struct Value
 {
-  enum Type { NUL, BOOL, NUM, STR, ARR, OBJ };
+  enum Type
+  {
+    NUL,
+    BOOL,
+    NUM,
+    STR,
+    ARR,
+    OBJ
+  };
+
   Type type{NUL};
   bool b{false};
   double num{0.0};
@@ -28,25 +38,46 @@ struct Value
   std::vector<Value> arr;
   std::map<std::string, Value> obj;
 
-  bool is_obj() const {return type == OBJ;}
-  bool is_arr() const {return type == ARR;}
+  bool is_obj() const
+  {
+    return type == OBJ;
+  }
+
+  bool is_arr() const
+  {
+    return type == ARR;
+  }
 
   // Object lookup; nullptr if absent or not an object.
   const Value * find(const std::string & key) const
   {
-    if (type != OBJ) {return nullptr;}
+    if (type != OBJ) {
+      return nullptr;
+    }
     auto it = obj.find(key);
     return it == obj.end() ? nullptr : &it->second;
   }
 
-  double as_num(double dflt = 0.0) const {return type == NUM ? num : dflt;}
+  double as_num(double dflt = 0.0) const
+  {
+    return type == NUM ? num : dflt;
+  }
+
   bool as_bool(bool dflt = false) const
   {
-    if (type == BOOL) {return b;}
-    if (type == NUM) {return num != 0.0;}
+    if (type == BOOL) {
+      return b;
+    }
+    if (type == NUM) {
+      return num != 0.0;
+    }
     return dflt;
   }
-  std::string as_str(const std::string & dflt = "") const {return type == STR ? str : dflt;}
+
+  std::string as_str(const std::string & dflt = "") const
+  {
+    return type == STR ? str : dflt;
+  }
 
   // Convenience: number/bool/string field of an object by key.
   double num_at(const std::string & k, double dflt = 0.0) const
@@ -54,11 +85,13 @@ struct Value
     const Value * v = find(k);
     return v ? v->as_num(dflt) : dflt;
   }
+
   bool bool_at(const std::string & k, bool dflt = false) const
   {
     const Value * v = find(k);
     return v ? v->as_bool(dflt) : dflt;
   }
+
   std::string str_at(const std::string & k, const std::string & dflt = "") const
   {
     const Value * v = find(k);
@@ -69,12 +102,16 @@ struct Value
 class Parser
 {
 public:
-  explicit Parser(const std::string & s) : s_(s) {}
+  explicit Parser(const std::string & s)
+  : s_(s)
+  {}
 
   bool parse(Value & out)
   {
     skip_ws();
-    if (!value(out, 0)) {return false;}
+    if (!value(out, 0)) {
+      return false;
+    }
     skip_ws();
     return true;  // trailing junk tolerated
   }
@@ -88,23 +125,39 @@ private:
 
   void skip_ws()
   {
-    while (i_ < s_.size() && std::isspace(static_cast<unsigned char>(s_[i_]))) {++i_;}
+    while (i_ < s_.size() && std::isspace(static_cast<unsigned char>(s_[i_]))) {
+      ++i_;
+    }
   }
-  char peek() const {return i_ < s_.size() ? s_[i_] : '\0';}
+
+  char peek() const
+  {
+    return i_ < s_.size() ? s_[i_] : '\0';
+  }
 
   bool value(Value & v, int depth)
   {
-    if (depth > kMaxDepth) {return false;}
+    if (depth > kMaxDepth) {
+      return false;
+    }
     skip_ws();
     char c = peek();
     switch (c) {
-      case '{': return object(v, depth);
-      case '[': return array(v, depth);
-      case '"': return string_val(v);
-      case 't': case 'f': return boolean(v);
-      case 'n': return null_val(v);
+      case '{':
+        return object(v, depth);
+      case '[':
+        return array(v, depth);
+      case '"':
+        return string_val(v);
+      case 't':
+      case 'f':
+        return boolean(v);
+      case 'n':
+        return null_val(v);
       default:
-        if (c == '-' || std::isdigit(static_cast<unsigned char>(c))) {return number(v);}
+        if (c == '-' || std::isdigit(static_cast<unsigned char>(c))) {
+          return number(v);
+        }
         return false;
     }
   }
@@ -114,22 +167,39 @@ private:
     v.type = Value::OBJ;
     ++i_;  // {
     skip_ws();
-    if (peek() == '}') {++i_; return true;}
+    if (peek() == '}') {
+      ++i_;
+      return true;
+    }
     while (true) {
       skip_ws();
-      if (peek() != '"') {return false;}
+      if (peek() != '"') {
+        return false;
+      }
       Value key;
-      if (!string_val(key)) {return false;}
+      if (!string_val(key)) {
+        return false;
+      }
       skip_ws();
-      if (peek() != ':') {return false;}
+      if (peek() != ':') {
+        return false;
+      }
       ++i_;
       Value val;
-      if (!value(val, depth + 1)) {return false;}
+      if (!value(val, depth + 1)) {
+        return false;
+      }
       v.obj[key.str] = std::move(val);
       skip_ws();
       char c = peek();
-      if (c == ',') {++i_; continue;}
-      if (c == '}') {++i_; return true;}
+      if (c == ',') {
+        ++i_;
+        continue;
+      }
+      if (c == '}') {
+        ++i_;
+        return true;
+      }
       return false;
     }
   }
@@ -139,15 +209,26 @@ private:
     v.type = Value::ARR;
     ++i_;  // [
     skip_ws();
-    if (peek() == ']') {++i_; return true;}
+    if (peek() == ']') {
+      ++i_;
+      return true;
+    }
     while (true) {
       Value item;
-      if (!value(item, depth + 1)) {return false;}
+      if (!value(item, depth + 1)) {
+        return false;
+      }
       v.arr.push_back(std::move(item));
       skip_ws();
       char c = peek();
-      if (c == ',') {++i_; continue;}
-      if (c == ']') {++i_; return true;}
+      if (c == ',') {
+        ++i_;
+        continue;
+      }
+      if (c == ']') {
+        ++i_;
+        return true;
+      }
       return false;
     }
   }
@@ -159,21 +240,41 @@ private:
     std::string out;
     while (i_ < s_.size()) {
       char c = s_[i_++];
-      if (c == '"') {v.str = std::move(out); return true;}
+      if (c == '"') {
+        v.str = std::move(out);
+        return true;
+      }
       if (c == '\\' && i_ < s_.size()) {
         char e = s_[i_++];
         switch (e) {
-          case 'n': out.push_back('\n'); break;
-          case 't': out.push_back('\t'); break;
-          case 'r': out.push_back('\r'); break;
-          case '"': out.push_back('"'); break;
-          case '\\': out.push_back('\\'); break;
-          case '/': out.push_back('/'); break;
-          case 'u':  // passthrough: keep the 4 hex digits literally
-            out.push_back('\\'); out.push_back('u');
-            for (int k = 0; k < 4 && i_ < s_.size(); ++k) {out.push_back(s_[i_++]);}
+          case 'n':
+            out.push_back('\n');
             break;
-          default: out.push_back(e); break;
+          case 't':
+            out.push_back('\t');
+            break;
+          case 'r':
+            out.push_back('\r');
+            break;
+          case '"':
+            out.push_back('"');
+            break;
+          case '\\':
+            out.push_back('\\');
+            break;
+          case '/':
+            out.push_back('/');
+            break;
+          case 'u':  // passthrough: keep the 4 hex digits literally
+            out.push_back('\\');
+            out.push_back('u');
+            for (int k = 0; k < 4 && i_ < s_.size(); ++k) {
+              out.push_back(s_[i_++]);
+            }
+            break;
+          default:
+            out.push_back(e);
+            break;
         }
       } else {
         out.push_back(c);
@@ -185,10 +286,11 @@ private:
   bool number(Value & v)
   {
     size_t start = i_;
-    if (peek() == '-') {++i_;}
-    while (i_ < s_.size() &&
-      (std::isdigit(static_cast<unsigned char>(s_[i_])) || s_[i_] == '.' ||
-      s_[i_] == 'e' || s_[i_] == 'E' || s_[i_] == '+' || s_[i_] == '-'))
+    if (peek() == '-') {
+      ++i_;
+    }
+    while (i_ < s_.size() && (std::isdigit(static_cast<unsigned char>(s_[i_])) || s_[i_] == '.' || s_[i_] == 'e' ||
+                              s_[i_] == 'E' || s_[i_] == '+' || s_[i_] == '-'))
     {
       ++i_;
     }
@@ -199,14 +301,28 @@ private:
 
   bool boolean(Value & v)
   {
-    if (s_.compare(i_, 4, "true") == 0) {v.type = Value::BOOL; v.b = true; i_ += 4; return true;}
-    if (s_.compare(i_, 5, "false") == 0) {v.type = Value::BOOL; v.b = false; i_ += 5; return true;}
+    if (s_.compare(i_, 4, "true") == 0) {
+      v.type = Value::BOOL;
+      v.b = true;
+      i_ += 4;
+      return true;
+    }
+    if (s_.compare(i_, 5, "false") == 0) {
+      v.type = Value::BOOL;
+      v.b = false;
+      i_ += 5;
+      return true;
+    }
     return false;
   }
 
   bool null_val(Value & v)
   {
-    if (s_.compare(i_, 4, "null") == 0) {v.type = Value::NUL; i_ += 4; return true;}
+    if (s_.compare(i_, 4, "null") == 0) {
+      v.type = Value::NUL;
+      i_ += 4;
+      return true;
+    }
     return false;
   }
 };

@@ -6,9 +6,12 @@
 // STOP independently; this backend only observes and (best-effort) reconfigures.
 #include "protective_stop_machine/hardware_backend.hpp"
 
-#include <chrono>
-
 #include <curl/curl.h>
+
+#include <chrono>
+#include <cstdio>
+#include <string>
+#include <utility>
 
 #include "protective_stop_machine/json_lite.hpp"
 
@@ -36,33 +39,41 @@ HardwareMachineBackend::~HardwareMachineBackend()
 
 bool HardwareMachineBackend::start()
 {
-  if (running_.load()) {return true;}
+  if (running_.load()) {
+    return true;
+  }
   running_ = true;
-  th_ = std::thread([this] {poll_loop();});
+  th_ = std::thread([this] { poll_loop(); });
   return true;
 }
 
 void HardwareMachineBackend::stop()
 {
-  if (!running_.exchange(false)) {return;}
-  if (th_.joinable()) {th_.join();}
+  if (!running_.exchange(false)) {
+    return;
+  }
+  if (th_.joinable()) {
+    th_.join();
+  }
   std::lock_guard<std::mutex> lk(mtx_);
-  snap_ = MachineSnapshot{};   // unreachable -> UNSTABLE
+  snap_ = MachineSnapshot{};  // unreachable -> UNSTABLE
 }
 
-bool HardwareMachineBackend::http_get(const std::string & path, std::string & body,
-  long & status)
+// NOLINTNEXTLINE(runtime/int)
+bool HardwareMachineBackend::http_get(const std::string & path, std::string & body, long & status)
 {
   CURL * c = curl_easy_init();
-  if (!c) {return false;}
+  if (!c) {
+    return false;
+  }
   const std::string url = cfg_.device_url + path;
   body.clear();
   status = 0;
   curl_easy_setopt(c, CURLOPT_URL, url.c_str());
   curl_easy_setopt(c, CURLOPT_WRITEFUNCTION, write_cb);
   curl_easy_setopt(c, CURLOPT_WRITEDATA, &body);
-  curl_easy_setopt(c, CURLOPT_TIMEOUT_MS,
-    static_cast<long>(cfg_.http_timeout_s * 1000.0));
+  // NOLINTNEXTLINE(runtime/int)
+  curl_easy_setopt(c, CURLOPT_TIMEOUT_MS, static_cast<long>(cfg_.http_timeout_s * 1000.0));
   if (!cfg_.admin_pass.empty()) {
     curl_easy_setopt(c, CURLOPT_HTTPAUTH, CURLAUTH_BASIC);
     const std::string up = cfg_.admin_user + ":" + cfg_.admin_pass;
@@ -74,11 +85,18 @@ bool HardwareMachineBackend::http_get(const std::string & path, std::string & bo
   return rc == CURLE_OK && status >= 200 && status < 300;
 }
 
-bool HardwareMachineBackend::http_post(const std::string & path,
-  const std::string & json, std::string & body, long & status)
+bool HardwareMachineBackend::http_post(
+  // NOLINTNEXTLINE(runtime/int)
+  const std::string & path,
+  const std::string & json,
+  std::string & body,
+  // NOLINTNEXTLINE(runtime/int)
+  long & status)
 {
   CURL * c = curl_easy_init();
-  if (!c) {return false;}
+  if (!c) {
+    return false;
+  }
   const std::string url = cfg_.device_url + path;
   body.clear();
   status = 0;
@@ -90,8 +108,8 @@ bool HardwareMachineBackend::http_post(const std::string & path,
   curl_easy_setopt(c, CURLOPT_HTTPHEADER, hdrs);
   curl_easy_setopt(c, CURLOPT_WRITEFUNCTION, write_cb);
   curl_easy_setopt(c, CURLOPT_WRITEDATA, &body);
-  curl_easy_setopt(c, CURLOPT_TIMEOUT_MS,
-    static_cast<long>(cfg_.http_timeout_s * 1000.0));
+  // NOLINTNEXTLINE(runtime/int)
+  curl_easy_setopt(c, CURLOPT_TIMEOUT_MS, static_cast<long>(cfg_.http_timeout_s * 1000.0));
   if (!cfg_.admin_pass.empty()) {
     curl_easy_setopt(c, CURLOPT_HTTPAUTH, CURLAUTH_BASIC);
     const std::string up = cfg_.admin_user + ":" + cfg_.admin_pass;
@@ -125,9 +143,13 @@ void HardwareMachineBackend::parse_state(const std::string & body, MachineSnapsh
     const jsonlite::Value * list = root.find("bonded_remotes");
     if (list && list->is_arr()) {
       for (const auto & item : list->arr) {
-        if (!item.is_obj()) {continue;}
+        if (!item.is_obj()) {
+          continue;
+        }
         const uint32_t id = static_cast<uint32_t>(item.num_at("id", 0));
-        if (id == 0U) {continue;}   // skip empty/malformed entries
+        if (id == 0U) {
+          continue;
+        }  // skip empty/malformed entries
         RemoteInfo r;
         char buf[16];
         std::snprintf(buf, sizeof(buf), "%08x", id);
@@ -153,6 +175,7 @@ void HardwareMachineBackend::poll_loop()
   const auto period = std::chrono::milliseconds(static_cast<int>(1000.0 / hz));
   while (running_.load()) {
     std::string body;
+    // NOLINTNEXTLINE(runtime/int)
     long status = 0;
     MachineSnapshot s;
     if (http_get("/state.json", body, status)) {
@@ -182,19 +205,24 @@ bool HardwareMachineBackend::configure(const MachineTiming & timing, std::string
   // so this reports the device's response and fails cleanly if unsupported —
   // the seam is here for when the device gains the endpoint.
   char json[160];
-  std::snprintf(json, sizeof(json),
+  std::snprintf(
+    json,
+    sizeof(json),
     "{\"heartbeat_ms\":%llu,\"max_missed\":%u,\"min_stop_ms\":%llu}",
+    // NOLINTNEXTLINE(runtime/int)
     static_cast<unsigned long long>(timing.heartbeat_ms),
     static_cast<unsigned>(timing.max_missed),
+    // NOLINTNEXTLINE(runtime/int)
     static_cast<unsigned long long>(timing.min_stop_ms));
   std::string body;
+  // NOLINTNEXTLINE(runtime/int)
   long status = 0;
   if (http_post("/admin/api/pstop_config", json, body, status)) {
     error.clear();
     return true;
   }
   error = "device did not accept timing config (http " + std::to_string(status) +
-    "); hardware timing is set via device config";
+          "); hardware timing is set via device config";
   return false;
 }
 

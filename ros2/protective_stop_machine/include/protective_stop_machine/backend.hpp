@@ -13,16 +13,16 @@ namespace protective_stop_machine
 // Mirrors protective_stop_msg/ProtectiveStopStatus.
 enum class MachineState : uint8_t
 {
-  ACTIVE = 0,        // bonded remote(s), armed, cleared to run
-  DEACTIVATED = 1,   // stopped / not cleared (NEED_STOP, or backend down)
-  UNSTABLE = 2       // backend unreachable / fault
+  ACTIVE = 0,  // bonded remote(s), armed, cleared to run
+  DEACTIVATED = 1,  // stopped / not cleared (NEED_STOP, or backend down)
+  UNSTABLE = 2  // backend unreachable / fault
 };
 
 struct RemoteInfo
 {
-  std::string device_id;        // hex UUID, e.g. "01d7eed0"
-  uint8_t bond_state{0};        // 0 empty, 1 connecting, 2 bonded
-  bool in_use{false};           // owns the current arming cycle
+  std::string device_id;  // hex UUID, e.g. "01d7eed0"
+  uint8_t bond_state{0};  // 0 empty, 1 connecting, 2 bonded
+  bool in_use{false};  // owns the current arming cycle
   bool stop_only{false};
   uint32_t reply_age_ms{0};
   uint32_t loop_rtt_ms{0};
@@ -32,9 +32,9 @@ struct RemoteInfo
 
 struct RelayInfo
 {
-  bool applicable{false};       // false on the software backend (no relays)
-  bool run{false};              // circuit closed / cleared to move
-  bool relay_stop{true};        // stop asserted (circuit open)
+  bool applicable{false};  // false on the software backend (no relays)
+  bool run{false};  // circuit closed / cleared to move
+  bool relay_stop{true};  // stop asserted (circuit open)
   bool fault_a{false};
   bool fault_b{false};
   uint32_t mismatch{0};
@@ -44,9 +44,9 @@ struct RelayInfo
 // it straight onto the ROS messages.
 struct MachineSnapshot
 {
-  bool reachable{false};        // backend healthy/reachable
-  bool running{false};          // robot cleared to move (armed, no stop)
-  bool need_stop{false};        // NEED_STOP: awaiting an arming gesture
+  bool reachable{false};  // backend healthy/reachable
+  bool running{false};  // robot cleared to move (armed, no stop)
+  bool need_stop{false};  // NEED_STOP: awaiting an arming gesture
   std::string status_reason;
   RelayInfo relay;
   std::vector<RemoteInfo> remotes;
@@ -54,7 +54,9 @@ struct MachineSnapshot
 
   MachineState state() const
   {
-    if (!reachable) {return MachineState::UNSTABLE;}
+    if (!reachable) {
+      return MachineState::UNSTABLE;
+    }
     return running ? MachineState::ACTIVE : MachineState::DEACTIVATED;
   }
 };
