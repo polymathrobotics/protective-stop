@@ -15,7 +15,7 @@
 #include <string>
 #include <thread>
 
-#include "http_stub.hpp"
+#include "http_stub.hpp"  // NOLINT(build/include_subdir)
 #include "protective_stop_machine/hardware_backend.hpp"
 
 using protective_stop_machine::HardwareConfig;
@@ -30,7 +30,8 @@ static constexpr const char * kClosedUrl = "http://127.0.0.1:9";
 
 // Poll snapshot() until pred holds or the deadline passes.
 template <typename Pred>
-static bool wait_for(HardwareMachineBackend & be, Pred pred, std::chrono::milliseconds timeout = std::chrono::seconds(3))
+static bool wait_for(
+  HardwareMachineBackend & be, Pred pred, std::chrono::milliseconds timeout = std::chrono::seconds(3))
 {
   const auto deadline = std::chrono::steady_clock::now() + timeout;
   while (std::chrono::steady_clock::now() < deadline) {
@@ -89,8 +90,9 @@ TEST(HwBackend, ClosedPortUnreachable)
 {
   HardwareMachineBackend be(cfg_for(kClosedUrl));
   ASSERT_TRUE(be.start());
-  EXPECT_TRUE(wait_for(
-    be, [](const MachineSnapshot & s) { return !s.reachable && s.status_reason.find("unreachable") != std::string::npos; }));
+  EXPECT_TRUE(wait_for(be, [](const MachineSnapshot & s) {
+    return !s.reachable && s.status_reason.find("unreachable") != std::string::npos;
+  }));
   be.stop();
 }
 

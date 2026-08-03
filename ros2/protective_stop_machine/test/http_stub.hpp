@@ -30,7 +30,8 @@ class LoopbackHttpStub
 {
 public:
   explicit LoopbackHttpStub(std::string body, int http_status = 200)
-  : body_(std::move(body)), status_(http_status)
+  : body_(std::move(body))
+  , status_(http_status)
   {
     fd_ = ::socket(AF_INET, SOCK_STREAM, 0);
     int one = 1;
@@ -143,10 +144,9 @@ private:
     }
     count_.fetch_add(1);
 
-    const std::string resp = "HTTP/1.1 " + std::to_string(status_) + " OK\r\n" +
-                             "Content-Type: application/json\r\n" +
-                             "Content-Length: " + std::to_string(body_.size()) + "\r\n" +
-                             "Connection: close\r\n\r\n" + body_;
+    const std::string resp = "HTTP/1.1 " + std::to_string(status_) + " OK\r\n" + "Content-Type: application/json\r\n" +
+                             "Content-Length: " + std::to_string(body_.size()) + "\r\n" + "Connection: close\r\n\r\n" +
+                             body_;
     size_t sent = 0;
     while (sent < resp.size()) {
       ssize_t n = ::send(c, resp.data() + sent, resp.size() - sent, 0);

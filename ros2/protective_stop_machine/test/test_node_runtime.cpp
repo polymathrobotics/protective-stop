@@ -25,7 +25,7 @@
 #include <vector>
 
 #include "diagnostic_msgs/msg/diagnostic_array.hpp"
-#include "http_stub.hpp"
+#include "http_stub.hpp"  // NOLINT(build/include_subdir)
 #include "lifecycle_msgs/msg/state.hpp"
 #include "protective_stop_machine/machine_bridge_node.hpp"
 #include "protective_stop_msg/msg/bonded_remote_array.hpp"
@@ -54,7 +54,8 @@ static rclcpp::NodeOptions with(std::vector<rclcpp::Parameter> overrides)
 // Spin the executor until pred() is true or the deadline passes.
 template <typename Pred>
 static bool spin_until(
-  rclcpp::executors::SingleThreadedExecutor & exec, Pred pred,
+  rclcpp::executors::SingleThreadedExecutor & exec,
+  Pred pred,
   std::chrono::milliseconds timeout = std::chrono::seconds(5))
 {
   const auto deadline = std::chrono::steady_clock::now() + timeout;
@@ -84,9 +85,11 @@ protected:
 // not-applicable, and diagnostics reports an OK/stopped summary.
 TEST_F(NodeRuntime, SoftwarePublishesAndDiagnoses)
 {
-  auto node = std::make_shared<MachineBridgeNode>(
-    with({rclcpp::Parameter("backend", "software"), rclcpp::Parameter("software.port", 18921),
-          rclcpp::Parameter("rates.publish_rate_hz", 30.0), rclcpp::Parameter("rates.diagnostics_rate_hz", 30.0)}));
+  auto node = std::make_shared<MachineBridgeNode>(with(
+    {rclcpp::Parameter("backend", "software"),
+     rclcpp::Parameter("software.port", 18921),
+     rclcpp::Parameter("rates.publish_rate_hz", 30.0),
+     rclcpp::Parameter("rates.diagnostics_rate_hz", 30.0)}));
   ASSERT_EQ(node->configure().id(), State::PRIMARY_STATE_INACTIVE);
   ASSERT_EQ(node->activate().id(), State::PRIMARY_STATE_ACTIVE);
 
@@ -98,8 +101,7 @@ TEST_F(NodeRuntime, SoftwarePublishesAndDiagnoses)
   bool got_remotes = false;
   bool got_diag = false;
   auto s1 = sub->create_subscription<ProtectiveStopStatus>(
-    "/machine_bridge/machine_state", rclcpp::QoS(1).transient_local(),
-    [&](ProtectiveStopStatus::SharedPtr m) {
+    "/machine_bridge/machine_state", rclcpp::QoS(1).transient_local(), [&](ProtectiveStopStatus::SharedPtr m) {
       got_state = true;
       status = m->status;
     });
@@ -110,8 +112,8 @@ TEST_F(NodeRuntime, SoftwarePublishesAndDiagnoses)
     });
   auto s3 = sub->create_subscription<BondedRemoteArray>(
     "/machine_bridge/remotes", rclcpp::QoS(5), [&](BondedRemoteArray::SharedPtr) { got_remotes = true; });
-  auto s4 = sub->create_subscription<DiagnosticArray>(
-    "/diagnostics", rclcpp::QoS(5), [&](DiagnosticArray::SharedPtr m) {
+  auto s4 =
+    sub->create_subscription<DiagnosticArray>("/diagnostics", rclcpp::QoS(5), [&](DiagnosticArray::SharedPtr m) {
       for (const auto & st : m->status) {
         if (st.name.find("machine") != std::string::npos) {
           got_diag = true;
@@ -134,10 +136,12 @@ TEST_F(NodeRuntime, SoftwarePublishesAndDiagnoses)
 // snapshot to UNSTABLE, and diagnostics raises the "backend unreachable" ERROR.
 TEST_F(NodeRuntime, HardwareUnreachableDiagnosesError)
 {
-  auto node = std::make_shared<MachineBridgeNode>(
-    with({rclcpp::Parameter("backend", "hardware"), rclcpp::Parameter("hardware.device_url", "http://127.0.0.1:9"),
-          rclcpp::Parameter("rates.state_poll_hz", 40.0), rclcpp::Parameter("rates.publish_rate_hz", 40.0),
-          rclcpp::Parameter("rates.diagnostics_rate_hz", 40.0)}));
+  auto node = std::make_shared<MachineBridgeNode>(with(
+    {rclcpp::Parameter("backend", "hardware"),
+     rclcpp::Parameter("hardware.device_url", "http://127.0.0.1:9"),
+     rclcpp::Parameter("rates.state_poll_hz", 40.0),
+     rclcpp::Parameter("rates.publish_rate_hz", 40.0),
+     rclcpp::Parameter("rates.diagnostics_rate_hz", 40.0)}));
   ASSERT_EQ(node->configure().id(), State::PRIMARY_STATE_INACTIVE);
   ASSERT_EQ(node->activate().id(), State::PRIMARY_STATE_ACTIVE);
 
@@ -145,10 +149,11 @@ TEST_F(NodeRuntime, HardwareUnreachableDiagnosesError)
   uint8_t status = 0;
   bool err_diag = false;
   auto s1 = sub->create_subscription<ProtectiveStopStatus>(
-    "/machine_bridge/machine_state", rclcpp::QoS(1).transient_local(),
-    [&](ProtectiveStopStatus::SharedPtr m) { status = m->status; });
-  auto s2 = sub->create_subscription<DiagnosticArray>(
-    "/diagnostics", rclcpp::QoS(5), [&](DiagnosticArray::SharedPtr m) {
+    "/machine_bridge/machine_state", rclcpp::QoS(1).transient_local(), [&](ProtectiveStopStatus::SharedPtr m) {
+      status = m->status;
+    });
+  auto s2 =
+    sub->create_subscription<DiagnosticArray>("/diagnostics", rclcpp::QoS(5), [&](DiagnosticArray::SharedPtr m) {
       for (const auto & st : m->status) {
         if (st.level == DiagnosticStatus::ERROR && st.message.find("unreachable") != std::string::npos) {
           err_diag = true;
@@ -169,14 +174,19 @@ TEST_F(NodeRuntime, HardwareUnreachableDiagnosesError)
 // Drive the hardware backend off a loopback stub so a specific /state.json steers
 // the diagnostics summary + the bonded-remote publish loop.
 static void run_hardware_stub_case(
-  const std::string & state_json, uint8_t want_diag_level, const std::string & want_msg_substr,
-  uint8_t want_status, bool expect_remote)
+  const std::string & state_json,
+  uint8_t want_diag_level,
+  const std::string & want_msg_substr,
+  uint8_t want_status,
+  bool expect_remote)
 {
   LoopbackHttpStub stub(state_json);
-  auto node = std::make_shared<MachineBridgeNode>(
-    with({rclcpp::Parameter("backend", "hardware"), rclcpp::Parameter("hardware.device_url", stub.url()),
-          rclcpp::Parameter("rates.state_poll_hz", 40.0), rclcpp::Parameter("rates.publish_rate_hz", 40.0),
-          rclcpp::Parameter("rates.diagnostics_rate_hz", 40.0)}));
+  auto node = std::make_shared<MachineBridgeNode>(with(
+    {rclcpp::Parameter("backend", "hardware"),
+     rclcpp::Parameter("hardware.device_url", stub.url()),
+     rclcpp::Parameter("rates.state_poll_hz", 40.0),
+     rclcpp::Parameter("rates.publish_rate_hz", 40.0),
+     rclcpp::Parameter("rates.diagnostics_rate_hz", 40.0)}));
   ASSERT_EQ(node->configure().id(), State::PRIMARY_STATE_INACTIVE);
   ASSERT_EQ(node->activate().id(), State::PRIMARY_STATE_ACTIVE);
 
@@ -185,12 +195,15 @@ static void run_hardware_stub_case(
   bool diag_hit = false;
   size_t remote_count = 0;
   auto s1 = sub->create_subscription<ProtectiveStopStatus>(
-    "/machine_bridge/machine_state", rclcpp::QoS(1).transient_local(),
-    [&](ProtectiveStopStatus::SharedPtr m) { status = m->status; });
+    "/machine_bridge/machine_state", rclcpp::QoS(1).transient_local(), [&](ProtectiveStopStatus::SharedPtr m) {
+      status = m->status;
+    });
   auto s2 = sub->create_subscription<BondedRemoteArray>(
-    "/machine_bridge/remotes", rclcpp::QoS(5), [&](BondedRemoteArray::SharedPtr m) { remote_count = m->remotes.size(); });
-  auto s3 = sub->create_subscription<DiagnosticArray>(
-    "/diagnostics", rclcpp::QoS(5), [&](DiagnosticArray::SharedPtr m) {
+    "/machine_bridge/remotes", rclcpp::QoS(5), [&](BondedRemoteArray::SharedPtr m) {
+      remote_count = m->remotes.size();
+    });
+  auto s3 =
+    sub->create_subscription<DiagnosticArray>("/diagnostics", rclcpp::QoS(5), [&](DiagnosticArray::SharedPtr m) {
       for (const auto & st : m->status) {
         if (st.level == want_diag_level && st.message.find(want_msg_substr) != std::string::npos) {
           diag_hit = true;
@@ -201,7 +214,8 @@ static void run_hardware_stub_case(
   rclcpp::executors::SingleThreadedExecutor exec;
   exec.add_node(node->get_node_base_interface());
   exec.add_node(sub);
-  EXPECT_TRUE(spin_until(exec, [&] { return diag_hit && status == want_status && (!expect_remote || remote_count == 1U); }));
+  EXPECT_TRUE(
+    spin_until(exec, [&] { return diag_hit && status == want_status && (!expect_remote || remote_count == 1U); }));
   EXPECT_TRUE(diag_hit);
   EXPECT_EQ(status, want_status);
   if (expect_remote) {
@@ -218,23 +232,32 @@ TEST_F(NodeRuntime, HardwareRunningDiagnosesOk)
 {
   run_hardware_stub_case(
     R"({"relay_stop":false,"bonded_remotes":[{"id":5,"state":2,"age_ms":10,"rtt_ms":20,"wg_rtt_ms":30}]})",
-    DiagnosticStatus::OK, "running", static_cast<uint8_t>(protective_stop_machine::MachineState::ACTIVE), true);
+    DiagnosticStatus::OK,
+    "running",
+    static_cast<uint8_t>(protective_stop_machine::MachineState::ACTIVE),
+    true);
 }
 
 // A relay feedback fault outranks "running" -> ERROR summary.
 TEST_F(NodeRuntime, HardwareRelayFaultDiagnosesError)
 {
   run_hardware_stub_case(
-    R"({"relay_stop":false,"relay_fault_a":true})", DiagnosticStatus::ERROR, "relay feedback fault",
-    static_cast<uint8_t>(protective_stop_machine::MachineState::ACTIVE), false);
+    R"({"relay_stop":false,"relay_fault_a":true})",
+    DiagnosticStatus::ERROR,
+    "relay feedback fault",
+    static_cast<uint8_t>(protective_stop_machine::MachineState::ACTIVE),
+    false);
 }
 
 // A lockstep mismatch (no fault) -> WARN summary.
 TEST_F(NodeRuntime, HardwareMismatchDiagnosesWarn)
 {
   run_hardware_stub_case(
-    R"({"relay_stop":false,"pstop_mismatch":3})", DiagnosticStatus::WARN, "lockstep mismatch",
-    static_cast<uint8_t>(protective_stop_machine::MachineState::ACTIVE), false);
+    R"({"relay_stop":false,"pstop_mismatch":3})",
+    DiagnosticStatus::WARN,
+    "lockstep mismatch",
+    static_cast<uint8_t>(protective_stop_machine::MachineState::ACTIVE),
+    false);
 }
 
 // on_set_parameters: a tighter (still-safe) timing envelope is accepted and
@@ -246,7 +269,8 @@ TEST_F(NodeRuntime, SetParametersAcceptsTighter)
   // Atomic set: on_set_parameters sees the whole batch at once and validates the
   // resulting envelope as a unit, returning a single result.
   auto res = node->set_parameters_atomically(
-    {rclcpp::Parameter("timing.heartbeat_ms", 300), rclcpp::Parameter("timing.max_missed", 2),
+    {rclcpp::Parameter("timing.heartbeat_ms", 300),
+     rclcpp::Parameter("timing.max_missed", 2),
      rclcpp::Parameter("timing.min_stop_ms", 600)});
   EXPECT_TRUE(res.successful);
 }
@@ -364,7 +388,7 @@ TEST_F(NodeRuntime, ConfigureServiceHardwareBackendRefuses)
 
   auto req = std::make_shared<ConfigureMachine::Request>();
   req->heartbeat_ms = 300;  // all-safe envelope so it clears the floor and reaches
-  req->max_missed = 3;      // the backend, where the unreachable device refuses it
+  req->max_missed = 3;  // the backend, where the unreachable device refuses it
   req->min_stop_ms = 600;
   auto future = client->async_send_request(req);
   ASSERT_TRUE(spin_until(exec, [&] { return future.wait_for(std::chrono::seconds(0)) == std::future_status::ready; }));
