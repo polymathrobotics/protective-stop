@@ -73,6 +73,13 @@ if(BUILD_TESTING)
   target_include_directories(test_hardware_parse PRIVATE include)
   target_link_libraries(test_hardware_parse CURL::libcurl)
 
+  # HTTP/threading paths of the hardware backend (http_get/http_post/write_cb,
+  # poll loop, start/stop, configure) exercised against a loopback HTTP stub +
+  # a closed port — no live device. SR-M-03.
+  ament_add_gtest(test_hardware_backend test/test_hardware_backend.cpp src/hardware_backend.cpp)
+  target_include_directories(test_hardware_backend PRIVATE include test)
+  target_link_libraries(test_hardware_backend CURL::libcurl)
+
   # Timing-floor validator (SR-M-01) — header-only, no ROS runtime.
   ament_add_gtest(test_timing_floors test/test_timing_floors.cpp)
   target_include_directories(test_timing_floors PRIVATE include)
@@ -88,6 +95,19 @@ if(BUILD_TESTING)
   ament_target_dependencies(test_lifecycle
     rclcpp rclcpp_lifecycle lifecycle_msgs diagnostic_updater diagnostic_msgs protective_stop_msg)
   target_link_libraries(test_lifecycle CURL::libcurl)
+
+  # Runtime node paths that need a spun executor: publish_tick, every diagnostics
+  # summary branch (driven off a loopback /state.json stub), on_set_parameters,
+  # the ~/configure_machine service, and the error/shutdown/start-failure
+  # transitions. Same link set as the executable, own main(). SR-M-01 / SR-M-07.
+  ament_add_gtest(test_node_runtime test/test_node_runtime.cpp
+    src/machine_bridge_node.cpp src/software_backend.cpp src/hardware_backend.cpp
+    ${PSTOP_SRCS} ${TRANSPORT_SRCS})
+  target_include_directories(test_node_runtime PRIVATE
+    include test ${PSTOP_ROOT}/pstop/include ${PSTOP_ROOT}/transport/include)
+  ament_target_dependencies(test_node_runtime
+    rclcpp rclcpp_lifecycle lifecycle_msgs diagnostic_updater diagnostic_msgs protective_stop_msg)
+  target_link_libraries(test_node_runtime CURL::libcurl)
 endif()
 
 ament_package()

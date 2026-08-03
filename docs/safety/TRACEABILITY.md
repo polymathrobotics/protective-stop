@@ -106,9 +106,9 @@ Test-file shorthand:
 
 | SR | Alloc F-xx | Code (file:line) | Verifying test(s) | Method | Status |
 |---|---|---|---|---|---|
-| SR-M-01 | F-M-07 | `machine_bridge_node.cpp:72-97,323,354,28-35` | **NO TEST** — `validate_timing` reject-loosening not exercised (only `test_json_lite.cpp` exists in `ros2/.../test/`) | Test | **Unverified-gap** |
+| SR-M-01 | F-M-07 | `machine_bridge_node.cpp:72-97,323,354,28-35` | `test_timing_floors` (8/8, every accept/reject boundary) + `test_node_runtime` runtime rejection: `SetParametersRejectsUnsafeMinStop`/`RejectsOversizeHeartbeat`/`AcceptsTighter` (set-param) and `ConfigureServiceApplies`/`RejectsUnsafe` (service) — reject-loosening exercised at unit, param, and service levels (closes M07-1/DU-4) | Test | **Verified** (2026-08-02) |
 | SR-M-02 | F-M-04/05 | `hardware_backend.cpp:119` (`bool_at("relay_stop", true)`) | JL exercises `bool_at` default mechanism (present-key), **not** the missing-key→STOP safety default directly | Test | **Partially-verified** |
-| SR-M-03 | F-M-04, F-M-08 | `hardware_backend.cpp` / `machine_bridge_node.cpp:286` | **NO TEST** — unreachable `/state.json`→UNSTABLE not exercised (no backend test in-tree) | Test | **Unverified-gap** |
+| SR-M-03 | F-M-04, F-M-08 | `hardware_backend.cpp` / `machine_bridge_node.cpp:286` | `test_hardware_parse` (malformed/empty→blind) + `test_hardware_backend` `ClosedPortUnreachable`/`Non2xxUnreachable` (backend→unreachable) + `test_node_runtime` `HardwareUnreachableDiagnosesError` (state→UNSTABLE **and** diagnostics ERROR) — closes M04-1 | Test | **Verified** (2026-08-02) |
 | SR-M-04 | F-M-03 | `software_backend.cpp:199` (`relay.applicable=false`) | Inspection (safety-case scope statement) | Inspection | **Residual-accepted** |
 | SR-M-05 | F-M-05 | `json_lite.hpp:87,97` (depth cap 32) | JL `RejectsPathologicalNesting` (500-deep → clean reject, no crash), `RejectsMalformed` | Test | **Verified** |
 | SR-M-06 | F-M-05 | `json_lite.hpp:185-198` | JL `NumbersBoolsNull` (tolerant numeric parse) — confirms no safety field is numeric | Inspection + Test | **Residual-accepted** |
@@ -128,11 +128,12 @@ Test-file shorthand:
 
 ### 3.1 Headline numbers
 
-- **(a) SRs with ≥1 passing verifying test: 25 / 39 = 64.1 %.**
-  (13 Verified + 11 Partially-verified + 1 Residual-with-test [SR-M-06]. The
-  remaining Residual [SR-M-04] is inspection-only; the 13 Unverified-gap SRs
+- **(a) SRs with ≥1 passing verifying test: 27 / 39 = 69.2 %** (was 25/39;
+  SR-M-01 + SR-M-03 gained verifying ROS 2 tests 2026-08-02).
+  (15 Verified + 11 Partially-verified + 1 Residual-with-test [SR-M-06]. The
+  remaining Residual [SR-M-04] is inspection-only; the 11 Unverified-gap SRs
   have no test.)
-  **Strict, fully-verified only: 13 / 39 = 33.3 %.** This is the honest number
+  **Strict, fully-verified only: 15 / 39 = 38.5 %.** This is the honest number
   for "requirement completely discharged by test" — the 11 Partials each leave a
   named leg (end-to-end, quantification, or golden-vector/replay) untested.
 
@@ -149,19 +150,21 @@ Test-file shorthand:
 | SR-SYS | 8 | 2 | 5 | 1 | 0 | 87.5 % | 25.0 % |
 | SR-R | 15 | 6 | 1 | 8 | 0 | 46.7 % | 40.0 % |
 | SR-H | 6 | 3 | 1 | 2 | 0 | 66.7 % | 50.0 % |
-| SR-M | 6 | 1 | 1 | 2 | 2 | 50.0 %† | 16.7 % |
+| SR-M | 6 | 3 | 1 | 0 | 2 | 83.3 %† | 50.0 % |
 | SR-I | 4 | 1 | 3 | 0 | 0 | 100 % | 25.0 % |
-| **Total** | **39** | **13** | **11** | **13** | **2** | **64.1 %** | **33.3 %** |
+| **Total** | **39** | **15** | **11** | **11** | **2** | **69.2 %** | **38.5 %** |
 
-† SR-M ≥1-test counts SR-M-05 (Verified) + SR-M-02 (Partial) + SR-M-06
-(Residual-with-test) = 3/6 = 50 %.
+† SR-M ≥1-test counts SR-M-01/03/05 (Verified) + SR-M-02 (Partial) + SR-M-06
+(Residual-with-test) = 5/6 = 83.3 % (SR-M-01/03 verified 2026-08-02).
 
 **Reading:** SR-I is fully *touched* by the pre-qualified `pstop_c` suite but
 never *completed* (golden-vector + replay integration missing). **SR-R is the
 weak area** — 8 of 15 have no test, and it holds five of the six
 highest-priority DU gaps. Structural coverage confirms the split: the decision
-core (`estop_verdict.c`) is at 100 % MC-DC, while the host runner sits at 56.8 %
-branch and the ROS 2 node has no coverage run at all.
+core (`estop_verdict.c`) is at 100 % MC-DC, the host runner sits at 56.8 %
+branch, and the ROS 2 node — now structurally covered (2026-08-02) — is at
+~89 % line (`machine_bridge_node.cpp` 98 %, `hardware_backend.cpp` 99 %; see
+COVERAGE.md §1).
 
 ---
 
@@ -180,8 +183,8 @@ Partial→Verified closers; **P3** = requirements-completeness holes (§5).
 | **P0-5** | SR-R-08 | `memcmp` mis-returns equal undetected | **DU-7** | Per-offset positive-diff self-test (40 offsets) |
 | **P0-6** | SR-R-12 | Common-mode encode fault | **DU-5**, SR-I-01 | Golden-vector encode test + second encoder image |
 | P1-1 | SR-R-14 | VPN-drop → dark path (implemented, untested) | FMEA R06-3 | VPN-drop regression test |
-| P1-2 | SR-M-01 | `validate_timing` reject-loosening (implemented, untested) | DU-4/M07-1 | ROS 2 set-param rejection test |
-| P1-3 | SR-M-03 | Unreachable `/state.json`→UNSTABLE (implemented, untested) | M04-1 | Drop-`/state.json` backend test |
+| ~~P1-2~~ | SR-M-01 | ~~`validate_timing` reject-loosening~~ **DONE 2026-08-02** (`test_node_runtime` set-param + service rejection, `test_timing_floors`) | DU-4/M07-1 | ✅ ROS 2 set-param rejection test added |
+| ~~P1-3~~ | SR-M-03 | ~~Unreachable `/state.json`→UNSTABLE~~ **DONE 2026-08-02** (`test_hardware_backend` + `test_node_runtime` `HardwareUnreachableDiagnosesError`) | M04-1 | ✅ Drop-`/state.json` backend + node test added |
 | P1-4 | SR-M-02 | Missing-`relay_stop`→STOP default (partial) | M04-2 | Field-level missing-key→true test |
 | P2-1 | SR-I-01 | Golden-vector encode/decode both ends | (= SR-R-12) | Author golden-vector both-end pin |
 | P2-2 | SR-I-04 | Shell-level replay integration | HARA §7 item 6 | Replay reply → no-OK integration test |
