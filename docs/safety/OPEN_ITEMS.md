@@ -9,6 +9,21 @@ code-coverage effort. Newest status at the top of each section.
 
 _Last updated: 2026-08-02._
 
+> **2026-08-02 — three-subagent batch merged (`347de6f`, on GitHub):**
+> 1. **DERP reachability FIXED in firmware** (`ml_wg_mgr.c`): the chip was
+>    installing an unvalidated netmap endpoint as the live WG endpoint; now
+>    DERP-homed, direct only after bidirectional DISCO validation. Remote DUT
+>    reachable + **full HIL smoke (arm / press→STOP / discordance) passed over
+>    the fixed safety link** — this also closes the deferred firmware-extraction
+>    HIL validation. No infra workaround needed.
+> 2. **SR-H-04 / DU-2 CLOSED**: ESP32 TWDT/IWDT/RTC-WDT + dual-core mutual clock
+>    cross-check (`docs/WATCHDOG_CLOCK_PROTECTION.md`); fault-injection proved a
+>    frozen clock is caught by the cross-check (missed by the lockstep memcmp).
+> 3. **Quantitative FMEDA** (`docs/safety/FMEDA.md`): SFF≈93% / PFH≈3.7e-9/h /
+>    β=10%, SIL 3 met-but-fragile; closing DU-2 (done) + DU-1 → SFF≥99%.
+>    **Escalated to user:** real ESP32-S3 + relay part numbers, and demand rate
+>    + proof-test interval, to move from assumed to demonstrated.
+
 ---
 
 ## 1. Decisions log (settled)
@@ -40,7 +55,7 @@ _Last updated: 2026-08-02._
 ### 3b. Dangerous-Undetected register (from FMEA — prioritized)
 - [x] **DU-4 (F-H-02) / SR-H-03 — DONE 2026-08-02:** host runner now validates timing config at startup (`cfg_validate`, floors mirror the ROS2 node: heartbeat [50,1000], max_missed [1,5], min_stop ≥100) and **refuses to start** on unsafe values. Test `tools/test_config_floor.py` (7/7). Host coverage 70.4→71.4% L / 56.8→57.9% B / 58.3% MC-DC.
 - [ ] **DU-1 (F-R-01) — SMALL:** lost GPIO pull-down → open loop reads *closed* → false OK, no runtime detection. Pad config set once at `estop_init`, never re-verified. **Fix: periodic pull-down / pin-config re-verification → STOP on mismatch.** (This is the "GPIO config-integrity check" the design doc claims but code never implemented.)
-- [ ] **DU-2 (F-H-03 / F-P-03):** frozen `get_time_cb` (CLOCK_MONOTONIC) silently disables the heartbeat watchdog. Mitigation options: independent clock cross-check / sanity on time advance.
+- [x] **DU-2 (F-H-03 / F-P-03) — DONE 2026-08-02 (SR-H-04):** remote-side dual-core mutual clock cross-check + ESP32 TWDT/IWDT/RTC-WDT (`347de6f`, fault-injection validated). NOTE: this covers the *remote* clock; the *machine*-side `get_time_cb` freeze (host runner / ROS2) still wants an analogous guard — track as SR-H-04b.
 - [ ] **DU-3 (F-R-02):** Option B diversity may be compiler-erasable. **Action: verify against object code** whether reads go through `volatile`/`esp_rom` barriers before treating as real.
 - [ ] **DU-5/DU-7 (F-R-04/05):** lockstep blind to common-mode faults in shared downstream code (encode / `memcmp` / priming, β≈1).
 - [ ] Remaining 3 DU rows — see FMEA.md §3.
@@ -72,7 +87,7 @@ Full report: **`docs/safety/COVERAGE.md`**.
 | Remote firmware (decision core `estop_verdict.c`) | host harness gcc-14 | **100% line/branch/MC-DC** (39/39) | Hybrid (on-target JTAG infeasible). Extracted from main.c behavior-preserving; firmware builds clean. **On-bench smoke of this build DEFERRED** — bench DERP-relayed, DUT HTTP unreachable. |
 | `pstop_c` | Bullseye (own CI) | referenced | Pre-qualified; not re-measured here. |
 
-**Firmware extraction — real-HW validation (2026-08-02):** OTA'd build `2a4d77c` to a **local** unit pstop-01d7ed38 (`10.43.0.195`, on `usb0`, no loop relay). Confirmed on-target: clean boot, loops settle to 1/1/1/1, verdict **OK**, **mm=0 (no nuisance divergence post-extraction)**, bonds to a local machine streaming OK/crc=ok/black-channel echo. **Still deferred:** [ ] press→STOP / discordance / arm paths — need loop relays (only the remote DERP-blocked DUT has them); the identical decision logic was bench-validated pre-extraction, and is 100% MC/DC host-tested. (Left the local unit on `2a4d77c`; can restore on request.)
+**Firmware extraction — real-HW validation (2026-08-02):** OTA'd build `2a4d77c` to a **local** unit pstop-01d7ed38 (`10.43.0.195`, on `usb0`, no loop relay). Confirmed on-target: clean boot, loops settle to 1/1/1/1, verdict **OK**, **mm=0 (no nuisance divergence post-extraction)**, bonds to a local machine streaming OK/crc=ok/black-channel echo. **DONE 2026-08-02:** press→STOP / discordance / arm all validated on the (now-reachable) remote DUT `100.75.70.74` over the fixed WG safety link — arm held 3023 ms, press→STOP, single-channel discordance → STOP via liveness with 0 STOP-msgs on wire. Deferred smoke fully closed.
 
 **DUT reachability diagnosis (2026-08-02).** From this host, PSTOP06 (pstop-01d7f344 @ 100.75.70.74) is reachable only via **DERP(sfo) relay** — `tailscale ping` succeeds (~40-120 ms) but **no direct path forms** (8/8 relayed, "direct connection not established"). Over DERP, disco pings + the TCP 3-way handshake complete, but **HTTP data never returns** ("Empty reply"/timeout), independent of HTTP version, an MSS clamp (1140), or a relay-3 power-cycle. Ruled out: httpd wedge (power-cycle didn't fix), MTU size (path MTU ~1250; clamp didn't fix), HTTP/1.1 keep-alive (HTTP/1.0 also fails). My NAT is friendly (`MappingVariesByDestIP: false`), and the **DUT fw already has the direct-path-healing + send-fail fixes (66df9ae)** — so the blocker is the **remote bench's NAT/firewall preventing direct WireGuard hole-punching**, forcing a DERP path that carries tiny packets but not the DUT's HTTP responses. (Earlier this session the direct path *did* form intermittently — 16 ms — so it's flaky, not permanently blocked.) The DUT's **outbound** path is fine (fleet check-ins work). **Not fixable by reflashing.** Remediation: run the HIL suite **on the bench host** (local USB-NCM, direct) as designed; or fix bench-side direct connectivity (subnet router / open WG UDP / DERP alignment). Fleet-push can still update DUT firmware (DUT pulls outbound) but won't give interactive HTTP for the smoke.
 
