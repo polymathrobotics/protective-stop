@@ -145,7 +145,7 @@ CONFIG_TINYUSB_NET_MODE_NCM=y
 # default 3+3 (~19 KB) is sized for throughput; this is a low-rate fallback
 # tether, so 2+2 (~13 KB) frees ~6 KB internal for the WiFi/WG/TLS stacks.
 CONFIG_TINYUSB_NCM_OUT_NTB_BUFFS_COUNT=2
-CONFIG_TINYUSB_NCM_IN_NTB_BUFFS_COUNT=2
+CONFIG_TINYUSB_NCM_IN_NTB_BUFFS_COUNT=4
 CONFIG_TINYUSB_CDC_ENABLED=y
 CONFIG_TINYUSB_CDC_COUNT=1
 # Route ESP_LOG over USB CDC so boot logs flow through the composite device
@@ -215,3 +215,4 @@ CONFIG_COMPILER_OPTIMIZATION_ASSERTIONS_ENABLE=y
 # faster XIP (cache-miss) code execution.
 # Trim bootloader chatter (was INFO).
 CONFIG_BOOTLOADER_LOG_LEVEL_WARN=y
+CONFIG_LWIP_DHCP_RESTORE_LAST_IP=y

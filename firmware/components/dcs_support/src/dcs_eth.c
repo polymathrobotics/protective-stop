@@ -169,6 +169,11 @@ esp_err_t dcs_eth_start(void)
     .clock_speed_hz = DCS_ETH_SPI_CLOCK_MHZ * 1000 * 1000,
     .queue_size = 20,
     .spics_io_num = DCS_ETH_PIN_CS,
+    /* Declare the MISO round-trip so the SPI driver places the sampling edge
+     * with margin against trace/temperature delay (ESP-IDF SPI-Ethernet default).
+     * At 20 MHz the freq limit is 80/(floor(20/12.5)+1) = 40 MHz, well clear —
+     * pure signal-integrity margin, no behavioural change. */
+    .input_delay_ns = 20,
   };
 
   eth_w5500_config_t w5500_config = ETH_W5500_DEFAULT_CONFIG(DCS_ETH_SPI_HOST, &spi_devcfg);

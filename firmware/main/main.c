@@ -49,14 +49,14 @@
 #include "esp_task_wdt.h"
 #include "esp_timer.h"
 #include "estop_verdict.h"
-#include "hal/gpio_ll.h"   /* gpio_ll_get_io_config — pad-config read-back (SR-R-09) */
-#include "soc/gpio_struct.h" /* GPIO peripheral instance for gpio_ll_* */
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
+#include "hal/gpio_ll.h" /* gpio_ll_get_io_config — pad-config read-back (SR-R-09) */
 #include "lwip/sockets.h"
 #include "pstop/protocol_data.h"
 #include "pstop/pstop_msg.h"
+#include "soc/gpio_struct.h" /* GPIO peripheral instance for gpio_ll_* */
 
 /* ============================================================================
  * Configuration
@@ -243,7 +243,7 @@ static uint8_t estop_channel_closed(int core_id, uint32_t counter)
 {
   const gpio_num_t out = g_estop_ch[core_id].out;
   const gpio_num_t in = g_estop_ch[core_id].in;
-  (void)counter;   /* both phases are sampled every tick; no rolling phase */
+  (void)counter; /* both phases are sampled every tick; no rolling phase */
 
   /* SAFETY — button integral to the message (external reviewer, 2026-08).
    * Sample BOTH loop phases THIS tick: drive HIGH then LOW, reading each back.
@@ -763,11 +763,38 @@ static void sess_drain(pstop_sess_t * s)
   }
 }
 
+/* Count of transient ERR_IF refusals absorbed by a same-tick retry (i.e. sends
+ * that would previously have been dropped as g_sf_txdrv and could have opened a
+ * heartbeat gap). Published as pstop_sf_txdrv_recovered for soak verification. */
+static uint32_t g_sf_txdrv_recovered;
+
+/* Max immediate retries on a TRANSIENT uplink-driver refusal (ERR_IF, errno -1
+ * — e.g. USB-NCM all IN NTBs momentarily in-flight). Each retry yields 1 ms
+ * (FreeRTOS HZ=1000) so the lower-priority TinyUSB task can complete a bulk-IN
+ * transfer and return an NTB to the free list; the resend then succeeds within
+ * the SAME 200 ms send tick, so the machine never sees a heartbeat gap. Bounded
+ * at 3 (<= 3 ms << the 200 ms period and << the machine's ~1.2 s timeout), and
+ * gated on ERR_IF ONLY — a genuinely dead link (route/ENOMEM) still fails on the
+ * first attempt, so dead-link detection latency is UNCHANGED. */
+#define PSTOP_TX_RETRY_MAX 3
+
 static bool sess_sendto(pstop_sess_t * s, const uint8_t * bytes)
 {
   struct sockaddr_in a = sess_addr(s);
-  int n = sendto(s->sock, bytes, PSTOP_MESSAGE_SIZE, 0, (struct sockaddr *)&a, sizeof(a));
-  return n == PSTOP_MESSAGE_SIZE;
+  for (int attempt = 0; attempt <= PSTOP_TX_RETRY_MAX; attempt++) {
+    int n = sendto(s->sock, bytes, PSTOP_MESSAGE_SIZE, 0, (struct sockaddr *)&a, sizeof(a));
+    if (n == PSTOP_MESSAGE_SIZE) {
+      if (attempt > 0) {
+        g_sf_txdrv_recovered++; /* a transient ERR_IF absorbed without a gap */
+      }
+      return true;
+    }
+    if (errno != -1) {
+      return false; /* not ERR_IF (route / ENOMEM / other): fail fast, never spin */
+    }
+    vTaskDelay(1); /* yield 1 ms so the prio-5 USB task can free an IN NTB */
+  }
+  return false; /* still ERR_IF after the bounded retries -> counted as g_sf_txdrv */
 }
 
 /* Aggregate send-failure causes (errno buckets), published to /state.json so
@@ -949,7 +976,7 @@ static void comparator_task(void * arg)
   uint64_t last_unhealthy_kick_ms = 0;
   bool xc_announced = false;
   TickType_t xc_fault_tick = 0;
-  uint32_t padcfg_tick = 0;   /* decimates the ~1 s GPIO pad-config re-verify */
+  uint32_t padcfg_tick = 0; /* decimates the ~1 s GPIO pad-config re-verify */
   bool padcfg_announced = false;
   TickType_t padcfg_fault_tick = 0;
 
@@ -979,8 +1006,7 @@ static void comparator_task(void * arg)
           (unsigned long)xc_fault,
           (unsigned long)XCHECK_RESET_GRACE_MS);
       }
-      dcs_publish_xcheck(
-        xc_fault, (uint32_t)atomic_load(&g_xcheck_hb[0]), (uint32_t)atomic_load(&g_xcheck_hb[1]));
+      dcs_publish_xcheck(xc_fault, (uint32_t)atomic_load(&g_xcheck_hb[0]), (uint32_t)atomic_load(&g_xcheck_hb[1]));
       if ((TickType_t)(xTaskGetTickCount() - xc_fault_tick) >= pdMS_TO_TICKS(XCHECK_RESET_GRACE_MS)) {
         ESP_LOGE(TAG, "XCHECK: controlled reset now");
         vTaskDelay(pdMS_TO_TICKS(20)); /* flush the log line */
@@ -1263,7 +1289,7 @@ static void comparator_task(void * arg)
     } else {
       /* all OK: agg_msg stays OK */
     }
-    dcs_publish_pstop_sf_causes(g_sf_nomem, g_sf_route, g_sf_txdrv, g_sf_other, g_sf_last_errno);
+    dcs_publish_pstop_sf_causes(g_sf_nomem, g_sf_route, g_sf_txdrv, g_sf_txdrv_recovered, g_sf_other, g_sf_last_errno);
     /* Dual-core cross-check liveness: publish the per-core heartbeats every
          * tick (healthy or not) so /state.json shows them advancing — positive
          * evidence the cross-check is running, not just a fault indicator. */

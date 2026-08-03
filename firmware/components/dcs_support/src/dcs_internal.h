@@ -137,6 +137,7 @@ extern "C"
   extern atomic_uint_fast32_t g_dcs_pstop_sf_nomem;
   extern atomic_uint_fast32_t g_dcs_pstop_sf_route;
   extern atomic_uint_fast32_t g_dcs_pstop_sf_txdrv; /* lwip ERR_IF: uplink driver TX refused */
+  extern atomic_uint_fast32_t g_dcs_pstop_sf_txdrv_recovered; /* transient ERR_IF absorbed by same-tick retry */
   extern atomic_uint_fast32_t g_dcs_pstop_sf_other;
   extern atomic_int g_dcs_pstop_sf_last_errno;
   extern atomic_uint_fast32_t g_dcs_pstop_rebonds; /* link re-syncs after reply loss */
