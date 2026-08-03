@@ -466,7 +466,7 @@ safe use.
 
 Grouped by theme; within each group, roughly in order of first appearance.
 
-### Analysis methods & documents
+## Analysis methods & documents
 - **FMEDA — Failure Modes, Effects and Diagnostic Analysis.** The core spreadsheet of
   this whole effort: list every component, every way it can fail, how often, whether the
   failure is safe or dangerous, and whether a diagnostic catches it. Everything else here

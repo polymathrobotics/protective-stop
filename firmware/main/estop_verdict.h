@@ -34,16 +34,16 @@
 // Per-core E-stop channel state, carried across ticks. One instance per core.
 typedef struct
 {
-  bool high_ok;      // most recent drive-high tick read IN==1 (closed)
-  bool low_ok;       // most recent drive-low  tick read IN==0 (not shorted)
+  bool high_ok;  // most recent drive-high tick read IN==1 (closed)
+  bool low_ok;  // most recent drive-low  tick read IN==0 (not shorted)
   bool primed_high;  // a drive-high sample has been taken since boot
-  bool primed_low;   // a drive-low  sample has been taken since boot
+  bool primed_low;  // a drive-low  sample has been taken since boot
   uint8_t closed_streak;  // consecutive healthy ticks (release debounce)
-  uint8_t open_streak;    // consecutive unhealthy ticks (boot warm-up only)
-  bool settled;      // debounce warm-up done: one full closed-debounce cycle
-                     // observed, OR LOOP_BOOT_OPEN_CONFIRM_TICKS consecutive
-                     // open reads (button held at boot). Until BOTH channels
-                     // settle, the comparator's boot-priming hold sends nothing.
+  uint8_t open_streak;  // consecutive unhealthy ticks (boot warm-up only)
+  bool settled;  // debounce warm-up done: one full closed-debounce cycle
+    // observed, OR LOOP_BOOT_OPEN_CONFIRM_TICKS consecutive
+    // open reads (button held at boot). Until BOTH channels
+    // settle, the comparator's boot-priming hold sends nothing.
 } estop_state_t;
 
 // Decide this tick's pstop message byte from the two FRESH both-phase reads
@@ -54,7 +54,7 @@ typedef struct
 // core_id selects the diverse verdict expression (Option B): core 0 by
 // arithmetic image (table-index), core 1 by boolean — logically identical when
 // correct, so a systematic bug in one diverges the lockstep comparator.
-uint8_t estop_decide(estop_state_t *st, int core_id, int rb_hi, int rb_lo);
+uint8_t estop_decide(estop_state_t * st, int core_id, int rb_hi, int rb_lo);
 
 // True once BOTH cores have sampled both phases AND settled (see the boot
 // warm-up rationale above). The comparator holds off sending until then.

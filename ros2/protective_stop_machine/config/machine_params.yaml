@@ -1,23 +1,24 @@
+---
 /machine_bridge:
   ros__parameters:
-    backend: software           # software | hardware   (read-only)
-    machine_id: 16909060        # 0x01020304            (read-only)
+    backend: software  # software | hardware   (read-only)
+    machine_id: 16909060  # 0x01020304            (read-only)
     frame_id: pstop_machine
 
-    software:                   # used when backend == software
-      bind_addr: "0.0.0.0"
-      port: 8890                # read-only
+    software:  # used when backend == software
+      bind_addr: 0.0.0.0
+      port: 8890  # read-only
 
-    hardware:                   # used when backend == hardware
-      device_url: "http://127.0.0.1"
-      admin_user: "admin"       # password via env PSTOP_MACHINE_ADMIN_PASS
+    hardware:  # used when backend == hardware
+      device_url: http://127.0.0.1
+      admin_user: admin  # password via env PSTOP_MACHINE_ADMIN_PASS
 
-    timing:                     # dynamic; validated against the safety floor
+    timing:  # dynamic; validated against the safety floor
       heartbeat_ms: 400
       max_missed: 3
       min_stop_ms: 500
 
     rates:
       publish_rate_hz: 10.0
-      state_poll_hz: 5.0        # hardware poll rate
+      state_poll_hz: 5.0  # hardware poll rate
       diagnostics_rate_hz: 1.0

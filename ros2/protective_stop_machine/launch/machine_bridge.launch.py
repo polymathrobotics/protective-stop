@@ -5,6 +5,7 @@
 No nav2_lifecycle_manager dependency: we emit the configure/activate transitions
 from launch event handlers when autostart:=true (the default).
 """
+
 import os
 
 import launch
@@ -20,18 +21,18 @@ from lifecycle_msgs.msg import Transition
 
 
 def generate_launch_description():
-    pkg = get_package_share_directory("protective_stop_machine")
-    default_params = os.path.join(pkg, "config", "machine_params.yaml")
+    pkg = get_package_share_directory('protective_stop_machine')
+    default_params = os.path.join(pkg, 'config', 'machine_params.yaml')
 
-    params_file = LaunchConfiguration("params_file")
-    autostart = LaunchConfiguration("autostart")
+    params_file = LaunchConfiguration('params_file')
+    autostart = LaunchConfiguration('autostart')
 
     node = LifecycleNode(
-        package="protective_stop_machine",
-        executable="machine_bridge_node",
-        name="machine_bridge",
-        namespace="",
-        output="screen",
+        package='protective_stop_machine',
+        executable='machine_bridge_node',
+        name='machine_bridge',
+        namespace='',
+        output='screen',
         parameters=[params_file],
     )
 
@@ -46,7 +47,7 @@ def generate_launch_description():
     activate_on_inactive = RegisterEventHandler(
         OnStateTransition(
             target_lifecycle_node=node,
-            goal_state="inactive",
+            goal_state='inactive',
             entities=[
                 EmitEvent(
                     event=ChangeState(
@@ -60,8 +61,8 @@ def generate_launch_description():
     )
 
     return LaunchDescription([
-        DeclareLaunchArgument("params_file", default_value=default_params),
-        DeclareLaunchArgument("autostart", default_value="true"),
+        DeclareLaunchArgument('params_file', default_value=default_params),
+        DeclareLaunchArgument('autostart', default_value='true'),
         node,
         activate_on_inactive,
         configure,

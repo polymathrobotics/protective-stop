@@ -26,7 +26,7 @@
  */
 
 #ifndef _GNU_SOURCE
-#define _GNU_SOURCE /* CLOCK_BOOTTIME (independent clock ref for the clock guard) */
+  #define _GNU_SOURCE /* CLOCK_BOOTTIME (independent clock ref for the clock guard) */
 #endif
 
 #include <netdb.h>
@@ -52,11 +52,11 @@
  * primary CLOCK_MONOTONIC still holds against CLOCK_REALTIME + the call-count
  * proxy even when BOOTTIME degrades to a less-independent source. */
 #ifndef CLOCK_BOOTTIME
-#ifdef CLOCK_MONOTONIC_RAW
-#define CLOCK_BOOTTIME CLOCK_MONOTONIC_RAW
-#else
-#define CLOCK_BOOTTIME CLOCK_REALTIME
-#endif
+  #ifdef CLOCK_MONOTONIC_RAW
+    #define CLOCK_BOOTTIME CLOCK_MONOTONIC_RAW
+  #else
+    #define CLOCK_BOOTTIME CLOCK_REALTIME
+  #endif
 #endif
 
 /* ============================================================================
@@ -654,34 +654,53 @@ static udp_transport_data_t udp_transport;
  * refuse to run rather than silently accept the setting. Floors mirror
  * machine_bridge_node.cpp floor::. */
 #define CFG_HB_MIN_MS 50U
-#define CFG_HB_MAX_MS 1000U        /* liveness window can't exceed 1 s        */
+#define CFG_HB_MAX_MS 1000U /* liveness window can't exceed 1 s        */
 #define CFG_MAX_MISSED_MIN 1U
-#define CFG_MAX_MISSED_MAX 5U      /* can't tolerate more than 5 withheld ticks */
+#define CFG_MAX_MISSED_MAX 5U /* can't tolerate more than 5 withheld ticks */
 #define CFG_MIN_STOP_FLOOR_MS 100U /* anti-blip arming-delay floor             */
 
 static int cfg_validate(const machine_cfg_t * c, char * reason, size_t rlen)
 {
   if (c->default_heartbeat_ms < CFG_HB_MIN_MS || c->default_heartbeat_ms > CFG_HB_MAX_MS) {
-    snprintf(reason, rlen, "default_heartbeat_ms %llu out of [%u,%u]",
-             (unsigned long long)c->default_heartbeat_ms, CFG_HB_MIN_MS, CFG_HB_MAX_MS);
+    snprintf(
+      reason,
+      rlen,
+      "default_heartbeat_ms %llu out of [%u,%u]",
+      (unsigned long long)c->default_heartbeat_ms,
+      CFG_HB_MIN_MS,
+      CFG_HB_MAX_MS);
     return -1;
   }
-  if (c->max_missed_heartbeats < CFG_MAX_MISSED_MIN ||
-      c->max_missed_heartbeats > CFG_MAX_MISSED_MAX) {
-    snprintf(reason, rlen, "max_missed_heartbeats %u out of [%u,%u]",
-             c->max_missed_heartbeats, CFG_MAX_MISSED_MIN, CFG_MAX_MISSED_MAX);
+  if (c->max_missed_heartbeats < CFG_MAX_MISSED_MIN || c->max_missed_heartbeats > CFG_MAX_MISSED_MAX) {
+    snprintf(
+      reason,
+      rlen,
+      "max_missed_heartbeats %u out of [%u,%u]",
+      c->max_missed_heartbeats,
+      CFG_MAX_MISSED_MIN,
+      CFG_MAX_MISSED_MAX);
     return -1;
   }
   if (c->min_stop_ms < CFG_MIN_STOP_FLOOR_MS) {
-    snprintf(reason, rlen, "min_stop_ms %llu below safety floor %u",
-             (unsigned long long)c->min_stop_ms, CFG_MIN_STOP_FLOOR_MS);
+    snprintf(
+      reason,
+      rlen,
+      "min_stop_ms %llu below safety floor %u",
+      (unsigned long long)c->min_stop_ms,
+      CFG_MIN_STOP_FLOOR_MS);
     return -1;
   }
   for (int i = 0; i < c->n_operators; i++) {
     const uint64_t hb = c->operators[i].heartbeat_ms; /* 0 => inherit default */
     if (hb != 0U && (hb < CFG_HB_MIN_MS || hb > CFG_HB_MAX_MS)) {
-      snprintf(reason, rlen, "operator[%d] heartbeat_ms %llu out of [%u,%u]",
-               i, (unsigned long long)hb, CFG_HB_MIN_MS, CFG_HB_MAX_MS);
+      snprintf(
+        reason,
+        rlen,
+        "operator[%d] heartbeat_ms %llu out of [%u,%u]",
+        i,
+        (unsigned long long)hb,
+        CFG_HB_MIN_MS,
+        CFG_HB_MAX_MS);
       return -1;
     }
   }

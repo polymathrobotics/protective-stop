@@ -216,22 +216,22 @@ evidence + integrator confirmation of A-01..A-05.
 
 **Evidence blocking the SIL 3 / PL e claim:**
 
-4. **FMEDA** for the remote sensing chain and the machine relay chain: SFF, DC,
+1. **FMEDA** for the remote sensing chain and the machine relay chain: SFF, DC,
    β, PFH. Without it there is no quantitative SIL/PL claim (§6.1).
-5. **Fault-injection proof of Option B diversity** (PSTOP_SAFETY_DESIGN §10
+2. **Fault-injection proof of Option B diversity** (PSTOP_SAFETY_DESIGN §10
    row 9): inject an identical logic fault into both cores' sensing and show the
    byte encodings still diverge. If they do not, common-cause (H-09) is
    uncontrolled and SIL 3 fails.
-6. **Anti-replay residual** (H-06): argue the `pstop_c` native counter /
+3. **Anti-replay residual** (H-06): argue the `pstop_c` native counter /
    `MSG_LOST` bounded-loss window is sufficient without the dropped stamp
    signature, quantified against A-08.
-7. **Frozen-clock diagnostic** (H-05): demonstrate the machine's `get_time_cb`
+4. **Frozen-clock diagnostic** (H-05): demonstrate the machine's `get_time_cb`
    cannot silently stall (F-P-03), or add a monotonicity check.
-8. **DERP dark-window vs PST** (H-03): the measured 5–9 s failover gap and the
+5. **DERP dark-window vs PST** (H-03): the measured 5–9 s failover gap and the
    degraded-mode ladder must be shown ≤ PST, or STOP must be forced during the
    gap. **This is likely to fail for any short-PST vehicle** and needs explicit
    treatment.
-9. Confirm the pstop is **not** credited as the machine's emergency-stop; verify
+6. Confirm the pstop is **not** credited as the machine's emergency-stop; verify
    an independent IEC 60204-1 / ISO 13850 E-stop exists.
 
 **Doc-vs-code register (found during this analysis — fix before sign-off):**

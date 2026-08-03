@@ -5,7 +5,7 @@
 
 #include "pstop/pstop_msg.h"  // PSTOP_MESSAGE_OK / PSTOP_MESSAGE_STOP
 
-uint8_t estop_decide(estop_state_t *st, int core_id, int rb_hi, int rb_lo)
+uint8_t estop_decide(estop_state_t * st, int core_id, int rb_hi, int rb_lo)
 {
   // The OK codeword is selected by the ARITHMETIC IMAGE of both fresh reads —
   // index 0 (OK) iff rb_hi==1 AND rb_lo==0, computed with no interpretable
@@ -76,6 +76,6 @@ uint8_t estop_decide(estop_state_t *st, int core_id, int rb_hi, int rb_lo)
 
 bool estop_channels_primed(const estop_state_t st[2])
 {
-  return st[0].primed_high && st[0].primed_low && st[1].primed_high &&
-         st[1].primed_low && st[0].settled && st[1].settled;
+  return st[0].primed_high && st[0].primed_low && st[1].primed_high && st[1].primed_low && st[0].settled &&
+         st[1].settled;
 }

@@ -109,6 +109,7 @@ container on every push/PR (`.github/workflows/coverage.yml`) and posts the
 summary. `SKIP_ROS2=1` for a host+firmware-only run. Manual per-codebase steps:
 
 **Host** (statement+branch now; add `-fcondition-coverage` + `gcov-14` for MC/DC):
+
 ```
 cd host && gcc -O0 -g --coverage -I../pstop_c/pstop/include -I../pstop_c/transport/include \
   -o machine_app_runner machine_app_runner.c ../pstop_c/pstop/src/pstop/*.c \
@@ -118,6 +119,7 @@ gcovr --filter 'host/machine_app_runner\.c' --print-summary
 ```
 
 **ROS2** (separate `build-cov`, does not disturb the normal build):
+
 ```
 cd ros2 && source /opt/ros/humble/setup.bash
 colcon build --packages-up-to protective_stop_machine --build-base build-cov \

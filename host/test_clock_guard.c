@@ -1,5 +1,5 @@
-/* SPDX-FileCopyrightText: 2026 Polymath Robotics, Inc. */
-/* SPDX-License-Identifier: Apache-2.0 */
+// SPDX-FileCopyrightText: 2026 Polymath Robotics
+// SPDX-License-Identifier: Apache-2.0
 
 /* Host unit tests for the machine-side clock-freeze guard (clock_guard.c),
  * the SR-H-04b / FMEA DU-2 mitigation. Fully host-runnable (no hardware): a

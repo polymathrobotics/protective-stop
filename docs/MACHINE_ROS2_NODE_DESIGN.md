@@ -142,16 +142,18 @@ discipline):
 - Publishers/services live in a `MutuallyExclusive` group. A `MultiThreaded
   Executor` runs the node.
 - Backends implement one interface:
+
   ```cpp
   class IMachineBackend {            // pure, no rclcpp
-    virtual void start() = 0;        // bind/socket or begin polling
+  virtual void start() = 0;        // bind/socket or begin polling
     virtual void stop()  = 0;        // → safe state
     virtual MachineSnapshot snapshot() const = 0;   // thread-safe read
     virtual bool configure(const MachineTiming&) = 0; // runtime reconfig
   };
   ```
+
   `SoftwareMachineBackend` and `HardwareMachineBackend` are the two impls; the
-  node depends only on `IMachineBackend`.
+node depends only on `IMachineBackend`.
 
 ---
 

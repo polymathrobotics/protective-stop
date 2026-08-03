@@ -55,7 +55,5 @@ int microlink_perf_bench(int iters, char * out, size_t cap)
   unsigned aead_mbps = (aead_us > 0u) ? (unsigned)((uint64_t)sizeof(buf) * 8u / aead_us) : 0u;
 
   return snprintf(
-    out, cap,
-    "{\"iters\":%d,\"x25519_us\":%u,\"aead_1420B_us\":%u,\"aead_Mbps\":%u}",
-    iters, x_us, aead_us, aead_mbps);
+    out, cap, "{\"iters\":%d,\"x25519_us\":%u,\"aead_1420B_us\":%u,\"aead_Mbps\":%u}", iters, x_us, aead_us, aead_mbps);
 }

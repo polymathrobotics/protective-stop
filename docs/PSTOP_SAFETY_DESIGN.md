@@ -131,7 +131,7 @@ GPIO fault breaks a chain the *machine* polices, not just the remote.
 > (§5.3), the semantic-1oo2D comparator (§5.4), and the runtime GPIO
 > config-integrity check (§5.5) are **not in the code**. The implemented controls
 > are **Option A** (fresh both-phase physical sample per tick, `main.c:265-308`)
-> + **Option B** (two cores form the verdict by diverse expressions — arithmetic
+> - **Option B** (two cores form the verdict by diverse expressions — arithmetic
 > image `:305` vs boolean `:307` — with a byte `memcmp` of the two 40-byte
 > encodings, `:890`, detecting divergence). The text is kept as design rationale;
 > see per-subsection notes and `docs/safety/RECONCILIATION.md` (R-01/R-02/R-04).

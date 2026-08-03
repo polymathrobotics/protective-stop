@@ -32,7 +32,7 @@ polarity `OK == 0x00` (SYSTEM_DEFINITION §5).
 
 ### 1.1 Reliability model
 
-- **Random-hardware only.** Per IEC 61508 and the TI white paper *SLOA294A*
++ **Random-hardware only.** Per IEC 61508 and the TI white paper *SLOA294A*
   (§2, "systematic failures are excluded from the calculation of random hardware
   failure metrics"), this FMEDA quantifies **random** hardware failures only.
   Systematic faults — the dominant residual here (DU-3 compiler-erased diversity,
@@ -40,13 +40,13 @@ polarity `OK == 0x00` (SYSTEM_DEFINITION §5).
   are governed by the **systematic-capability (SC 3)** argument in HARA §6.3 and
   are carried in §7 as the reason the numeric PFH is *necessary but not
   sufficient*.
-- **Constant failure rate** (exponential, useful-life region of the bathtub
++ **Constant failure rate** (exponential, useful-life region of the bathtub
   curve) — TI *SLOA294A* §3.
-- **Series safety chain.** For the STOP function the remote sensing subsystem
++ **Series safety chain.** For the STOP function the remote sensing subsystem
   **and** the machine actuation subsystem are in *functional series* (a
   dangerous-undetected fault in either defeats the stop), so subsystem
   λ_DU and PFH **add** at system level.
-- **Per subsystem: 1oo2D**, evaluated with the IEC 61508-6:2010 Annex B
++ **Per subsystem: 1oo2D**, evaluated with the IEC 61508-6:2010 Annex B
   formulas (§5.3).
 
 ### 1.2 Mission profile (stated + cited)
@@ -126,12 +126,12 @@ IEC 62280 principles). The transport is **not** assigned a λ in the SFF roll-up
 instead its residual undetected-corruption probability is bounded by the
 endpoint **CRC-16** (`pstop_c` over bytes [0..37]):
 
-- Residual undetected-error fraction of a 16-bit CRC ≈ **2⁻¹⁶ ≈ 1.5×10⁻⁵**
++ Residual undetected-error fraction of a 16-bit CRC ≈ **2⁻¹⁶ ≈ 1.5×10⁻⁵**
   (upper bound, IEC 61508-2 Annex A / IEC 62280 residual-error argument).
-- Combined with per-session src IP/port filtering (`main.c:741`) and the
++ Combined with per-session src IP/port filtering (`main.c:741`) and the
   `pstop_c` counter/stamp echo + `MSG_LOST`/`OUT_OF_ORDER` (F-P-04), **all**
   identified corruption/replay effects tend to STOP (fail-safe; FMEA R06-x).
-- **Contribution to λ_DU: treated as negligible** vs the endpoint hardware,
++ **Contribution to λ_DU: treated as negligible** vs the endpoint hardware,
   contingent on the black-channel assumption being a stated safety requirement
   (SR-SYS-08). This is a *qualitative* discharge, flagged in §8.
 
@@ -242,16 +242,16 @@ Constants: T1 = 8760 h, MRT = MTTR = 8 h, β = 0.10, β_D = 0.05 (§6).
 λ in /h (FIT ×10⁻⁹).
 
 **Remote subsystem** (λ_DU = 3.8 FIT, λ_DD = 26.2 FIT):
-- Common-cause: β·λ_DU = 0.10 × 3.8e-9 = **3.8×10⁻¹⁰ /h**
-- Residual dual-independent: 2·[(0.9)(3.8e-9)]²·t_CE, t_CE ≈ (3.8/30)(4380+8)+(26.2/30)(8) ≈ 563 h → 2·(3.4e-9)²·563 ≈ **1.3×10⁻¹⁴ /h** (negligible)
-- **PFH_remote ≈ 3.8×10⁻¹⁰ /h**
++ Common-cause: β·λ_DU = 0.10 × 3.8e-9 = **3.8×10⁻¹⁰ /h**
++ Residual dual-independent: 2·[(0.9)(3.8e-9)]²·t_CE, t_CE ≈ (3.8/30)(4380+8)+(26.2/30)(8) ≈ 563 h → 2·(3.4e-9)²·563 ≈ **1.3×10⁻¹⁴ /h** (negligible)
++ **PFH_remote ≈ 3.8×10⁻¹⁰ /h**
 
 **Machine subsystem** (λ_DU = 5.6 FIT). Split by β:
-- MC-4 clock (3.0 FIT) is a **single latched time source → β ≈ 1**, so it enters
++ MC-4 clock (3.0 FIT) is a **single latched time source → β ≈ 1**, so it enters
   at ~full rate: ≈ **3.0×10⁻⁹ /h** (dominant single-point).
-- Remaining λ_DU (2.6 FIT, β = 0.10): β·λ_DU ≈ **2.6×10⁻¹⁰ /h**.
-- Residual dual-independent ≈ 10⁻¹⁴ (negligible).
-- **PFH_machine ≈ 3.3×10⁻⁹ /h**
++ Remaining λ_DU (2.6 FIT, β = 0.10): β·λ_DU ≈ **2.6×10⁻¹⁰ /h**.
++ Residual dual-independent ≈ 10⁻¹⁴ (negligible).
++ **PFH_machine ≈ 3.3×10⁻⁹ /h**
 
 **System PFH = PFH_remote + PFH_machine ≈ 3.7×10⁻⁹ /h ≈ 4 FIT.**
 
@@ -389,19 +389,19 @@ external SIL 3 claim.
 
 ## Sources cited
 
-- **IEC 61508-1:2010** Table 3 — SIL vs PFH bands (continuous mode).
-- **IEC 61508-2:2010** §7.4.4 (Type A/B), Table 3 (architectural constraints, Route 1H), Annex A/C (diagnostic-coverage technique tables & bands).
-- **IEC 61508-6:2010** Annex B (PFH formulas for 1oo2 / 1oo2D), Annex D (β common-cause scoring).
-- **IEC TR 62380:2004** — reliability data handbook (MCU die/package cross-check).
-- **Siemens Norm SN 29500** (-1:2004, -2:2004, -3:2004, -4:2004, -5:2004) — component reference failure rates (editions per the exida analogue below).
-- **MIL-HDBK-217F Notice 2** — passive/switch/connector base rates; RM chip-film resistor λ_b = 0.0037/10⁶ h (ROHM *R1102A*, <https://fscdn.rohm.com/en/products/databook/operation/passive/resistor/common/r_failure_rate.pdf>).
-- **ISO 13849-1** — 50 % dangerous default; B10d method; proof-test concept.
-- **exida FMEDA — R. STAHL Isolating Repeater 9165** (*STAHL 04/04-03 R004*, V5R0, 2015): SN 29500 @ 40 °C, IEC 60654-1 class C, ×2.5 at 60 °C; single-channel Type A λ_DD 150 / λ_DU 58 FIT, SFF 72 %, PFH 5.8×10⁻⁸/h — <https://r-stahl.com/fileadmin/tx_aimeos/Files/8_/00/STAHL040403R004_008_00/FMEDA_report_STAHL040403R004_008_00.pdf>.
-- **TI SLOA294A** — *Understanding Functional Safety FIT Base Failure Rate Estimates per IEC 62380 and SN 29500* (Rev. A, 2024): SN 29500 method; SIL 3 SFF ≥ 99 % / PFH ≤ 10 FIT (Table 2-2); op-amp λ_ref 12 FIT @ 55 °C (SN 29500-2 Table 4) — <https://www.ti.com/lit/SLOA294A>.
-- **Omron** — *Reliability Data for Safety of Machinery Safety Components*: G7SA safety relay B10d = 4.0×10⁵ ops (forcibly-guided, IEC 61810-3) — <https://www.ia.omron.com/support/sistemalibrary/data/omron_safety_components_en_20240826.pdf>.
-- **Infineon KBA-236335** — AURIX MCU base failure rate SN 29500-2 vs IEC TR 62380 — <https://community.infineon.com/t5/Knowledge-Base-Articles/AURIX-MCU-Base-failure-rate-SN29500-2-vs-IEC-TR-62380/ta-p/373852>.
-- **Analog Devices EngineerZone** — *How to Quantify Common Cause Failures* (IEC 61508-6 Annex D β 1–10 %) — <https://ez.analog.com/b/engineerzone-spotlight/posts/how-to-quantify-common-cause-failures>.
-- **Ho et al. (2024)** — *The development of a common cause factor score table on IEC 61508 Part 6 Ed. 2.0* — <https://www.sciencedirect.com/science/article/abs/pii/S0950423024000287>.
++ **IEC 61508-1:2010** Table 3 — SIL vs PFH bands (continuous mode).
++ **IEC 61508-2:2010** §7.4.4 (Type A/B), Table 3 (architectural constraints, Route 1H), Annex A/C (diagnostic-coverage technique tables & bands).
++ **IEC 61508-6:2010** Annex B (PFH formulas for 1oo2 / 1oo2D), Annex D (β common-cause scoring).
++ **IEC TR 62380:2004** — reliability data handbook (MCU die/package cross-check).
++ **Siemens Norm SN 29500** (-1:2004, -2:2004, -3:2004, -4:2004, -5:2004) — component reference failure rates (editions per the exida analogue below).
++ **MIL-HDBK-217F Notice 2** — passive/switch/connector base rates; RM chip-film resistor λ_b = 0.0037/10⁶ h (ROHM *R1102A*, <https://fscdn.rohm.com/en/products/databook/operation/passive/resistor/common/r_failure_rate.pdf>).
++ **ISO 13849-1** — 50 % dangerous default; B10d method; proof-test concept.
++ **exida FMEDA — R. STAHL Isolating Repeater 9165** (*STAHL 04/04-03 R004*, V5R0, 2015): SN 29500 @ 40 °C, IEC 60654-1 class C, ×2.5 at 60 °C; single-channel Type A λ_DD 150 / λ_DU 58 FIT, SFF 72 %, PFH 5.8×10⁻⁸/h — <https://r-stahl.com/fileadmin/tx_aimeos/Files/8_/00/STAHL040403R004_008_00/FMEDA_report_STAHL040403R004_008_00.pdf>.
++ **TI SLOA294A** — *Understanding Functional Safety FIT Base Failure Rate Estimates per IEC 62380 and SN 29500* (Rev. A, 2024): SN 29500 method; SIL 3 SFF ≥ 99 % / PFH ≤ 10 FIT (Table 2-2); op-amp λ_ref 12 FIT @ 55 °C (SN 29500-2 Table 4) — <https://www.ti.com/lit/SLOA294A>.
++ **Omron** — *Reliability Data for Safety of Machinery Safety Components*: G7SA safety relay B10d = 4.0×10⁵ ops (forcibly-guided, IEC 61810-3) — <https://www.ia.omron.com/support/sistemalibrary/data/omron_safety_components_en_20240826.pdf>.
++ **Infineon KBA-236335** — AURIX MCU base failure rate SN 29500-2 vs IEC TR 62380 — <https://community.infineon.com/t5/Knowledge-Base-Articles/AURIX-MCU-Base-failure-rate-SN29500-2-vs-IEC-TR-62380/ta-p/373852>.
++ **Analog Devices EngineerZone** — *How to Quantify Common Cause Failures* (IEC 61508-6 Annex D β 1–10 %) — <https://ez.analog.com/b/engineerzone-spotlight/posts/how-to-quantify-common-cause-failures>.
++ **Ho et al. (2024)** — *The development of a common cause factor score table on IEC 61508 Part 6 Ed. 2.0* — <https://www.sciencedirect.com/science/article/abs/pii/S0950423024000287>.
 
 ---
 

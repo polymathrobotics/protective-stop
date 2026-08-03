@@ -1,5 +1,5 @@
-/* SPDX-FileCopyrightText: 2026 Polymath Robotics, Inc. */
-/* SPDX-License-Identifier: Apache-2.0 */
+// SPDX-FileCopyrightText: 2026 Polymath Robotics
+// SPDX-License-Identifier: Apache-2.0
 
 /* Pure detection logic for the machine-side clock-freeze guard. See
  * clock_guard.h for the full rationale (SR-H-04b / FMEA DU-2). No syscalls
@@ -11,7 +11,7 @@
 #define CLOCK_GUARD_DEFAULT_WINDOW_MS 500u
 #define CLOCK_GUARD_DEFAULT_MAX_CALLS 2000u
 
-void clock_guard_init(clock_guard_t *g, uint64_t freeze_window_ms, uint32_t freeze_max_calls)
+void clock_guard_init(clock_guard_t * g, uint64_t freeze_window_ms, uint32_t freeze_max_calls)
 {
   g->freeze_window_ms = (freeze_window_ms != 0u) ? freeze_window_ms : CLOCK_GUARD_DEFAULT_WINDOW_MS;
   g->freeze_max_calls = (freeze_max_calls != 0u) ? freeze_max_calls : CLOCK_GUARD_DEFAULT_MAX_CALLS;
@@ -23,12 +23,12 @@ void clock_guard_init(clock_guard_t *g, uint64_t freeze_window_ms, uint32_t free
   g->fault = CLOCK_GUARD_OK;
 }
 
-clock_guard_fault_t clock_guard_fault(const clock_guard_t *g)
+clock_guard_fault_t clock_guard_fault(const clock_guard_t * g)
 {
   return g->fault;
 }
 
-clock_guard_fault_t clock_guard_update(clock_guard_t *g, uint64_t mono_ms, uint64_t ref_ms, uint64_t real_ms)
+clock_guard_fault_t clock_guard_update(clock_guard_t * g, uint64_t mono_ms, uint64_t ref_ms, uint64_t real_ms)
 {
   /* Sticky latch: once a clock fault is seen it is never cleared. A frozen or
    * backward machine clock is a hardware/kernel fault the app cannot recover
@@ -92,7 +92,7 @@ clock_guard_fault_t clock_guard_update(clock_guard_t *g, uint64_t mono_ms, uint6
   return CLOCK_GUARD_OK;
 }
 
-const char *clock_guard_fault_name(clock_guard_fault_t f)
+const char * clock_guard_fault_name(clock_guard_fault_t f)
 {
   switch (f) {
     case CLOCK_GUARD_OK:

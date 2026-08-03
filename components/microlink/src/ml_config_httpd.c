@@ -119,11 +119,11 @@ static void config_load_settings(ml_config_ctx_t * ctx)
   /* Seed empty fields from Kconfig compile-time defaults.
      * This ensures the web UI displays sdkconfig values even before
      * the user saves anything via the web interface. */
-  #define SEED_STR(field, kconfig)                      \
-    do {                                                \
-      if ((field)[0] == '\0' && strlen(kconfig) > 0) {  \
-        strlcpy((field), (kconfig), sizeof(field)); \
-      }                                                 \
+  #define SEED_STR(field, kconfig)                     \
+    do {                                               \
+      if ((field)[0] == '\0' && strlen(kconfig) > 0) { \
+        strlcpy((field), (kconfig), sizeof(field));    \
+      }                                                \
     } while (0)
 
   SEED_STR(ctx->settings.wifi_ssid, CONFIG_ML_WIFI_SSID);
@@ -571,9 +571,9 @@ static esp_err_t handler_post_settings(httpd_req_t * req)
   }
 
   /* Helper macro: clear field, copy new value, ensure null termination */
-  #define COPY_STR_FIELD(field, val)              \
-    do {                                          \
-      memset((field), 0, sizeof(field));          \
+  #define COPY_STR_FIELD(field, val)          \
+    do {                                      \
+      memset((field), 0, sizeof(field));      \
       strlcpy((field), (val), sizeof(field)); \
     } while (0)
 

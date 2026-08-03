@@ -9,6 +9,7 @@ must fail-safe by refusing to start.
 
 Self-contained: writes temp configs, runs host/machine_app_runner, and checks it
 exits nonzero with a reason on unsafe values and starts on a valid one."""
+
 import os
 import signal
 import subprocess
@@ -44,8 +45,7 @@ def run(cfg_text):
         f.write(cfg_text)
         path = f.name
     try:
-        p = subprocess.Popen([RUNNER, path, str(PORT)],
-                             stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        p = subprocess.Popen([RUNNER, path, str(PORT)], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         try:
             _, err = p.communicate(timeout=3)
             return p.returncode, err.decode(errors='replace')
@@ -68,32 +68,32 @@ def check(cond, name):
     global checks, fails
     checks += 1
     if cond:
-        print(f"  ok:   {name}")
+        print(f'  ok:   {name}')
     else:
         fails += 1
-        print(f"  FAIL: {name}")
+        print(f'  FAIL: {name}')
 
 
 if not os.path.exists(RUNNER):
-    print(f"machine_app_runner not built at {RUNNER} — run `make -C host` first")
+    print(f'machine_app_runner not built at {RUNNER} — run `make -C host` first')
     sys.exit(2)
 
 # Unsafe configs MUST be refused (nonzero exit + a reason mentioning the field).
 unsafe = [
-    ("min_stop_ms=0 defeats arming (SF-3)", cfg(min_stop=0), "min_stop_ms"),
-    ("min_stop_ms=50 below floor 100", cfg(min_stop=50), "min_stop_ms"),
-    ("max_missed=0", cfg(max_missed=0), "max_missed"),
-    ("max_missed=9 (>5)", cfg(max_missed=9), "max_missed"),
-    ("heartbeat=30 (<50)", cfg(hb=30), "heartbeat"),
-    ("heartbeat=2000 (>1000, window>1s defeats SF-1 latency)", cfg(hb=2000), "heartbeat"),
+    ('min_stop_ms=0 defeats arming (SF-3)', cfg(min_stop=0), 'min_stop_ms'),
+    ('min_stop_ms=50 below floor 100', cfg(min_stop=50), 'min_stop_ms'),
+    ('max_missed=0', cfg(max_missed=0), 'max_missed'),
+    ('max_missed=9 (>5)', cfg(max_missed=9), 'max_missed'),
+    ('heartbeat=30 (<50)', cfg(hb=30), 'heartbeat'),
+    ('heartbeat=2000 (>1000, window>1s defeats SF-1 latency)', cfg(hb=2000), 'heartbeat'),
 ]
 for name, c, token in unsafe:
     rc, err = run(c)
-    check(rc not in (None, 0) and token in err and "UNSAFE CONFIG" in err, f"REFUSED: {name}")
+    check(rc not in (None, 0) and token in err and 'UNSAFE CONFIG' in err, f'REFUSED: {name}')
 
 # A valid config MUST start (defaults 400 ms / 3 / 500 ms).
 rc, _ = run(cfg())
-check(rc is None, "valid config (400/3/500) starts")
+check(rc is None, 'valid config (400/3/500) starts')
 
-print(f"config-floor tests: {checks} checks, {fails} failures")
+print(f'config-floor tests: {checks} checks, {fails} failures')
 sys.exit(1 if fails else 0)

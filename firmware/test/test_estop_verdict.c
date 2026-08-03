@@ -18,13 +18,13 @@
 
 static int g_checks = 0;
 static int g_fails = 0;
-#define CHECK(cond, what)                             \
-  do {                                                \
-    g_checks++;                                       \
-    if (!(cond)) {                                    \
-      g_fails++;                                       \
-      printf("  FAIL: %s\n", (what));                 \
-    }                                                 \
+#define CHECK(cond, what)             \
+  do {                                \
+    g_checks++;                       \
+    if (!(cond)) {                    \
+      g_fails++;                      \
+      printf("  FAIL: %s\n", (what)); \
+    }                                 \
   } while (0)
 
 static estop_state_t fresh(void)
@@ -121,21 +121,33 @@ int main(void)
   //    single term must make it false (each condition independently decides).
   {
     estop_state_t b[2];
-#define ALLTRUE()                                                       \
-    do {                                                                \
-      for (int c = 0; c < 2; c++) {                                     \
-        b[c] = fresh();                                                 \
-        b[c].primed_high = b[c].primed_low = b[c].settled = true;       \
-      }                                                                 \
-    } while (0)
+#define ALLTRUE()                                               \
+  do {                                                          \
+    for (int c = 0; c < 2; c++) {                               \
+      b[c] = fresh();                                           \
+      b[c].primed_high = b[c].primed_low = b[c].settled = true; \
+    }                                                           \
+  } while (0)
     ALLTRUE();
     CHECK(estop_channels_primed(b), "all-true -> primed");
-    ALLTRUE(); b[0].primed_high = false; CHECK(!estop_channels_primed(b), "flip c0.primed_high");
-    ALLTRUE(); b[0].primed_low = false;  CHECK(!estop_channels_primed(b), "flip c0.primed_low");
-    ALLTRUE(); b[1].primed_high = false; CHECK(!estop_channels_primed(b), "flip c1.primed_high");
-    ALLTRUE(); b[1].primed_low = false;  CHECK(!estop_channels_primed(b), "flip c1.primed_low");
-    ALLTRUE(); b[0].settled = false;     CHECK(!estop_channels_primed(b), "flip c0.settled");
-    ALLTRUE(); b[1].settled = false;     CHECK(!estop_channels_primed(b), "flip c1.settled");
+    ALLTRUE();
+    b[0].primed_high = false;
+    CHECK(!estop_channels_primed(b), "flip c0.primed_high");
+    ALLTRUE();
+    b[0].primed_low = false;
+    CHECK(!estop_channels_primed(b), "flip c0.primed_low");
+    ALLTRUE();
+    b[1].primed_high = false;
+    CHECK(!estop_channels_primed(b), "flip c1.primed_high");
+    ALLTRUE();
+    b[1].primed_low = false;
+    CHECK(!estop_channels_primed(b), "flip c1.primed_low");
+    ALLTRUE();
+    b[0].settled = false;
+    CHECK(!estop_channels_primed(b), "flip c0.settled");
+    ALLTRUE();
+    b[1].settled = false;
+    CHECK(!estop_channels_primed(b), "flip c1.settled");
 #undef ALLTRUE
   }
 

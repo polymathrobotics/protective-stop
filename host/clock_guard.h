@@ -1,5 +1,5 @@
-/* SPDX-FileCopyrightText: 2026 Polymath Robotics, Inc. */
-/* SPDX-License-Identifier: Apache-2.0 */
+// SPDX-FileCopyrightText: 2026 Polymath Robotics
+// SPDX-License-Identifier: Apache-2.0
 
 /* ============================================================================
  * clock_guard — machine-side monotonic-clock freeze / backward detector.
@@ -36,48 +36,51 @@
 #include <stdint.h>
 
 #ifdef __cplusplus
-extern "C" {
+extern "C"
+{
 #endif
 
-typedef enum {
-  CLOCK_GUARD_OK = 0,             /* primary clock healthy */
-  CLOCK_GUARD_FAULT_BACKWARD = 1, /* primary clock jumped backward */
-  CLOCK_GUARD_FAULT_FROZEN = 2,   /* primary clock stalled while time really passed */
-} clock_guard_fault_t;
+  typedef enum
+  {
+    CLOCK_GUARD_OK = 0, /* primary clock healthy */
+    CLOCK_GUARD_FAULT_BACKWARD = 1, /* primary clock jumped backward */
+    CLOCK_GUARD_FAULT_FROZEN = 2, /* primary clock stalled while time really passed */
+  } clock_guard_fault_t;
 
-typedef struct {
-  /* --- configuration (thresholds) --- */
-  uint64_t freeze_window_ms; /* independent-reference advance, while the primary
+  typedef struct
+  {
+    /* --- configuration (thresholds) --- */
+    uint64_t freeze_window_ms; /* independent-reference advance, while the primary
                               * is stalled, that trips a FROZEN fault */
-  uint32_t freeze_max_calls; /* call-count-proxy backstop: this many consecutive
+    uint32_t freeze_max_calls; /* call-count-proxy backstop: this many consecutive
                               * updates with no primary advance also trips FROZEN
                               * (covers an all-clocks-wedged silicon fault where
                               * only the spinning loop still makes progress) */
 
-  /* --- state --- */
-  int initialized;
-  uint64_t base_mono_ms; /* highest primary value seen so far (advance baseline) */
-  uint64_t base_ref_ms;  /* reference (BOOTTIME) at the last primary advance */
-  uint64_t base_real_ms; /* reference (REALTIME) at the last primary advance */
-  uint32_t stall_calls;  /* consecutive updates with no primary advance */
-  clock_guard_fault_t fault; /* latched, sticky once tripped */
-} clock_guard_t;
+    /* --- state --- */
+    int initialized;
+    uint64_t base_mono_ms; /* highest primary value seen so far (advance baseline) */
+    uint64_t base_ref_ms; /* reference (BOOTTIME) at the last primary advance */
+    uint64_t base_real_ms; /* reference (REALTIME) at the last primary advance */
+    uint32_t stall_calls; /* consecutive updates with no primary advance */
+    clock_guard_fault_t fault; /* latched, sticky once tripped */
+  } clock_guard_t;
 
-/* Initialize a guard. Pass 0 for either threshold to use the built-in default
+  /* Initialize a guard. Pass 0 for either threshold to use the built-in default
  * (freeze_window_ms=500, freeze_max_calls=2000). */
-void clock_guard_init(clock_guard_t *g, uint64_t freeze_window_ms, uint32_t freeze_max_calls);
+  void clock_guard_init(clock_guard_t * g, uint64_t freeze_window_ms, uint32_t freeze_max_calls);
 
-/* Feed one fresh reading triple. mono_ms is the primary (get_time_cb) value;
+  /* Feed one fresh reading triple. mono_ms is the primary (get_time_cb) value;
  * ref_ms / real_ms are the two independent references. Returns the (sticky)
  * fault verdict. Once a fault is latched it is returned on every subsequent
  * call unchanged (fail-safe: a clock fault is never "un-seen"). */
-clock_guard_fault_t clock_guard_update(clock_guard_t *g, uint64_t mono_ms, uint64_t ref_ms, uint64_t real_ms);
+  clock_guard_fault_t clock_guard_update(clock_guard_t * g, uint64_t mono_ms, uint64_t ref_ms, uint64_t real_ms);
 
-/* Current latched verdict without feeding a new sample. */
-clock_guard_fault_t clock_guard_fault(const clock_guard_t *g);
+  /* Current latched verdict without feeding a new sample. */
+  clock_guard_fault_t clock_guard_fault(const clock_guard_t * g);
 
-/* Human-readable name for logging. */
-const char *clock_guard_fault_name(clock_guard_fault_t f);
+  /* Human-readable name for logging. */
+  const char * clock_guard_fault_name(clock_guard_fault_t f);
 
 #ifdef __cplusplus
 }
