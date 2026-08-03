@@ -10,6 +10,14 @@ Two coverage regimes, both driven toward the SIL 3 bar:
    with a verifying test, and % of safety-relevant lines traced to a requirement
    (`TRACEABILITY.md`, pending).
 
+**Coverage-tooling policy (OD-1, settled 2026-08-02, user-confirmed).** Two tools
+by design, and they never measure the same code: `pstop_c` keeps its own
+**Bullseye** coverage + CI as pre-qualified evidence; **every other in-scope
+codebase uses GCC-14 `gcov`/`gcovr`** (line + branch + `-fcondition-coverage`
+MC/DC), the free flow already wired into `scripts/coverage.sh` and CI. Re-tooling
+the pre-qualified library would add cost without adding evidence, and because the
+two tools cover disjoint code there is no cross-tool comparability concern.
+
 `pstop_c` is **pre-qualified** — it carries its own Bullseye coverage + CI and is
 excluded from the numbers below.
 

@@ -48,6 +48,7 @@ _Last updated: 2026-08-02 (rev 2 — #15/#16/#17 batch + stability battery + bat
 | Date | Decision | Notes |
 |---|---|---|
 | 2026-08-02 | **Firmware coverage = HYBRID only** (host logic-harness for branch+MC/DC; on-target = functional/HIL smoke) | On-target gcov needs JTAG+OpenOCD (ESP-IDF), but **both JTAG routes are blocked by the design**: the physical JTAG pins GPIO39–42 *are* the E-stop loop pins (`main.c:207`), and USB-Serial-JTAG is displaced by the TinyUSB/NCM tether on the native USB. No no-solder JTAG path exists, and any external JTAG would break the safety wiring under test. (Side note: JTAG being consumed by the safety loops is a mild field-integrity property.) |
+| 2026-08-02 | **OD-1 SETTLED — two coverage tools accepted (user-confirmed):** `pstop_c` keeps its own **Bullseye** coverage + CI (pre-qualified, not re-measured); **every other in-scope codebase uses GCC-14 gcov/gcovr** (line + branch + `-fcondition-coverage` MC/DC). | Rationale: `pstop_c` is pre-qualified with its existing Bullseye evidence, so re-tooling it buys nothing; new code standardizes on the free GCC-14 flow already wired into `scripts/coverage.sh` + CI. The two tools never measure the same code, so there is no cross-tool comparability problem. |
 | 2026-08-02 | **MC/DC toolchain = GCC 14** (`-fcondition-coverage`) | Installed 14.3.0 via ubuntu-toolchain-r/test PPA; gcov-14 + gcovr condition coverage confirmed. No Bullseye license needed. |
 | 2026-08-01 | Safety standard = **IEC 61508 (SIL) + ISO 13849 (PL)** | |
 | 2026-08-01 | `pstop_c` = **pre-qualified** (referenced, not re-verified) | Add only interface/integration requirements at its boundary. |
@@ -59,7 +60,7 @@ _Last updated: 2026-08-02 (rev 2 — #15/#16/#17 batch + stability battery + bat
 
 | ID | Decision | Status |
 |---|---|---|
-| OD-1 | Bullseye in CI to *match `pstop_c`* vs standardize on GCC-14 gcov everywhere | Leaning GCC-14 (now installed). `pstop_c` keeps Bullseye; new codebases use gcov. Confirm acceptable to have two tools. |
+| ~~OD-1~~ | ~~Bullseye vs GCC-14 gcov~~ | **SETTLED 2026-08-02 (user-confirmed)** — see Decisions log §1: `pstop_c` keeps Bullseye; everything else GCC-14 gcov. |
 | OD-2 | Vehicle-level HARA inputs (assumptions A-01..A-10 in HARA.md) — mass, speed, exposure, **demand rate W**, process safety time | Integrator must supply. SIL sits at 2 (W2) vs 3 (W3) pending W. |
 
 ## 3. Open safety items (from HARA / FMEA)
