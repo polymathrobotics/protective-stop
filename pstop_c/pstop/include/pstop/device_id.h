@@ -9,7 +9,7 @@
 #include "pstop/config.h"
 
 typedef struct {
-#if PSTOP_VERSION == 0x00
+#if PSTOP_VERSION == 0x01
     // IPv4 address
     uint32_t data;
 #else

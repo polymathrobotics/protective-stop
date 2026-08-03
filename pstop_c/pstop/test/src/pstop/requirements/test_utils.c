@@ -35,7 +35,7 @@ set_operator_allowed(bool is_allowed, bool stop_only, uint64_t heartbeat_ms)
     details.heartbeat_ms = heartbeat_ms;
 }
 
-static pstop_status_message_t last_status = PSTOP_STATUS_OK;
+static pstop_status_message_t last_status = PSTOP_STATUS_STOP;
 static int robot_status_counter = 0;
 
 void
@@ -61,7 +61,7 @@ get_robot_status_counter()
 void
 reset_robot_status()
 {
-    last_status = PSTOP_STATUS_OK;
+    last_status = PSTOP_STATUS_STOP;
     robot_status_counter = 0;
 }
 
