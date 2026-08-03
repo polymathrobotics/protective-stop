@@ -142,7 +142,7 @@ Every DU-1..9 discharged; SG-6 fully discharged, SG-1..5 partial. SIL3/PLe kept
 ## 8. What actually remains (rev 2 — 2026-08-02)
 
 **Needs your input (blocking, I cannot proceed without it):**
-- [ ] **FMEDA firm-up (OD-2):** real ESP32-S3 + relay part numbers, demand rate **W**, and proof-test interval — moves SIL 3 from *allocated/assumed* to *demonstrated*, and sets W2(SIL2) vs W3(SIL3). Also unblocks HARA **H-03** (DERP failover 5–9 s dark window vs process-safety-time budget; may then need a local-STOP latch mitigation).
+- [ ] **FMEDA firm-up (OD-2):** real ESP32-S3 + relay part numbers, demand rate **W**, and proof-test interval — moves SIL 3 from *allocated/assumed* to *demonstrated*, and sets W2(SIL2) vs W3(SIL3). Also unblocks HARA **H-03** (DERP failover 5–9 s dark window vs process-safety-time budget; may then need a local-STOP latch mitigation). **HOW-TO written 2026-08-02:** `docs/safety/FMEDA_FIRMUP_GUIDE.md` — the full playbook for firming up the FMEDA *without* manufacturer λ data (data sources SN 29500/exida SERH/FMD-2016/FIDES, π-factor conversion, DC-from-IEC-61508 tables, B10d relay route, Annex D β, the assumptions register, sensitivity analysis, proven-in-use). Top pstop actions: protect the Type-B SFF-90 % boundary, **introduce relay diversity** (≈halves PFH since PFH≈β·λ_DU), and stand up a fleet field-hours + classified-fault log now for a future proven-in-use / Route-2H argument.
 - [ ] **OD-1:** confirm the two-tool coverage split is acceptable (Bullseye stays with `pstop_c`; GCC-14 gcov everywhere else).
 
 **Blocked on hardware / people:**
