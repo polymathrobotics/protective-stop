@@ -22,9 +22,11 @@ import sys
 import tempfile
 import time
 
-PSTOP_VERSION = 0x00
-MSG_OK, MSG_STOP, MSG_BOND, MSG_UNBOND = 0, 1, 2, 3
-NAMES = {0: 'OK', 1: 'STOP', 2: 'BOND', 3: 'UNBOND'}
+# Wire protocol — MUST track pstop_c (config.h PSTOP_VERSION, pstop_msg.h codewords).
+# v1 uses far-Hamming codewords so a zeroed/stuck/single-bit message -> invalid -> STOP.
+PSTOP_VERSION = 0x01
+MSG_OK, MSG_STOP, MSG_BOND, MSG_UNBOND = 0x55, 0x92, 0xAD, 0x6A
+NAMES = {0x55: 'OK', 0x92: 'STOP', 0xAD: 'BOND', 0x6A: 'UNBOND'}
 SIZE = 40
 MACHINE_ID = 0x01020304
 HEARTBEAT_MS = 400  # matches production machine.toml

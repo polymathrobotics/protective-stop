@@ -46,9 +46,11 @@ import time
 # Wire protocol (parameterised by remote id — the shared library tracks each
 # id independently).
 # ---------------------------------------------------------------------------
-PSTOP_VERSION = 0x00
-MSG_OK, MSG_STOP, MSG_BOND, MSG_UNBOND, MSG_UNKNOWN = 0, 1, 2, 3, 0x0F
-NAMES = {0: 'OK', 1: 'STOP', 2: 'BOND', 3: 'UNBOND', 0x0F: 'UNKNOWN'}
+# Wire protocol — MUST track pstop_c (config.h PSTOP_VERSION, pstop_msg.h codewords).
+# v1 uses far-Hamming codewords so a zeroed/stuck/single-bit message -> invalid -> STOP.
+PSTOP_VERSION = 0x01
+MSG_OK, MSG_STOP, MSG_BOND, MSG_UNBOND, MSG_UNKNOWN = 0x55, 0x92, 0xAD, 0x6A, 0x0F
+NAMES = {0x55: 'OK', 0x92: 'STOP', 0xAD: 'BOND', 0x6A: 'UNBOND', 0x0F: 'UNKNOWN'}
 SIZE = 40
 MACHINE_ID = 0x01020304
 HEARTBEAT_MS = 1000
