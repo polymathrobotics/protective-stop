@@ -93,8 +93,22 @@ CONFIG_ESP_WIFI_AMPDU_RX_ENABLED=y
 # CPU
 CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
 
-# Watchdog
-CONFIG_ESP_TASK_WDT_TIMEOUT_S=30
+# === Watchdogs (SR-H-04b machine-side / FMEA DU-2: frozen-clock / frozen-task)
+# Mirrors the remote's watchdog stack (docs/WATCHDOG_CLOCK_PROTECTION.md) as the
+# last-resort backstop behind the comparator's esp_timer-vs-FreeRTOS-tick clock
+# sanity (machn/main/main.c). TWDT: the comparator subscribes explicitly and
+# feeds every 100 ms tick; a wedged comparator trips it (PANIC=y -> reset). The
+# IWDT catches a total systimer freeze (the tick ISR stops feeding it); its
+# stage-2 RTC-WDT hard-resets if the panic handler hangs.
+CONFIG_ESP_TASK_WDT_EN=y
+CONFIG_ESP_TASK_WDT_INIT=y
+CONFIG_ESP_TASK_WDT_PANIC=y
+CONFIG_ESP_TASK_WDT_TIMEOUT_S=5
+CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU0=y
+CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU1=y
+CONFIG_ESP_INT_WDT=y
+CONFIG_ESP_INT_WDT_TIMEOUT_MS=300
+CONFIG_BOOTLOADER_WDT_ENABLE=y
 
 # SoftAP fallback. When the chip has no usable network after
 # CONFIG_ML_AP_FALLBACK_TIMEOUT_S seconds of WiFi-association attempts,

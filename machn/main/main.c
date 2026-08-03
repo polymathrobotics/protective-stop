@@ -38,6 +38,8 @@
 
 #include "dcs_support.h"
 #include "esp_log.h"
+#include "esp_system.h" /* esp_restart on a clock fault */
+#include "esp_task_wdt.h" /* TWDT subscribe/feed for the comparator */
 #include "esp_timer.h"
 // clang-format off
 #include "freertos/FreeRTOS.h"
@@ -76,6 +78,21 @@ static const char * TAG = "machn";
 #define TICK_MS 100u /* comparator/liveness cadence, matches the remote */
 #define CORE_WINDOW_MS 80u /* per-core processing budget within a tick */
 #define SAFETY_TASK_PRIO 8 /* above WG tasks, below TCPIP — remote rationale */
+
+/* Independent-timebase clock sanity (SR-H-04b machine-side / FMEA DU-2). The
+ * machn's entire liveness case (machine_validate_heartbeats) runs on esp_timer
+ * via g_tick_now_ms — a SINGLE latched clock (FMEDA MC-4, beta≈1). If esp_timer
+ * freezes or runs backward while the FreeRTOS scheduler keeps ticking, heartbeat
+ * timeouts stop firing and a dead/silent remote keeps looking alive -> the
+ * series relays stay ENERGIZED (RUN) = dangerous-undetected. The comparator
+ * cross-checks esp_timer against xTaskGetTickCount() (a DIFFERENT time base):
+ * on a frozen or backward esp_timer it forces STOP (opens both relays +
+ * machine_stop_robot on both cores) and does a controlled reset for recovery —
+ * the machine analogue of the remote's dual-core clock cross-check
+ * (docs/WATCHDOG_CLOCK_PROTECTION.md). */
+#define MACHN_CLK_STALL_TICKS pdMS_TO_TICKS(500) /* esp_timer no-advance tolerance */
+#define MACHN_CLK_RESET_GRACE_MS 500u /* STOP settle before the controlled reset */
+#define MACHN_TWDT_STARTUP_DELAY_MS 5000u /* match the remote: don't subscribe unfed */
 
 /* === Per-core machine instances =========================================== */
 typedef struct
@@ -396,7 +413,73 @@ static void comparator_task(void * arg)
   uint32_t mismatch = 0;
   uint64_t last_rx_ms = 0;
 
+  /* Subscribe the comparator to the TWDT after a startup delay (so the unfed
+   * bring-up window can't trip it), then feed it every tick below. A wedged
+   * comparator stops the feed and the TWDT resets the chip — the recovery
+   * backstop under the fast clock-sanity/heartbeat reactions. */
+  vTaskDelay(pdMS_TO_TICKS(MACHN_TWDT_STARTUP_DELAY_MS));
+  (void)esp_task_wdt_add(NULL);
+
+  /* Independent-timebase clock-sanity state (SR-H-04b machine-side / DU-2). */
+  uint64_t clk_last_us = 0;
+  TickType_t clk_last_adv_tick = 0;
+  bool clk_init = false;
+  bool clk_fault = false;
+  bool clk_announced = false;
+  TickType_t clk_fault_tick = 0;
+
   for (;;) {
+    (void)esp_task_wdt_reset();
+
+    /* Clock sanity FIRST: esp_timer (the liveness time base) vs the FreeRTOS
+         * tick (an independent base). A frozen or backward esp_timer disables
+         * every heartbeat timeout -> a dead remote would look alive -> relays
+         * stay energized (RUN). Fail-safe: open both relays now, force STOP on
+         * both cores, and do a controlled reset after a short STOP-settle. */
+    {
+      uint64_t us = (uint64_t)esp_timer_get_time();
+      TickType_t nt = xTaskGetTickCount();
+      if (!clk_init) {
+        clk_last_us = us;
+        clk_last_adv_tick = nt;
+        clk_init = true;
+      } else if (us < clk_last_us) {
+        clk_fault = true; /* esp_timer ran backward */
+      } else if (us > clk_last_us) {
+        clk_last_us = us;
+        clk_last_adv_tick = nt;
+      } else if ((TickType_t)(nt - clk_last_adv_tick) > MACHN_CLK_STALL_TICKS) {
+        clk_fault = true; /* esp_timer frozen while the scheduler still ticks */
+      }
+    }
+    if (clk_fault) {
+      TickType_t nt = xTaskGetTickCount();
+      if (!clk_announced) {
+        clk_announced = true;
+        clk_fault_tick = nt;
+        ESP_LOGE(
+          TAG,
+          "CLOCK FAULT: esp_timer frozen/backward vs FreeRTOS tick — heartbeat "
+          "watchdog is BLIND. FAIL-SAFE STOP (relays open); controlled reset in %lu ms",
+          (unsigned long)MACHN_CLK_RESET_GRACE_MS);
+      }
+      /* Force STOP directly (do not depend on the core round-trip, which shares
+             * the suspect clock): open both series relays and stop both cores. */
+      (void)gpio_set_level(RELAY_A_DRIVE, 0);
+      (void)gpio_set_level(RELAY_B_DRIVE, 0);
+      g_relay_cmd[0] = 0;
+      g_relay_cmd[1] = 0;
+      machine_stop_robot(&g_core[0].machine);
+      machine_stop_robot(&g_core[1].machine);
+      if ((TickType_t)(nt - clk_fault_tick) >= pdMS_TO_TICKS(MACHN_CLK_RESET_GRACE_MS)) {
+        ESP_LOGE(TAG, "CLOCK FAULT: controlled reset now");
+        vTaskDelay(pdMS_TO_TICKS(20)); /* flush the log line */
+        esp_restart();
+      }
+      vTaskDelay(pdMS_TO_TICKS(TICK_MS));
+      continue; /* no reply, no re-arm while the clock is untrustworthy */
+    }
+
     /* Wait up to one tick for a datagram; a quiet tick still runs
          * liveness + relay supervision on both cores. */
     struct timeval tv = {.tv_sec = 0, .tv_usec = (int)(TICK_MS * 1000u)};
