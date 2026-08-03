@@ -13,9 +13,13 @@ cascade.
 Exit 0 = all scenarios pass.
 """
 
+import atexit
+import os
 import socket
 import struct
+import subprocess
 import sys
+import tempfile
 import time
 
 PSTOP_VERSION = 0x00
@@ -28,6 +32,43 @@ MIN_STOP_MS = 500   # delay_between_stop_ms
 MAX_MISSED = 3      # timeout = hb * max_missed = 1.2 s
 
 PORT = int(sys.argv[1]) if len(sys.argv) > 1 else 8899
+
+RUNNER = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "host", "machine_app_runner")
+
+
+def spawn_runner(port):
+    """Spawn our OWN machine_app_runner on `port` with the machine_device_id +
+    timing this battery targets, and tear it down on exit. Self-contained: the
+    battery no longer silently fails when no external runner happens to be up
+    on the right port with the right id."""
+    if not os.path.exists(RUNNER):
+        sys.exit(f"machine_app_runner not built at {RUNNER} — run `make -C host` first")
+    cfg = tempfile.NamedTemporaryFile("w", suffix=".toml", delete=False)
+    cfg.write(
+        f"[machine]\nmachine_device_id = 0x{MACHINE_ID:08X}\n"
+        f"[limits]\nmax_missed_heartbeats = {MAX_MISSED}\n"
+        f"[policy]\nallow_unlisted = true\n"
+        f"default_heartbeat_ms = {HEARTBEAT_MS}\nmin_stop_ms = {MIN_STOP_MS}\n")
+    cfg.close()
+    p = subprocess.Popen([RUNNER, cfg.name, str(port)],
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+    def _cleanup():
+        p.terminate()
+        try:
+            p.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            p.kill()
+        try:
+            os.unlink(cfg.name)
+        except OSError:
+            pass
+    atexit.register(_cleanup)
+    time.sleep(1.0)  # let it bind
+    if p.poll() is not None:
+        sys.exit(f"machine_app_runner exited immediately — is port {port} already in use? "
+                 f"(kill stray runners, or pass a free port)")
+    return p
 
 
 def crc16(data):
@@ -170,6 +211,8 @@ def main():
     print(f"pstop stop/reset battery vs machine on 127.0.0.1:{PORT}\n"
           f"(hb={HEARTBEAT_MS}ms min_stop={MIN_STOP_MS}ms max_missed={MAX_MISSED} "
           f"=> timeout {HEARTBEAT_MS*MAX_MISSED}ms)")
+
+    spawn_runner(PORT)   # self-contained: bring up our own machine to drive
 
     # --- 1. baseline bond + need-stop ------------------------------------
     scenario("1. fresh bond, stream OK -> machine must hold STOP (NEED_STOP)")
