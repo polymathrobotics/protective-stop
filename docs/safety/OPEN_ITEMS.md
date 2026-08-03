@@ -7,7 +7,24 @@
 what is decided, what is open, and what is next across the safety-analysis +
 code-coverage effort. Newest status at the top of each section.
 
-_Last updated: 2026-08-02._
+_Last updated: 2026-08-02 (rev 2 — #15/#16/#17 batch + stability battery + battery-tool fix)._
+
+> **2026-08-02 — "do them in order" batch merged + verified:**
+> 1. **#1 — SR-H-04b machine clock-freeze guard + DU-1 GPIO re-verify DONE**
+>    (`1cfbd9a`): host+machn `get_time_cb` freeze guard (`clock_guard`, 5117-check
+>    host test), and remote periodic E-stop GPIO pad-config re-verify → controlled
+>    clean reset (`gpio_cfg_fault`, SR-R-09). **DU-1 CLOSED.**
+> 2. **#2 — DU-3 object-code diversity gate DONE** (`d96129c`): verified Option-B
+>    diverse expressions survive the optimizer (distinct object code) +
+>    `scripts/check_estop_diversity.sh` CI guard. **DU-3 CLOSED.**
+> 3. **#3 — production networking robustness DONE** (`1f7604e`,
+>    `docs/PRODUCTION_NETWORKING.md`): same-LAN direct-path validated; DERP-home +
+>    promote-direct-after-DISCO shipped.
+> 4. **Stability battery (~30 min) PASSED:** power-cycle 6/6, arm/press/discordance
+>    3/3, 4-min soak, `pstop_multi_remote_test` 34/34, real 2-chip E2E.
+> 5. **`tools/stop_reset_battery.py` FIXED** (`b802c35`, `7c72e36`): self-contained
+>    auto-spawn + strictly-monotonic send stamp; **22/22**. Both defects were
+>    test-harness footguns, not firmware. See memory `reference_pstop_battery_tool_footguns`.
 
 > **2026-08-02 — three-subagent batch merged (`347de6f`, on GitHub):**
 > 1. **DERP reachability FIXED in firmware** (`ml_wg_mgr.c`): the chip was
@@ -54,9 +71,9 @@ _Last updated: 2026-08-02._
 
 ### 3b. Dangerous-Undetected register (from FMEA — prioritized)
 - [x] **DU-4 (F-H-02) / SR-H-03 — DONE 2026-08-02:** host runner now validates timing config at startup (`cfg_validate`, floors mirror the ROS2 node: heartbeat [50,1000], max_missed [1,5], min_stop ≥100) and **refuses to start** on unsafe values. Test `tools/test_config_floor.py` (7/7). Host coverage 70.4→71.4% L / 56.8→57.9% B / 58.3% MC-DC.
-- [ ] **DU-1 (F-R-01) — SMALL:** lost GPIO pull-down → open loop reads *closed* → false OK, no runtime detection. Pad config set once at `estop_init`, never re-verified. **Fix: periodic pull-down / pin-config re-verification → STOP on mismatch.** (This is the "GPIO config-integrity check" the design doc claims but code never implemented.)
+- [x] **DU-1 (F-R-01) — DONE 2026-08-02 (SR-R-09, `1cfbd9a`):** remote now periodically re-verifies the E-stop GPIO pad config (`gpio_ll_get_io_config` every ~10 ticks) and forces a controlled clean reset on mismatch (`gpio_cfg_fault`). Closes the "GPIO config-integrity check" the design doc claimed but code never implemented. _Remaining: on-bench fault-injection of a live pad-config corruption (bench-blocked, low value — logic is host-reasoned)._
 - [x] **DU-2 (F-H-03 / F-P-03) — DONE 2026-08-02 (SR-H-04):** remote-side dual-core mutual clock cross-check + ESP32 TWDT/IWDT/RTC-WDT (`347de6f`, fault-injection validated). NOTE: this covers the *remote* clock; the *machine*-side `get_time_cb` freeze (host runner / ROS2) still wants an analogous guard — track as SR-H-04b.
-- [ ] **DU-3 (F-R-02):** Option B diversity may be compiler-erasable. **Action: verify against object code** whether reads go through `volatile`/`esp_rom` barriers before treating as real.
+- [x] **DU-3 (F-R-02) — DONE 2026-08-02 (SR-R-03, `d96129c`):** verified Option-B diverse expressions produce distinct object code (survive the optimizer, not collapsed to one form) + `scripts/check_estop_diversity.sh` CI guard so a future refactor can't silently erase the diversity. See `docs/safety/DU3_OBJECT_CODE_DIVERSITY.md`.
 - [ ] **DU-5/DU-7 (F-R-04/05):** lockstep blind to common-mode faults in shared downstream code (encode / `memcmp` / priming, β≈1).
 - [ ] Remaining 3 DU rows — see FMEA.md §3.
 
@@ -119,4 +136,21 @@ Every DU-1..9 discharged; SG-6 fully discharged, SG-1..5 partial. SIL3/PLe kept
 3. **Requirements-traceability + coverage** (task #9): map each SR → code → test; report % SRs with a verifying test + % safety lines traced to an SR.
 4. **Implement Gap requirements** (SR-H-03, SR-R-09 first) as SR-traced tests land — drives both coverages up.
 5. ~~Aggregate report + CI gate (task #10)~~ — **DONE 2026-08-02**: `scripts/coverage.sh` + `.github/workflows/coverage.yml` (ros:humble + gcc-14), CI green (2m27s). Aggregate: firmware core 100% / host 71.4% / ROS2 52.4% line.
-6. Remaining: drive coverage higher (thinner — spun-executor tests, host paths); firmware HIL press/discordance/arm + SR-R-09 (bench-blocked); SR-H-04 frozen-clock (design); curate DU-3 object-code check; `pstop`→`main` PR (reviewer).
+6. ~~firmware HIL press/discordance/arm~~ **DONE**; ~~SR-H-04 frozen-clock~~ **DONE (SR-H-04b)**; ~~DU-3 object-code check~~ **DONE**.
+
+## 8. What actually remains (rev 2 — 2026-08-02)
+
+**Needs your input (blocking, I cannot proceed without it):**
+- [ ] **FMEDA firm-up (OD-2):** real ESP32-S3 + relay part numbers, demand rate **W**, and proof-test interval — moves SIL 3 from *allocated/assumed* to *demonstrated*, and sets W2(SIL2) vs W3(SIL3). Also unblocks HARA **H-03** (DERP failover 5–9 s dark window vs process-safety-time budget; may then need a local-STOP latch mitigation).
+- [ ] **OD-1:** confirm the two-tool coverage split is acceptable (Bullseye stays with `pstop_c`; GCC-14 gcov everywhere else).
+
+**Blocked on hardware / people:**
+- [ ] **machn (ESP32 machine) clock-guard HW validation** — needs a live machine node + relay HIL bench (host+machn logic done + host-tested).
+- [ ] **`pstop`→`main` PR** reviewer sign-off (your call; not reminding).
+
+**Open engineering, lower priority:**
+- [ ] Coverage headroom: ROS2 node/backends (need a spun executor) + host branch paths. Firmware core already 100%.
+- [ ] Remaining DU rows: **DU-5/7** comparator/encode common-mode (β≈1 shared downstream), **DU-6/8** pull-down CCF + settle, **SR-R-15** NVS peer-slot integrity.
+- [ ] On-bench fault-injection of SR-R-09 pad-config corruption (bench-blocked, low value).
+- [ ] Repo-wide pre-commit cosmetic cleanup (deferred maintainer-level debt; ~22 files reformat).
+- [ ] Upstream `pstop_c` far-Hamming status-encoding memo (maintainers).
