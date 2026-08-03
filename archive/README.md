@@ -1,3 +1,3 @@
 # Archive
 
-NOTE(troy): Putting these pieces to the side until the hardware is online.
+These packages are in use for the old method of PSTOP. Continue building them until they are phased out.
