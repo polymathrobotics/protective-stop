@@ -9,10 +9,10 @@
 
 #include "diagnostic_updater/diagnostic_updater.hpp"
 #include "protective_stop_machine/backend.hpp"
-#include "protective_stop_msg/msg/bonded_remote_array.hpp"
-#include "protective_stop_msg/msg/machine_relay_status.hpp"
-#include "protective_stop_msg/msg/protective_stop_status.hpp"
-#include "protective_stop_msg/srv/configure_machine.hpp"
+#include "protective_stop_msgs/msg/bonded_remote_array.hpp"
+#include "protective_stop_msgs/msg/machine_relay_status.hpp"
+#include "protective_stop_msgs/msg/protective_stop_status.hpp"
+#include "protective_stop_msgs/srv/configure_machine.hpp"
 #include "rcl_interfaces/msg/set_parameters_result.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "rclcpp_lifecycle/lifecycle_node.hpp"
@@ -42,8 +42,8 @@ private:
   bool validate_timing(const MachineTiming & t, std::string & reason) const;
   rcl_interfaces::msg::SetParametersResult on_set_parameters(const std::vector<rclcpp::Parameter> & params);
   void handle_configure(
-    const std::shared_ptr<protective_stop_msg::srv::ConfigureMachine::Request> req,
-    std::shared_ptr<protective_stop_msg::srv::ConfigureMachine::Response> resp);
+    const std::shared_ptr<protective_stop_msgs::srv::ConfigureMachine::Request> req,
+    std::shared_ptr<protective_stop_msgs::srv::ConfigureMachine::Response> resp);
 
   // config
   std::string backend_kind_;
@@ -53,11 +53,11 @@ private:
 
   std::unique_ptr<IMachineBackend> backend_;
 
-  rclcpp_lifecycle::LifecyclePublisher<protective_stop_msg::msg::ProtectiveStopStatus>::SharedPtr state_pub_;
-  rclcpp_lifecycle::LifecyclePublisher<protective_stop_msg::msg::MachineRelayStatus>::SharedPtr relay_pub_;
-  rclcpp_lifecycle::LifecyclePublisher<protective_stop_msg::msg::BondedRemoteArray>::SharedPtr remotes_pub_;
+  rclcpp_lifecycle::LifecyclePublisher<protective_stop_msgs::msg::ProtectiveStopStatus>::SharedPtr state_pub_;
+  rclcpp_lifecycle::LifecyclePublisher<protective_stop_msgs::msg::MachineRelayStatus>::SharedPtr relay_pub_;
+  rclcpp_lifecycle::LifecyclePublisher<protective_stop_msgs::msg::BondedRemoteArray>::SharedPtr remotes_pub_;
   rclcpp::TimerBase::SharedPtr pub_timer_;
-  rclcpp::Service<protective_stop_msg::srv::ConfigureMachine>::SharedPtr configure_srv_;
+  rclcpp::Service<protective_stop_msgs::srv::ConfigureMachine>::SharedPtr configure_srv_;
   std::shared_ptr<diagnostic_updater::Updater> diag_;
   rclcpp::node_interfaces::OnSetParametersCallbackHandle::SharedPtr param_cb_handle_;
 };

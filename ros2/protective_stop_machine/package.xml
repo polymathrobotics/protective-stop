@@ -15,7 +15,7 @@
   <depend>lifecycle_msgs</depend>
   <depend>diagnostic_updater</depend>
   <depend>diagnostic_msgs</depend>
-  <depend>protective_stop_msg</depend>
+  <depend>protective_stop_msgs</depend>
   <depend>libcurl-dev</depend>
 
   <exec_depend>launch</exec_depend>

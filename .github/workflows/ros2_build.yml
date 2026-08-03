@@ -1,0 +1,29 @@
+---
+
+name: ROS2 build and test
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  build_and_test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        ros: [humble, jazzy, lyrical]
+    name: ROS 2 ${{ matrix.ros }}
+    container:
+      image: polymathrobotics/ros:${{ matrix.ros }}-builder-ubuntu
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ros-tooling/action-ros-ci@v0.4
+        with:
+          target-ros2-distro: ${{ matrix.ros }}
+          coverage-result: false
+      - uses: actions/upload-artifact@v4
+        with:
+          name: colcon-logs-${{ matrix.ros }}
+          path: ros_ws/log

@@ -10,7 +10,7 @@
 namespace protective_stop_machine
 {
 
-// Mirrors protective_stop_msg/ProtectiveStopStatus.
+// Mirrors protective_stop_msgs/ProtectiveStopStatus.
 enum class MachineState : uint8_t
 {
   ACTIVE = 0,  // bonded remote(s), armed, cleared to run

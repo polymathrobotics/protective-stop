@@ -21,7 +21,7 @@ find_package(rclcpp_lifecycle REQUIRED)
 find_package(lifecycle_msgs REQUIRED)
 find_package(diagnostic_updater REQUIRED)
 find_package(diagnostic_msgs REQUIRED)
-find_package(protective_stop_msg REQUIRED)
+find_package(protective_stop_msgs REQUIRED)
 find_package(CURL REQUIRED)
 
 # Vendored, unmodified pstop_c sources (same set host/machine_app_runner links).
@@ -48,7 +48,7 @@ ament_target_dependencies(machine_bridge_node
   lifecycle_msgs
   diagnostic_updater
   diagnostic_msgs
-  protective_stop_msg
+  protective_stop_msgs
 )
 target_link_libraries(machine_bridge_node CURL::libcurl)
 
@@ -93,7 +93,7 @@ if(BUILD_TESTING)
   target_include_directories(test_lifecycle PRIVATE
     include ${PSTOP_ROOT}/pstop/include ${PSTOP_ROOT}/transport/include)
   ament_target_dependencies(test_lifecycle
-    rclcpp rclcpp_lifecycle lifecycle_msgs diagnostic_updater diagnostic_msgs protective_stop_msg)
+    rclcpp rclcpp_lifecycle lifecycle_msgs diagnostic_updater diagnostic_msgs protective_stop_msgs)
   target_link_libraries(test_lifecycle CURL::libcurl)
 
   # Runtime node paths that need a spun executor: publish_tick, every diagnostics
@@ -106,7 +106,7 @@ if(BUILD_TESTING)
   target_include_directories(test_node_runtime PRIVATE
     include test ${PSTOP_ROOT}/pstop/include ${PSTOP_ROOT}/transport/include)
   ament_target_dependencies(test_node_runtime
-    rclcpp rclcpp_lifecycle lifecycle_msgs diagnostic_updater diagnostic_msgs protective_stop_msg)
+    rclcpp rclcpp_lifecycle lifecycle_msgs diagnostic_updater diagnostic_msgs protective_stop_msgs)
   target_link_libraries(test_node_runtime CURL::libcurl)
 endif()
 

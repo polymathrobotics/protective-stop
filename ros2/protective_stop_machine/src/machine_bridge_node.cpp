@@ -20,11 +20,11 @@
 namespace protective_stop_machine
 {
 
-using ProtectiveStopStatus = protective_stop_msg::msg::ProtectiveStopStatus;
-using MachineRelayStatus = protective_stop_msg::msg::MachineRelayStatus;
-using BondedRemoteArray = protective_stop_msg::msg::BondedRemoteArray;
-using BondedRemote = protective_stop_msg::msg::BondedRemote;
-using ConfigureMachine = protective_stop_msg::srv::ConfigureMachine;
+using ProtectiveStopStatus = protective_stop_msgs::msg::ProtectiveStopStatus;
+using MachineRelayStatus = protective_stop_msgs::msg::MachineRelayStatus;
+using BondedRemoteArray = protective_stop_msgs::msg::BondedRemoteArray;
+using BondedRemote = protective_stop_msgs::msg::BondedRemote;
+using ConfigureMachine = protective_stop_msgs::srv::ConfigureMachine;
 
 // Timing safety floors + the pure validator now live in timing_floors.hpp so
 // they are unit-testable without a live node (SR-M-01).
