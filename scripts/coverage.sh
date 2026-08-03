@@ -62,7 +62,7 @@ if have "$CC"; then
       -I../pstop_c/pstop/include -I../pstop_c/transport/include \
       -c ../pstop_c/pstop/src/pstop/*.c ../pstop_c/transport/src/transport/udp/udp_transport.c
     "$CC" -O0 -g --coverage -fcondition-coverage -Wno-unused-parameter -pthread \
-      -I../pstop_c/pstop/include -I../pstop_c/transport/include -c machine_app_runner.c
+      -I../pstop_c/pstop/include -I../pstop_c/transport/include -c machine_app_runner.c clock_guard.c
     "$CC" --coverage -pthread -o machine_app_runner ./*.o )
   python3 "$ROOT/tools/pstop_multi_remote_test.py" >/dev/null 2>&1 || rc=1
   python3 "$ROOT/tools/test_config_floor.py"       >/dev/null 2>&1 || rc=1
