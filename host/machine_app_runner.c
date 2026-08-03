@@ -25,6 +25,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE /* CLOCK_BOOTTIME (independent clock ref for the clock guard) */
+#endif
+
 #include <netdb.h>
 #include <pthread.h>
 #include <signal.h>
@@ -37,10 +41,23 @@
 #include <time.h>
 #include <unistd.h>
 
+#include "clock_guard.h"
 #include "pstop/machine.h"
 #include "pstop/pstop_msg.h"
 #include "pstop/pstop_remote_data.h"
 #include "transport/udp/udp_transport.h"
+
+/* CLOCK_BOOTTIME is Linux-specific; fall back to MONOTONIC_RAW / REALTIME on
+ * platforms that lack it so the build stays portable. Independence from the
+ * primary CLOCK_MONOTONIC still holds against CLOCK_REALTIME + the call-count
+ * proxy even when BOOTTIME degrades to a less-independent source. */
+#ifndef CLOCK_BOOTTIME
+#ifdef CLOCK_MONOTONIC_RAW
+#define CLOCK_BOOTTIME CLOCK_MONOTONIC_RAW
+#else
+#define CLOCK_BOOTTIME CLOCK_REALTIME
+#endif
+#endif
 
 /* ============================================================================
  * Config — every setting the upstream machine library exposes, plus the
@@ -297,11 +314,36 @@ static void cfg_dump(const machine_cfg_t * c)
  * checks. Anchoring the machine clock to the remote would freeze it whenever
  * the remote went quiet, disabling the very heartbeat watchdog we rely on.
  * ========================================================================== */
-static uint64_t machine_now_ms(void)
+static uint64_t clk_ms(clockid_t which)
 {
   struct timespec ts;
-  clock_gettime(CLOCK_MONOTONIC, &ts);
+  clock_gettime(which, &ts);
   return ((uint64_t)ts.tv_sec) * 1000ULL + ((uint64_t)ts.tv_nsec) / 1000000ULL;
+}
+
+/* ----------------------------------------------------------------------------
+ * SR-H-04b / FMEA DU-2 — machine-side clock-freeze guard (the FMEDA's dominant
+ * lambda_DU term). check_heartbeats trusts machine_now_ms blindly: a frozen or
+ * backward CLOCK_MONOTONIC silently disables remote-silence detection, so a
+ * dead remote keeps looking alive (dangerous). We cannot detect our own clock's
+ * freeze from that same clock — every read of get_time_cb() therefore also
+ * feeds an independent-reference guard (CLOCK_BOOTTIME + CLOCK_REALTIME + a
+ * loop/call-count progress proxy). On a latched fault the main loop forces STOP
+ * and refuses to emit OK. Detection logic is the pure, unit-tested clock_guard
+ * module. -------------------------------------------------------------------- */
+static clock_guard_t g_clock_guard;
+
+/* Wired in as env.get_time_cb. Returns the machine's CLOCK_MONOTONIC (exactly
+ * as before) AND cross-checks it against the independent references on every
+ * call, so the guard is fed at the library's own time-read cadence in addition
+ * to the explicit poll at the top of the main loop. */
+static uint64_t machine_now_ms(void)
+{
+  uint64_t mono = clk_ms(CLOCK_MONOTONIC);
+  uint64_t boot = clk_ms(CLOCK_BOOTTIME);
+  uint64_t real = clk_ms(CLOCK_REALTIME);
+  (void)clock_guard_update(&g_clock_guard, mono, boot, real);
+  return mono;
 }
 
 static volatile int s_running = 1;
@@ -716,6 +758,11 @@ int main(int argc, char * argv[])
   pstop_app.remote_details_cb = is_operator_allowed;
   pstop_app.status_cb = robot_status;
   pstop_app.log_message_cb = log_message;
+  /* Arm the clock-freeze guard (SR-H-04b / DU-2) BEFORE the library can call
+   * get_time_cb. Defaults: 500 ms independent-reference window (well under the
+   * ~1.2 s heartbeat timeout, so a freeze is caught before it can mask a dead
+   * remote) + a call-count backstop for the all-clocks-wedged case. */
+  clock_guard_init(&g_clock_guard, 0U, 0U);
   pstop_app.env.get_time_cb = machine_now_ms;
 
   machine_init(&machine, &pstop_app, pstop_clients, g_cfg.max_remotes);
@@ -761,8 +808,36 @@ int main(int argc, char * argv[])
   uint64_t last_rx_stamp = 0;
   uint32_t last_rx_id = 0;
   int have_baseline = 0;
+  int clock_fault_reported = 0;
 
   while (s_running) {
+    /* 0. Clock-freeze guard (SR-H-04b / FMEA DU-2). Feed the guard explicitly
+     *    every poll — independent of how often the library reads the clock —
+     *    then fail safe on any latched fault. A frozen/backward CLOCK_MONOTONIC
+     *    would silently disable check_heartbeats (a dead remote would look
+     *    alive), so the ONLY safe response is to force STOP and never emit OK.
+     *    The robot stays STOPPED for as long as the fault persists; in a full
+     *    deployment an external watchdog would then restart the host. */
+    (void)machine_now_ms(); /* samples all three clocks + updates the guard */
+    if (clock_guard_fault(&g_clock_guard) != CLOCK_GUARD_OK) {
+      if (!clock_fault_reported) {
+        clock_fault_reported = 1;
+        fprintf(
+          stderr,
+          "*** CLOCK GUARD FAULT (%s): machine monotonic clock froze/regressed — "
+          "heartbeat watchdog is BLIND. Forcing STOP; refusing all OK. ***\n",
+          clock_guard_fault_name(clock_guard_fault(&g_clock_guard)));
+      }
+      machine_stop_robot(&machine); /* latches ROBOT_STATE_STOPPED + status_cb(STOP) */
+      s_stop_episode_valid = 0;
+      /* Do NOT process inbound traffic (which could commit an OK) while the
+       * clock is untrustworthy. Brief real-time sleep to avoid a busy spin;
+       * nanosleep is a relative delay and safe even if the wall clock is off. */
+      struct timespec nap = {.tv_sec = 0, .tv_nsec = 50 * 1000 * 1000};
+      nanosleep(&nap, NULL);
+      continue;
+    }
+
     /* Native liveness watchdog: pstop_c's own check_heartbeats (machine.c),
          * driven by the machine's monotonic clock, issues the STOP (status_cb)
          * and clears the timed-out remote so a fresh BOND re-bonds. Called every

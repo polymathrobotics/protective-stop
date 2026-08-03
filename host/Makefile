@@ -21,10 +21,17 @@ CPPFLAGS += $(PSTOP_INC)
 # the host build — that's the path it was written for. The chip uses a
 # port file under components/pstop/port/ instead; this Makefile doesn't.
 
-machine_app_runner: machine_app_runner.c $(PSTOP_SRCS) $(TRANS_SRCS)
+# clock_guard.c: pure machine-side clock-freeze detector (SR-H-04b / DU-2).
+machine_app_runner: machine_app_runner.c clock_guard.c $(PSTOP_SRCS) $(TRANS_SRCS)
 	$(CC) $(CFLAGS) $(CPPFLAGS) -o $@ $^
 
-clean:
-	rm -f machine_app_runner
+# Host unit test for the clock guard — no hardware, no pstop_c needed.
+test_clock_guard: test_clock_guard.c clock_guard.c
+	$(CC) $(CFLAGS) -o $@ $^
 
-.PHONY: clean
+.PHONY: test clean
+test: test_clock_guard
+	./test_clock_guard
+
+clean:
+	rm -f machine_app_runner test_clock_guard
