@@ -2599,6 +2599,7 @@ void ml_coord_task(void * arg)
 
         state = COORD_LONG_POLL;
         ml->state = ML_STATE_CONNECTED;
+        ml->connect_count++; /* 1 = first connect; >1 = a control-plane reconnect (soak telemetry) */
         reconnect_attempts = 0;
         last_activity_ms = ml_get_time_ms();
 

@@ -151,6 +151,13 @@ extern "C"
   microlink_state_t microlink_get_state(const microlink_t * ml);
 
   /**
+ * @brief Count of control-plane connects. 1 = first connect after boot; each
+ * higher value is a re-connect (soft link flap). ml_reconnects in /state.json
+ * is this minus 1. Used for soak monitoring of DERP/control-plane stability.
+ */
+  uint32_t microlink_get_connect_count(const microlink_t * ml);
+
+  /**
  * @brief Check if connected and ready to send/receive
  */
   bool microlink_is_connected(const microlink_t * ml);

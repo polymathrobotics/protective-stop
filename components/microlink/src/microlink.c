@@ -628,6 +628,11 @@ microlink_state_t microlink_get_state(const microlink_t * ml)
   return ml ? ml->state : ML_STATE_IDLE;
 }
 
+uint32_t microlink_get_connect_count(const microlink_t * ml)
+{
+  return ml ? ml->connect_count : 0U;
+}
+
 bool microlink_is_connected(const microlink_t * ml)
 {
   return ml && ml->state == ML_STATE_CONNECTED;

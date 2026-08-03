@@ -411,6 +411,11 @@ extern "C"
 
     /* State (atomic reads from any task, writes only from coord) */
     volatile microlink_state_t state;
+    /* Count of control-plane connects (coord long-poll established). First
+     * connect = 1; each later increment is a RE-connect (a soft link flap).
+     * Exposed as ml_reconnects (= connect_count - 1) in /state.json for soak
+     * tracking of DERP/control-plane stability. Writes only from coord. */
+    volatile uint32_t connect_count;
     volatile uint32_t vpn_ip;
 
     /* Priority-peer application-level health, set by the app (pstop layer) via

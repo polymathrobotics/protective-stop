@@ -120,11 +120,14 @@ static esp_err_t page_state(httpd_req_t * req)
   (void)microlink_get_heap_info(&free_heap, &largest);
 
   int ml_state = -1;
+  uint32_t ml_reconnects = 0; /* control-plane reconnects since boot (soak flap tracking) */
   uint32_t vpn_ip = 0;
   uint32_t public_ip = 0; /* STUN egress IP — for rough management-side geolocation */
   int derp_region = 0; /* DERP home region — coarse locality hint */
   if (g_dcs.ml_handle != NULL) {
     ml_state = (int)microlink_get_state(g_dcs.ml_handle);
+    uint32_t cc = microlink_get_connect_count(g_dcs.ml_handle);
+    ml_reconnects = (cc > 0U) ? (cc - 1U) : 0U;
     vpn_ip = microlink_get_vpn_ip(g_dcs.ml_handle);
     public_ip = microlink_get_public_ip(g_dcs.ml_handle);
     derp_region = (int)microlink_get_derp_region(g_dcs.ml_handle);
@@ -222,7 +225,7 @@ static esp_err_t page_state(httpd_req_t * req)
     "\"usb_enabled\":%d,\"ts_boot_en\":%d,\"derp_only\":%d,"
     "\"boot_count\":%u,\"reset_reason\":%u,"
     "\"fw_ver\":\"%s\",\"fw_sha\":\"%s\","
-    "\"ml_state\":%d,\"vpn_ip\":%lu,\"public_ip\":%lu,\"derp_region\":%d,"
+    "\"ml_state\":%d,\"ml_reconnects\":%lu,\"vpn_ip\":%lu,\"public_ip\":%lu,\"derp_region\":%d,"
     "\"pstop_peer_ip\":%lu,\"pstop_peer_port\":%lu,"
     "\"pstop_sent\":%lu,\"pstop_replies\":%lu,\"pstop_last_msg\":%lu,\"pstop_mismatch\":%lu,"
     "\"pstop_send_fail\":%lu,\"pstop_sf_nomem\":%lu,\"pstop_sf_route\":%lu,"
@@ -275,6 +278,7 @@ static esp_err_t page_state(httpd_req_t * req)
     (app_desc != NULL) ? app_desc->version : "",
     fw_sha,
     ml_state,
+    (unsigned long)ml_reconnects,
     (unsigned long)vpn_ip,
     (unsigned long)public_ip,
     derp_region,
