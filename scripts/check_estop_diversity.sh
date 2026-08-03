@@ -15,6 +15,7 @@
 #
 # Usage: scripts/check_estop_diversity.sh [path/to/pstop_remote.elf]
 #        (source esp-idf export.sh first, or have the xtensa objdump on PATH)
+# shellcheck disable=SC2012,SC2015  # ls-glob for toolchain path; guard uses && || intentionally
 set -uo pipefail
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)

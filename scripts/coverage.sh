@@ -15,6 +15,7 @@
 #         SKIP_ROS2=1 scripts/coverage.sh # host + firmware only (no ROS 2 env)
 #
 # Env: CC (gcc-14), GCOV (gcov-14), GCOVR (gcovr), ROS_SETUP (auto-detected).
+# shellcheck disable=SC2012,SC2015  # ls-glob for toolchain path; guard uses && || intentionally
 set -uo pipefail
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
