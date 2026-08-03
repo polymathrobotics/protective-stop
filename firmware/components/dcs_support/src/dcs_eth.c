@@ -40,8 +40,11 @@
 #include "esp_mac.h"
 #include "esp_netif.h"
 #include "esp_netif_defaults.h"
+#include "esp_rom_sys.h" /* esp_rom_delay_us — datasheet-correct RST pulse width */
+#include "esp_timer.h" /* esp_timer_get_time — watchdog silence/timeout math   */
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
+#include "freertos/task.h"
 
 static const char * TAG = "dcs_eth";
 
@@ -62,6 +65,80 @@ static SemaphoreHandle_t s_got_ip_sem = NULL;
 static atomic_bool s_link_up = false;
 static atomic_bool s_has_ip = false;
 static atomic_bool s_enabled = false; /* admin toggle: eth driver running */
+
+/* MAC/PHY object handles, stored on a successful bring-up so the health
+ * watchdog's recovery ladder can del + recreate them across a full driver
+ * reinstall (esp_eth_driver_uninstall does NOT free them — the caller does).
+ * Left NULL on the boot fail path (which reboots) — only the success path
+ * publishes them here, so eth_teardown() never double-frees. */
+static esp_eth_mac_t * s_mac = NULL;
+static esp_eth_phy_t * s_phy = NULL;
+
+/* Serialises Ethernet lifecycle transitions (admin enable/disable vs the
+ * watchdog's stop/start/reinstall ladder) so the two can't race the driver
+ * FSM. The safety comparator/send loop never takes this — it only ever does
+ * lock-free sendto/recvfrom on its own socket, untouched by recovery. */
+static SemaphoreHandle_t s_eth_lock = NULL;
+static bool s_wd_started = false; /* watchdog task spawned exactly once */
+
+/* === W5500 SPI-Ethernet health watchdog + bounded reset-recovery ==========
+ *
+ * Closes the deferred-P1 "unrecoverable SPI/PHY wedge" gap (ESP-IDF issues
+ * #11845 "unrecoverable SPI errors, no ETH event", #12058 "errno 113 can't
+ * recover", esp32.com "W5500 reset-timeout"): the W5500 can black-hole with NO
+ * ETHERNET_EVENT_DISCONNECTED and the netif still reporting UP with a valid
+ * lease, so the 1 Hz route supervisor never demotes Ethernet and the link stays
+ * wedged until a human power-cycles. The system still fails safe throughout (the
+ * machine STOPs on heartbeat silence) — this only adds SELF-HEALING.
+ *
+ * Detection (either signal, must PERSIST DCS_ETHWD_CONFIRM_TICKS ticks):
+ *   (A) SPI probe — a periodic read-only esp_eth_ioctl(ETH_CMD_READ_PHY_REG)
+ *       returns != ESP_OK (a wedged/timed-out bus surfaces here).
+ *   (B) Black-hole — driver link UP + valid lease + Ethernet is the active route,
+ *       yet pstop has seen NO reply from ANY peer for DCS_ETHWD_SILENCE_MS AND the
+ *       uplink gateway is likewise silent (or never answered ICMP). The gateway
+ *       cross-check discriminates a local W5500 wedge from a merely-unreachable
+ *       peer: if the gateway still answers, our uplink is fine and we hold.
+ *
+ * Recovery ladder (escalates only if the prior rung fails to restore link +
+ * an SPI probe pass within DCS_ETHWD_RUNG_TIMEOUT_MS):
+ *   1. esp_eth_stop()/esp_eth_start() — cheapest; clears a stuck driver FSM /
+ *      link timer (does NOT re-init the chip).
+ *   2. Full driver+netif rebuild via the existing dcs_eth_start() path —
+ *      esp_eth_driver_install() re-runs phy->reset_hw + mac->init (W5500 SW reset
+ *      + VERSIONR verify) + phy->init, re-establishing SPI from scratch.
+ *   3. A datasheet-correct hardware RST pulse on GPIO9 (assert >= T_RC 500 us,
+ *      wait >= T_PL 1 ms for PLL lock) THEN the same rebuild — last resort for a
+ *      PLL/logic wedge the IDF's built-in 100 us reset_hw pulse is too short to
+ *      clear. Board schematic: RSTn->GPIO9 through a 20 ohm series R (R22), no
+ *      external RC or pull-up, so the GPIO drives the pin cleanly.
+ *
+ * Runs on a NON-safety PSRAM-stack task (mirrors the supervisor/liveness tasks);
+ * never blocks or touches the comparator/send loop; never changes fail-safe
+ * semantics. After a full ladder it enters a cooldown so it can never thrash. */
+#define DCS_ETHWD_POLL_MS 1000u /* 1 Hz health check                         */
+#define DCS_ETHWD_CONFIRM_TICKS 3u /* consecutive suspicion ticks before acting */
+#define DCS_ETHWD_SILENCE_MS 8000u /* pstop + gateway silent this long => wedge */
+#define DCS_ETHWD_RUNG_TIMEOUT_MS 8000u /* per-rung wait for link + probe pass  */
+#define DCS_ETHWD_COOLDOWN_MS 60000u /* hold-off after a full ladder (anti-thrash) */
+
+/* W5500 RESET electrical timing (datasheet v1.1.0 sec 5.5.1, Fig.22 Reset Timing):
+ *   T_RC (Reset Cycle Time)      min 500 us  — RSTn low pulse width
+ *   T_PL (RSTn -> internal PLOCK) max 1 ms    — PLL lock after RSTn released
+ * We use generous margins (1 ms assert, 5 ms PLL wait). */
+#define DCS_ETHWD_RST_ASSERT_US 1000u
+#define DCS_ETHWD_RST_PLL_MS 5u
+
+/* PHYCFGR common register, reconstructed from the IDF-private w5500.h mapping
+ * W5500_MAKE_MAP(0x002E, BSB_COM_REG=0) = ((0x2E)<<16 | (0)<<3). The W5500 MAC's
+ * phy_reg_read accepts ONLY this register, and reading it drives a real SPI
+ * transaction — so a wedged bus is observable as esp_eth_ioctl() != ESP_OK. */
+#define DCS_W5500_REG_PHYCFGR (((uint32_t)0x002Eu << 16) | ((uint32_t)0x00u << 3))
+
+/* Last-recovery reason codes published to /state.json (eth_rec_reason). */
+#define DCS_ETHWD_REASON_NONE 0u
+#define DCS_ETHWD_REASON_SPI 1u /* SPI probe failed          */
+#define DCS_ETHWD_REASON_BLACKHOLE 2u /* link UP + lease but all peers silent */
 
 /* === Event handlers ======================================================= */
 
@@ -101,6 +178,251 @@ static void on_eth_got_ip(void * arg, esp_event_base_t base, int32_t id, void * 
   }
 }
 
+/* === Health watchdog + bounded reset-recovery (non-safety) ================ */
+
+/* Read-only SPI liveness probe. Reads PHYCFGR over SPI via the public ioctl;
+ * a wedged/timed-out bus returns != ESP_OK. Serialised against the driver's own
+ * link-timer reads by the SPI-master device lock, so it is safe to call
+ * concurrently. Returns true (healthy) when no driver is installed — an absent
+ * driver is "nothing to probe", not a fault. */
+static bool eth_spi_probe_ok(void)
+{
+  esp_eth_handle_t h = s_eth_handle;
+  if (h == NULL) {
+    return true;
+  }
+  uint32_t val = 0u;
+  esp_eth_phy_reg_rw_data_t rd = {.reg_addr = DCS_W5500_REG_PHYCFGR, .reg_value_p = &val};
+  return esp_eth_ioctl(h, ETH_CMD_READ_PHY_REG, &rd) == ESP_OK;
+}
+
+/* Detector B — a black-holing but still-"UP" Ethernet link. True only when the
+ * driver claims link UP with a valid lease, Ethernet is the active default route,
+ * pstop has bonded at least once yet no peer has replied for DCS_ETHWD_SILENCE_MS,
+ * AND the uplink gateway is also silent (or never answered ICMP). If the gateway
+ * still answers, our uplink is fine and the silence is a peer/path problem — not a
+ * W5500 wedge — so we return false (mirrors the liveness watchdog's cross-check). */
+static bool eth_blackhole_suspected(void)
+{
+  if (!atomic_load(&s_link_up) || !atomic_load(&s_has_ip)) {
+    return false; /* link/lease already gone — the supervisor handles that path */
+  }
+  if ((dcs_iface_t)atomic_load(&g_dcs_active_iface) != DCS_IFACE_ETH) {
+    return false; /* Ethernet isn't carrying traffic right now */
+  }
+  uint64_t ps_last = atomic_load(&g_dcs_pstop_last_reply_ms);
+  if (ps_last == 0u) {
+    return false; /* pstop never bonded — silence is not evidence of a wedge */
+  }
+  uint64_t now_ms = (uint64_t)esp_timer_get_time() / 1000u;
+  uint64_t ps_silent = (now_ms > ps_last) ? (now_ms - ps_last) : 0u;
+  if (ps_silent < (uint64_t)DCS_ETHWD_SILENCE_MS) {
+    return false; /* a peer replied recently — traffic is flowing */
+  }
+  uint32_t gw_replies = 0u;
+  dcs_net_liveness_stats(NULL, NULL, &gw_replies, NULL);
+  if ((gw_replies > 0u) && (dcs_net_liveness_gw_silent_ms() < DCS_ETHWD_SILENCE_MS)) {
+    return false; /* gateway is answering — uplink is fine, don't reset the W5500 */
+  }
+  return true;
+}
+
+/* Immediately reflect "Ethernet suspect/down" to link-state consumers
+ * (telemetry, boot gating). The supervisor's own demotion happens when the
+ * recovery ladder brings the netif down via esp_eth_stop(). */
+static void eth_force_demote(void)
+{
+  atomic_store(&s_link_up, false);
+  atomic_store(&s_has_ip, false);
+}
+
+/* Datasheet-correct hardware reset pulse on GPIO9 (RSTn, active-low). Only used
+ * on the last recovery rung, always while the driver is torn down (so the pin
+ * isn't owned by the esp_eth phy). Assert >= T_RC 500 us, release, wait >= T_PL
+ * 1 ms for PLL lock — both with margin. */
+static void eth_hw_reset_pulse(void)
+{
+  gpio_config_t io = {
+    .pin_bit_mask = (1ULL << DCS_ETH_PIN_RST),
+    .mode = GPIO_MODE_OUTPUT,
+    .pull_up_en = GPIO_PULLUP_DISABLE,
+    .pull_down_en = GPIO_PULLDOWN_DISABLE,
+    .intr_type = GPIO_INTR_DISABLE,
+  };
+  (void)gpio_config(&io);
+  gpio_set_level(DCS_ETH_PIN_RST, 0); /* assert RSTn */
+  esp_rom_delay_us(DCS_ETHWD_RST_ASSERT_US); /* >= 500 us (T_RC) */
+  gpio_set_level(DCS_ETH_PIN_RST, 1); /* release RSTn */
+  vTaskDelay(pdMS_TO_TICKS(DCS_ETHWD_RST_PLL_MS)); /* >= 1 ms (T_PL) PLL lock */
+  ESP_LOGW(TAG, "W5500 hardware RST pulse issued on GPIO%d", DCS_ETH_PIN_RST);
+}
+
+/* Full teardown of everything dcs_eth_start() created, in reverse order, leaving
+ * the SPI bus + GPIO ISR service (both shared/idempotent) alone so a subsequent
+ * dcs_eth_start() re-inits them via their INVALID_STATE fast-path. Mirrors the
+ * bring-up's fail ladder. Only frees s_mac/s_phy, which are non-NULL solely after
+ * a successful bring-up — so this never double-frees. */
+static void eth_teardown(void)
+{
+  atomic_store(&s_enabled, false);
+  if (s_eth_handle != NULL) {
+    (void)esp_eth_stop(s_eth_handle);
+  }
+  (void)esp_event_handler_unregister(ETH_EVENT, ESP_EVENT_ANY_ID, on_eth_event);
+  (void)esp_event_handler_unregister(IP_EVENT, IP_EVENT_ETH_GOT_IP, on_eth_got_ip);
+  if (s_eth_netif != NULL) {
+    esp_netif_destroy(s_eth_netif);
+    s_eth_netif = NULL;
+  }
+  if (s_eth_handle != NULL) {
+    (void)esp_eth_driver_uninstall(s_eth_handle);
+    s_eth_handle = NULL;
+  }
+  if (s_phy != NULL) {
+    (void)s_phy->del(s_phy);
+    s_phy = NULL;
+  }
+  if (s_mac != NULL) {
+    (void)s_mac->del(s_mac);
+    s_mac = NULL;
+  }
+  if (s_got_ip_sem != NULL) {
+    vSemaphoreDelete(s_got_ip_sem);
+    s_got_ip_sem = NULL;
+  }
+  atomic_store(&s_link_up, false);
+  atomic_store(&s_has_ip, false);
+}
+
+/* Wait up to DCS_ETHWD_RUNG_TIMEOUT_MS for a recovery rung to restore the link:
+ * a fresh CONNECTED event (s_link_up) AND an SPI probe pass. Bounded loop. */
+static bool eth_wait_restored(void)
+{
+  uint64_t deadline_ms = (uint64_t)esp_timer_get_time() / 1000u + (uint64_t)DCS_ETHWD_RUNG_TIMEOUT_MS;
+  for (;;) {
+    vTaskDelay(pdMS_TO_TICKS(250));
+    if (atomic_load(&s_link_up) && eth_spi_probe_ok()) {
+      return true;
+    }
+    if (((uint64_t)esp_timer_get_time() / 1000u) >= deadline_ms) {
+      return false;
+    }
+  }
+}
+
+/* Walk the escalating recovery ladder under the lifecycle lock. Returns true if
+ * some rung restored the link. Per-rung success counts feed /state.json. */
+static bool eth_run_recovery(void)
+{
+  bool restored = false;
+  (void)xSemaphoreTake(s_eth_lock, portMAX_DELAY);
+
+  eth_force_demote(); /* consumers see Ethernet down at once */
+
+  /* Rung 1 — stop/start: cheapest, clears a stuck FSM / link timer. */
+  if (s_eth_handle != NULL) {
+    (void)esp_eth_stop(s_eth_handle);
+    vTaskDelay(pdMS_TO_TICKS(50));
+    if ((esp_eth_start(s_eth_handle) == ESP_OK) && eth_wait_restored()) {
+      (void)atomic_fetch_add(&g_dcs_eth_rec_r1, 1u);
+      restored = true;
+    }
+  }
+
+  /* Rung 2 — full driver+netif rebuild (re-inits the chip over SPI). */
+  if (!restored) {
+    ESP_LOGW(TAG, "W5500 recovery: rung 2 (driver reinstall)");
+    eth_teardown();
+    if ((dcs_eth_start() == ESP_OK) && eth_wait_restored()) {
+      (void)atomic_fetch_add(&g_dcs_eth_rec_r2, 1u);
+      restored = true;
+    }
+  }
+
+  /* Rung 3 — datasheet-correct HW RST pulse, then rebuild. */
+  if (!restored) {
+    ESP_LOGW(TAG, "W5500 recovery: rung 3 (hardware RST pulse + reinstall)");
+    eth_teardown();
+    eth_hw_reset_pulse();
+    if ((dcs_eth_start() == ESP_OK) && eth_wait_restored()) {
+      (void)atomic_fetch_add(&g_dcs_eth_rec_r3, 1u);
+      restored = true;
+    }
+  }
+
+  (void)xSemaphoreGive(s_eth_lock);
+  return restored;
+}
+
+static void eth_watchdog_task(void * arg)
+{
+  (void)arg;
+  uint32_t suspect_ticks = 0u;
+  uint64_t cooldown_until_ms = 0u;
+  ESP_LOGI(
+    TAG,
+    "W5500 health watchdog: probe+black-hole detect, confirm=%u ticks, silence=%ums, "
+    "bounded reset ladder, cooldown=%ums",
+    (unsigned)DCS_ETHWD_CONFIRM_TICKS,
+    (unsigned)DCS_ETHWD_SILENCE_MS,
+    (unsigned)DCS_ETHWD_COOLDOWN_MS);
+
+  for (;;) {
+    vTaskDelay(pdMS_TO_TICKS(DCS_ETHWD_POLL_MS));
+
+    if ((s_eth_handle == NULL) || !atomic_load(&s_enabled)) {
+      suspect_ticks = 0u; /* driver down (boot / admin-disabled) — nothing to guard */
+      continue;
+    }
+    uint64_t now_ms = (uint64_t)esp_timer_get_time() / 1000u;
+    if (now_ms < cooldown_until_ms) {
+      suspect_ticks = 0u; /* post-ladder hold-off */
+      continue;
+    }
+
+    uint32_t reason = DCS_ETHWD_REASON_NONE;
+    if (!eth_spi_probe_ok()) {
+      reason = DCS_ETHWD_REASON_SPI;
+      (void)atomic_fetch_add(&g_dcs_eth_spi_err, 1u);
+    } else if (eth_blackhole_suspected()) {
+      reason = DCS_ETHWD_REASON_BLACKHOLE;
+    } else {
+      /* healthy */
+    }
+
+    if (reason == DCS_ETHWD_REASON_NONE) {
+      suspect_ticks = 0u;
+      continue;
+    }
+
+    suspect_ticks++;
+    if (suspect_ticks < DCS_ETHWD_CONFIRM_TICKS) {
+      continue; /* require persistence — no false trips on a transient glitch */
+    }
+
+    ESP_LOGE(
+      TAG,
+      "W5500 wedge CONFIRMED (reason=%s) — demoting Ethernet and running reset ladder",
+      (reason == DCS_ETHWD_REASON_SPI) ? "spi-probe" : "black-hole");
+    atomic_store(&g_dcs_eth_rec_reason, reason);
+
+    bool restored = eth_run_recovery();
+
+    suspect_ticks = 0u;
+    cooldown_until_ms = ((uint64_t)esp_timer_get_time() / 1000u) + (uint64_t)DCS_ETHWD_COOLDOWN_MS;
+    if (restored) {
+      (void)atomic_fetch_add(&g_dcs_eth_recoveries, 1u);
+      ESP_LOGW(TAG, "W5500 recovery SUCCEEDED — Ethernet restored");
+    } else {
+      ESP_LOGE(
+        TAG,
+        "W5500 recovery ladder EXHAUSTED — Ethernet stays demoted (USB-NCM/WiFi "
+        "carries pstop; fail-safe intact); cooldown %us before re-arming",
+        (unsigned)(DCS_ETHWD_COOLDOWN_MS / 1000u));
+    }
+  }
+}
+
 /* === Public-ish (component-internal) API ================================== */
 
 esp_err_t dcs_eth_start(void)
@@ -108,6 +430,15 @@ esp_err_t dcs_eth_start(void)
   if (s_eth_netif != NULL) {
     ESP_LOGW(TAG, "already started");
     return ESP_OK;
+  }
+
+  /* Lifecycle lock, created once on the first bring-up (before any concurrent
+   * admin toggle or watchdog recovery can run). */
+  if (s_eth_lock == NULL) {
+    s_eth_lock = xSemaphoreCreateMutex();
+    if (s_eth_lock == NULL) {
+      return ESP_ERR_NO_MEM;
+    }
   }
 
   /* esp_netif + default event loop may not exist yet if we run before
@@ -241,6 +572,20 @@ esp_err_t dcs_eth_start(void)
   }
 
   atomic_store(&s_enabled, true);
+
+  /* Publish the MAC/PHY objects for the watchdog's reinstall path, and spawn the
+   * health watchdog exactly once. Recovery rungs 2/3 re-enter dcs_eth_start(),
+   * so the s_wd_started guard keeps this to a single task. */
+  s_mac = mac;
+  s_phy = phy;
+  if (!s_wd_started) {
+    s_wd_started = true;
+    /* PSRAM stack, non-safety: the watchdog does esp_eth ioctl/stop/start and,
+     * on recovery, a full driver+netif rebuild (no flash/NVS, no ISR access) —
+     * safe on an external-RAM stack. Prio 3 < supervisor(4), well below safety. */
+    (void)dcs_task_spawn_psram(eth_watchdog_task, "eth_wd", 6144, NULL, 3, tskNO_AFFINITY);
+  }
+
   ESP_LOGI(
     TAG,
     "W5500 Ethernet started (SPI%d cs=%d int=%d rst=%d @%dMHz, "
@@ -328,12 +673,23 @@ esp_err_t dcs_eth_set_enabled(bool on)
   if (s_eth_handle == NULL) {
     return ESP_ERR_INVALID_STATE;
   }
+  /* Serialise against the watchdog's recovery ladder so an admin toggle can't
+   * race a stop/start/reinstall in flight. */
+  if (s_eth_lock != NULL) {
+    (void)xSemaphoreTake(s_eth_lock, portMAX_DELAY);
+  }
   if (on == atomic_load(&s_enabled)) {
+    if (s_eth_lock != NULL) {
+      (void)xSemaphoreGive(s_eth_lock);
+    }
     return ESP_OK;
   }
   esp_err_t err = on ? esp_eth_start(s_eth_handle) : esp_eth_stop(s_eth_handle);
   if (err != ESP_OK) {
     ESP_LOGE(TAG, "eth %s: %s", on ? "start" : "stop", esp_err_to_name(err));
+    if (s_eth_lock != NULL) {
+      (void)xSemaphoreGive(s_eth_lock);
+    }
     return err;
   }
   if (!on) {
@@ -342,5 +698,8 @@ esp_err_t dcs_eth_set_enabled(bool on)
   }
   atomic_store(&s_enabled, on);
   ESP_LOGW(TAG, "Ethernet %s via admin toggle", on ? "ENABLED" : "DISABLED");
+  if (s_eth_lock != NULL) {
+    (void)xSemaphoreGive(s_eth_lock);
+  }
   return ESP_OK;
 }

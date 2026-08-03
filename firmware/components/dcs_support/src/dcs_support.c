@@ -130,6 +130,13 @@ atomic_int g_dcs_wg_paused;
 atomic_uint_fast32_t g_dcs_heap_min_internal = UINT32_MAX;
 
 atomic_int g_dcs_active_iface;
+/* W5500 health-watchdog counters (written by dcs_eth.c's eth_wd task). */
+atomic_uint_fast32_t g_dcs_eth_recoveries;
+atomic_uint_fast32_t g_dcs_eth_rec_r1;
+atomic_uint_fast32_t g_dcs_eth_rec_r2;
+atomic_uint_fast32_t g_dcs_eth_rec_r3;
+atomic_uint_fast32_t g_dcs_eth_rec_reason;
+atomic_uint_fast32_t g_dcs_eth_spi_err;
 atomic_uint_fast32_t g_dcs_rgb_cycles;
 atomic_uint_fast32_t g_dcs_pstop_rebonds;
 atomic_uint_fast32_t g_dcs_relay_fault_a;

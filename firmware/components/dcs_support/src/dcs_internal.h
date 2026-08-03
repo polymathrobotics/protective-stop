@@ -206,6 +206,19 @@ extern "C"
  * net supervisor every second, read by /state.json. */
   extern atomic_int g_dcs_active_iface;
 
+  /* W5500 SPI-Ethernet health-watchdog telemetry (dcs_eth.c), read by
+ * /state.json. recoveries = ladders that restored the link; rec_r1/r2/r3 =
+ * per-rung success counts (stop-start / reinstall / HW-reset+reinstall);
+ * rec_reason = last trip cause (0 none, 1 SPI-probe fault, 2 black-hole);
+ * spi_err = cumulative read-only SPI-probe failures. All monotonic; a rising
+ * value flags a wedge that self-healed rather than requiring a power-cycle. */
+  extern atomic_uint_fast32_t g_dcs_eth_recoveries;
+  extern atomic_uint_fast32_t g_dcs_eth_rec_r1;
+  extern atomic_uint_fast32_t g_dcs_eth_rec_r2;
+  extern atomic_uint_fast32_t g_dcs_eth_rec_r3;
+  extern atomic_uint_fast32_t g_dcs_eth_rec_reason;
+  extern atomic_uint_fast32_t g_dcs_eth_spi_err;
+
   /* RGB status-LED loop counter — incremented once per blink cycle by dcs_rgb,
  * read by /state.json so the task's liveness is observable (a frozen counter
  * means the LED task is wedged). */
