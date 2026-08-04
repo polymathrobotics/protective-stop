@@ -90,6 +90,35 @@ hold each other's key. Therefore:
   holds up to `ML_EXTRA_PINS` (= 16) app-pins per chip (machine slots on a remote,
   operators on a machine).
 
+### 5.1 Scaling to hundreds of remotes and machines
+
+The **128 WG-session ceiling (`ML_MAX_PEERS`) is per chip, not per site.** Hundreds
+of units are fine as long as no single node needs sessions to more than ~120 others:
+
+- **Remotes never scale-limit** — a remote sessions only with its ≤4 configured
+  machines + the fleet (~5 peers), at any site size.
+- **A machine sessions with each bonded remote**, so a *single machine* can serve at
+  most ~120 remotes. Beyond that, partition remotes across more machines (a topology
+  choice) or raise `ML_MAX_PEERS`/`WIREGUARD_MAX_PEERS` in firmware (bounded by RAM
+  and needs validation).
+
+`max_peers` (runtime `POST /api/settings`) is the per-site **active-set** tuning:
+
+- **Dedicated pstop tailnet (recommended for production):** with only real pstop
+  nodes in the netmap there's no noise to trim. A value like **`max_peers = 32`** is
+  a good production default — it comfortably covers a machine's fan-out + fleet +
+  operators while keeping the DISCO/WG probing set small, and it's well under the 128
+  ceiling. Raise it toward 128 only for a machine that must serve >~28 remotes.
+- **Shared/noisy tailnet:** a low value (e.g. 16) suppresses churn from unrelated
+  nodes — a *test accommodation*, not a production setting.
+- **`ML_EXTRA_PINS` (= 16) caps pinned peers per chip.** For a machine that must
+  reliably hold >16 operators, raise it (small static-RAM cost) so every operator
+  survives the trim; stop-only remotes remain best-effort.
+
+**Do not ship `max_peers = 16`** — it would cap a machine at ~16 remotes. Set it to
+the production value (≈32, or higher per fan-out) once the deployment tailnet is
+sized.
+
 ## 6. DERP / direct-path notes
 
 - A chip holds ONE DERP connection and homes it on its **priority peer's (the
