@@ -224,13 +224,6 @@ def run(args):
         remote_states = {n: http_get_json(u + "/state.json") for n, u in remotes.items()}
         machine_states = {n: http_get_json(u + "/state.json") for n, u in machines.items()}
 
-        machine_ids = {}
-        for mname, mst in machine_states.items():
-            if isinstance(mst, dict) and "__err__" not in mst:
-                # A machine reports its own id via any remote's slot; instead we
-                # match slots to machines by the id the remote is configured for.
-                machine_ids[mname] = mst  # kept for future correlation
-
         for rname, url in remotes.items():
             st = remote_states[rname]
             if "__err__" in st:
