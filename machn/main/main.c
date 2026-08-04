@@ -35,6 +35,7 @@
  */
 
 #include <stdatomic.h>
+#include <stdlib.h> /* strtoul for the operator-hostname parse */
 #include <string.h>
 
 #include "dcs_support.h"
@@ -42,6 +43,7 @@
 #include "esp_system.h" /* esp_restart on a clock fault */
 #include "esp_task_wdt.h" /* TWDT subscribe/feed for the comparator */
 #include "esp_timer.h"
+#include "microlink.h" /* peer-wanted hook: pin operator remotes past the peer cap */
 // clang-format off
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -617,11 +619,60 @@ static void relay_gpio_init(void)
   ESP_ERROR_CHECK(gpio_config(&in));
 }
 
+/* microlink "keep this peer past the ML_MAX_PEERS cap" hook.
+ *
+ * The tailnet can exceed ML_MAX_PEERS, so every chip trims its netmap. A machn
+ * pins nothing by default, so a freshly-added operator remote (no recent
+ * activity) gets dropped from the netmap and machn never learns its WG key ->
+ * the remote's handshakes get no session and it never bonds. Fix: when the peer
+ * table is full, keep any incoming peer whose device identity is on the
+ * OPERATOR allowlist (bounded, <= DCS_MAX_OPERATORS). Stop-only accept-all
+ * remotes are intentionally NOT pinned here and remain best-effort.
+ *
+ * Identity scheme: the remote's tailnet hostname is "pstop-01<mac24>" — the 8
+ * lowercase hex digits after "pstop-" ARE the 32-bit pstop id (e.g.
+ * "pstop-01d7f344" -> 0x01d7f344), the exact value dcs_operator_* stores and
+ * compares, so parsing the hex as a uint32_t needs no byte-order fixup.
+ * Robust to any hostname that doesn't match the pattern (returns false). */
+static bool machn_peer_wanted_cb(void * ctx, const char * hostname, uint32_t vpn_ip)
+{
+  (void)ctx;
+  (void)vpn_ip;
+  static const char kPrefix[] = "pstop-";
+  const size_t plen = sizeof(kPrefix) - 1u;
+  if (hostname == NULL) {
+    return false;
+  }
+  if (strncmp(hostname, kPrefix, plen) != 0) {
+    return false;
+  }
+  const char * hex = hostname + plen;
+  /* Require exactly 8 hex digits (the pstop-01<mac24> form) then end-of-string
+   * OR a '.' — netmap hostnames are FQDNs like pstop-01d7f344.tail13f8.ts.net,
+   * so the id is followed by the tailnet domain suffix, not a NUL. */
+  for (int i = 0; i < 8; i++) {
+    const char c = hex[i];
+    const bool is_hex = ((c >= '0') && (c <= '9')) || ((c >= 'a') && (c <= 'f')) || ((c >= 'A') && (c <= 'F'));
+    if (!is_hex) {
+      return false;
+    }
+  }
+  if ((hex[8] != '\0') && (hex[8] != '.')) {
+    return false;
+  }
+  const uint32_t id = (uint32_t)strtoul(hex, NULL, 16);
+  return dcs_operator_is_listed(id);
+}
+
 void app_main(void);
 
 void app_main(void)
 {
   dcs_boot_state_t bs = dcs_support_init();
+
+  /* Register the operator-remote pin hook now that microlink is up. Keeps a
+     * newly-added operator remote from being trimmed out of machn's netmap. */
+  microlink_set_peer_wanted_cb(bs.ml_handle, machn_peer_wanted_cb, NULL);
 
   relay_gpio_init(); /* relays open (STOP) before anything else runs */
   core_instance_init(0);

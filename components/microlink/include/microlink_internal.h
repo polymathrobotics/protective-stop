@@ -532,6 +532,10 @@ extern "C"
     void * peer_cb_data;
     microlink_data_cb_t data_cb;
     void * data_cb_data;
+    /* "Keep this peer when the table is full" hook (NULL = disabled). See
+     * microlink_set_peer_wanted_cb() / add_peer() in ml_wg_mgr.c. */
+    microlink_peer_wanted_cb_t peer_wanted_cb;
+    void * peer_wanted_ctx;
 
     /* HTTP Config Server (peer allowlist, runtime settings) */
     ml_config_ctx_t * config_httpd;

@@ -544,7 +544,7 @@ static uint32_t fleet_server_ip_cached(void)
  * the tailnet after the chip's last full netmap (or that has no recent
  * activity) gets trimmed by the ML_MAX_PEERS cap and the remote can never
  * bond to it (observed: EHOSTUNREACH on every BOND, bench 2026-07-31). */
-#define ML_EXTRA_PINS 8
+#define ML_EXTRA_PINS 16
 static uint32_t s_extra_pins[ML_EXTRA_PINS];
 
 /* True path RTT to a peer from the disco layer (txid-matched ping->pong,
@@ -811,6 +811,21 @@ static int add_peer(microlink_t * ml, const ml_peer_update_t * update)
         idx = i;
         break;
       }
+    }
+
+    /* Peer table full, and this peer isn't pinned yet — but the application
+         * (machn) may still need it: an incoming peer whose device identity is on
+         * the operator allowlist must be kept, or the machine never learns its WG
+         * key and the remote can never bond. Pin it NOW (bounded set: operators
+         * are ≤ DCS_MAX_OPERATORS) so is_pinned_peer() below is true and the
+         * existing LRU-evict-for-pinned path makes room; pinning also persists it
+         * for future netmap syncs. Stop-only accept-all remotes are NOT pinned
+         * here and remain best-effort. Null cb (e.g. remotes) = current behavior. */
+    if (
+      idx < 0 && !is_pinned_peer(ml, update->vpn_ip) && ml->peer_wanted_cb != NULL &&
+      ml->peer_wanted_cb(ml->peer_wanted_ctx, update->hostname, update->vpn_ip))
+    {
+      microlink_pin_peer_ip(ml, update->vpn_ip, true);
     }
 
     /* Peer table full — evict LRU non-pinned peer if the incoming peer is

@@ -81,6 +81,15 @@ extern "C"
   typedef void (*microlink_data_cb_t)(
     microlink_t * ml, uint32_t src_ip, const uint8_t * data, size_t len, void * user_data);
 
+  /* Application hook asked, when the WG peer table is FULL, whether an incoming
+   * peer must be kept anyway. Returning true makes microlink pin the peer (it
+   * evicts an LRU non-pinned peer to make room and persists the pin for future
+   * netmap syncs). Used by machn to keep operator-allowlist remotes that would
+   * otherwise be trimmed by the ML_MAX_PEERS cap and never learn the remote's
+   * WG key. Must be side-effect-free and fast (called on the coord->wg path).
+   * The application must only return true for a BOUNDED set of peers. */
+  typedef bool (*microlink_peer_wanted_cb_t)(void * ctx, const char * hostname, uint32_t vpn_ip);
+
   /**
  * @brief Factory reset — erase all stored keys and cached peers
  * @return ESP_OK on success
@@ -231,6 +240,15 @@ extern "C"
   void microlink_set_state_callback(microlink_t * ml, microlink_state_cb_t cb, void * user_data);
   void microlink_set_peer_callback(microlink_t * ml, microlink_peer_cb_t cb, void * user_data);
   void microlink_set_data_callback(microlink_t * ml, microlink_data_cb_t cb, void * user_data);
+
+  /**
+ * @brief Register the "keep this peer even when the table is full" hook.
+ *
+ * Optional. When set, add_peer() consults it before dropping an incoming peer
+ * that hit the ML_MAX_PEERS cap; a true return pins the peer (LRU-evicting a
+ * non-pinned peer to make room). Unset (default) preserves current behavior.
+ */
+  void microlink_set_peer_wanted_cb(microlink_t * ml, microlink_peer_wanted_cb_t cb, void * ctx);
 
   /**
  * @brief Set/get the DERP I/O task's inner-loop yield delay (1..100 ms).
