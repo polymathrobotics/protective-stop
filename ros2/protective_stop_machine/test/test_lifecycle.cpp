@@ -27,8 +27,13 @@ using State = lifecycle_msgs::msg::State;
 
 static rclcpp::NodeOptions with(std::vector<rclcpp::Parameter> overrides)
 {
+  // These tests drive the lifecycle by hand, so suppress the constructor's
+  // self-activation (autostart defaults to true for `ros2 run`). Placed first
+  // so any explicit per-test override still wins.
+  std::vector<rclcpp::Parameter> params{rclcpp::Parameter("autostart", false)};
+  params.insert(params.end(), overrides.begin(), overrides.end());
   rclcpp::NodeOptions o;
-  o.parameter_overrides(std::move(overrides));
+  o.parameter_overrides(std::move(params));
   return o;
 }
 

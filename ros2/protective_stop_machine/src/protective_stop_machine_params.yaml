@@ -91,6 +91,6 @@ protective_stop_machine:
 
   autostart:
     type: bool
-    default_value: false
+    default_value: true
     read_only: true
-    description: If true, the node configures and activates itself on startup (launch sets this true; left false for tests and manual lifecycle control).
+    description: If true, the node configures and activates itself on startup (default, so `ros2 run` comes up active). Set false for manual lifecycle control (tests, external lifecycle manager).

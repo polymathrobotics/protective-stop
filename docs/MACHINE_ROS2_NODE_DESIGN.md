@@ -67,10 +67,12 @@ assert it.
 | `on_shutdown`  | ensure loop stopped, release | ensure polling stopped | idempotent safe teardown |
 | `on_error`     | stop loop, publish `UNSTABLE`, → `errorprocessing` | mark backend unreachable, publish `UNSTABLE` | fault ⇒ conservative state |
 
-Bringup via **`nav2_lifecycle_manager`** (the archived node already test-depended
-on it) or a launch file with `RegisterEventHandler` autostart. Managed lifecycle
-is what lets an operator/orchestrator hold the node in `inactive` (configured but
-not servicing) — useful on the bench.
+Bringup is self-managed: the `autostart` parameter (default true) makes the node
+configure and activate itself in its constructor, so a bare `ros2 run` comes up
+active with no `nav2_lifecycle_manager` or launch event handlers. Set
+`autostart:=false` to hold the node in `unconfigured` for manual/orchestrated
+lifecycle control (tests, bench, an external lifecycle manager) — useful when an
+operator needs the node configured but not yet servicing.
 
 ---
 
@@ -172,9 +174,7 @@ protective_stop_machine/                 # ament_cmake, C++17
     machine_bridge_node.cpp              # lifecycle + ROS glue only
     software_backend.cpp                 # links pstop_c
     hardware_backend.cpp                 # libcurl + nlohmann/json
-    main.cpp
-  config/machine_params.yaml             # generate_parameter_library source + defaults
-  launch/machine_bridge.launch.yaml      # lifecycle bringup (autostart via node param)
+    protective_stop_machine_params.yaml  # generate_parameter_library source + defaults
   test/                                   # gtest (backend logic) + launch_testing (transitions)
 protective_stop_msg/                      # restored from archive/, + MachineRelayStatus, BondedRemoteArray
 ```
@@ -241,7 +241,26 @@ adopted (station uses newest).
 
 ---
 
-## 12. Example `config/machine_params.yaml`
+## 12. Running the node and overriding parameters
+
+There is no launch file — the node is a composable component with a
+code-generated executable. Defaults (and the SR-M-01 validation ranges) live in
+the `generate_parameter_library` source `src/protective_stop_machine_params.yaml`
+and are compiled in, so `autostart` defaults to true and a bare run comes up
+active:
+
+```sh
+ros2 run protective_stop_machine machine_bridge_node
+```
+
+To override any parameter, pass your own params file:
+
+```sh
+ros2 run protective_stop_machine machine_bridge_node \
+  --ros-args --params-file my_overrides.yaml
+```
+
+where `my_overrides.yaml` looks like:
 
 ```yaml
 /machine_bridge:
