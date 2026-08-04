@@ -74,6 +74,11 @@ extern "C"
 
 /* Queue depths */
 #define ML_DERP_TX_QUEUE_DEPTH 16
+/* Separate FIFO queue for SAFETY (pinned/priority/health-tracked) + WG-handshake
+ * frames, drained FIRST by the DERP task so the 5 Hz pstop heartbeat is never
+ * stuck behind, or dropped by, a disco relay burst. Small: a handful of safety
+ * peers, each 5 Hz. */
+#define ML_DERP_TX_PRIO_DEPTH 12
 #define ML_DISCO_RX_QUEUE_DEPTH 8
 #define ML_WG_RX_QUEUE_DEPTH \
   32 /* carries the 10 Hz pstop heartbeats;
@@ -346,6 +351,22 @@ extern "C"
     uint16_t best_port;
     bool has_direct_path;
 
+    /* DERP-stability flap damping (safety peers only). A hard-NAT peer can get a
+     * lucky direct pong (promote) whose reverse NAT mapping then dies, demoting a
+     * few seconds later — an endless 5 s promote/demote swap that wobbles the
+     * safety heartbeat. If a direct path lived < 15 s we count it as a flap and
+     * exponentially back off the direct-UPGRADE re-probe so the peer holds a
+     * steady DERP bond. Never suppresses the 3 s liveness wake or a >15 s
+     * established failover; only priority/health-tracked peers ever set these. */
+    uint64_t direct_promoted_ms; /* ms of last has_direct_path false->true edge */
+    uint8_t direct_flap_count; /* consecutive short-lived direct paths (cap 8) */
+    uint64_t direct_backoff_until; /* gate direct-upgrade re-probe until this ms */
+
+    /* Throttle the via-DERP-pong DERP-handshake re-fire to >= 5 s apart so a
+     * DERP-only safety peer answering every 3 s ping doesn't drive a connect_derp
+     * storm. 0 = never fired. */
+    uint64_t last_derp_reconnect_ms;
+
     /* WireGuard peer index in wireguard-lwip */
     int wg_peer_index;
 
@@ -472,7 +493,8 @@ extern "C"
     TaskHandle_t wg_mgr_task;
 
     /* Queues */
-    QueueHandle_t derp_tx_queue; /* -> derp_tx task */
+    QueueHandle_t derp_tx_queue; /* -> derp_tx task (disco/relay frames) */
+    QueueHandle_t derp_tx_prio_queue; /* -> derp_tx task, drained FIRST (safety heartbeat + WG handshake) */
     QueueHandle_t disco_rx_queue; /* net_io -> wg_mgr */
     QueueHandle_t wg_rx_queue; /* net_io -> wg_mgr */
     QueueHandle_t stun_rx_queue; /* net_io -> coord */
@@ -623,6 +645,12 @@ extern "C"
    * 0 = peer unknown or region not yet learned. Called from the enqueue path
    * (same wg_mgr task that owns the peer table) to tag each relayed frame. */
   uint16_t ml_wg_region_for_pubkey(microlink_t * ml, const uint8_t * wg_pubkey);
+  /* True if the peer identified by its 32-byte WG public key is a SAFETY peer
+   * (pinned incl. priority/fleet/app-pin, OR health-tracked). Used by the DERP
+   * TX enqueue path to front-queue and protect the safety heartbeat frame from
+   * disco backpressure. Same cross-task read profile as ml_wg_region_for_pubkey:
+   * word-sized reads of the peer table, worst case a transiently stale answer. */
+  bool ml_wg_is_safety_pubkey(microlink_t * ml, const uint8_t * wg_pubkey);
   /* Collect the DISTINCT DERP regions of the safety peers exempt from the
    * peer-scaling armor (pinned OR priority OR health-tracked). Writes up to
    * `max` region ids into `out`, returns the count. Used by the DERP task to
