@@ -7,7 +7,35 @@
 what is decided, what is open, and what is next across the safety-analysis +
 code-coverage effort. Newest status at the top of each section.
 
-_Last updated: 2026-08-02 (rev 2 — #15/#16/#17 batch + stability battery + battery-tool fix)._
+_Last updated: 2026-08-04 (heartbeat-timeout tunable `max_missed` 3 → 5 propagated to the safety case)._
+
+> **2026-08-04 — heartbeat-timeout raised (`max_missed` 3 → 5, commit `01e4c10`):**
+> The machn (safety-credited machine, HARA A-07) `MACHN_MAX_MISSED_HEARTBEATS`
+> was raised **3 → 5** (advertised to remotes). The silent-remote STOP-detection
+> timeout moved from `400 × 3 ≈ 1.2 s` to `400 × 5 ≈ 2.0 s`; the internal
+> reaction budget (SR-SYS-01 / HARA A-05) moved from ≈ 1.3 s to **≈ 2.1 s**.
+> Rationale: ~90-min Tailscale control-plane re-syncs caused transient ~1.4 s RTT
+> spikes on the machine bond that exceeded the old 1.2 s timeout → nuisance
+> rebonds / false STOPs; the 2.0 s margin rides through them (a deliberate trade
+> of detection latency for far fewer false safety stops; addresses HARA **H-02**).
+> Safety-case docs updated: SYSTEM_DEFINITION §2, HARA A-05/A-10/SG-1/SG-2/D1/H-03,
+> SAFETY_REQUIREMENTS SR-SYS-01/02 + SR-H-01 + header, RECONCILIATION R-03/R-08,
+> PSTOP_SAFETY_DESIGN §5.6, PRODUCTION_NETWORKING, CLOCK_GUARD, TRACEABILITY,
+> README.
+> - [ ] **FINDING — FTTI/PST budget lengthened (integrator action).** The internal
+>   budget is now **≈ 2.1 s** (was ≈ 1.3 s). PST is an unknown integrator input
+>   (A-05, OD-2), so no *stated numeric* FTTI is internally violated — but any
+>   vehicle previously sized against the 1.3 s budget must be **re-confirmed
+>   against ≥ 2.1 s + braking**. Short-PST vehicles are the ones at risk; this
+>   compounds the existing H-03 DERP dark-window concern.
+> - [ ] **`max_missed` = 5 now equals the validated-envelope ceiling `[1,5]`**
+>   (SR-H-03 / ROS 2 `validate_timing`). No headroom remains to raise it further
+>   without widening the envelope (which would need re-validation).
+> - [ ] **ROS 2 node default not confirmed changed.** Commit `01e4c10` is
+>   machn-specific; `docs/MACHINE_ROS2_NODE_DESIGN.md` still shows `max_missed: 3`.
+>   Confirm whether the ROS 2 node default should track machn (=5) or the two
+>   paths intentionally differ, then reconcile doc + code. (Code is out of this
+>   docs-only change's scope.)
 
 > **2026-08-02 — "do them in order" batch merged + verified:**
 > 1. **#1 — SR-H-04b machine clock-freeze guard + DU-1 GPIO re-verify DONE**

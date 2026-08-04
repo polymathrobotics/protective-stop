@@ -67,9 +67,22 @@ requirements at its edges.
 | Safe state | **STOP = de-energized** (no valid message ⇒ machine heartbeat-times-out to STOP) |
 | Architecture | Remote: 1oo2D to stop / 2oo2 to run, HFT=1. Machine relay: de-energize-to-safe |
 | Tick rate | 10 Hz sensing/compare on the remote |
-| Heartbeat | `heartbeat_ms` = 400 ms default; timeout = `heartbeat_ms × max_missed` (=3) ≈ **1.2 s** |
+| Heartbeat | `heartbeat_ms` = 400 ms default; timeout = `heartbeat_ms × max_missed` (=5) ≈ **2.0 s** |
 | Arming | STOP must be held ≥ `min_stop_ms` = 500 ms, then released, to count as the deliberate arming gesture |
 | Topology | Many remotes → one machine (fail-safe OR); one remote → many machines |
+
+> **Heartbeat-timeout tunable (2026-08-04).** `max_missed_heartbeats` was raised
+> **3 → 5** (machn firmware, advertised to remotes), so the silent-remote
+> STOP-detection timeout moved from `400 × 3 ≈ 1.2 s` to `400 × 5 ≈ 2.0 s`.
+> Rationale: ~90-min Tailscale control-plane re-syncs caused transient ~1.4 s RTT
+> spikes on the machine bond that exceeded the old 1.2 s timeout → nuisance
+> rebonds / false STOPs; the 2.0 s margin rides through them. This is a
+> deliberate trade of real-disconnect detection latency (1.2 s → 2.0 s) for far
+> fewer false safety stops. `max_missed` is a runtime tunable inside the
+> validated envelope `[1,5]` (SR-H-03); the new default sits at the envelope
+> **ceiling**. Any FTTI / process-safety-time budget must now accommodate the
+> ~2.0 s detection time (+ one 100 ms tick ⇒ ≈ 2.1 s internal budget — HARA A-05,
+> SR-SYS-01).
 
 ## 3. Top-level safety functions
 

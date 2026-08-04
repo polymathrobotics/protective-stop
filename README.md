@@ -137,7 +137,8 @@ releasing. The runner logs `ARMED` and the ring turns green.
 ## Key facts
 
 - 10 Hz heartbeat; stop-on-silence is `heartbeat_ms ×
-  (max_missed_heartbeats+1)`, about 1 to 2 s as configured.
+  max_missed_heartbeats`, about 2.0 s as configured (400 ms × 5;
+  `max_missed_heartbeats` raised 3 → 5 on 2026-08-04).
 - One remote can heartbeat up to 4 machines (`/api/pstop_peers`), each an
   independent session with its own bond and reply watchdog; one dead
   machine never stalls the others. STOP and the arming gesture broadcast
@@ -190,6 +191,13 @@ protocol), `tools/pstop_chaos_proxy.py` + `test/chaos_ladder.sh`
 was removed from production firmware; tests exercise the machine policy
 through the scripted test remote instead, and arming a real unit
 requires a physical press.
+
+For long-run remote-to-machine connectivity soaks over Tailscale,
+`tools/soak_disconnect_monitor.py` polls remotes and machines, records
+every disconnect with the context needed to localize its cause
+(`sf_route`/errno, `ml_reconnects`, `wg_direct`, `rebonds`), and supports
+an "N-hours-clean" acceptance exit
+([`docs/CONNECTIVITY_SOAK.md`](docs/CONNECTIVITY_SOAK.md)).
 
 `./tools/misra_check.sh` runs a free-cppcheck MISRA C:2012 pass over
 the code we own (`pstop_c` is excluded; see

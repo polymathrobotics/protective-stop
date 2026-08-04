@@ -62,7 +62,7 @@ Test-file shorthand:
 
 | SR | Alloc F-xx | Code (file:line) | Verifying test(s) | Method | Status |
 |---|---|---|---|---|---|
-| SR-SYS-01 | F-R-01..05, F-H-03, F-M-03/04, final elem | timing budget (HARA A-05) | **NO TEST** measures end-to-end latency; HIL20/30 wait *within* a heartbeat budget but assert STOP-occurred, not the ≤1.3 s internal budget | Analysis + Test (latency) | **Unverified-gap** |
+| SR-SYS-01 | F-R-01..05, F-H-03, F-M-03/04, final elem | timing budget (HARA A-05) | **NO TEST** measures end-to-end latency; HIL20/30 wait *within* a heartbeat budget but assert STOP-occurred, not the ≤2.1 s internal budget (was ≤1.3 s before `max_missed` 3 → 5 on 2026-08-04) | Analysis + Test (latency) | **Unverified-gap** |
 | SR-SYS-02 | F-R-02/06, F-H-03, F-P-03/04 | endpoint freshness path | Constituents: EV (fresh-sample OK), MR[F] (bad-CRC→STOP), REQ 2_02/2_03 (replay/lost). **End-to-end staleness/forgery NO TEST** | Test + Fault-inj | **Partially-verified** |
 | SR-SYS-03 | F-R-03, F-H-02, F-M-03 | arming path | HIL10 (fresh needs gesture; short-blip defers), HIL30 (boot no re-arm), MR[A] I3/I4 | Test | **Partially-verified** (host floor SR-H-03 unverified) |
 | SR-SYS-04 | F-H-05, F-P-04 | many-to-one OR | MR[B/D/E/F] 32/32 (any-STOP OR, ownership) | Test (E2E) | **Partially-verified** (ghost-bond masking unquantified) |
@@ -192,7 +192,7 @@ Partial→Verified closers; **P3** = requirements-completeness holes (§5).
 | P2-1 | SR-I-01 | Golden-vector encode/decode both ends | (= SR-R-12) | Author golden-vector both-end pin |
 | P2-2 | SR-I-04 | Shell-level replay integration | HARA §7 item 6 | Replay reply → no-OK integration test |
 | P2-3 | SR-R-13 | Remote-side spoofed-reply→no-OK | R06-1 | Replay-reply integration on remote |
-| P2-4 | SR-SYS-01 | End-to-end latency ≤1.3 s unmeasured | HARA A-05 | Injected-demand→STOP latency measurement |
+| P2-4 | SR-SYS-01 | End-to-end latency ≤2.1 s unmeasured (budget lengthened from ≤1.3 s by `max_missed` 3 → 5, 2026-08-04) | HARA A-05 | Injected-demand→STOP latency measurement |
 | P2-5 | SR-SYS-02 | End-to-end staleness/forgery | H-05/H-11 | Stale/replayed-OK end-to-end test |
 | P2-6 | SR-SYS-04 / SR-H-05 | Ghost-bond random-fault masking unquantified | — | FMEDA / random-fault campaign |
 | P2-7 | SR-SYS-05 | `machn` hardware final element untested here | H-10/A-07 | `machn` series-relay + feedback bench test |
