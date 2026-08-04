@@ -9,7 +9,7 @@ name: coverage (host + firmware core + ROS2)
 
 on:
   push:
-    branches: [main, pstop]
+    branches: [main]
     paths:
       - firmware/**
       - host/**
