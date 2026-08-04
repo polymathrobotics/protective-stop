@@ -418,15 +418,20 @@ static int poll_derp_read(microlink_t * ml, ml_derp_conn_t * c)
     return -1;
   }
 
-  /* Read frame payload - we already got the header so payload should follow.
-     * Use longer timeout (2s) since we KNOW data is coming. */
+  /* Read frame payload - we already got the header so the payload should follow.
+     * Bounded by the per-iteration safety timeout below (see rationale there). */
   uint8_t * buf = ml_psram_malloc(len);
   if (!buf) return -1;
 
   size_t total_read = 0;
   uint64_t payload_start = ml_get_time_ms();
   while (total_read < len) {
-    /* Safety timeout: 5 seconds for payload */
+    /* Safety timeout for payload. Kept at 5 s (NOT lowered to 1 s): once a frame
+     * header has arrived, the payload can straggle across several TCP retransmits
+     * on a lossy NAT'd/cellular link (RTO >= 1 s, backing off). A 1 s cap would
+     * truncate a legit in-flight heartbeat/STOP frame AND trip a home reconnect
+     * that flushes the TX queue and gaps the bond — strictly worse than the brief
+     * egress delay it was meant to avoid (adversarial review 2026-08-04). */
     if (ml_get_time_ms() - payload_start > 5000) {
       ESP_LOGW(TAG, "DERP payload timeout at %d/%lu bytes", (int)total_read, (unsigned long)len);
       free(buf);
@@ -495,30 +500,39 @@ esp_err_t ml_derp_queue_send(microlink_t * ml, const uint8_t * dest_key, const u
   };
   memcpy(item.dest_pubkey, dest_key, 32);
 
-  /* WG handshake packets (type 1=init, 2=response) get priority — front of queue.
-     * This ensures handshake responses aren't delayed behind DISCO pings. */
+  /* Route to the correct FIFO queue: safety/handshake frames -> the PRIORITY
+   * queue (the DERP task drains it first, so a 5 Hz heartbeat is never stuck
+   * behind a disco burst); everything else -> the normal disco queue. Enqueue is
+   * a single atomic op per queue, so it is safe against the concurrent producers
+   * (wg_mgr disco + the TCPIP-thread heartbeat via wg_derp_output_cb) with NO
+   * cross-thread drain, and per-peer frame order is preserved (FIFO within a
+   * queue -> no OK-after-STOP reordering). */
   bool is_wg_handshake = (len >= 4 && (data[0] == 0x01 || data[0] == 0x02));
+  bool is_priority = is_wg_handshake || ml_wg_is_safety_pubkey(ml, dest_key);
+  QueueHandle_t txq = is_priority ? ml->derp_tx_prio_queue : ml->derp_tx_queue;
 
-  /* Try to send to queue */
-  if (
-    (is_wg_handshake ? xQueueSendToFront(ml->derp_tx_queue, &item, 0) : xQueueSend(ml->derp_tx_queue, &item, 0)) ==
-    pdTRUE)
-  {
+  if (xQueueSend(txq, &item, 0) == pdTRUE) {
     return ESP_OK;
   }
 
-  /* Queue full - backpressure: drop oldest, retry up to 3 times */
+  /* Queue full: drop the OLDEST item on THIS queue to admit the newer one, retry
+   * up to 3x. On the PRIORITY queue the oldest is the STALEST heartbeat/handshake
+   * — dropping it to keep the freshest is correct for liveness (a full priority
+   * queue is already a multi-second backlog; the bond is gapping regardless, and
+   * the receiver only cares about the newest heartbeat). A disco frame can NEVER
+   * evict a heartbeat — they live on separate queues. All single-atomic ops, no
+   * cross-thread drain/requeue. */
   for (int i = 0; i < 3; i++) {
     ml_derp_tx_item_t dropped;
-    if (xQueueReceive(ml->derp_tx_queue, &dropped, 0) == pdTRUE) {
-      free(dropped.data); /* Drop oldest */
+    if (xQueueReceive(txq, &dropped, 0) == pdTRUE) {
+      free(dropped.data);
     }
-    if (xQueueSend(ml->derp_tx_queue, &item, 0) == pdTRUE) {
+    if (xQueueSend(txq, &item, 0) == pdTRUE) {
       return ESP_OK;
     }
   }
 
-  /* Still full after 3 attempts, drop new packet */
+  /* Still full after 3 attempts, drop the new packet. */
   free(pkt_data);
   return ESP_ERR_TIMEOUT;
 }
@@ -823,11 +837,19 @@ void ml_derp_tx_task(void * arg)
          *      frame to the pool connection homed on the destination's region. ---- */
     {
       uint16_t eff_home = ml_effective_home_region(ml);
-      for (int tx_count = 0; tx_count < 8; tx_count++) {
-        ml_derp_tx_item_t item;
-        if (xQueueReceive(ml->derp_tx_queue, &item, 0) != pdTRUE) {
-          break;
-        }
+      /* Drain the PRIORITY (safety/handshake) queue FULLY first, then the disco
+       * queue (bounded). Two separate FIFO queues => a 5 Hz safety heartbeat is
+       * never stuck behind a disco burst, enqueue stays single-atomic per queue
+       * (no cross-thread drain/requeue = the CRITICAL race is gone), and per-peer
+       * frame order is preserved within a queue (no OK-after-STOP reordering). */
+      for (int q = 0; q < 2; q++) {
+        QueueHandle_t txq = (q == 0) ? ml->derp_tx_prio_queue : ml->derp_tx_queue;
+        int budget = (q == 0) ? ML_DERP_TX_PRIO_DEPTH : 8;
+        for (int tx_count = 0; tx_count < budget; tx_count++) {
+          ml_derp_tx_item_t item;
+          if (xQueueReceive(txq, &item, 0) != pdTRUE) {
+            break;
+          }
         ml_derp_conn_t * c = derp_route_conn(ml, item.region_id, eff_home);
         if (c == NULL) {
           /* Chosen conn (home fallback) is down — nothing can carry it now.
@@ -878,6 +900,7 @@ void ml_derp_tx_task(void * arg)
           c->last_used_ms = ml_get_time_ms();
         }
         free(item.data);
+        }
       }
     }
 
