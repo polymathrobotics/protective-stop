@@ -81,6 +81,7 @@ protocol_handle_message(pstop_machine_t *machine, const pstop_msg_t *req, pstop_
     remote_details_t details = machine->application->remote_details_cb((&req->id));
 
     if(details.allowed == false) {
+        resp->message = PSTOP_MESSAGE_UNBOND;
         return PSTOP_OPERATOR_NOT_ALLOWED;
     }
 
