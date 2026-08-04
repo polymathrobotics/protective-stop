@@ -1,0 +1,233 @@
+# MicroLink Dual-Core Safety — sdkconfig defaults
+CONFIG_IDF_TARGET="esp32s3"
+
+# W5500 SPI Ethernet (Waveshare ESP32-S3-ETH board). Highest-priority netif;
+# see components/dcs_support/src/dcs_eth.c for the pin map and bring-up.
+CONFIG_ETH_ENABLED=y
+CONFIG_ETH_USE_SPI_ETHERNET=y
+CONFIG_ETH_SPI_ETHERNET_W5500=y
+
+# Flash size (8MB)
+CONFIG_ESPTOOLPY_FLASHSIZE_2MB=n
+CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y
+
+# Partition table (OTA, no factory)
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_FILENAME="partitions.csv"
+
+# OTA rollback
+CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
+
+# PSRAM (8 MB in-package octal die). Route the bulk of heap to PSRAM so the
+# WG/TLS/Tailscale working set + WiFi driver fit alongside each other in the
+# scarce ~350 KB internal DRAM. ALWAYSINTERNAL=2048 sends allocations >2 KB to
+# PSRAM (default 16384 kept almost everything internal); TRY_ALLOCATE_WIFI_LWIP
+# pushes WiFi/lwIP buffers out too; RESERVE_INTERNAL keeps 32 KB internal for
+# DMA/ISR-only allocations.
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCT=y
+CONFIG_SPIRAM_SPEED_80M=y
+CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y
+CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=2048
+CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL=32768
+
+# lwIP
+CONFIG_LWIP_MAX_SOCKETS=16
+CONFIG_LWIP_SO_RCVBUF=y
+CONFIG_LWIP_TCPIP_RECVMBOX_SIZE=64
+CONFIG_LWIP_TCP_SND_BUF_DEFAULT=32768
+CONFIG_LWIP_TCP_WND_DEFAULT=32768
+# Per-socket TCP receive mailbox. Default 6 was overflowing the DERP socket
+# the instant ml_coord's peer-table ingestion ran on the adjacent coord
+# socket — the DERP HTTP-upgrade response dropped behind 6 queued pbufs.
+# 32 gives the TCPIP thread room to back-pressure properly.
+CONFIG_LWIP_TCP_RECVMBOX_SIZE=32
+# Hot-path lwIP code in IRAM — measurably reduces TCPIP-thread latency
+# under sustained Tailscale + USB-NCM load. Costs ~6 KiB IRAM, easily
+# affordable on the S3.
+CONFIG_LWIP_IRAM_OPTIMIZATION=y
+# Bigger TCPIP stack. v15.11 bump from 4 KiB → 8 KiB to accommodate the
+# direct-UDP WireGuard receive path. With zero-copy, an incoming WG data
+# packet runs *entirely* on the TCPIP thread: zc_pcb_recv_cb →
+# wireguardif_network_rx → wireguardif_process_data_message (ChaCha20-
+# Poly1305 decrypt) → ip_input → ip4_input → icmp_input → icmp_echo
+# → ip4_output → wg_netif_output → wireguardif_output → encrypt → udp_sendto.
+# That recursive ip_input + crypto + lwIP-output call chain blew the 4 KiB
+# stack canary in v15.9 within ~3 s of sustained ping load — the canary
+# tripped esp_panic_handler and the chip rebooted, which we saw as
+# 87 % packet loss + bc++. 8 KiB has comfortable headroom.
+CONFIG_LWIP_TCPIP_TASK_STACK_SIZE=8192
+
+# mbedTLS
+CONFIG_MBEDTLS_CHACHA20_C=y
+CONFIG_MBEDTLS_POLY1305_C=y
+CONFIG_MBEDTLS_CHACHAPOLY_C=y
+CONFIG_MBEDTLS_HKDF_C=y
+CONFIG_MBEDTLS_SSL_PROTO_TLS1_2=y
+# Dynamic TLS buffers: the DERP handshake (cert-chain verify against the CA
+# bundle) is the largest transient internal-RAM consumer and OOM'd WiFi when
+# both were up. DYNAMIC_BUFFER allocates the SSL I/O buffers on demand and frees
+# them + the CA copy + config data after the handshake, cutting the steady and
+# peak internal footprint so WiFi+Tailscale coexist without crashing.
+CONFIG_MBEDTLS_DYNAMIC_BUFFER=y
+CONFIG_MBEDTLS_DYNAMIC_FREE_CONFIG_DATA=y
+CONFIG_MBEDTLS_DYNAMIC_FREE_CA_CERT=y
+
+# FreeRTOS — both cores active, 1 kHz tick
+CONFIG_FREERTOS_UNICORE=n
+CONFIG_FREERTOS_HZ=1000
+CONFIG_FREERTOS_TIMER_TASK_STACK_DEPTH=4096
+
+# Runtime stats for per-core CPU load reporting (esp_timer clock, ~µs per ctx switch)
+CONFIG_FREERTOS_USE_TRACE_FACILITY=y
+CONFIG_FREERTOS_GENERATE_RUN_TIME_STATS=y
+# Expose TaskStatus_t.xCoreID for per-core task breakdown
+CONFIG_FREERTOS_VTASKLIST_INCLUDE_COREID=y
+
+# WiFi
+CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM=10
+CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM=32
+CONFIG_ESP_WIFI_AMPDU_TX_ENABLED=y
+CONFIG_ESP_WIFI_AMPDU_RX_ENABLED=y
+
+# CPU
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
+
+# === Watchdogs (SR-H-04 / FMEA DU-2: frozen-clock / frozen-task) ============
+# Three built-in hardware/software watchdogs form the last-resort backstop
+# behind the software dual-core clock cross-check (main.c). Rationale for every
+# value is in docs/WATCHDOG_CLOCK_PROTECTION.md.
+#
+# Task Watchdog Timer (TWDT). Auto-inits at startup and subscribes both idle
+# tasks, so a safety task that spins (never yields) starves its core's idle
+# task and trips the WDT. The two lockstep cores + the comparator ALSO
+# subscribe explicitly (main.c) and feed once per 100 ms tick, so a wedged
+# safety task is caught within TIMEOUT_S. PANIC=y makes a timeout reset the
+# chip (reset_reason ESP_RST_TASK_WDT — counted toward the OTA rollback ladder
+# in dcs_safety.c) instead of only printing a warning. 5 s: the fast safety
+# reactions are the 0.5 s cross-check and the 1 s machine heartbeat timeout;
+# the TWDT is the recovery-reset backstop, so a few seconds (50 missed ticks
+# of feed margin) avoids false resets during TLS/WireGuard bursts while still
+# resetting a genuinely wedged task promptly.
+CONFIG_ESP_TASK_WDT_EN=y
+CONFIG_ESP_TASK_WDT_INIT=y
+CONFIG_ESP_TASK_WDT_PANIC=y
+CONFIG_ESP_TASK_WDT_TIMEOUT_S=5
+CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU0=y
+CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU1=y
+#
+# Interrupt Watchdog (IWDT). FED BY THE FreeRTOS TICK ISR. Catches interrupts
+# being blocked too long (a runaway ISR or an over-long critical section — e.g.
+# a lwIP core-lock section or a wedged WG-crypto ISR). Crucially it ALSO catches
+# a total systimer freeze: if the systimer stops, the FreeRTOS tick interrupt
+# stops firing, the IWDT stops being fed, and it fires. Two-stage design — stage
+# 1 invokes the panic handler; stage 2 is wired to the RTC watchdog, which
+# HARD-RESETS the chip if the panic handler itself hangs. That RTC-WDT second
+# stage IS the ultimate last-resort backstop on the ESP32-S3 (the rtc_wdt feed
+# API is ESP32/ESP32-S2-only, so a manual user-code RTC feed is not available
+# here — the INT-WDT/RTC coupling provides it instead). 300 ms is the IDF
+# default, comfortably longer than any critical section on the safety path (the
+# E-stop loop uses only two esp_rom_delay_us(10) settles).
+CONFIG_ESP_INT_WDT=y
+CONFIG_ESP_INT_WDT_TIMEOUT_MS=300
+#
+# RTC (main system) Watchdog — enabled by the bootloader to protect the boot
+# path (a stalled boot auto-resets and retries). It is disabled early in app
+# startup (IDF default) and, at runtime, is driven as the INT-WDT's stage-2
+# hard-reset backstop described above rather than being fed from user code.
+CONFIG_BOOTLOADER_WDT_ENABLE=y
+
+# SoftAP fallback. When the chip has no usable network after
+# CONFIG_ML_AP_FALLBACK_TIMEOUT_S seconds of WiFi-association attempts,
+# it switches to APSTA mode and hosts its own AP so a user can join and
+# add a working network via the admin panel — critical for the case
+# where USB-NCM is off AND the configured WiFi networks are out of
+# range. (Earlier disabled-by-default because v5's mode-switch hung
+# under TinyUSB load; v15.x boots WiFi only when usb_enabled=0 so the
+# hang condition no longer applies.) Timeout default 60s.
+CONFIG_ML_AP_FALLBACK_ENABLE=y
+
+# Logging
+CONFIG_LOG_DEFAULT_LEVEL_INFO=y
+
+# HTTP Config Server (admin panel)
+CONFIG_ML_ENABLE_CONFIG_HTTPD=y
+CONFIG_ML_CONFIG_MAX_ALLOWED_PEERS=512
+
+# ML_MAX_PEERS matches WIREGUARD_MAX_PEERS=16 (kept in wireguard-platform.h
+# at the same value because more wg peers exhausts internal RAM at boot).
+# priority_peer_ip in NVS keeps the host in the 16-slot table via the LRU
+# eviction code in ml_wg_mgr.c.
+CONFIG_ML_MAX_PEERS=128
+CONFIG_ML_DEFAULT_MAX_PEERS=32   # production active-set default (ceiling stays 128)
+CONFIG_ML_NVS_MAX_PEERS=128
+
+# Browser request headers can easily exceed the 512-byte default.
+CONFIG_HTTPD_MAX_REQ_HDR_LEN=2048
+
+# USB-CDC-NCM tether (ml_dev_tether). Host gets a usbN interface; the ESP
+# routes Tailscale via the host. CDC-ACM enabled alongside so /dev/ttyACM*
+# console still works while NCM is up.
+CONFIG_TINYUSB_NET_MODE_NCM=y
+# NTB buffers are DMA-pinned to internal SRAM (USB-OTG can't reach PSRAM). The
+# default 3+3 (~19 KB) is sized for throughput; this is a low-rate fallback
+# tether, so 2+2 (~13 KB) frees ~6 KB internal for the WiFi/WG/TLS stacks.
+CONFIG_TINYUSB_NCM_OUT_NTB_BUFFS_COUNT=2
+CONFIG_TINYUSB_NCM_IN_NTB_BUFFS_COUNT=4
+CONFIG_TINYUSB_CDC_ENABLED=y
+CONFIG_TINYUSB_CDC_COUNT=1
+# Route ESP_LOG over USB CDC so boot logs flow through the composite device
+# (USB-Serial-JTAG is replaced by TinyUSB OTG once tinyusb_driver_install runs).
+CONFIG_ESP_CONSOLE_SECONDARY_USB_SERIAL_JTAG=n
+CONFIG_TINYUSB_CDC_RX_BUFSIZE=512
+CONFIG_TINYUSB_CDC_TX_BUFSIZE=512
+# USB descriptors
+CONFIG_TINYUSB_DESC_MANUFACTURER_STRING="Polymath"
+CONFIG_TINYUSB_DESC_PRODUCT_STRING="MicroLink dual_core_safety"
+
+# v15.20 — lwIP TCPIP core locking. Required by upstream microlink
+# PR#14: WG packet processing (process_wg_packet -> wireguardif_network_rx
+# -> ip_input/output) runs from ml_wg_mgr task, NOT the TCPIP thread.
+# Without core locking, those calls race with TCPIP thread's own work
+# and silently corrupt pbuf/netif state — which is the root cause of
+# the ~100-180 s silent panic under sustained direct-UDP traffic.
+CONFIG_LWIP_TCPIP_CORE_LOCKING=y
+
+# Crash diagnostics: save an ELF core dump to flash on every panic, readable
+# over the network (no UART adapter on the bench, and TinyUSB displaces the
+# ROM-JTAG once USB-NCM runs). 128KB coredump partition carved from ota_1's
+# tail (see partitions.csv). Unblocks remote backtraces for any panic.
+CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH=y
+CONFIG_ESP_COREDUMP_DATA_FORMAT_ELF=y
+CONFIG_ESP_COREDUMP_CHECKSUM_CRC32=y
+CONFIG_ESP_COREDUMP_CHECK_BOOT=y
+CONFIG_ESP_COREDUMP_MAX_TASKS_NUM=64
+
+# Centralized configuration management / OTA. The firmware's check-in and
+# OTA tooling is intended to pair with a management backend of your own;
+# none is included in this project. The backend address, URL, and API key
+# are site-specific and live in sdkconfig.credentials (never committed):
+# CONFIG_ML_FLEET_SERVER_IP, CONFIG_ML_OTA_BACKEND_URL, CONFIG_ML_OTA_API_KEY.
+
+# mbedTLS allocates its TLS working buffers from PSRAM, not internal RAM.
+# Internal RAM runs 5-13KB free on this build; a DERP TLS handshake needs
+# ~20-30KB transiently (IN_CONTENT_LEN 16K + OUT 4K + scratch), so with
+# INTERNAL_MEM_ALLOC the reconnect OOMs and DERP stays down. External (PSRAM)
+# alloc fixes it; prereq CONFIG_SPIRAM_USE_MALLOC is set. TLS runs in the
+# derp_tx/net_io tasks (not ISR/cache-disabled) and is NOT the WireGuard/pstop
+# datapath crypto, so the safety heartbeat path is unaffected.
+# See docs/INTERNAL_RAM_REDUCTION.md.
+CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC=y
+
+# === perf branch: performance tuning (A/B against -Og baseline) ===
+# App at -O2 (project default was -Og debug). Speeds crypto, lockstep,
+# packet processing, netmap parse, boot init — everything.
+CONFIG_COMPILER_OPTIMIZATION_PERF=y
+# Keep runtime assertions ON — this is a safety device; catching a bad
+# state is worth the cycles.
+CONFIG_COMPILER_OPTIMIZATION_ASSERTIONS_ENABLE=y
+# Flash Quad-I/O: ~2x read throughput -> faster bootloader app-load and
+# faster XIP (cache-miss) code execution.
+# Trim bootloader chatter (was INFO).
+CONFIG_BOOTLOADER_LOG_LEVEL_WARN=y
+CONFIG_LWIP_DHCP_RESTORE_LAST_IP=y

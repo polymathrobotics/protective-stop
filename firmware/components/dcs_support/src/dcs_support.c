@@ -1,0 +1,709 @@
+// SPDX-FileCopyrightText: 2026 Polymath Robotics
+// SPDX-License-Identifier: Apache-2.0
+
+/**
+ * @file dcs_support.c
+ * @brief Top-level bring-up orchestrator. Calls into the per-file modules
+ * (dcs_nvs, dcs_safety, dcs_boot, dcs_net_liveness, dcs_telemetry,
+ * dcs_admin_pages) in the right order.
+ */
+
+#include "dcs_support.h"
+
+#include <stdatomic.h>
+#include <string.h>
+
+#include "dcs_identity.h"
+#include "dcs_internal.h"
+#include "esp_heap_caps.h"
+#include "esp_log.h"
+#include "esp_system.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/idf_additions.h" /* xTaskCreatePinnedToCoreWithCaps */
+#include "freertos/semphr.h" /* operator-allowlist writer mutex */
+#include "freertos/task.h"
+#include "microlink.h"
+#include "ml_app.h"
+#include "ml_dev_tether.h"
+#include "nvs_flash.h"
+#include "panic_log.h"
+
+static const char * TAG = "dcs_support";
+
+/* See the doc comment on the declaration in dcs_internal.h for the contract a
+ * PSRAM-stack task must honour (no flash/NVS, no ISR access). */
+TaskHandle_t dcs_task_spawn_psram(
+  TaskFunction_t fn, const char * name, uint32_t stack, void * arg, UBaseType_t prio, BaseType_t core)
+{
+  TaskHandle_t h = NULL;
+  if (
+    (xTaskCreatePinnedToCoreWithCaps(fn, name, stack, arg, prio, &h, core, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) ==
+     pdPASS) &&
+    (h != NULL))
+  {
+    ESP_LOGI(TAG, "task '%s' (%u B stack) created in PSRAM", name, (unsigned)stack);
+    return h;
+  }
+  ESP_LOGW(TAG, "PSRAM stack for '%s' unavailable — falling back to internal RAM", name);
+  h = NULL;
+  if (xTaskCreatePinnedToCore(fn, name, stack, arg, prio, &h, core) == pdPASS) {
+    return h;
+  }
+  ESP_LOGE(TAG, "task '%s' create FAILED", name);
+  return NULL;
+}
+
+/* v15.27 — graceful Tailscale quiesce on any esp_restart() path.
+ *
+ * Runs from esp_register_shutdown_handler(), which fires for *any*
+ * call to esp_restart() (admin restart, /api/usb_enable, the v15.24
+ * auto-recovery, the never-brick fallback, etc) but does NOT fire on
+ * panic. So this hook only mitigates *graceful* restarts where some
+ * WG packet processing might be mid-flight. Work is limited to what's
+ * safe with interrupts about to be disabled: a flag flip + a
+ * vTaskSuspend, both effectively instant.
+ *
+ * Motivation: a single panic seen during a WiFi→USB mode transition,
+ * backtrace lost (no serial on the test rig). Suspected race between
+ * in-flight WG decrypt on ml_wg_mgr and esp_restart_noos's task-kill
+ * sequence. Pausing DERP + suspending wg_mgr means no new packets
+ * enter the processing pipeline from this point; anything already
+ * mid-flight finishes within microseconds of the hook running. */
+static void dcs_tailscale_quiesce_on_restart(void)
+{
+  microlink_pause_derp(true);
+  if (g_dcs_wg_handle != NULL) {
+    vTaskSuspend(g_dcs_wg_handle);
+  }
+}
+
+/* === Process-wide state (declared extern in dcs_internal.h). =============== */
+dcs_state_t g_dcs;
+
+atomic_uint_fast32_t g_dcs_core_tick[2];
+atomic_uint_fast32_t g_dcs_core_verdict[2];
+atomic_uint_fast32_t g_dcs_xcheck_fault;
+atomic_uint_fast32_t g_dcs_xcheck_hb[2];
+atomic_uint_fast32_t g_dcs_gpio_cfg_fault;
+atomic_uint_fast32_t g_dcs_load_pct[2];
+atomic_uint_fast32_t g_dcs_estop_high_ok[2];
+atomic_uint_fast32_t g_dcs_estop_low_ok[2];
+
+atomic_uint_fast32_t g_dcs_pstop_sent;
+atomic_uint_fast32_t g_dcs_pstop_replies;
+atomic_uint_fast32_t g_dcs_pstop_last_msg; /* last PSTOP_MESSAGE_* received from the machine */
+atomic_uint_fast32_t g_dcs_pstop_mismatch;
+atomic_uint_fast32_t g_dcs_pstop_send_fail;
+atomic_uint_fast32_t g_dcs_pstop_sf_nomem;
+atomic_uint_fast32_t g_dcs_pstop_sf_route;
+atomic_uint_fast32_t g_dcs_pstop_sf_txdrv;
+atomic_uint_fast32_t g_dcs_pstop_sf_txdrv_recovered;
+atomic_uint_fast32_t g_dcs_pstop_sf_other;
+atomic_int g_dcs_pstop_sf_last_errno;
+atomic_uint_fast32_t g_dcs_pstop_rtt_ms;
+atomic_uint_fast64_t g_dcs_pstop_last_reply_ms;
+atomic_uint_fast32_t g_dcs_pstop_peer_ip;
+atomic_uint_fast32_t g_dcs_pstop_peer_port;
+
+atomic_uint_fast64_t g_dcs_pstop_slot_ep[DCS_PSTOP_MAX_MACHINES];
+atomic_uint_fast32_t g_dcs_pstop_slot_id[DCS_PSTOP_MAX_MACHINES];
+atomic_uint_fast32_t g_dcs_pstop_m_sent[DCS_PSTOP_MAX_MACHINES];
+atomic_uint_fast32_t g_dcs_pstop_m_replies[DCS_PSTOP_MAX_MACHINES];
+atomic_uint_fast32_t g_dcs_pstop_m_send_fail[DCS_PSTOP_MAX_MACHINES];
+atomic_uint_fast32_t g_dcs_pstop_m_rebonds[DCS_PSTOP_MAX_MACHINES];
+atomic_uint_fast32_t g_dcs_pstop_m_rtt_ms[DCS_PSTOP_MAX_MACHINES];
+atomic_uint_fast32_t g_dcs_pstop_m_hb_ms[DCS_PSTOP_MAX_MACHINES];
+atomic_uint_fast32_t g_dcs_pstop_m_last_msg[DCS_PSTOP_MAX_MACHINES];
+atomic_uint_fast32_t g_dcs_pstop_m_state[DCS_PSTOP_MAX_MACHINES];
+atomic_uint_fast64_t g_dcs_pstop_m_last_reply_ms[DCS_PSTOP_MAX_MACHINES];
+
+/* Endpoint packing for g_dcs_pstop_slot_ep (see dcs_internal.h). */
+#define PSTOP_EP_CONFIGURED (1ULL << 63)
+
+static uint64_t pstop_ep_pack(bool configured, uint32_t ip, uint16_t port)
+{
+  return (configured ? PSTOP_EP_CONFIGURED : 0ULL) | ((uint64_t)ip << 16) | (uint64_t)port;
+}
+
+TaskHandle_t g_dcs_wg_handle;
+atomic_int g_dcs_wg_paused;
+
+atomic_uint_fast32_t g_dcs_heap_min_internal = UINT32_MAX;
+
+atomic_int g_dcs_active_iface;
+/* W5500 health-watchdog counters (written by dcs_eth.c's eth_wd task). */
+atomic_uint_fast32_t g_dcs_eth_recoveries;
+atomic_uint_fast32_t g_dcs_eth_rec_r1;
+atomic_uint_fast32_t g_dcs_eth_rec_r2;
+atomic_uint_fast32_t g_dcs_eth_rec_r3;
+atomic_uint_fast32_t g_dcs_eth_rec_reason;
+atomic_uint_fast32_t g_dcs_eth_spi_err;
+atomic_uint_fast32_t g_dcs_rgb_cycles;
+atomic_uint_fast32_t g_dcs_pstop_rebonds;
+atomic_uint_fast32_t g_dcs_relay_fault_a;
+atomic_uint_fast32_t g_dcs_relay_fault_b;
+atomic_uint_fast32_t g_dcs_relay_stop;
+atomic_uint_fast32_t g_dcs_machn_r_id[DCS_MACHN_MAX_REMOTES];
+atomic_uint_fast32_t g_dcs_machn_r_state[DCS_MACHN_MAX_REMOTES];
+atomic_uint_fast32_t g_dcs_machn_r_age_ms[DCS_MACHN_MAX_REMOTES];
+atomic_uint_fast32_t g_dcs_machn_r_rtt_ms[DCS_MACHN_MAX_REMOTES];
+atomic_uint_fast32_t g_dcs_machn_r_ip[DCS_MACHN_MAX_REMOTES];
+atomic_uint_fast32_t g_dcs_machn_r_stop_only[DCS_MACHN_MAX_REMOTES];
+
+/* Operator allowlist RAM cache. Lock-free for readers: the safety cores scan
+ * these atomics from their remote_details callback, never touching NVS/flash.
+ * Each slot holds 0 (empty) or a real operator id, so a torn read can never
+ * FABRICATE a match — it can at worst miss a just-added id (=> stop-only = safe)
+ * or briefly still see a just-removed id (a de-auth lag, harmless). Writers
+ * (admin API + boot load) serialize on g_dcs_operators_mtx and also persist to
+ * NVS. Loaded once at boot in dcs_support_init(); empty on blank NVS. */
+static atomic_uint_fast32_t g_dcs_operators[DCS_MAX_OPERATORS];
+static SemaphoreHandle_t g_dcs_operators_mtx; /* writer serialization only */
+
+static void pstop_slot_pins_sync(void);
+
+static void dcs_operators_load_from_nvs(void)
+{
+  uint32_t ids[DCS_MAX_OPERATORS];
+  int n = dcs_nvs_read_operators(ids);
+  for (int i = 0; i < DCS_MAX_OPERATORS; i++) {
+    atomic_store(&g_dcs_operators[i], (i < n) ? ids[i] : 0u);
+  }
+  ESP_LOGI(TAG, "operator allowlist: %d id(s) loaded (empty => every remote is stop-only)", n);
+}
+
+bool dcs_operator_is_listed(uint32_t remote_id)
+{
+  if (remote_id == 0u) {
+    return false;
+  }
+  for (int i = 0; i < DCS_MAX_OPERATORS; i++) {
+    if ((uint32_t)atomic_load(&g_dcs_operators[i]) == remote_id) {
+      return true;
+    }
+  }
+  return false;
+}
+
+int dcs_operator_get_list(uint32_t out[DCS_MAX_OPERATORS])
+{
+  int n = 0;
+  for (int i = 0; i < DCS_MAX_OPERATORS; i++) {
+    uint32_t id = (uint32_t)atomic_load(&g_dcs_operators[i]);
+    if (id != 0u) {
+      out[n++] = id;
+    }
+  }
+  return n;
+}
+
+/* Serialize a write, snapshot the current ids into a compact array, persist to
+ * NVS, and only on NVS success republish the compacted set into the RAM cache.
+ * Keeping NVS the source of truth means a failed write leaves RAM unchanged. */
+static esp_err_t dcs_operators_commit(const uint32_t * ids, int count)
+{
+  esp_err_t r = dcs_nvs_write_operators(ids, count);
+  if (r != ESP_OK) {
+    return r;
+  }
+  for (int i = 0; i < DCS_MAX_OPERATORS; i++) {
+    atomic_store(&g_dcs_operators[i], (i < count) ? ids[i] : 0u);
+  }
+  return ESP_OK;
+}
+
+esp_err_t dcs_operator_add(uint32_t remote_id)
+{
+  if (remote_id == 0u) {
+    return ESP_ERR_INVALID_ARG;
+  }
+  if (g_dcs_operators_mtx != NULL) {
+    (void)xSemaphoreTake(g_dcs_operators_mtx, portMAX_DELAY);
+  }
+  uint32_t ids[DCS_MAX_OPERATORS];
+  int n = dcs_operator_get_list(ids);
+  esp_err_t r = ESP_OK;
+  bool present = false;
+  for (int i = 0; i < n; i++) {
+    if (ids[i] == remote_id) {
+      present = true;
+      break;
+    }
+  }
+  if (present) {
+    r = ESP_OK; /* idempotent */
+  } else if (n >= DCS_MAX_OPERATORS) {
+    r = ESP_ERR_NO_MEM;
+  } else {
+    ids[n++] = remote_id;
+    r = dcs_operators_commit(ids, n);
+  }
+  if (g_dcs_operators_mtx != NULL) {
+    (void)xSemaphoreGive(g_dcs_operators_mtx);
+  }
+  return r;
+}
+
+esp_err_t dcs_operator_del(uint32_t remote_id)
+{
+  if (g_dcs_operators_mtx != NULL) {
+    (void)xSemaphoreTake(g_dcs_operators_mtx, portMAX_DELAY);
+  }
+  uint32_t ids[DCS_MAX_OPERATORS];
+  int n = dcs_operator_get_list(ids);
+  int w = 0;
+  for (int i = 0; i < n; i++) {
+    if (ids[i] != remote_id) {
+      ids[w++] = ids[i];
+    }
+  }
+  esp_err_t r = (w == n) ? ESP_OK /* absent: nothing to persist */ : dcs_operators_commit(ids, w);
+  if (g_dcs_operators_mtx != NULL) {
+    (void)xSemaphoreGive(g_dcs_operators_mtx);
+  }
+  return r;
+}
+
+/* === Public API ============================================================ */
+
+dcs_boot_state_t dcs_support_init(void)
+{
+  /* RTC_NOINIT log capture: must be first so we don't miss early boot logs. */
+  panic_log_init();
+
+  /* Power-on sign of life: whole ring dim purple, before any network or
+     * NVS work. Overwritten by the ring task once bring-up completes. */
+  dcs_pstop_ring_bootsign();
+
+  /* v15.27: register the Tailscale-quiesce shutdown hook before anything
+     * else can call esp_restart(). Idempotent — runs once per process. */
+  esp_err_t hook_err = esp_register_shutdown_handler(dcs_tailscale_quiesce_on_restart);
+  if (hook_err != ESP_OK) {
+    ESP_LOGW(TAG, "shutdown handler register: %s", esp_err_to_name(hook_err));
+  }
+
+  /* NVS up first — both our boot-counter and the usb_enabled flag live there. */
+  esp_err_t nvs_err = nvs_flash_init();
+  if ((nvs_err == ESP_ERR_NVS_NO_FREE_PAGES) || (nvs_err == ESP_ERR_NVS_NEW_VERSION_FOUND)) {
+    esp_err_t erase_err = nvs_flash_erase();
+    if (erase_err != ESP_OK) {
+      ESP_LOGW(TAG, "nvs_flash_erase: %s", esp_err_to_name(erase_err));
+    }
+    nvs_err = nvs_flash_init();
+  }
+  if (nvs_err != ESP_OK) {
+    ESP_LOGW(TAG, "nvs_flash_init early: %s", esp_err_to_name(nvs_err));
+  }
+
+  /* Boot-counter accounting + rollback decision. Does NOT return if it
+     * decides to invoke esp_ota_mark_app_invalid_rollback_and_reboot(). */
+  dcs_safety_account_boot();
+
+  /* Resolve NVS-backed user toggles. */
+  g_dcs.usb_enabled = dcs_nvs_read_usb_enabled();
+  g_dcs.ts_boot_en = dcs_nvs_read_ts_boot_en();
+
+  /* Safety ladder: boot_count==1 → drop direct-UDP path only;
+     *                 boot_count>=2 → full Tailscale pause. */
+  if (g_dcs.ts_boot_en && (g_dcs.boot_count == 1u)) {
+    ESP_LOGW(TAG, "SAFETY: bc=1 — forcing DERP-only mode for this boot");
+    g_dcs.derp_only_mode = true;
+  } else if (g_dcs.ts_boot_en && (g_dcs.boot_count >= 2u)) {
+    ESP_LOGW(
+      TAG,
+      "SAFETY: ts_boot=1 but boot_count=%u — forcing Tailscale "
+      "paused for this boot (safe mode)",
+      g_dcs.boot_count);
+    g_dcs.ts_boot_en = false;
+  } else {
+    /* boot_count 0: no safety-ladder action */
+  }
+  ESP_LOGI(
+    TAG, "Boot: usb_enabled=%d ts_boot_en=%d boot_count=%u", g_dcs.usb_enabled, g_dcs.ts_boot_en, g_dcs.boot_count);
+
+  /* TWDT keep-alive. */
+  dcs_safety_start_heartbeat();
+
+  /* USB "PSTOPxx" unit number: admin-set value from NVS, or 0 = derive from
+     * the chip ID. Must be set before ml_app_start (its try_alt_network hook can
+     * bring up the USB tether, which fixes the descriptor at TinyUSB install). */
+  ml_dev_tether_set_unit_number(dcs_nvs_read_pstop_unit_num());
+
+  /* ml_app config — same defaults as the pre-refactor main.c. */
+  ml_app_config_t cfg = ML_APP_CONFIG_DEFAULT();
+  cfg.max_peers = 128; /* PSRAM-backed; load paths budgeted */
+  /* Register on the tailnet as "pstop-01xxxxxx", matching the black-channel
+     * device ID (dcs_identity_*). Stable per unit; static buffer, safe to hold. */
+  cfg.device_name = dcs_identity_hostname();
+  ESP_LOGI(
+    TAG,
+    "Identity: tailnet=%s  pstop device_id=0x%08x "
+    "(machine must allow_unlisted or list this ID)",
+    dcs_identity_hostname(),
+    (unsigned)dcs_identity_device_id());
+  cfg.enable_disco = !g_dcs.derp_only_mode;
+  cfg.enable_stun = !g_dcs.derp_only_mode;
+  cfg.try_alt_network = dcs_boot_try_tether_or_skip;
+  cfg.alt_network_timeout_ms = 30000;
+  /* httpd URI-handler budget. The server holds 16 + this many slots
+     * (ml_app.c). microlink registers ~20 of its own (config panel + /admin
+     * API + fleet-ota + verbose) and dcs_admin_pages registers 18; at 16 the
+     * total overflowed 32 and the LAST-registered app routes silently failed
+     * to register (observed: /api/pstop_num and /api/enter_download 404'd on
+     * shipped firmware). dcs now registers 21 (incl. /api/operators GET+POST);
+     * 30 gives 46 total slots with headroom — re-check this
+     * arithmetic whenever a route is added on either side. */
+  cfg.max_user_uri_handlers = 30;
+  g_dcs.app = ml_app_start(&cfg);
+  g_dcs.ml_handle = ml_app_get_microlink(g_dcs.app);
+
+  /* If an alt network took the default route, ml_app skipped wifi_init.
+     * Bring the WiFi driver up in idle mode so admin endpoints touching
+     * esp_wifi_* behave — EXCEPT on the wired-Ethernet path, where WiFi is
+     * never used and esp_wifi_init() would burn ~30-50 KB of internal RAM we
+     * can't spare (internal heap runs tight on this build; that pressure was
+     * tipping the chip into intermittent allocation-failure panics). The
+     * esp_wifi_* admin calls return ESP_ERR_WIFI_NOT_INIT rather than crash
+     * when the driver is absent, so skipping it is safe. */
+  if (dcs_boot_alt_network_won()) {
+    if (dcs_eth_has_ip()) {
+      /* Wired Ethernet: do NOT init the WiFi driver. It costs ~20-25 KB
+             * internal RAM, and MEASURED (2026-06-23): always-initialising it
+             * here on the eth path crushed heap_min to ~1.9 KB once the Tailscale
+             * DERP-TLS handshake ran concurrently (vs ~46 KB skipped) and started
+             * tripping early-boot reboots — i.e. it re-creates the very OOM
+             * pressure the skip exists to avoid. The esp_wifi_* NULL-deref this
+             * once caused in the admin status endpoints (an unguarded call on the
+             * not-init driver crash-looped the device) is fixed at the call sites
+             * instead — see the guards in dcs_admin_pages.c (/state.json) and
+             * ml_config_httpd.c (/api/monitor). */
+      ESP_LOGI(
+        TAG,
+        "wired Ethernet active — skipping WiFi driver init "
+        "to preserve internal RAM (esp_wifi admin calls guarded)");
+    } else {
+      dcs_boot_wifi_idle_init(); /* USB-NCM path: keep WiFi driver */
+    }
+  }
+
+  /* Onboard WS2812 RGB LED: colour = active interface (live), blink = IP
+     * last octet. Replaces ml_ip_blink (which drove GPIO21 as a plain pin —
+     * can't clock the board's addressable LED). */
+  dcs_rgb_start();
+
+  /* 16-LED WS2812 ring on GPIO17 — PSTOP safety state (separate from the
+     * onboard single LED's network indicator). */
+  dcs_pstop_ring_start();
+
+  /* Initial peer targets (NVS-backed, legacy single peer migrated into
+     * slot 0) — main.c reads the slots via dcs_get_pstop_peer_slot() before
+     * and during the comparator's run. Slot 0 mirrors to the legacy atomics. */
+  {
+    dcs_pstop_peer_rec_t peers[DCS_PSTOP_MAX_MACHINES];
+    dcs_nvs_read_pstop_peers(peers);
+    for (int i = 0; i < DCS_PSTOP_MAX_MACHINES; i++) {
+      atomic_store(&g_dcs_pstop_slot_ep[i], pstop_ep_pack(peers[i].configured, peers[i].ip, peers[i].port));
+      atomic_store(&g_dcs_pstop_slot_id[i], peers[i].machine_id);
+    }
+    atomic_store(&g_dcs_pstop_peer_ip, peers[0].configured ? peers[0].ip : 0u);
+    atomic_store(&g_dcs_pstop_peer_port, peers[0].port);
+  }
+  /* Pin every configured machine target in the WG peer table so the cap
+     * trim can never orphan a safety link (see pstop_slot_pins_sync). */
+  pstop_slot_pins_sync();
+
+  /* Operator allowlist (machine-role authorization): create the writer mutex
+     * and load the persisted ids into the lock-free RAM cache BEFORE main.c
+     * spawns the safety cores (their remote_details callback reads the cache)
+     * and before the admin API can mutate it. Empty on blank NVS = every remote
+     * stop-only = safe. */
+  g_dcs_operators_mtx = xSemaphoreCreateMutex();
+  if (g_dcs_operators_mtx == NULL) {
+    ESP_LOGW(TAG, "operator-allowlist mutex alloc failed — add/del will run unserialized");
+  }
+  dcs_operators_load_from_nvs();
+
+  /* Register the admin pages now that ml_app is up. */
+  dcs_admin_pages_register(g_dcs.app);
+
+  /* Verbose ml_* logging — kept from pre-refactor; helps catch wedges. */
+  esp_log_level_set("ml_wg_mgr", ESP_LOG_INFO);
+  esp_log_level_set("ml_net_io", ESP_LOG_INFO);
+  esp_log_level_set("ml_derp", ESP_LOG_INFO);
+  esp_log_level_set("wireguard_lwip", ESP_LOG_INFO);
+  esp_log_level_set("microlink", ESP_LOG_INFO);
+
+  dcs_telemetry_start_sampler();
+  dcs_net_supervisor_start(); /* 1 Hz Eth>USB>WiFi default-route enforcer */
+  dcs_net_liveness_start();
+  dcs_net_inet_start(); /* internet reachability -> red LED when down */
+
+  /* Cache the ml_wg_mgr handle for the legacy /api/wg toggle. */
+  g_dcs_wg_handle = xTaskGetHandle("ml_wg_mgr");
+
+  /* Mirror into the public boot-state struct. */
+  dcs_boot_state_t bs = {
+    .usb_enabled = g_dcs.usb_enabled,
+    .ts_boot_en = g_dcs.ts_boot_en,
+    .derp_only_mode = g_dcs.derp_only_mode,
+    .boot_count = g_dcs.boot_count,
+    .reset_reason = g_dcs.reset_reason,
+    .ml_handle = g_dcs.ml_handle,
+    .app = g_dcs.app,
+  };
+  return bs;
+}
+
+void dcs_support_finalize(const dcs_boot_state_t * bs)
+{
+  (void)bs;
+  /* Mark current OTA partition valid — does NOT clear boot_count, so the
+     * crash-loop signal survives until the Layer-4 age-out fires. */
+  dcs_safety_mark_ota_valid();
+
+  /* Layer 4: age-out the crash counter after sustained healthy uptime,
+     * and (v15.24) auto-restart out of derp-only mode on success. */
+  dcs_safety_start_bc_clear();
+
+  /* If Tailscale was supposed to start paused this boot, suspend
+     * ml_wg_mgr now (after our NVS reads completed earlier). The 500 ms
+     * delay lets wg_mgr finish its own NVS peer-cache load. */
+  if ((!g_dcs.ts_boot_en) && (g_dcs_wg_handle != NULL)) {
+    microlink_pause_derp(true);
+    vTaskDelay(pdMS_TO_TICKS(500));
+    vTaskSuspend(g_dcs_wg_handle);
+    atomic_store(&g_dcs_wg_paused, 1);
+    ESP_LOGW(TAG, "ml_wg_mgr task suspended + DERP paused at boot");
+  } else {
+    ESP_LOGI(TAG, "Tailscale tasks active at boot (safety net: 4-crash rollback)");
+  }
+}
+
+/* === Telemetry sinks ======================================================= */
+
+void dcs_publish_core_tick(int core_id, uint32_t tick, uint8_t verdict)
+{
+  if ((core_id < 0) || (core_id > 1)) {
+    return;
+  }
+  atomic_store(&g_dcs_core_tick[core_id], tick);
+  atomic_store(&g_dcs_core_verdict[core_id], verdict);
+}
+
+void dcs_publish_xcheck(uint32_t fault, uint32_t hb0, uint32_t hb1)
+{
+  atomic_store(&g_dcs_xcheck_fault, fault);
+  atomic_store(&g_dcs_xcheck_hb[0], hb0);
+  atomic_store(&g_dcs_xcheck_hb[1], hb1);
+}
+
+void dcs_publish_gpio_cfg(uint32_t fault)
+{
+  atomic_store(&g_dcs_gpio_cfg_fault, fault);
+}
+
+void dcs_publish_estop(int core_id, bool high_ok, bool low_ok)
+{
+  if ((core_id < 0) || (core_id > 1)) {
+    return;
+  }
+  atomic_store(&g_dcs_estop_high_ok[core_id], high_ok ? 1u : 0u);
+  atomic_store(&g_dcs_estop_low_ok[core_id], low_ok ? 1u : 0u);
+}
+
+void dcs_publish_comparator(
+  uint32_t sent, uint32_t mismatch, uint32_t send_fail, uint64_t last_reply_ms, uint32_t rtt_ms)
+{
+  atomic_store(&g_dcs_pstop_sent, sent);
+  atomic_store(&g_dcs_pstop_mismatch, mismatch);
+  atomic_store(&g_dcs_pstop_send_fail, send_fail);
+  atomic_store(&g_dcs_pstop_last_reply_ms, last_reply_ms);
+  atomic_store(&g_dcs_pstop_rtt_ms, rtt_ms);
+}
+
+void dcs_publish_relay_fault(uint32_t fault_a_ticks, uint32_t fault_b_ticks, bool stop_active)
+{
+  atomic_store(&g_dcs_relay_fault_a, fault_a_ticks);
+  atomic_store(&g_dcs_relay_fault_b, fault_b_ticks);
+  atomic_store(&g_dcs_relay_stop, stop_active ? 1u : 0u);
+}
+
+void dcs_publish_machn_remote(
+  int slot, uint32_t remote_id, uint32_t ip, uint32_t state, uint32_t age_ms, uint32_t rtt_ms, bool stop_only)
+{
+  if ((slot < 0) || (slot >= DCS_MACHN_MAX_REMOTES)) {
+    return;
+  }
+  atomic_store(&g_dcs_machn_r_id[slot], remote_id);
+  atomic_store(&g_dcs_machn_r_ip[slot], ip);
+  atomic_store(&g_dcs_machn_r_state[slot], state);
+  atomic_store(&g_dcs_machn_r_age_ms[slot], age_ms);
+  atomic_store(&g_dcs_machn_r_rtt_ms[slot], rtt_ms);
+  atomic_store(&g_dcs_machn_r_stop_only[slot], stop_only ? 1u : 0u);
+}
+
+void dcs_publish_pstop_sf_causes(
+  uint32_t nomem, uint32_t route, uint32_t txdrv, uint32_t txdrv_recovered, uint32_t other, int last_errno)
+{
+  atomic_store(&g_dcs_pstop_sf_nomem, nomem);
+  atomic_store(&g_dcs_pstop_sf_route, route);
+  atomic_store(&g_dcs_pstop_sf_txdrv, txdrv);
+  atomic_store(&g_dcs_pstop_sf_txdrv_recovered, txdrv_recovered);
+  atomic_store(&g_dcs_pstop_sf_other, other);
+  atomic_store(&g_dcs_pstop_sf_last_errno, last_errno);
+}
+
+void dcs_publish_pstop_peer(uint32_t peer_ip, uint16_t peer_port)
+{
+  /* Legacy single-peer setter (/api/pstop_peer, provisioning tooling) = slot 0
+   * with the default machine id. */
+  esp_err_t werr = dcs_pstop_set_peer_slot(0, true, peer_ip, peer_port, DCS_PSTOP_DEFAULT_MACHINE_ID);
+  if (werr != ESP_OK) {
+    ESP_LOGW(TAG, "persist pstop peer: %s", esp_err_to_name(werr));
+  }
+}
+
+/* Pin every configured slot target in the WG peer table (and unpin an IP
+ * only when NO remaining slot uses it — two slots may target one host on
+ * different ports). Without the pin, a machine that joined the tailnet
+ * after this chip's last full netmap — or one with no recent traffic —
+ * is trimmed by the peer cap and every BOND dies with EHOSTUNREACH. */
+static void pstop_slot_pins_sync(void)
+{
+  if (g_dcs.ml_handle == NULL) {
+    return;
+  }
+  for (int i = 0; i < DCS_PSTOP_MAX_MACHINES; i++) {
+    uint64_t ep = (uint64_t)atomic_load(&g_dcs_pstop_slot_ep[i]);
+    bool cfg = (ep & PSTOP_EP_CONFIGURED) != 0ULL;
+    uint32_t ip = (uint32_t)((ep >> 16) & 0xFFFFFFFFULL);
+    if (cfg && (ip != 0u)) {
+      microlink_pin_peer_ip(g_dcs.ml_handle, ip, true);
+    }
+  }
+}
+
+esp_err_t dcs_pstop_set_peer_slot(int slot, bool configured, uint32_t ip, uint16_t port, uint32_t machine_id)
+{
+  if ((slot < 0) || (slot >= DCS_PSTOP_MAX_MACHINES)) {
+    return ESP_ERR_INVALID_ARG;
+  }
+  /* Unpin the OLD target if this slot had one and no other slot shares it. */
+  uint64_t old_ep = (uint64_t)atomic_load(&g_dcs_pstop_slot_ep[slot]);
+  uint32_t old_ip = (uint32_t)((old_ep >> 16) & 0xFFFFFFFFULL);
+  if (((old_ep & PSTOP_EP_CONFIGURED) != 0ULL) && (old_ip != 0u) && (g_dcs.ml_handle != NULL)) {
+    bool shared = false;
+    for (int i = 0; i < DCS_PSTOP_MAX_MACHINES; i++) {
+      if (i == slot) continue;
+      uint64_t ep = (uint64_t)atomic_load(&g_dcs_pstop_slot_ep[i]);
+      if (((ep & PSTOP_EP_CONFIGURED) != 0ULL) && ((uint32_t)((ep >> 16) & 0xFFFFFFFFULL) == old_ip)) {
+        shared = true;
+        break;
+      }
+    }
+    if (!shared && !(configured && (ip == old_ip))) {
+      microlink_pin_peer_ip(g_dcs.ml_handle, old_ip, false);
+    }
+  }
+  /* Live update first (comparator picks it up next tick)... */
+  atomic_store(&g_dcs_pstop_slot_id[slot], machine_id);
+  atomic_store(&g_dcs_pstop_slot_ep[slot], pstop_ep_pack(configured, ip, port));
+  pstop_slot_pins_sync();
+  if (slot == 0) {
+    atomic_store(&g_dcs_pstop_peer_ip, configured ? ip : 0u);
+    atomic_store(&g_dcs_pstop_peer_port, port);
+  }
+  /* ...then persist the whole table (read-modify-write of the blob). */
+  dcs_pstop_peer_rec_t peers[DCS_PSTOP_MAX_MACHINES];
+  dcs_nvs_read_pstop_peers(peers);
+  peers[slot].configured = configured;
+  peers[slot].ip = ip;
+  peers[slot].port = port;
+  peers[slot].machine_id = machine_id;
+  return dcs_nvs_write_pstop_peers(peers);
+}
+
+void dcs_get_pstop_peer_slot(
+  int slot, bool * configured, uint32_t * peer_ip, uint16_t * peer_port, uint32_t * machine_id)
+{
+  uint64_t ep = 0;
+  uint32_t id = 0;
+  if ((slot >= 0) && (slot < DCS_PSTOP_MAX_MACHINES)) {
+    ep = atomic_load(&g_dcs_pstop_slot_ep[slot]);
+    id = (uint32_t)atomic_load(&g_dcs_pstop_slot_id[slot]);
+  }
+  if (configured != NULL) {
+    *configured = (ep & PSTOP_EP_CONFIGURED) != 0ULL;
+  }
+  if (peer_ip != NULL) {
+    *peer_ip = (uint32_t)((ep >> 16) & 0xFFFFFFFFu);
+  }
+  if (peer_port != NULL) {
+    *peer_port = (uint16_t)(ep & 0xFFFFu);
+  }
+  if (machine_id != NULL) {
+    *machine_id = id;
+  }
+}
+
+void dcs_publish_pstop_machine(
+  int slot,
+  uint32_t sent,
+  uint32_t replies,
+  uint32_t send_fail,
+  uint32_t rebonds,
+  uint32_t hb_ms,
+  uint64_t last_reply_ms,
+  uint32_t rtt_ms,
+  uint8_t last_msg,
+  uint8_t sess_state)
+{
+  if ((slot < 0) || (slot >= DCS_PSTOP_MAX_MACHINES)) {
+    return;
+  }
+  atomic_store(&g_dcs_pstop_m_sent[slot], sent);
+  atomic_store(&g_dcs_pstop_m_replies[slot], replies);
+  atomic_store(&g_dcs_pstop_m_send_fail[slot], send_fail);
+  atomic_store(&g_dcs_pstop_m_rebonds[slot], rebonds);
+  atomic_store(&g_dcs_pstop_m_last_reply_ms[slot], last_reply_ms);
+  atomic_store(&g_dcs_pstop_m_rtt_ms[slot], rtt_ms);
+  atomic_store(&g_dcs_pstop_m_hb_ms[slot], hb_ms);
+  atomic_store(&g_dcs_pstop_m_last_msg[slot], last_msg);
+  atomic_store(&g_dcs_pstop_m_state[slot], sess_state);
+}
+
+void dcs_get_initial_pstop_peer(uint32_t * peer_ip, uint16_t * peer_port)
+{
+  if (peer_ip != NULL) {
+    *peer_ip = atomic_load(&g_dcs_pstop_peer_ip);
+  }
+  if (peer_port != NULL) {
+    *peer_port = (uint16_t)atomic_load(&g_dcs_pstop_peer_port);
+  }
+}
+
+uint32_t dcs_get_vpn_ip(void)
+{
+  return (g_dcs.ml_handle != NULL) ? microlink_get_vpn_ip(g_dcs.ml_handle) : 0u;
+}
+
+void dcs_notify_priority_health(bool healthy)
+{
+  if (g_dcs.ml_handle != NULL) {
+    microlink_notify_priority_health(g_dcs.ml_handle, healthy);
+  }
+}
+
+void dcs_notify_peer_health(uint32_t vpn_ip, bool healthy)
+{
+  if (g_dcs.ml_handle != NULL) {
+    microlink_notify_peer_health(g_dcs.ml_handle, vpn_ip, healthy);
+  }
+}
+
+void dcs_untrack_peer_health(uint32_t vpn_ip)
+{
+  if (g_dcs.ml_handle != NULL) {
+    microlink_untrack_peer_health(g_dcs.ml_handle, vpn_ip);
+  }
+}

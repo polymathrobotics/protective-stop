@@ -84,4 +84,8 @@ pstop_error_t machine_validate_heartbeats(pstop_machine_t *machine);
 
 void machine_stop_robot(pstop_machine_t *machine);
 
+const pstop_remote_data_t *machine_get_remote_data(const pstop_machine_t *machine, const device_id_t *remote_id);
+const protocol_data_t *machine_get_protocol_data(const pstop_machine_t *machine, const device_id_t *remote_id);
+const robot_state_t *machine_get_robot_state(const pstop_machine_t *machine);
+
 #endif /* PSTOP_MACHINE_H */

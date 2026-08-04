@@ -1,0 +1,142 @@
+---
+protective_stop_machine:
+  backend:
+    type: string
+    default_value: software
+    read_only: true
+    description: Machine backend to run. 'software' hosts pstop_c in-process; 'hardware' polls the ESP32 machn over HTTP. Validated in build_backend().
+  machine_id:
+    type: int
+    default_value: 16909060  # 0x01020304
+    read_only: true
+    description: 32-bit machine identity advertised to bonded remotes.
+  frame_id:
+    type: string
+    default_value: pstop_machine
+    read_only: true
+    description: TF frame id stamped on published machine state.
+
+  software:
+    bind_addr:
+      type: string
+      default_value: 0.0.0.0
+      read_only: true
+      description: UDP bind address for the in-process software backend.
+    port:
+      type: int
+      default_value: 8890
+      read_only: true
+      description: UDP port for the in-process software backend.
+      validation:
+        bounds<>: [1, 65535]
+    # Operator authorization (SAFETY). A bonded remote is accepted and
+    # heartbeat-monitored but STOP-ONLY by default: it may command STOP but may
+    # NEVER re-arm (STOP -> OK). Only a remote whose 32-bit pstop id is listed in
+    # `operators` gets re-arm authority. An empty list (the default) leaves every
+    # remote stop-only = maximally safe out of the box.
+    default_stop_only:
+      type: bool
+      default_value: true
+      read_only: true
+      description: Policy for UNLISTED remotes. True (the default, and what a deployment should keep) makes them stop-only, so they may STOP but never re-arm.
+    operators:
+      type: int_array
+      default_value: []
+      read_only: true
+      description: 32-bit pstop ids granted re-arm authority, e.g. [30234300]. Empty (default) means no remote may re-arm.
+
+  hardware:
+    device_url:
+      type: string
+      default_value: http://127.0.0.1
+      read_only: true
+      description: Base URL of the ESP32 machn admin/state HTTP API.
+    admin_user:
+      type: string
+      default_value: admin
+      read_only: true
+      description: HTTP basic-auth user for the device admin API (password comes from PSTOP_MACHINE_ADMIN_PASS, never a param).
+
+  # timing.* is the only dynamic group: the bounds<>/gt_eq<> ranges below ARE the
+  # SR-M-01 safety floors — the generated ParamListener rejects any out-of-floor
+  # value (at declare time and on a live set) before it can apply.
+  timing:
+    heartbeat_ms:
+      type: int
+      default_value: 400
+      description: Remote heartbeat window (SF-1 stop latency). Floor SR-M-01.
+      validation:
+        bounds<>: [50, 1000]
+    max_missed:
+      type: int
+      default_value: 3
+      description: Missed heartbeats tolerated before STOP. Floor SR-M-01.
+      validation:
+        bounds<>: [1, 5]
+    min_stop_ms:
+      type: int
+      default_value: 500
+      description: Anti-blip arming-delay floor (SF-3). Floor SR-M-01.
+      validation:
+        gt_eq<>: 100
+
+  # Rates are read at configure/activate; changing them needs a restart.
+  rates:
+    publish_rate_hz:
+      type: double
+      default_value: 10.0
+      read_only: true
+      description: State publish rate.
+      validation:
+        gt_eq<>: 1.0
+    state_poll_hz:
+      type: double
+      default_value: 5.0
+      read_only: true
+      description: Hardware backend /state.json poll rate.
+      validation:
+        gt_eq<>: 1.0
+    diagnostics_rate_hz:
+      type: double
+      default_value: 1.0
+      read_only: true
+      description: diagnostic_updater refresh rate.
+      validation:
+        gt_eq<>: 0.1
+
+  # Optional fleet check-in (software backend only). Default DISABLED (empty url)
+  # so a non-fleet deployment is unaffected. When set, the node POSTs a
+  # bearer-authenticated {"name","port", ...} to the console every interval_s
+  # while ACTIVE, exactly like the host runner's [announce]. Entirely off the
+  # safety path: a dead console only logs. Prefer the ENVIRONMENT for the URL +
+  # key file so secrets stay out of committed config — PSTOP_ANNOUNCE_URL and
+  # PSTOP_ANNOUNCE_KEY_FILE override the two keys below.
+  announce:
+    url:
+      type: string
+      default_value: ''
+      read_only: true
+      description: Fleet console check-in endpoint, http://host[:port]/path. Empty (default) disables check-in entirely.
+    key_file:
+      type: string
+      default_value: ''
+      read_only: true
+      description: Path to a chmod-600 file whose first line is the bearer token. Empty means no Authorization header.
+    name:
+      type: string
+      default_value: ''
+      read_only: true
+      description: Display name on the console. Empty (default) uses this host's hostname, like the host runner.
+    interval_s:
+      type: int
+      default_value: 60
+      read_only: true
+      description: Seconds between check-ins.
+      validation:
+        gt_eq<>: 1
+
+  autostart:
+    type: bool
+    default_value: true
+    read_only: true
+    description: If true, the node configures and activates itself on startup (default, so `ros2 run` comes up active). Set false for manual lifecycle control (tests, external lifecycle manager).

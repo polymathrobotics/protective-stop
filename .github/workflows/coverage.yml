@@ -1,0 +1,72 @@
+---
+name: coverage (host + firmware core + ROS2)
+
+# Structural coverage for the in-scope codebases. pstop_c has its own coverage
+# workflow (pstop_c_coverage.yml, BullseyeCoverage) and is excluded here.
+# Runs in the ros:humble container (colcon + ROS 2 preinstalled); gcc-14 is
+# added for the host + firmware-core MC/DC builds, so CI mirrors
+# scripts/coverage.sh exactly.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - firmware/**
+      - host/**
+      - ros2/**
+      - tools/**
+      - pstop_c/**
+      - scripts/coverage.sh
+      - .github/workflows/coverage.yml
+  pull_request:
+    paths:
+      - firmware/**
+      - host/**
+      - ros2/**
+      - tools/**
+      - scripts/coverage.sh
+      - .github/workflows/coverage.yml
+
+jobs:
+  coverage:
+    runs-on: ubuntu-latest
+    container: ros:humble
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install gcc-14 + gcovr
+        run: |
+          set -eu
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get update
+          apt-get install -y --no-install-recommends software-properties-common python3-pip make
+          add-apt-repository -y ppa:ubuntu-toolchain-r/test
+          apt-get update
+          apt-get install -y gcc-14 g++-14
+          pip3 install --break-system-packages gcovr || pip3 install gcovr
+          gcc-14 --version | head -1
+          gcovr --version | head -1
+
+      - name: Run aggregate coverage
+        run: |
+          set -eu
+          # colcon runs as root in the container; allow it.
+          export ROS_SETUP=/opt/ros/humble/setup.bash
+          bash scripts/coverage.sh
+
+      - name: Publish summary
+        if: always()
+        run: |
+          if [ -f docs/safety/coverage/SUMMARY.md ]; then
+            cat docs/safety/coverage/SUMMARY.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "coverage did not produce a summary" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload coverage summary
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-summary
+          path: docs/safety/coverage/SUMMARY.md
+          if-no-files-found: warn

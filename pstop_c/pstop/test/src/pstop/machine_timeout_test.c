@@ -21,7 +21,7 @@ static bool operator_allowed_flag;
 
 static
 remote_details_t
-is_operator_allowed(const device_id_t *id)
+is_operator_allowed(const device_id_t * /* id */)
 {
     remote_details_t details;
 
@@ -46,7 +46,7 @@ robot_status(pstop_status_message_t status)
 
 static
 void
-log_error(uint64_t timestamp, const device_id_t *client, uint8_t message, pstop_error_t error)
+log_error(uint64_t /* timestamp */, const device_id_t * /* client */, uint8_t /* message */, pstop_error_t /* error */)
 {
 
 }

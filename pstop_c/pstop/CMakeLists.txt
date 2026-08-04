@@ -39,7 +39,7 @@ add_library(pstop
   src/pstop/time.c
 )
 
-target_compile_options(pstop PRIVATE -Wall -fanalyzer)
+target_compile_options(pstop PRIVATE -Wall -Wextra -Werror -fanalyzer)
 
 target_include_directories(pstop PUBLIC include)
 
@@ -53,17 +53,53 @@ add_executable(pstop_test
   test/src/pstop/pstop_remote_data_test.c
   test/src/pstop/pstop_msg_test.c
 
-  #test/src/pstop/test_utils.c
-
   test/src/pstop/main.c
 )
 
+target_compile_options(pstop_test PRIVATE -Wall -Wextra -Werror -fanalyzer)
+
 target_include_directories(pstop_test PUBLIC
+  include
+)
+
+target_link_libraries(pstop_test PUBLIC
+  pstop
+  unity
+)
+
+add_executable(pstop_requirements_test
+  test/src/pstop/requirements/req_2_01_test.c
+  test/src/pstop/requirements/req_2_02_test.c
+  test/src/pstop/requirements/req_2_03_test.c
+
+  test/src/pstop/requirements/req_2_06_test.c
+  test/src/pstop/requirements/req_2_07_test.c
+  test/src/pstop/requirements/req_2_08_test.c
+
+  test/src/pstop/requirements/req_3_01_test.c
+  test/src/pstop/requirements/req_3_02_test.c
+  test/src/pstop/requirements/req_3_03_test.c
+  test/src/pstop/requirements/req_3_04_test.c
+  test/src/pstop/requirements/req_3_05_test.c
+  test/src/pstop/requirements/req_3_06_test.c
+  test/src/pstop/requirements/req_3_07_test.c
+  test/src/pstop/requirements/req_3_08_test.c
+  test/src/pstop/requirements/req_3_09_test.c
+  test/src/pstop/requirements/req_3_10_test.c
+
+  test/src/pstop/requirements/test_utils.c
+
+  test/src/pstop/requirements/main.c
+)
+
+target_compile_options(pstop_requirements_test PRIVATE -Wall -Wextra -Werror -fanalyzer)
+
+target_include_directories(pstop_requirements_test PUBLIC
   include
   test/include
 )
 
-target_link_libraries(pstop_test PUBLIC
+target_link_libraries(pstop_requirements_test PUBLIC
   pstop
   unity
 )

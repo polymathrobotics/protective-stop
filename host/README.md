@@ -1,0 +1,163 @@
+# machine_app_runner — robot-side pstop machine
+
+Companion to the remote firmware in `firmware/`. The remote runs as a
+**pstop client** (lockstep verdict from cores 0 + 1, byte-compared, sent
+over UDP at 10 Hz); this runs the **pstop machine** that accepts those
+heartbeats and tells the robot to STOP when they say so — or when they
+stop coming.
+
+The upstream pstop_c library (`pstop_c/`, submodule,
+certification track) is linked unmodified. This wrapper adds:
+
+- transport: binds `0.0.0.0` (configurable) instead of `127.0.0.1`, so
+  the remote can reach it over Tailscale, USB-NCM, or plain LAN;
+- config: every library knob + wrapper policy in `machine.toml`
+  (documented inline);
+- **min-STOP-duration arming policy** (`min_stop_ms`, default 500 ms):
+  an OK arriving sooner than this after the STOP that opened the arming
+  cycle cannot arm the robot. Enforced natively by pstop_c
+  (`delay_between_stop_ms`, upstream #59) — the runner forwards the
+  value and logs `ARMED` / `arming DEFERRED`. Defends against
+  EMC-induced loop blips performing the arming gesture. See
+  `docs/FAILOVER_AND_ARMING_DESIGN_2026-07-21.md`;
+- a status latch: OK is only propagated after the policy approves the
+  arming — **any real actuation must hang off the latched status, never
+  the library's raw callback**;
+- sequence-anomaly logging (counter gaps/regressions, non-monotonic
+  stamps, pstop rejections with direction disambiguation);
+- optional **console announce** (`[announce]` in machine.toml, or
+  `PSTOP_ANNOUNCE_URL` / `PSTOP_ANNOUNCE_KEY_FILE` in the environment): a
+  60 s bearer-authenticated POST so a management dashboard can show this
+  machine as RUNNING. Off by default, never on the safety path.
+
+## Liveness timeout — read this before tuning
+
+The library declares a remote lost after **`heartbeat_ms ×
+max_missed_heartbeats`** of silence (`machine.c` computes
+`missed = silence / heartbeat_ms` and stops at `missed >=
+max_missed_heartbeats`). It is **not** `× (max_missed + 1)`.
+
+Remotes publish at `heartbeat_ms / 2`, and the dual-core remote
+**deliberately withholds one send** whenever its lockstep comparator
+disagrees for a tick. With `max_missed_heartbeats = 1` the timeout equals
+exactly two send slots, so a single withheld tick lands *on* the deadline
+and races the 10 ms liveness poll — observed on the bench (2026-07-27
+soak) as sporadic false `MISSED_HEARTBEATS` stops every ~15 min. **Do not
+use `max_missed_heartbeats = 1` with lockstep remotes.** The default is 3
+(six send slots of margin; ~1.2 s stop at `heartbeat_ms = 400`).
+
+## Build
+
+```sh
+make
+```
+
+No ESP-IDF needed — just `cc` (gcc or clang) and the vendored pstop_c
+sources. Builds to `./machine_app_runner`.
+
+## Run
+
+```sh
+./machine_app_runner                  # ./machine.toml, 0.0.0.0:8890
+./machine_app_runner my.toml          # different config
+./machine_app_runner 9999 -v          # port override + verbose RX/TX trace
+```
+
+Stderr prints per-pstop command changes and state transitions by default —
+`pstop 0x<id> -> STOP/OK/BOND/...`, `Robot Status = OK` / `STOP`,
+`ARMED by 0x<id> ...`, `ANOMALY: ...` — each line naming the remote by its
+device id, so with several remotes bonded you can see exactly which one sent
+what (and which one caused a stop or owns the arming cycle).
+
+## USB tether — one-time host setup (read this first)
+
+Plugging a pstop into a Linux host does NOT give you a working network
+link out of the box, and the failure mode is misleading: the laptop's
+new "wired" connection sits in *connecting…* forever while the unit
+silently falls back to its provisioned WiFi. The chip's USB-NCM tether
+deliberately runs **no DHCP server** — the HOST is expected to own the
+link (serve DHCP, NAT it out), which NetworkManager calls `shared`
+mode. Two files fix it permanently:
+
+1. Pin every pstop to one predictable interface name (`esp-pstop0`),
+   keyed on the USB VID:PID so it holds across units and reboots:
+
+   ```sh
+   sudo cp 70-esp-pstop.link /etc/systemd/network/   # ships in this directory
+   sudo udevadm control --reload
+   ```
+
+2. Bind a shared-mode NetworkManager profile to that name:
+
+   ```sh
+   sudo nmcli con add type ethernet ifname esp-pstop0 con-name esp-pstop \
+        ipv4.method shared connection.autoconnect yes
+   ```
+
+Replug the unit. The host takes `10.42.0.1`, the chip DHCPs to
+`10.42.0.x`, switches its active uplink to USB, and — because the
+chip's factory-default machine peer is `10.42.0.1:8890` — it will bond
+to a `machine_app_runner` on this host with zero further configuration.
+
+Caveat: only the first unit plugged in gets `esp-pstop0`; simultaneous
+extra units fall back to `enx<mac>` names and need their own profiles.
+
+## Point the remote at this host
+
+USB-NCM (host side of the tether is `10.42.0.1` after the one-time
+setup above — the chip's factory default, so usually nothing to do):
+
+```sh
+curl -X POST "http://$CHIP/api/pstop_peer?ip=10.42.0.1&port=8890"
+```
+
+Tailscale (the normal deployment path):
+
+```sh
+HOST_TS_IP=$(tailscale ip -4)
+curl -X POST "http://$CHIP/api/pstop_peer?ip=$HOST_TS_IP&port=8890"
+```
+
+The change persists to NVS and the comparator picks it up within one
+tick (~100 ms), no reboot. For a Tailscale peer the chip source-binds
+its socket to the VPN IP — if the tunnel is down it holds the bond and
+the machine safely sees silence.
+
+## What you should see
+
+```
+machine_app_runner listening on 0.0.0.0:8890
+Robot Status = STOP
+pstop 0x01D7791C -> BOND
+  STATE robot=STOPPED restart=NEED_STOP owner=0x00000000 active=1  (from pstop 0x01D7791C BOND; ...)
+pstop 0x01D7791C -> STOP
+ARMED by 0x01D7791C: STOP held 804 ms (policy minimum 500 ms)
+Robot Status = OK
+pstop 0x01D778B4 -> STOP
+  STATE robot=STOPPED restart=NEED_STOP owner=0x01D7791C active=2  (from pstop 0x01D778B4 STOP; was robot=OK ...)
+```
+
+The machine starts disarmed (NEED_STOP). Arm it: press and hold the
+E-stop switch ≥ `min_stop_ms` (500 ms), then release →
+`ARMED by 0x01020380`, `Robot Status = OK`, remote's ring turns green.
+
+On the remote, `/state.json` should show `pstop_sent` advancing at 10 Hz
+with `pstop_mismatch` flat:
+
+```sh
+curl -s http://$CHIP/state.json | jq '.pstop_sent, .pstop_replies, .pstop_mismatch'
+```
+
+If `pstop_mismatch` climbs, the two cores are producing different
+encodings — see `firmware/main/main.c::compute_verdict` and the loop
+diagnostics (`e_hi*/e_lo*`) in `/state.json`.
+
+## Testing the policy without a chip
+
+`tools/pstop_test_remote.py` bonds over the real wire protocol and runs
+timed STOP/OK sequences against a dedicated runner instance — see
+`docs/TESTING.md`.
+
+## Stopping
+
+`Ctrl-C`. SIGINT/SIGTERM are handled cleanly and the socket is closed.

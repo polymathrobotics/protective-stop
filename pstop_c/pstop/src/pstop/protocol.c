@@ -1,6 +1,7 @@
 
 // SPDX-FileCopyrightText: 2026 Polymath Robotics, Inc.
 // SPDX-License-Identifier: Apache-2.0
+#include <stdio.h>
 
 #include <stdlib.h>
 
@@ -17,10 +18,10 @@ static
 pstop_error_t
 check_counter(const pstop_application_config_t *app_config, const pstop_remote_data_t *client, const pstop_msg_t *req)
 {
-    if(req->counter <= client->remote_data.last_sent_counter) {
+    if(req->counter <= client->remote_data.last_received_counter) {
         return PSTOP_MSG_OUT_OF_ORDER;
     }
-    if((req->counter - client->remote_data.last_sent_counter) > (app_config->max_lost_messages + 1U)) {
+    if((req->counter - client->remote_data.last_received_counter) > (app_config->max_lost_messages + 1U)) {
         return PSTOP_MSG_LOST;
     }
     if(req->received_counter > client->remote_data.msg_counter) {
@@ -37,12 +38,17 @@ static
 pstop_error_t
 check_timestamp(const pstop_application_config_t *app_config, const protocol_data_t *client, const pstop_msg_t *req)
 {
+    if(req->stamp <= client->last_received_stamp) {
+        return PSTOP_MSG_OUT_OF_ORDER;
+    }
+
     if(req->received_stamp == client->last_timestamp) {
         return PSTOP_OK;
     }
 
     // did the other end miss a message?
     if(req->received_stamp < client->last_timestamp) {
+        fprintf(stderr, "Old timestamp: %ld < %ld\n", req->received_stamp, client->last_timestamp);
         uint64_t diff = client->last_timestamp - req->received_stamp;
 
         uint16_t missed = (uint16_t)(diff / client->heartbeat_ms);
@@ -126,7 +132,8 @@ protocol_handle_message(pstop_machine_t *machine, const pstop_msg_t *req, pstop_
         resp->counter = client->remote_data.msg_counter + 1U;
         resp->heartbeat_timeout = client->remote_data.heartbeat_ms;
         client->remote_data.msg_counter++;
-        client->remote_data.last_sent_counter = req->counter;
+        client->remote_data.last_received_counter = req->counter;
+        client->remote_data.last_received_stamp = req->stamp;
         client->remote_data.last_timestamp = now;
     }
 
