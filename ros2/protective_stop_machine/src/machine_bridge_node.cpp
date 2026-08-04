@@ -122,7 +122,7 @@ MachineBridgeNode::CallbackReturn MachineBridgeNode::on_activate(const rclcpp_li
   return CallbackReturn::SUCCESS;
 }
 
-MachineBridgeNode::CallbackReturn MachineBridgeNode::on_deactivate(const rclcpp_lifecycle::State &)
+MachineBridgeNode::CallbackReturn MachineBridgeNode::on_deactivate(const rclcpp_lifecycle::State & state)
 {
   if (pub_timer_) {
     pub_timer_->cancel();
@@ -135,7 +135,7 @@ MachineBridgeNode::CallbackReturn MachineBridgeNode::on_deactivate(const rclcpp_
   state_pub_->on_deactivate();
   relay_pub_->on_deactivate();
   remotes_pub_->on_deactivate();
-  LifecycleNode::on_deactivate(s);
+  LifecycleNode::on_deactivate(state);
   RCLCPP_INFO(get_logger(), "deactivated: backend stopped (safe state)");
   return CallbackReturn::SUCCESS;
 }
