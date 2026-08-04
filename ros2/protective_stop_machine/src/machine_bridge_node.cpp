@@ -6,7 +6,6 @@
 // IMachineBackend. See docs/MACHINE_ROS2_NODE_DESIGN.md.
 #include "protective_stop_machine/machine_bridge_node.hpp"
 
-#include <algorithm>
 #include <cstdlib>
 #include <memory>
 #include <string>
@@ -36,9 +35,7 @@ MachineBridgeNode::MachineBridgeNode(const rclcpp::NodeOptions & options)
   param_listener_(get_node_parameters_interface()),
   params_(param_listener_.get_params())
 {
-  // Optional self-managed bring-up. Transitions run synchronously here; a
-  // failed configure just leaves us UNCONFIGURED (configure() returns state,
-  // it does not throw), so no activate() follows.
+  // Optional self-managed bring-up
   if (params_.autostart &&
     configure().id() == lifecycle_msgs::msg::State::PRIMARY_STATE_INACTIVE)
   {
@@ -83,7 +80,7 @@ MachineBridgeNode::CallbackReturn MachineBridgeNode::on_configure(const rclcpp_l
 {
   std::string err;
   if (!build_backend(err)) {
-    RCLCPP_ERROR(get_logger(), "configure failed: %s", err.c_str());
+    RCLCPP_ERROR(get_logger(), "configure failed to build backend: %s", err.c_str());
     return CallbackReturn::FAILURE;
   }
 
@@ -103,7 +100,7 @@ MachineBridgeNode::CallbackReturn MachineBridgeNode::on_configure(const rclcpp_l
   return CallbackReturn::SUCCESS;
 }
 
-MachineBridgeNode::CallbackReturn MachineBridgeNode::on_activate(const rclcpp_lifecycle::State & s)
+MachineBridgeNode::CallbackReturn MachineBridgeNode::on_activate(const rclcpp_lifecycle::State & state)
 {
   // Start the backend FIRST so a failure needs no rollback (publishers/timer
   // not yet activated).
@@ -112,18 +109,18 @@ MachineBridgeNode::CallbackReturn MachineBridgeNode::on_activate(const rclcpp_li
     return CallbackReturn::FAILURE;
   }
 
-  LifecycleNode::on_activate(s);  // activate managed publishers
+  LifecycleNode::on_activate(state);  // activate managed publishers
   state_pub_->on_activate();
   relay_pub_->on_activate();
   remotes_pub_->on_activate();
 
-  const double hz = std::max(1.0, params_.rates.publish_rate_hz);
+  const double hz = params_.rates.publish_rate_hz;  // floored at 1.0 by param validation
   pub_timer_ =
     create_wall_timer(
     std::chrono::duration<double>(1.0 / hz),
     std::bind(&MachineBridgeNode::publish_tick, this));
 
-  const double dhz = std::max(0.1, params_.rates.diagnostics_rate_hz);
+  const double dhz = params_.rates.diagnostics_rate_hz;  // floored at 0.1 by param validation
   diag_ = std::make_shared<diagnostic_updater::Updater>(this, 1.0 / dhz);
   diag_->setHardwareID(backend_kind_);
   diag_->add("machine", this, &MachineBridgeNode::diagnostics);
@@ -133,7 +130,7 @@ MachineBridgeNode::CallbackReturn MachineBridgeNode::on_activate(const rclcpp_li
 }
 
 MachineBridgeNode::CallbackReturn MachineBridgeNode::on_deactivate(
-  const rclcpp_lifecycle::State & s)
+  const rclcpp_lifecycle::State &)
 {
   if (pub_timer_) {
     pub_timer_->cancel();

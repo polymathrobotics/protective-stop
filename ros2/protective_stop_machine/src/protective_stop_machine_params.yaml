@@ -73,21 +73,21 @@ protective_stop_machine:
       read_only: true
       description: State publish rate.
       validation:
-        gt_eq<>: 0.0
+        gt_eq<>: 1.0
     state_poll_hz:
       type: double
       default_value: 5.0
       read_only: true
       description: Hardware backend /state.json poll rate.
       validation:
-        gt_eq<>: 0.0
+        gt_eq<>: 1.0
     diagnostics_rate_hz:
       type: double
       default_value: 1.0
       read_only: true
       description: diagnostic_updater refresh rate.
       validation:
-        gt_eq<>: 0.0
+        gt_eq<>: 0.1
 
   autostart:
     type: bool
