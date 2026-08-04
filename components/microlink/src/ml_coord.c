@@ -733,7 +733,11 @@ static int do_register(microlink_t * ml, ml_noise_state_t * noise)
   {
     cJSON * netinfo = cJSON_CreateObject();
     if (netinfo) {
-      uint16_t pref = ml->priority_peer_region ? ml->priority_peer_region : ML_DERP_REGION;
+      /* The runtime region-pin override wins so INBOUND homes on the pinned
+       * region too (peers reach us where slot 0 is homed); else the learned
+       * priority-peer region; else the compiled default. */
+      uint16_t pref = ml->derp_region_override ? ml->derp_region_override
+                    : (ml->priority_peer_region ? ml->priority_peer_region : ML_DERP_REGION);
       cJSON_AddNumberToObject(netinfo, "PreferredDERP", pref);
       cJSON_AddItemToObject(hostinfo, "NetInfo", netinfo);
     }
@@ -2587,7 +2591,7 @@ void ml_coord_task(void * arg)
              * tiny per-socket RX mailbox (default 6) overflowed and the
              * DERP HTTP-upgrade response was silently dropped (2026-05-25
              * diagnosis). */
-        if (!ml->derp.connected) {
+        if (!ml->derp[0].connected) {
           ESP_LOGI(TAG, "Staggering DERP connect by 2s for peer-ingest drain");
           vTaskDelay(pdMS_TO_TICKS(2000));
           xEventGroupSetBits(ml->events, ML_EVT_DERP_CONNECT_REQ);
@@ -2778,7 +2782,7 @@ void ml_coord_task(void * arg)
 
         /* Periodic DERP NotePreferred keepalive (every 60s) */
         static uint64_t last_derp_keepalive_ms = 0;
-        if (ml->derp.connected && now - last_derp_keepalive_ms > 60000) {
+        if (ml->derp[0].connected && now - last_derp_keepalive_ms > 60000) {
           uint8_t preferred = 0x01;
           uint8_t * ka_data = malloc(1);
           if (ka_data) {

@@ -3,6 +3,19 @@
 
 # DERP-relay reachability failure — firmware investigation
 
+> **SCOPE (added 2026-08-04, read before trusting the "FIXED" below).** This
+> investigation fixed **one** link of the reachability chain: the chip's **return
+> flow to an INBOUND-initiated connection** (an arbitrary tailnet host → chip;
+> the chip was blackholing its own responses onto an unvalidated direct endpoint).
+> The fix landed as **`827386f`** ("DERP-home peers; never install unvalidated
+> netmap endpoint"), merged to `pstop` — the `ad75887-dirty` build named in the
+> status log below is the docs commit, not the code. It does **NOT** fix the chip
+> **ORIGINATING** a safety bond to a peer on a **different DERP region** (outbound
+> cold-bond, errno 128) — that was a *separate* root cause (single DERP home
+> region), fixed by the multi-region relay on 2026-08-04. See
+> **`docs/OUTBOUND_COLD_BOND.md`** for the full four-precondition chain. Do not
+> read the "ROOT CAUSE FOUND + FIXED" banner as closing the outbound case.
+
 **Working assumption (deliberate bias): this is solvable in ESP32 firmware.**
 A laptop running full Tailscale on the *same* tailnet, behind the *same* class
 of NAT, does **not** suffer this — so the gap is in the chip's lightweight

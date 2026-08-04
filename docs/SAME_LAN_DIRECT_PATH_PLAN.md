@@ -1,7 +1,12 @@
 # Same-LAN Direct-Path Fix — Plan (Option B)
 
-**Status:** scoping complete, no code written yet (beyond `local_ip` in
-`state.json`). Written 2026-07-22.
+**Status (updated 2026-08-04):** IMPLEMENTED — the active-uplink LAN-endpoint
+advertisement (`ml_active_lan_ip()`, `ml_coord.c` / `ml_wg_mgr.c`) landed and
+works. **But read §7 before assuming this "fixed same-LAN direct":** the dominant
+real-world blocker was found to be **environmental** (a subnet-router route hijack
+on the machine host), and on a steady-state pstop bond the direct path often forms
+even without this advertisement. This is a contributing firmware fix, not a
+standalone root-cause closure. Original plan (Written 2026-07-22) below.
 
 **Goal:** when a pstop remote and its machine are on the same LAN, the
 WireGuard link should upgrade from a DERP relay to a **direct, still-encrypted**

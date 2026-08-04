@@ -204,7 +204,19 @@ static int disco_udp_sendto(
 static err_t wg_derp_output_cb(const uint8_t * peer_public_key, const uint8_t * data, size_t len, void * ctx)
 {
   microlink_t * ml = (microlink_t *)ctx;
-  if (!ml || !ml->derp.connected) {
+  /* Any pool connection up is enough to accept the relay: ml_derp_queue_send
+   * tags the frame with the destination's region and the DERP task routes it to
+   * the home OR the matching aux conn (cross-region peers ride an aux slot). */
+  bool derp_up = false;
+  if (ml) {
+    for (int i = 0; i < ML_DERP_MAX_CONNS; i++) {
+      if (ml->derp[i].connected) {
+        derp_up = true;
+        break;
+      }
+    }
+  }
+  if (!ml || !derp_up) {
     ESP_LOGW(TAG, "DERP output cb: not connected, dropping %d bytes", (int)len);
     return ERR_CONN;
   }
@@ -663,6 +675,47 @@ static bool is_pinned_peer(microlink_t * ml, uint32_t vpn_ip)
 bool ml_wg_is_pinned_peer(microlink_t * ml, uint32_t vpn_ip)
 {
   return is_pinned_peer(ml, vpn_ip);
+}
+
+/* DERP home region of a peer identified by its 32-byte WG public key.
+ * 0 = unknown peer or region not learned. Called from ml_derp_queue_send on the
+ * wg_mgr task (the peer-table owner), so this is a same-task read — no lock. */
+uint16_t ml_wg_region_for_pubkey(microlink_t * ml, const uint8_t * wg_pubkey)
+{
+  if (ml == NULL || wg_pubkey == NULL) return 0;
+  int idx = find_peer_by_key(ml, wg_pubkey);
+  if (idx < 0) return 0;
+  return ml->peers[idx].derp_region;
+}
+
+/* Collect the DISTINCT DERP regions of the safety peers that are exempt from the
+ * peer-scaling armor: pinned (incl. priority + fleet + app pins) OR
+ * health-tracked. These few peers are the ones the DERP pool must keep an
+ * auxiliary connection open for when they home on a non-home region. Writes up
+ * to `max` distinct region ids into `out`; returns the count.
+ *
+ * Concurrency: read from the DERP I/O task while wg_mgr owns/writes the peer
+ * table. Reads are word-sized (region ids, active flag) and the worst case of a
+ * torn/stale read is a transiently wrong aux region, self-corrected next pass —
+ * identical to the existing cross-task diag readers (ml_wg_get_derp_diag). */
+int ml_wg_collect_safety_regions(microlink_t * ml, uint16_t * out, int max)
+{
+  if (ml == NULL || out == NULL || max <= 0) return 0;
+  int n = 0;
+  for (int i = 0; i < ml->peer_count && n < max; i++) {
+    ml_peer_t * p = &ml->peers[i];
+    if (!p->active || p->derp_region == 0) continue;
+    if (!(is_pinned_peer(ml, p->vpn_ip) || is_health_tracked(p->vpn_ip))) continue;
+    bool dup = false;
+    for (int k = 0; k < n; k++) {
+      if (out[k] == p->derp_region) {
+        dup = true;
+        break;
+      }
+    }
+    if (!dup) out[n++] = p->derp_region;
+  }
+  return n;
 }
 
 /* Diagnostic: report the DERP region the chip has LEARNED for the management and
@@ -1678,6 +1731,24 @@ static void process_disco_pong(
           }
         }
       }
+    } else if (pkt->via_derp) {
+      /* AGGRAVATOR FIX (a): a via-DERP pong proves the RELAY path to this peer is
+       * alive. Liveness (last_pong_recv_ms) is already renewed above for every
+       * pong. For a SAFETY peer (pinned/priority/health-tracked) with no WG
+       * session up, (re)fire a DERP handshake init so the working relay actually
+       * drives session establishment — a bond that was stuck errno-128 because
+       * our relayed init never reached a cross-region peer now completes once an
+       * aux DERP conn homes on that region. We do NOT install a direct endpoint
+       * from a DERP pong (would re-break 827386f), and we do NOTHING for
+       * non-pinned peers (peer-scaling armor: no retry storm for the bulk peers). */
+      bool is_safety = is_pinned_peer(ml, p->vpn_ip) || is_health_tracked(p->vpn_ip);
+      if (is_safety && ml->wg_netif && p->wg_peer_index >= 0) {
+        struct netif * netif = (struct netif *)ml->wg_netif;
+        if (wireguardif_peer_is_up(netif, (u8_t)p->wg_peer_index, NULL, NULL) != ERR_OK) {
+          wireguardif_connect_derp(netif, (u8_t)p->wg_peer_index);
+          ESP_LOGI(TAG, "via-DERP pong from %s: no WG session, (re)firing DERP handshake init", p->hostname);
+        }
+      }
     }
 
     pending_probes[i].active = false;
@@ -2478,7 +2549,13 @@ static void disco_periodic_probes(microlink_t * ml)
          * inbound initiations from the peer still establish sessions
          * regardless of this flag. The priority peer keeps unlimited
          * retries (its connectivity is the product). */
-    if (!is_priority && (ml->wg_netif != NULL) && (p->wg_peer_index >= 0)) {
+    /* AGGRAVATOR FIX (b): also exempt PINNED peers (fleet/OTA + app pins), not
+     * just priority/health-tracked (is_priority). These few safety peers KEEP
+     * `active` so wireguardif retransmits their handshake init between the 3 s
+     * disco wakes — critical for a cross-region bond that only completes once an
+     * aux DERP conn comes up. The ~120 non-pinned bulk peers still get the clear,
+     * so the retry-storm armor (PEER_SCALING_DESIGN.md:39) is preserved. */
+    if (!is_priority && !is_pinned_peer(ml, p->vpn_ip) && (ml->wg_netif != NULL) && (p->wg_peer_index >= 0)) {
       struct netif * nif = (struct netif *)ml->wg_netif;
       if (wireguardif_peer_is_up(nif, (u8_t)p->wg_peer_index, NULL, NULL) != ERR_OK) {
         struct wireguard_device * dev = (struct wireguard_device *)nif->state;

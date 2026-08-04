@@ -161,8 +161,11 @@ esp_err_t ml_stun_resolve_servers(microlink_t * ml)
   uint16_t primary_port = ML_STUN_PRIMARY_PORT;
 
   if (ml->derp_region_count > 0) {
-    /* Find home region (derp_home_region) or fallback to first region */
-    uint16_t target_region = ml->derp_home_region ? ml->derp_home_region : ML_DERP_REGION;
+    /* Find home region (effective: region-pin override wins, else learned home)
+     * or fall back to the compiled default. Keeps STUN homed on the same region
+     * slot 0 relays through. */
+    uint16_t target_region = ml_effective_home_region(ml);
+    if (!target_region) target_region = ML_DERP_REGION;
     for (int i = 0; i < ml->derp_region_count; i++) {
       if (
         ml->derp_regions[i].region_id == target_region && ml->derp_regions[i].node_count > 0 &&

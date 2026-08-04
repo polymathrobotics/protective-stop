@@ -362,6 +362,11 @@ uint8_t ml_config_get_max_peers(const ml_config_ctx_t * ctx)
   return ctx ? ctx->settings.max_peers : 0;
 }
 
+uint16_t ml_config_get_derp_region(const ml_config_ctx_t * ctx)
+{
+  return ctx ? ctx->settings.derp_region : 0;
+}
+
 uint16_t ml_config_get_disco_heartbeat_ms(const ml_config_ctx_t * ctx)
 {
   return ctx ? ctx->settings.disco_heartbeat_ms : 0;
@@ -546,6 +551,7 @@ static esp_err_t handler_get_settings(httpd_req_t * req)
   cJSON_AddStringToObject(json, "priority_peer_ip", pip_str);
   cJSON_AddStringToObject(json, "ctrl_host", ctx->settings.ctrl_host);
   cJSON_AddNumberToObject(json, "debug_flags", ctx->settings.debug_flags);
+  cJSON_AddNumberToObject(json, "derp_region", ctx->settings.derp_region);
   cJSON_AddStringToObject(json, "device_name_full", ctx->settings.device_name_full);
 
   return send_json(req, json);
@@ -617,6 +623,18 @@ static esp_err_t handler_post_settings(httpd_req_t * req)
   if ((item = cJSON_GetObjectItem(json, "debug_flags")) && cJSON_IsNumber(item)) {
     ctx->settings.debug_flags = (uint8_t)item->valuedouble;
   }
+  /* DERP home-region pin (0 = auto). Mirrors max_peers int handling. Applied
+   * LIVE (no restart): update ml->derp_region_override and kick a slot-0 DERP
+   * reconnect so inbound + relay re-home onto the pinned region immediately. */
+  bool derp_region_changed = false;
+  if ((item = cJSON_GetObjectItem(json, "derp_region")) && cJSON_IsNumber(item)) {
+    int v = (int)item->valuedouble;
+    uint16_t nr = (v >= 0 && v <= 4095) ? (uint16_t)v : 0;
+    if (nr != ctx->settings.derp_region) {
+      ctx->settings.derp_region = nr;
+      derp_region_changed = true;
+    }
+  }
   if ((item = cJSON_GetObjectItem(json, "device_name_full")) && cJSON_IsString(item)) {
     COPY_STR_FIELD(ctx->settings.device_name_full, item->valuestring);
   }
@@ -624,6 +642,12 @@ static esp_err_t handler_post_settings(httpd_req_t * req)
   cJSON_Delete(json);
 
   config_save_settings(ctx);
+
+  if (derp_region_changed && ctx->ml != NULL) {
+    ctx->ml->derp_region_override = ctx->settings.derp_region;
+    xEventGroupSetBits(ctx->ml->events, ML_EVT_DERP_RECONNECT);
+    ESP_LOGI(TAG, "DERP region pin applied live: %u (slot-0 reconnect)", (unsigned)ctx->settings.derp_region);
+  }
 
   cJSON * resp = cJSON_CreateObject();
   cJSON_AddBoolToObject(resp, "ok", true);
@@ -882,8 +906,27 @@ static esp_err_t handler_monitor(httpd_req_t * req)
     }
 
     /* DERP status */
-    cJSON_AddBoolToObject(json, "derp_connected", ml->derp.connected);
+    cJSON_AddBoolToObject(json, "derp_connected", ml->derp[0].connected); /* home conn */
     cJSON_AddNumberToObject(json, "derp_home_region", ml->derp_home_region);
+    cJSON_AddNumberToObject(json, "derp_region_override", ml->derp_region_override);
+    cJSON_AddNumberToObject(json, "derp_effective_home_region", ml_effective_home_region(ml));
+    /* Multi-region pool: per-slot region + connected, so the cross-region relay
+     * fix is verifiable (slot 0 = home, 1..N = aux for safety-peer regions). */
+    {
+      cJSON * pool = cJSON_AddArrayToObject(json, "derp_pool");
+      if (pool) {
+        for (int s = 0; s < ML_DERP_MAX_CONNS; s++) {
+          if (!ml->derp[s].connected && ml->derp[s].region_id == 0) continue; /* skip free slots */
+          cJSON * e = cJSON_CreateObject();
+          if (!e) continue;
+          cJSON_AddNumberToObject(e, "slot", s);
+          cJSON_AddNumberToObject(e, "region", ml->derp[s].region_id);
+          cJSON_AddBoolToObject(e, "connected", ml->derp[s].connected);
+          cJSON_AddBoolToObject(e, "home", s == 0);
+          cJSON_AddItemToArray(pool, e);
+        }
+      }
+    }
     /* DERP re-home diagnostics: the region we DECIDED to home on
      * (priority_peer_region) vs. the regions we LEARNED for the pinned peers.
      * fleet_peer_region==0 => the fleet's region never reached us (re-home

@@ -25,6 +25,14 @@ it across the public internet — a realistic robot↔operator split, not a LAN 
 2. **Per-unit identity**: node `pstop-01d7791c` / device ID `0x01d7791c`; VPN IP
    `100.117.20.69` stable across OTA.
 
+> **SCOPE NOTE (2026-08-04):** the "no manual intervention" claim below was
+> demonstrated against **framework16, a full-Tailscale laptop that upgraded to a
+> DIRECT path** and homed on the same region. It does **NOT** cover the
+> sustained-DERP-only, **cross-region**, dumb-far-peer origination case — that was
+> a separate root cause (single DERP home region) fixed by the multi-region relay
+> on 2026-08-04. See `docs/OUTBOUND_COLD_BOND.md`. Read this result as
+> "same-region cold connect works," not "all cold connects work."
+
 Result: chip cold-boots → bonds to framework16 with **no manual intervention**,
 upgrades to a **direct path**, machine receives the (correct, fail-safe) STOP
 heartbeats continuously — this remote has no operator switch wired, so STOP is

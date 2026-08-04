@@ -88,12 +88,16 @@ The point of the multi-unit snapshot is to localize a disconnect. Cross-referenc
   `derp_home_region` in `telemetry.csv` and its `/admin/api/monitor`
   (`wg_paused`, `ts_boot_en`). This is the netmap / boot-safety-pause class.
 - **`sf_errno` 128 (ENOTCONN) with slot `state=1`, `sent` climbing, `send_fail`
-  climbing** &rarr; the classic **peer-cap trim**: the tailnet is at the 128-node
-  cap and the machine dropped the remote from its netmap. Confirm on the machine
-  side — the event's `bonded_remotes` line will *not* list this remote. Fix per
-  §5 / §7: make the remote an operator on the machine so it gets pinned, prune
-  the tailnet below 128, or co-locate on one LAN. This is the re-sync / peer-cap
-  finding the tool was built to catch.
+  climbing** &rarr; **disambiguate — errno 128 has two causes.** FIRST check the
+  tailnet size. **(a) Small tailnet (< 128 nodes):** it is NOT a peer-cap trim — it
+  is an **outbound cold-bond / DERP region-home** failure (the chip can't relay its
+  handshake to a machine on a different DERP region). Check `/admin/api/monitor`
+  `derp_effective_home_region` + `derp_pool[]` vs the machine's region; the
+  multi-region relay (2026-08-04) should open an aux conn on the machine's region.
+  See **`docs/OUTBOUND_COLD_BOND.md`**. **(b) Large tailnet (≥ 128 nodes):** the
+  **peer-cap trim** — the machine dropped the remote from its 128-entry netmap
+  (its `bonded_remotes` line will *not* list this remote). Fix per §5 / §7: make
+  the remote an operator (pins it), prune below 128, or co-locate on one LAN.
 - **`ml_reconnects` incrementing while `rebonds` stays flat and the bond returns
   quickly** &rarr; a control-plane flap that the transport rode through; the
   heartbeat likely never gapped. Corroborate with `wg_direct` and
