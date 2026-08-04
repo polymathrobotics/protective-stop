@@ -1171,7 +1171,10 @@ ml_app_t * ml_app_start(const ml_app_config_t * cfg)
   ESP_LOGI(TAG, "HTTP server started on port %d", http_cfg.server_port);
 
   /* --- MicroLink init --- */
-  uint8_t max_peers = cfg->max_peers ? cfg->max_peers : CONFIG_ML_MAX_PEERS;
+  /* Active working set: runtime setting if configured, else the build default
+   * (ML_DEFAULT_MAX_PEERS, 32 in production), else the ML_MAX_PEERS ceiling. */
+  uint8_t max_peers =
+    cfg->max_peers ? cfg->max_peers : (CONFIG_ML_DEFAULT_MAX_PEERS ? CONFIG_ML_DEFAULT_MAX_PEERS : CONFIG_ML_MAX_PEERS);
   microlink_config_t ml_cfg = {
     .auth_key = CONFIG_ML_TAILSCALE_AUTH_KEY,
     .device_name = (cfg->device_name && cfg->device_name[0]) ? cfg->device_name : CONFIG_ML_DEVICE_NAME,
