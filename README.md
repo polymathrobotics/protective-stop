@@ -207,6 +207,10 @@ left the heartbeat intact, and a total link loss degraded to STOP with
 autonomous recovery in about 3 to 6 s
 (`docs/TWO_SITE_FAILOVER_2026-07-21.md`). Many-remotes-to-one-machine
 logic is validated in `docs/MULTI_REMOTE_VALIDATION_2026-07-22.md`.
+**How to bond and operate multiple remotes and machines over Tailscale —
+including the 128-peer cap rule that governs whether a cross-site remote can
+reach a machine — is documented in
+[`docs/MULTI_REMOTE_MULTI_MACHINE.md`](docs/MULTI_REMOTE_MULTI_MACHINE.md).**
 
 ## Current status and open items (2026-07-22)
 
