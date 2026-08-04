@@ -62,7 +62,8 @@ static const char * TAG = "machn";
 #define MACHN_MACHINE_ID 0x01020304u /* what remotes put in receiver_id */
 #define MACHN_MAX_REMOTES 8
 #define MACHN_MAX_LOST_MESSAGES 10u
-#define MACHN_MAX_MISSED_HEARTBEATS 5u /* was 3; raised to ride through ~90min control-plane re-sync RTT spikes (2026-08-04) */
+#define MACHN_MAX_MISSED_HEARTBEATS \
+  5u /* was 3; raised to ride through ~90min control-plane re-sync RTT spikes (2026-08-04) */
 #define MACHN_MIN_STOP_MS 500u /* -> library delay_between_stop_ms */
 #define MACHN_DEFAULT_HEARTBEAT_MS 400u /* advertised: remotes publish at /2 */
 
