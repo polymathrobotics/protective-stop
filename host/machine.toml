@@ -1,6 +1,12 @@
 # =============================================================================
 # machine_app_runner config — the laptop-side pstop MACHINE for bench testing.
 #
+# TESTING NOTE: this file ships tuned for easy bench bring-up — default_stop_only
+# is false, so ANY remote that bonds may operate (arm) the machine out of the box,
+# no per-remote setup. That is a convenience of this host test harness ONLY and
+# does not change the fleet safety posture (pstop_c / machn / ROS2 all default to
+# stop-only). See the [policy] section to lock it down for a production-like run.
+#
 # Every value below maps to a parameter the upstream pstop_c machine library
 # exposes (or a knob in the transport/watchdog shell around it). The library
 # itself (components/pstop/upstream/) is never modified — this file just feeds
@@ -64,9 +70,14 @@ max_remotes = 3
 verbose = false
 
 [policy]
-# Default treatment of any remote NOT listed in an [[operator]] block below.
-# allow_unlisted = true accepts any remote that bonds (handy for bring-up).
-# Set false to accept ONLY the explicitly-listed operators (allowlist mode).
+# ADMISSION (not authority). allow_unlisted controls ONLY whether a remote that
+# is not named in an [[operator]] block may BOND at all — it does NOT decide
+# whether that remote may arm the machine. That is default_stop_only, below. So a
+# remote can bond and look perfectly healthy (RX <- OK, crc=ok, counter advancing)
+# and the machine can STILL hold STOP, if authority is withheld. Two axes, both
+# must line up.
+#   allow_unlisted = true  -> any remote that bonds is admitted (handy for bring-up)
+#   allow_unlisted = false -> only remotes named in an [[operator]] block are admitted
 allow_unlisted = true
 # Heartbeat expected from unlisted remotes (and from listed ones that omit it).
 # THE MACHINE OWNS THIS RATE: it is what this machine's safety case requires,
@@ -78,14 +89,23 @@ allow_unlisted = true
 # remote-side configuration. 400 => remotes publish every 200 ms (5 Hz);
 # with max_missed_heartbeats = 5 the machine STOPs after ~2.0 s of silence.
 default_heartbeat_ms = 400
-# SAFETY DEFAULT. Unlisted remotes are accepted as STOP-ONLY: they may command
-# STOP and are heartbeat-monitored, but may NEVER re-arm the machine (STOP->OK).
-# Only remotes named in an [[operator]] entry with stop_only = false may re-arm.
-# With the operator list empty (the default below) every remote is stop-only =
-# maximally safe out of the box; add operator entries during configuration to
-# grant re-arm authority. Leave this true unless you deliberately want any
-# unlisted remote to be able to arm the machine.
-default_stop_only = true
+# AUTHORITY. Whether a bonded-but-unlisted remote is an OPERATOR (may re-arm the
+# machine, STOP->OK) or STOP-ONLY (may command STOP and is heartbeat-monitored,
+# but may NEVER re-arm). This axis — not allow_unlisted above — is what decides
+# whether the machine will actually arm off an unlisted remote's OK.
+#
+# *** BENCH-TEST DEFAULT: false ***  Any remote that bonds is a full operator, so
+# the machine arms out of the box with zero per-remote setup — point a remote at
+# this runner and it just works. This is a convenience of THIS host test harness
+# only; it does NOT change the fleet safety posture: the pstop_c library, the
+# machn (ESP32) firmware, and the ROS2 machine node all still default to
+# STOP-ONLY (empty operator allowlist, maximally safe out of the box).
+#
+# PRODUCTION-LIKE run: set this back to true and grant re-arm authority
+# explicitly via an [[operator]] entry (stop_only = false) per remote, below.
+# With it true and the operator list empty, every remote is stop-only and the
+# machine never arms — the safe default the safety case assumes.
+default_stop_only = false
 # ARMING POLICY. Minimum time (ms) between the STOP that opens an arming
 # cycle and the OK that completes it; an earlier OK is refused (machine
 # replies STOP and stays STOPPED — the episode can still complete by waiting
