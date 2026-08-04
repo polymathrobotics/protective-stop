@@ -38,15 +38,6 @@ jobs:
         with:
           target-ros2-distro: ${{ matrix.ros }}
           coverage-result: false
-          # Pi-only / bench-only rosdep keys that do not resolve on CI hosts:
-          #   python3-rpi.gpio -> archive/protective_stop_remote (Pi GPIO)
-          #   python3-roslibpy -> archive/protective_stop_remote (local key)
-          # The archive packages still build, lint and test without them; the
-          # code paths importing RPi.GPIO / roslibpy are not exercised by any
-          # test. nav2_lifecycle_manager is intentionally NOT skipped: it
-          # resolves on jazzy and is required by protective_stop_node's launch
-          # tests.
-          rosdep-skip-keys: python3-rpi.gpio python3-roslibpy
       - uses: actions/upload-artifact@v4
         if: always()
         with:
