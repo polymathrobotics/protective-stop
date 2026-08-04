@@ -46,10 +46,12 @@ max_lost_messages = 10
 # (machine.c: missed = diff/hb, stop when missed >= max — NOT max+1).
 # Remotes send at heartbeat_ms/2 and deliberately withhold one send on a
 # lockstep mismatch, so 1 tolerates ZERO withheld ticks and races the
-# deadline (caused false STOPs on the bench, 2026-07-27 soak). 3 gives a
-# heartbeat_ms x 3 timeout = 6 send slots of margin. Mind nuisance trips
-# before lowering.
-max_missed_heartbeats = 3
+# deadline (caused false STOPs on the bench, 2026-07-27 soak). Raised 3->5
+# to match the ESP32 machine (MACHN_MAX_MISSED_HEARTBEATS, commit 01e4c10):
+# the extra margin rides through the ~90-min control-plane re-sync RTT spikes
+# without a false rebond. 5 gives a heartbeat_ms x 5 timeout (~2.0 s at 400 ms)
+# = 10 send slots of margin. Mind nuisance trips before lowering.
+max_missed_heartbeats = 5
 # Size of the machine's remotes table = max simultaneous bonded remotes.
 # This bench has one (the chip); raise it to test multi-remote scenarios.
 max_remotes = 3
@@ -74,7 +76,7 @@ allow_unlisted = true
 # lockstep tick and 1000 ms — so tightening or relaxing this value (or a
 # per-operator heartbeat_ms below) retunes the remote's publish rate with no
 # remote-side configuration. 400 => remotes publish every 200 ms (5 Hz);
-# with max_missed_heartbeats = 3 the machine STOPs after ~1.2 s of silence.
+# with max_missed_heartbeats = 5 the machine STOPs after ~2.0 s of silence.
 default_heartbeat_ms = 400
 # SAFETY DEFAULT. Unlisted remotes are accepted as STOP-ONLY: they may command
 # STOP and are heartbeat-monitored, but may NEVER re-arm the machine (STOP->OK).

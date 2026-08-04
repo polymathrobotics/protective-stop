@@ -133,9 +133,11 @@ static void cfg_defaults(machine_cfg_t * c)
    * check_heartbeats: missed = diff/hb, stop when missed >= max). Remotes
    * send at hb/2 and deliberately withhold a tick on a lockstep mismatch,
    * so max_missed=1 tolerates ZERO withheld ticks (a 1-tick withhold races
-   * the deadline exactly — observed false STOPs on the bench). 3 = ~3 s
-   * silence at hb=1000 and absorbs up to 5 withheld send slots. */
-  c->max_missed_heartbeats = 3U;
+   * the deadline exactly — observed false STOPs on the bench). Raised 3->5
+   * to match machn (MACHN_MAX_MISSED_HEARTBEATS, commit 01e4c10): the extra
+   * margin rides through the ~90-min control-plane re-sync RTT spikes (~2.0 s
+   * timeout at hb=400) instead of false-rebonding the remote. */
+  c->max_missed_heartbeats = 5U;
   c->max_remotes = 3U;
   c->verbose = 0;
   c->allow_unlisted = 1;
@@ -867,7 +869,7 @@ int main(int argc, char * argv[])
          * and clears the timed-out remote so a fresh BOND re-bonds. Called every
          * poll cycle (~10 ms) so detection is prompt; the timeout is each
          * operator's heartbeat_ms x max_missed_heartbeats (machine.c:290-298;
-         * e.g. 400 ms x 3 ~= 1.2 s). [Reconciled 2026-08-02: was
+         * e.g. 400 ms x 5 ~= 2.0 s). [Reconciled 2026-08-02: was
          * "x (max_missed_heartbeats + 1)" — corrected to the library math.] */
     if (machine_validate_heartbeats(&machine) != PSTOP_OK) {
       /* A remote timed out: the library already stopped the robot and
