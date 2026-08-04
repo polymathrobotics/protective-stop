@@ -188,7 +188,11 @@ microlink_t * microlink_init(const microlink_config_t * config)
   ml->disco_sock6 = -1;
   ml->stun_sock = -1;
   ml->stun_sock6 = -1;
-  ml->derp.sockfd = -1;
+  /* Init every DERP pool slot: sockfd=-1, region_id=0 (free), tls_inited=false
+   * (ml is calloc'd so the rest is already zero). Slot 0 is the home conn. */
+  for (int i = 0; i < ML_DERP_MAX_CONNS; i++) {
+    ml->derp[i].sockfd = -1;
+  }
 
   /* Resolve timing (0 = use defaults from #defines) */
   ml->t_disco_heartbeat_ms = ml->config.disco_heartbeat_ms ? ml->config.disco_heartbeat_ms : ML_DISCO_HEARTBEAT_MS;
@@ -283,6 +287,11 @@ microlink_t * microlink_init(const microlink_config_t * config)
     ml->debug_flags = ml_config_get_debug_flags(ml->config_httpd);
     if (ml->debug_flags) {
       ESP_LOGI(TAG, "Debug flags from NVS: 0x%02x", ml->debug_flags);
+    }
+    uint16_t nvs_region = ml_config_get_derp_region(ml->config_httpd);
+    if (nvs_region > 0 && nvs_region <= 4095) {
+      ml->derp_region_override = nvs_region;
+      ESP_LOGI(TAG, "DERP home region pinned from NVS: %u", (unsigned)nvs_region);
     }
   }
 

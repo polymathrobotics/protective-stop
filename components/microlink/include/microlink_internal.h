@@ -93,6 +93,16 @@ extern "C"
 #define ML_DERP_HOST "derp9e.tailscale.com"
 #define ML_DERP_PORT 443
 
+/* Multi-region DERP relay pool. Slot 0 is the HOME connection (the chip's own
+ * PreferredDERP region, kept alive for inbound reachability). Slots 1..N are
+ * auxiliary connections opened on demand for the DISTINCT home regions of the
+ * few safety peers (pinned / priority / health-tracked) so the chip can relay a
+ * WG-init/DISCO-ping to a peer homed on a different region — a DERP server only
+ * relays between peers connected to IT (root cause of the cross-region errno-128
+ * bond failure). 6 slots covers home + up to 5 distinct safety-peer regions. */
+#define ML_DERP_MAX_CONNS 6
+#define ML_DERP_AUX_IDLE_REAP_MS 120000 /* reap an unused aux conn after 120 s idle */
+
 /* Tailscale control plane */
 #define ML_CTRL_HOST "controlplane.tailscale.com"
 #define ML_CTRL_PORT 443
@@ -245,6 +255,10 @@ extern "C"
     uint8_t * data; /* Heap-allocated payload (caller frees on failure) */
     size_t len; /* Payload length */
     uint8_t frame_type; /* DERP frame type (0x04 = SendPacket) */
+    uint16_t region_id; /* DERP home region of the destination peer; 0 = unknown
+                         * -> route on the HOME connection (slot 0). Resolved at
+                         * enqueue time from the peer table so the DERP task can
+                         * egress the frame on the pool conn homed on THIS region. */
   } ml_derp_tx_item_t;
 
   /* Received packet (from net_io to disco/wg queues) */
@@ -398,6 +412,12 @@ extern "C"
     mbedtls_ctr_drbg_context ctr_drbg;
     bool connected;
     uint64_t last_recv_ms; /* For keepalive watchdog */
+
+    /* Multi-region pool bookkeeping (all owned by the DERP I/O task) */
+    uint16_t region_id; /* DERP region this conn serves; 0 = unused/free slot */
+    bool tls_inited; /* the four mbedTLS contexts above are live (must be freed) */
+    uint64_t last_connect_attempt_ms; /* per-slot connect backoff timestamp */
+    uint64_t last_used_ms; /* last time a frame egressed here (aux reap clock) */
   } ml_derp_conn_t;
 
   /* ============================================================================
@@ -467,9 +487,18 @@ extern "C"
     uint8_t disco_private_key[32]; /* DISCO key */
     uint8_t disco_public_key[32];
 
-    /* DERP connection (owned exclusively by DERP I/O task after connect) */
-    /* Connection setup by coord task, then handed to DERP I/O task */
-    ml_derp_conn_t derp;
+    /* DERP relay connection POOL (owned exclusively by DERP I/O task after
+     * connect). derp[0] is the HOME connection — the chip's own PreferredDERP
+     * region, always maintained for inbound reachability. derp[1..N] are aux
+     * connections opened on demand for the distinct regions of the safety peers
+     * so cross-region relay works (magicsock model). See ML_DERP_MAX_CONNS. */
+    ml_derp_conn_t derp[ML_DERP_MAX_CONNS];
+
+    /* Region-pin override for slot 0's home region (repro rig + fleet pin).
+     * 0 = auto (use the learned/rehomed derp_home_region). Non-zero forces the
+     * chip to home its inbound DERP + PreferredDERP advert on THIS region.
+     * Runtime-settable via /api/settings derp_region; see ml_effective_home_region. */
+    volatile uint16_t derp_region_override;
 
     /* Sockets for net_io select() loop */
     int disco_sock4; /* UDP socket for DISCO + direct WG */
@@ -569,15 +598,36 @@ extern "C"
 
   /* ml_derp.c */
   void ml_derp_tx_task(void * arg);
-  esp_err_t ml_derp_connect(microlink_t * ml);
-  void ml_derp_disconnect(microlink_t * ml);
+  /* Connect a specific pool connection `c` to `region_id`'s DERP node. */
+  esp_err_t ml_derp_connect(microlink_t * ml, ml_derp_conn_t * c, uint16_t region_id);
+  /* Tear down a specific pool connection (frees its mbedTLS contexts + socket). */
+  void ml_derp_disconnect(microlink_t * ml, ml_derp_conn_t * c);
   esp_err_t ml_derp_queue_send(microlink_t * ml, const uint8_t * dest_key, const uint8_t * data, size_t len);
+
+  /* Effective home DERP region for slot 0: the runtime override wins, else the
+   * learned/rehomed home region. 0 = neither known (caller falls back to
+   * ML_DERP_REGION). Shared by ml_derp.c (slot-0 connect), ml_coord.c
+   * (PreferredDERP advert) and ml_stun.c (STUN home region). */
+  static inline uint16_t ml_effective_home_region(const microlink_t * ml)
+  {
+    uint16_t ov = ml->derp_region_override;
+    return ov ? ov : ml->derp_home_region;
+  }
 
   /* ml_coord.c */
   void ml_coord_task(void * arg);
 
   /* ml_wg_mgr.c */
   void ml_wg_mgr_task(void * arg);
+  /* DERP region a peer is homed on, looked up by its 32-byte WG public key.
+   * 0 = peer unknown or region not yet learned. Called from the enqueue path
+   * (same wg_mgr task that owns the peer table) to tag each relayed frame. */
+  uint16_t ml_wg_region_for_pubkey(microlink_t * ml, const uint8_t * wg_pubkey);
+  /* Collect the DISTINCT DERP regions of the safety peers exempt from the
+   * peer-scaling armor (pinned OR priority OR health-tracked). Writes up to
+   * `max` region ids into `out`, returns the count. Used by the DERP task to
+   * decide which auxiliary pool connections to open. */
+  int ml_wg_collect_safety_regions(microlink_t * ml, uint16_t * out, int max);
   void ml_wg_mgr_send_cmm(microlink_t * ml, uint32_t peer_vpn_ip);
   esp_err_t ml_wg_mgr_trigger_handshake(microlink_t * ml, uint32_t dest_vpn_ip);
   bool ml_wg_mgr_peer_is_up(microlink_t * ml, uint32_t vpn_ip);

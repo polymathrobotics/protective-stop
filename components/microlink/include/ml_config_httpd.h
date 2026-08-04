@@ -74,7 +74,11 @@ extern "C"
     /* --- v3 fields --- */
     char device_name_full[48]; /* Full custom hostname (overrides prefix+MAC).
                                        Empty = use device_prefix + MAC suffix */
-    char v3_reserved0[32]; /* retained for NVS blob layout compatibility */
+    /* DERP home-region pin (0 = auto). Carved from the head of v3_reserved0 so
+     * the blob layout/size is UNCHANGED — existing NVS blobs read this as 0
+     * (the reserved bytes were always memset to 0), i.e. auto. Append-safe. */
+    uint16_t derp_region; /* 0 = auto, else 1..4095 forced home DERP region */
+    char v3_reserved0[30]; /* retained for NVS blob layout compatibility */
     char v3_reserved1[32]; /* retained for NVS blob layout compatibility */
   } ml_config_settings_t;
 
@@ -207,6 +211,8 @@ extern "C"
   uint32_t ml_config_get_priority_peer_ip(const ml_config_ctx_t * ctx);
   const char * ml_config_get_ctrl_host(const ml_config_ctx_t * ctx);
   uint8_t ml_config_get_debug_flags(const ml_config_ctx_t * ctx);
+  /* DERP home-region pin (0 = auto). */
+  uint16_t ml_config_get_derp_region(const ml_config_ctx_t * ctx);
 
   /* v3 getter — full custom device name (overrides prefix+MAC) */
   const char * ml_config_get_device_name_full(const ml_config_ctx_t * ctx);
@@ -399,6 +405,12 @@ static inline const char * ml_config_get_ctrl_host(const ml_config_ctx_t * c)
 }
 
 static inline uint8_t ml_config_get_debug_flags(const ml_config_ctx_t * c)
+{
+  (void)c;
+  return 0;
+}
+
+static inline uint16_t ml_config_get_derp_region(const ml_config_ctx_t * c)
 {
   (void)c;
   return 0;

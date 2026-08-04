@@ -121,11 +121,17 @@ sized.
 
 ## 6. DERP / direct-path notes
 
-- A chip holds ONE DERP connection and homes it on its **priority peer's (the
-  fleet's) DERP region**; a DERP server only relays between peers on the **same**
-  region. Machines and remotes both home on the fleet region, so cross-site relay
-  works. If a link only comes up after a `tailscale ping` from a full client, the
-  region homing is off — see `[[reference_pstop_derp_region]]` (fixed in firmware).
+- A chip **homes** one DERP connection on its **priority peer's (the fleet's)
+  region** for inbound reachability, and (since 2026-08-04) opens **additional aux
+  DERP connections on demand — one per distinct region among its pinned safety
+  peers**, up to `ML_DERP_MAX_CONNS` (6). A DERP server only relays between peers
+  connected to *it*, so before multi-region a machine on a different region than
+  the chip's home was unreachable **outbound** (errno 128 — see
+  `docs/OUTBOUND_COLD_BOND.md`). Now the chip routes each peer's relayed frames to
+  that peer's region automatically, so cross-region remote↔machine bonds without a
+  manual `tailscale ping`. If a link still only comes up after a ping, check
+  `/admin/api/monitor` `derp_pool[]` — an aux conn for the peer's region should be
+  present. See `[[reference_pstop_derp_region]]`.
 - Same-LAN remote+machine upgrade to a **direct** path automatically; judge
   direct-vs-DERP by `wg_direct`/`tailscale status`, **not** by `rtt_ms` (the pstop
   loop RTT is hold-time inflated).
@@ -136,6 +142,19 @@ Symptom on the remote: `pstop_machines[slot]` `state=1`, `sent=0`, `send_fail`
 climbing, `errno 128`; the remote's `/admin/api/peers` *has* the machine but the
 machine's `/admin/api/peers` does **not** have the remote.
 
+**`errno 128` (ENOTCONN / "no session keys") has TWO causes — disambiguate first.**
+Check the tailnet size before doing anything:
+
+0. **Is the tailnet < 128 nodes?** Then it is **NOT** a peer-cap trim (step 1 does
+   not apply — do not prune the tailnet or add operators for connectivity). On a
+   small tailnet, errno 128 means the chip's single/pooled DERP connection can't
+   relay its WireGuard handshake to a machine on a **different DERP region** — an
+   **outbound cold-bond / region-home** failure. Check `/admin/api/monitor`
+   `derp_effective_home_region` and `derp_pool[]` vs the machine's region. With the
+   multi-region relay (2026-08-04) the chip opens an aux DERP conn on the machine's
+   region automatically; if it hasn't, the machine's region is unknown/unreachable.
+   Full details and the fix history: **`docs/OUTBOUND_COLD_BOND.md`**. This is the
+   most-misdiagnosed case — it is not a peer count problem.
 1. **Is the tailnet > 128 nodes?** (`/admin/api/peers` length = 128 on both = at the
    cap.) If so → peer-cap trim. Fix: **make the remote an operator on the machine**
    (`POST /api/operators?add=<id>`) so the machine pins it, or prune the tailnet

@@ -1,5 +1,13 @@
 # Tailscale on dual_core_safety — final status 2026-05-26
 
+> ⚠️ **SUPERSEDED — historical (archive).** This reflects the v15.8 era when
+> DISCO/STUN were *disabled* (they wedged the chip above ~8 peers) and DERP was
+> the only path. Both are obsolete: `PEER_SCALING_DESIGN.md` runs DISCO on at 128
+> peers (validated on a 343-node tailnet), direct paths form via DISCO validation
+> (`827386f`), and cross-region relay works via the multi-region pool
+> (`OUTBOUND_COLD_BOND.md`, 2026-08-04). Do not mine this file for current
+> behavior — it is kept for history only.
+
 After the v15.8 changes Tailscale-direct ICMP between the host and the
 chip works end-to-end over DERP, with the chip's safety chain intact.
 v15.10 (2026-05-26) re-confirmed the same behavior after a brief

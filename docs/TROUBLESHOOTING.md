@@ -40,7 +40,7 @@ curl -s http://$CHIP/state.json | python3 -m json.tool
 | `active_iface` | 1 (eth) / 2 (usb) / 3 (wifi) | 0 = no uplink, 4 = SoftAP setup mode |
 | `pstop_sent` / `pstop_replies` | grow together at 10 Hz | replies lagging = path issue; `pstop_send_fail` climbing = chip can't TX (e.g. Tailscale peer while VPN down — fail-safe) |
 | `pstop_mismatch` | **0** | climbing = the cores disagree — usually one loop channel open/shorted; ring shows purple |
-| `pstop_rebonds` | 0 (rare 1s) | climbing = reply loss >1.5 s bursts (link quality) |
+| `pstop_rebonds` | 0 (rare 1s) | climbing = reply loss > ~2.0 s bursts (heartbeat_ms 400 × max_missed 5; was 1.2 s at max_missed 3) — link quality |
 | `e_hi0`/`e_lo0`/`e_hi1`/`e_lo1` | all 1 | per-channel loop diagnostics: `hi=0` = loop open (press/broken wire), `lo=0` = sense stuck high |
 | `heap_min_int` | ≥ 20–30 KiB | low-water internal heap; ~6 KiB lows only in USB-NCM mode |
 | `wg_pbuf_fails` | 0 | lwIP couldn't alloc for a WG packet (silent drop) |
@@ -56,7 +56,7 @@ curl -s http://$CHIP/state.json | python3 -m json.tool
 | 3 | SW | Clean `esp_restart()` (OTA, admin restart, ladder auto-restart) | nothing — normal |
 | 4 | PANIC | Stack overflow, hard fault, `abort()` (including a deliberate liveness abort — check the log) | `/api/last_log` |
 | 5 | INT_WDT | Interrupts disabled too long | long critical sections |
-| 6 | TASK_WDT | TWDT starved 30 s | `/api/last_log`, task list |
+| 6 | TASK_WDT | TWDT starved 5 s (`CONFIG_ESP_TASK_WDT_TIMEOUT_S=5`) | `/api/last_log`, task list |
 | 11 | BROWNOUT | Supply dipped | power supply / cable (not counted toward rollback) |
 
 `reset_reason` is sticky from the last boot. Reason 4 with
