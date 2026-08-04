@@ -14,18 +14,20 @@ jobs:
       fail-fast: false
       matrix:
         # jazzy is the PRIMARY, REQUIRED target and is listed first: a failure
-        # on jazzy fails the whole workflow. humble and lyrical run for
-        # information only (optional: true -> continue-on-error), so a red leg
-        # there does not block a merge. Mark "ROS 2 jazzy (required)" as the
-        # required status check in branch protection.
+        # on jazzy fails the whole workflow. humble runs for information only
+        # (optional: true -> continue-on-error), so a red leg there does not
+        # block a merge. Mark "ROS 2 jazzy (required)" as the required status
+        # check in branch protection.
+        #
+        # lyrical removed 2026-08-04: it fails only because nav2_lifecycle_manager
+        # is not yet packaged for lyrical (a distro-availability gap, not our
+        # code) + a machine CMake dep gap. Re-add a `- ros: lyrical` informational
+        # leg once lyrical packaging catches up.
         include:
           - ros: jazzy
             optional: false
             tier: required
           - ros: humble
-            optional: true
-            tier: informational
-          - ros: lyrical
             optional: true
             tier: informational
     name: ROS 2 ${{ matrix.ros }} (${{ matrix.tier }})
