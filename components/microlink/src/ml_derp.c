@@ -181,7 +181,8 @@ static int derp_tls_read_all(microlink_t * ml, ml_derp_conn_t * c, uint8_t * dat
 /**
  * Read a DERP frame header (5 bytes: type + 4-byte BE length) with timeout.
  */
-static esp_err_t derp_recv_frame_header(microlink_t * ml, ml_derp_conn_t * c, uint8_t * type, uint32_t * len, int timeout_ms)
+static esp_err_t derp_recv_frame_header(
+  microlink_t * ml, ml_derp_conn_t * c, uint8_t * type, uint32_t * len, int timeout_ms)
 {
   uint8_t header[5];
   int ret = derp_tls_read_all(ml, c, header, 5, timeout_ms);
@@ -247,7 +248,8 @@ static int derp_write_frame(microlink_t * ml, ml_derp_conn_t * c, uint8_t type, 
 }
 
 /* Send a packet to a peer via DERP */
-static int derp_send_packet(microlink_t * ml, ml_derp_conn_t * c, const uint8_t * dest_key, const uint8_t * data, size_t len)
+static int derp_send_packet(
+  microlink_t * ml, ml_derp_conn_t * c, const uint8_t * dest_key, const uint8_t * data, size_t len)
 {
   /* SendPacket frame: 32-byte dest key + payload */
   size_t frame_len = 32 + len;
@@ -859,7 +861,8 @@ void ml_derp_tx_task(void * arg)
           ret = derp_write_frame(ml, c, item.frame_type, item.data, item.len);
         }
         if (ret < 0) {
-          ESP_LOGW(TAG, "DERP write failed on %s conn (region %u)", (c == home) ? "home" : "aux", (unsigned)c->region_id);
+          ESP_LOGW(
+            TAG, "DERP write failed on %s conn (region %u)", (c == home) ? "home" : "aux", (unsigned)c->region_id);
           c->connected = false;
           if (c == home) {
             /* Home reconnect is event-driven (handler frees TLS then reconnects). */
@@ -892,7 +895,12 @@ void ml_derp_tx_task(void * arg)
         } else if (ret == 0) {
           break; /* No more data / timeout */
         } else {
-          ESP_LOGW(TAG, "DERP read error %d on %s conn (region %u)", ret, (c == home) ? "home" : "aux", (unsigned)c->region_id);
+          ESP_LOGW(
+            TAG,
+            "DERP read error %d on %s conn (region %u)",
+            ret,
+            (c == home) ? "home" : "aux",
+            (unsigned)c->region_id);
           c->connected = false;
           if (c == home) {
             xEventGroupSetBits(ml->events, ML_EVT_DERP_RECONNECT);
@@ -983,7 +991,13 @@ esp_err_t ml_derp_connect(microlink_t * ml, ml_derp_conn_t * c, uint16_t region_
   bool is_home = (c == &ml->derp[0]);
   int64_t t_derp_start = esp_timer_get_time();
 
-  ESP_LOGI(TAG, "Connecting to DERP %s:%d (region %d, slot=%s)", derp_host, derp_port, lookup_region, is_home ? "home" : "aux");
+  ESP_LOGI(
+    TAG,
+    "Connecting to DERP %s:%d (region %d, slot=%s)",
+    derp_host,
+    derp_port,
+    lookup_region,
+    is_home ? "home" : "aux");
 
   /* DNS resolve — accept IPv4 or IPv6 (carrier may be IPv6-only) */
   struct addrinfo hints = {.ai_family = AF_UNSPEC, .ai_socktype = SOCK_STREAM};

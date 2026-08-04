@@ -737,7 +737,7 @@ static int do_register(microlink_t * ml, ml_noise_state_t * noise)
        * region too (peers reach us where slot 0 is homed); else the learned
        * priority-peer region; else the compiled default. */
       uint16_t pref = ml->derp_region_override ? ml->derp_region_override
-                    : (ml->priority_peer_region ? ml->priority_peer_region : ML_DERP_REGION);
+                                               : (ml->priority_peer_region ? ml->priority_peer_region : ML_DERP_REGION);
       cJSON_AddNumberToObject(netinfo, "PreferredDERP", pref);
       cJSON_AddItemToObject(hostinfo, "NetInfo", netinfo);
     }
