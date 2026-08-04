@@ -31,14 +31,12 @@ using BondedRemote = protective_stop_msgs::msg::BondedRemote;
 // applies, so no node code re-checks the floor.
 
 MachineBridgeNode::MachineBridgeNode(const rclcpp::NodeOptions & options)
-: rclcpp_lifecycle::LifecycleNode("machine_bridge", options),
-  param_listener_(get_node_parameters_interface()),
-  params_(param_listener_.get_params())
+: rclcpp_lifecycle::LifecycleNode("machine_bridge", options)
+, param_listener_(get_node_parameters_interface())
+, params_(param_listener_.get_params())
 {
   // Optional self-managed bring-up
-  if (params_.autostart &&
-    configure().id() == lifecycle_msgs::msg::State::PRIMARY_STATE_INACTIVE)
-  {
+  if (params_.autostart && configure().id() == lifecycle_msgs::msg::State::PRIMARY_STATE_INACTIVE) {
     activate();
   }
 }
@@ -91,10 +89,7 @@ MachineBridgeNode::CallbackReturn MachineBridgeNode::on_configure(const rclcpp_l
   remotes_pub_ = create_publisher<BondedRemoteArray>("~/remotes", data);
 
   param_cb_handle_ =
-    add_on_set_parameters_callback(
-    std::bind(
-      &MachineBridgeNode::on_set_parameters, this,
-      std::placeholders::_1));
+    add_on_set_parameters_callback(std::bind(&MachineBridgeNode::on_set_parameters, this, std::placeholders::_1));
 
   RCLCPP_INFO(get_logger(), "configured: backend=%s", backend_kind_.c_str());
   return CallbackReturn::SUCCESS;
@@ -116,9 +111,7 @@ MachineBridgeNode::CallbackReturn MachineBridgeNode::on_activate(const rclcpp_li
 
   const double hz = params_.rates.publish_rate_hz;  // floored at 1.0 by param validation
   pub_timer_ =
-    create_wall_timer(
-    std::chrono::duration<double>(1.0 / hz),
-    std::bind(&MachineBridgeNode::publish_tick, this));
+    create_wall_timer(std::chrono::duration<double>(1.0 / hz), std::bind(&MachineBridgeNode::publish_tick, this));
 
   const double dhz = params_.rates.diagnostics_rate_hz;  // floored at 0.1 by param validation
   diag_ = std::make_shared<diagnostic_updater::Updater>(this, 1.0 / dhz);
@@ -129,8 +122,7 @@ MachineBridgeNode::CallbackReturn MachineBridgeNode::on_activate(const rclcpp_li
   return CallbackReturn::SUCCESS;
 }
 
-MachineBridgeNode::CallbackReturn MachineBridgeNode::on_deactivate(
-  const rclcpp_lifecycle::State &)
+MachineBridgeNode::CallbackReturn MachineBridgeNode::on_deactivate(const rclcpp_lifecycle::State &)
 {
   if (pub_timer_) {
     pub_timer_->cancel();

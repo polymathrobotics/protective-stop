@@ -59,8 +59,7 @@ static uint64_t now_ms()
 {
   struct timespec ts;
   clock_gettime(CLOCK_MONOTONIC, &ts);
-  return static_cast<uint64_t>(ts.tv_sec) * 1000ULL + static_cast<uint64_t>(ts.tv_nsec) /
-         1000000ULL;
+  return static_cast<uint64_t>(ts.tv_sec) * 1000ULL + static_cast<uint64_t>(ts.tv_nsec) / 1000000ULL;
 }
 
 static remote_details_t cb_remote_details(const device_id_t * /*id*/)
@@ -74,7 +73,7 @@ static remote_details_t cb_remote_details(const device_id_t * /*id*/)
     hb = g_impl->timing.heartbeat_ms;
     allow = g_impl->cfg.allow_unlisted;
   }
-  remote_detail_set(&d, allow, hb, /*is_stop_only=*/ false);
+  remote_detail_set(&d, allow, hb, /*is_stop_only=*/false);
   return d;
 }
 
@@ -121,8 +120,7 @@ bool SoftwareMachineBackend::start()
   pstop_application_init(&impl_->app);
   impl_->app.app_config.max_lost_messages = 10;
   impl_->app.app_config.max_missed_heartbeats = impl_->cfg.timing.max_missed;
-  impl_->app.app_config.delay_between_stop_ms =
-    static_cast<uint32_t>(impl_->cfg.timing.min_stop_ms);
+  impl_->app.app_config.delay_between_stop_ms = static_cast<uint32_t>(impl_->cfg.timing.min_stop_ms);
   impl_->app.remote_details_cb = cb_remote_details;
   impl_->app.status_cb = cb_status;
   impl_->app.log_message_cb = cb_log;
@@ -139,7 +137,7 @@ bool SoftwareMachineBackend::start()
 
   impl_->reachable = true;
   impl_->running = true;
-  impl_->th = std::thread([this] {impl_->run();});
+  impl_->th = std::thread([this] { impl_->run(); });
   return true;
 }
 
@@ -190,9 +188,7 @@ void SoftwareMachineBackend::Impl::run()
       if (known || req_msg.message == PSTOP_MESSAGE_BOND) {
         if (machine_process_message(&machine, &req_msg, &resp_msg) == PSTOP_OK) {
           pstop_message_encode(&resp_msg, respbytes);
-          transport_udp_write(
-            &udp, respbytes, PSTOP_MESSAGE_SIZE,
-            reinterpret_cast<struct sockaddr_in *>(&client));
+          transport_udp_write(&udp, respbytes, PSTOP_MESSAGE_SIZE, reinterpret_cast<struct sockaddr_in *>(&client));
         }
       }
     }
@@ -212,8 +208,7 @@ void SoftwareMachineBackend::Impl::rebuild_snapshot()
   s.relay.run = s.running;
   s.relay.relay_stop = !s.running;
   s.status_reason =
-    s.running ? "armed (cleared to run)" :
-    (s.need_stop ? "need_stop (awaiting arming gesture)" : "stopped");
+    s.running ? "armed (cleared to run)" : (s.need_stop ? "need_stop (awaiting arming gesture)" : "stopped");
 
   for (uint16_t i = 0; i < machine.remotes.max_remotes; ++i) {
     const pstop_remote_data_t * c = &machine.remotes.remotes[i];
@@ -230,8 +225,7 @@ void SoftwareMachineBackend::Impl::rebuild_snapshot()
     std::snprintf(buf, sizeof(buf), "%08x", c->remote_data.remote_id.data);
     r.device_id = buf;
     // Map pstop remote_state -> bond_state (1 connecting, 2 bonded, 3 stopped).
-    r.bond_state = c->remote_state ==
-      PSTOP_REMOTE_INITING ? 1 : (c->remote_state == PSTOP_REMOTE_STOPPED ? 3 : 2);
+    r.bond_state = c->remote_state == PSTOP_REMOTE_INITING ? 1 : (c->remote_state == PSTOP_REMOTE_STOPPED ? 3 : 2);
     r.in_use = rs->remote_stop_id == c->local_remote_id;
     r.stop_only = c->is_stop_only;
     // reply_age / rtt / rebonds are microlink-side metrics not tracked by

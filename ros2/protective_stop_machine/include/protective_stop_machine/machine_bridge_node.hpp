@@ -41,8 +41,7 @@ private:
   // Live timing.* sets: floors are enforced declaratively by the generated
   // ParamListener; this handler only pushes an accepted change to the backend
   // and rejects it if the backend refuses (which the ParamListener can't do).
-  rcl_interfaces::msg::SetParametersResult on_set_parameters(
-    const std::vector<rclcpp::Parameter> & params);
+  rcl_interfaces::msg::SetParametersResult on_set_parameters(const std::vector<rclcpp::Parameter> & params);
 
   // Typed, validated parameters (see protective_stop_machine_params.yaml).
   ParamListener param_listener_;
@@ -56,12 +55,9 @@ private:
 
   std::unique_ptr<IMachineBackend> backend_;
 
-  rclcpp_lifecycle::LifecyclePublisher<protective_stop_msgs::msg::ProtectiveStopStatus>::SharedPtr
-    state_pub_;
-  rclcpp_lifecycle::LifecyclePublisher<protective_stop_msgs::msg::MachineRelayStatus>::SharedPtr
-    relay_pub_;
-  rclcpp_lifecycle::LifecyclePublisher<protective_stop_msgs::msg::BondedRemoteArray>::SharedPtr
-    remotes_pub_;
+  rclcpp_lifecycle::LifecyclePublisher<protective_stop_msgs::msg::ProtectiveStopStatus>::SharedPtr state_pub_;
+  rclcpp_lifecycle::LifecyclePublisher<protective_stop_msgs::msg::MachineRelayStatus>::SharedPtr relay_pub_;
+  rclcpp_lifecycle::LifecyclePublisher<protective_stop_msgs::msg::BondedRemoteArray>::SharedPtr remotes_pub_;
   rclcpp::TimerBase::SharedPtr pub_timer_;
   std::shared_ptr<diagnostic_updater::Updater> diag_;
   rclcpp::node_interfaces::OnSetParametersCallbackHandle::SharedPtr param_cb_handle_;

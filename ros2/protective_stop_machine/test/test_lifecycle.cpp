@@ -57,9 +57,7 @@ TEST_F(Lifecycle, RejectsMinStopZero)
 {
   EXPECT_THROW(
     std::make_shared<MachineBridgeNode>(
-      with(
-        {rclcpp::Parameter("backend", "software"),
-          rclcpp::Parameter("timing.min_stop_ms", 0)})),
+      with({rclcpp::Parameter("backend", "software"), rclcpp::Parameter("timing.min_stop_ms", 0)})),
     rclcpp::exceptions::InvalidParameterValueException);
 }
 
@@ -69,9 +67,7 @@ TEST_F(Lifecycle, RejectsOversizeHeartbeat)
 {
   EXPECT_THROW(
     std::make_shared<MachineBridgeNode>(
-      with(
-        {rclcpp::Parameter("backend", "software"),
-          rclcpp::Parameter("timing.heartbeat_ms", 5000)})),
+      with({rclcpp::Parameter("backend", "software"), rclcpp::Parameter("timing.heartbeat_ms", 5000)})),
     rclcpp::exceptions::InvalidParameterValueException);
 }
 

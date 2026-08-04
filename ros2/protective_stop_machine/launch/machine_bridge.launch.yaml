@@ -1,3 +1,4 @@
+---
 # SPDX-FileCopyrightText: 2026 Polymath Robotics, Inc.
 # SPDX-License-Identifier: Apache-2.0
 
@@ -9,20 +10,20 @@
 launch:
   - arg:
       name: params_file
-      default: "$(find-pkg-share protective_stop_machine)/config/machine_params.yaml"
+      default: $(find-pkg-share protective_stop_machine)/config/machine_params.yaml
 
   - arg:
       name: autostart
-      default: "true"
+      default: 'true'
 
   - lifecycle_node:
       pkg: protective_stop_machine
       exec: machine_bridge_node
       name: machine_bridge
-      namespace: ""
+      namespace: ''
       output: screen
       param:
-        - from: "$(var params_file)"
+        - from: $(var params_file)
         - name: autostart
-          value: "$(var autostart)"
+          value: $(var autostart)
           type: bool

@@ -28,8 +28,7 @@ static size_t write_cb(char * ptr, size_t size, size_t nmemb, void * userdata)
 
 HardwareMachineBackend::HardwareMachineBackend(const HardwareConfig & cfg)
 : cfg_(cfg)
-{
-}
+{}
 
 HardwareMachineBackend::~HardwareMachineBackend()
 {
@@ -46,9 +45,9 @@ bool HardwareMachineBackend::start()
   // the process with other curl users, so we leak it until exit rather than tear
   // it down underneath them.
   static std::once_flag curl_once;
-  std::call_once(curl_once, [] {curl_global_init(CURL_GLOBAL_DEFAULT);});
+  std::call_once(curl_once, [] { curl_global_init(CURL_GLOBAL_DEFAULT); });
   running_ = true;
-  th_ = std::thread([this] {poll_loop();});
+  th_ = std::thread([this] { poll_loop(); });
   return true;
 }
 
@@ -227,7 +226,7 @@ bool HardwareMachineBackend::configure(const MachineTiming & timing, std::string
     return true;
   }
   error = "device did not accept timing config (http " + std::to_string(status) +
-    "); hardware timing is set via device config";
+          "); hardware timing is set via device config";
   return false;
 }
 
