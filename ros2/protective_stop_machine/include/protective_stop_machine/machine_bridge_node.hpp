@@ -10,6 +10,8 @@
 #include "diagnostic_updater/diagnostic_updater.hpp"
 #include "protective_stop_machine/announce.hpp"
 #include "protective_stop_machine/backend.hpp"
+#include "protective_stop_machine/fleet_checkin.hpp"
+#include "protective_stop_machine/protective_stop_machine_parameters.hpp"
 #include "protective_stop_msgs/msg/bonded_remote_array.hpp"
 #include "protective_stop_msgs/msg/machine_relay_status.hpp"
 #include "protective_stop_msgs/msg/protective_stop_status.hpp"
@@ -36,16 +38,25 @@ public:
   CallbackReturn on_error(const rclcpp_lifecycle::State &) override;
 
 private:
-  void declare_all_parameters();
   bool build_backend(std::string & error);
   void publish_tick();
   void diagnostics(diagnostic_updater::DiagnosticStatusWrapper & stat);
-  bool validate_timing(const MachineTiming & t, std::string & reason) const;
+  // Live timing.* sets: floors are enforced declaratively by the generated
+  // ParamListener; this handler only pushes an accepted change to the backend
+  // and rejects it if the backend refuses (which the ParamListener can't do).
   rcl_interfaces::msg::SetParametersResult on_set_parameters(
     const std::vector<rclcpp::Parameter> & params);
+  // ~/configure_machine: runtime timing reconfiguration for callers that are not
+  // the parameter system. Request values <= 0 mean "leave unchanged"; the SR-M-01
+  // floor is re-checked here (timing_within_floors) because these values do NOT
+  // pass through the generated ParamListener's declared ranges.
   void handle_configure(
     const std::shared_ptr<protective_stop_msgs::srv::ConfigureMachine::Request> req,
     std::shared_ptr<protective_stop_msgs::srv::ConfigureMachine::Response> resp);
+
+  // Typed, validated parameters (see protective_stop_machine_params.yaml).
+  ParamListener param_listener_;
+  Params params_;
 
   // config
   std::string backend_kind_;
@@ -59,8 +70,14 @@ private:
   int announce_port_{0};
   uint32_t machine_id_{0};
 
+  // Fleet DEVICE check-in (optional, opt-in, software backend only). Registers
+  // the software machine with pstop-fleet like an ESP32 machn; resolved at
+  // configure time, the thread runs only while ACTIVE. Additive to the announcer.
+  FleetCheckinConfig fleet_cfg_;
+
   std::unique_ptr<IMachineBackend> backend_;
   std::unique_ptr<MachineAnnouncer> announcer_;
+  std::unique_ptr<FleetCheckin> fleet_checkin_;
 
   rclcpp_lifecycle::LifecyclePublisher<protective_stop_msgs::msg::ProtectiveStopStatus>::SharedPtr
     state_pub_;

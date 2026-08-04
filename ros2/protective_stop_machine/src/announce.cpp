@@ -14,6 +14,7 @@
 #include <cstdio>
 #include <cstring>
 #include <string>
+#include <utility>
 
 namespace protective_stop_machine
 {
@@ -25,11 +26,12 @@ static size_t discard_cb(char * /*ptr*/, size_t size, size_t nmemb, void * /*use
 }
 
 MachineAnnouncer::MachineAnnouncer(
-  AnnounceConfig cfg, int port, uint32_t machine_id,
-  std::function<MachineSnapshot()> snapshot_fn)
-: cfg_(std::move(cfg)), port_(port), machine_id_(machine_id), snapshot_fn_(std::move(snapshot_fn))
-{
-}
+  AnnounceConfig cfg, int port, uint32_t machine_id, std::function<MachineSnapshot()> snapshot_fn)
+: cfg_(std::move(cfg))
+  , port_(port)
+  , machine_id_(machine_id)
+  , snapshot_fn_(std::move(snapshot_fn))
+{}
 
 MachineAnnouncer::~MachineAnnouncer()
 {
@@ -106,9 +108,8 @@ void MachineAnnouncer::run()
       }
       std::fclose(file);
     } else {
-      std::fprintf(
-        stderr, "announce: cannot read key file %s — announce disabled\n",
-        cfg_.key_file.c_str());
+      std::fprintf(stderr, "announce: cannot read key file %s — announce disabled\n",
+          cfg_.key_file.c_str());
       enabled_ = false;
       running_ = false;
       return;
@@ -136,11 +137,9 @@ void MachineAnnouncer::run()
     const int now_ok = ok ? 1 : 0;
     if (now_ok != last_ok) {
       if (ok) {
-        std::fprintf(
-          stderr, "announce: OK -> %s (as \"%s\")\n", cfg_.url.c_str(), name.c_str());
+        std::fprintf(stderr, "announce: OK -> %s (as \"%s\")\n", cfg_.url.c_str(), name.c_str());
       } else {
-        std::fprintf(
-          stderr, "announce: FAILED -> %s (will keep retrying)\n", cfg_.url.c_str());
+        std::fprintf(stderr, "announce: FAILED -> %s (will keep retrying)\n", cfg_.url.c_str());
       }
       last_ok = now_ok;
     }

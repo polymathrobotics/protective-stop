@@ -196,9 +196,8 @@ void SoftwareMachineBackend::Impl::run()
       if (known || req_msg.message == PSTOP_MESSAGE_BOND) {
         if (machine_process_message(&machine, &req_msg, &resp_msg) == PSTOP_OK) {
           pstop_message_encode(&resp_msg, respbytes);
-          transport_udp_write(
-            &udp, respbytes, PSTOP_MESSAGE_SIZE,
-            reinterpret_cast<struct sockaddr_in *>(&client));
+          transport_udp_write(&udp, respbytes, PSTOP_MESSAGE_SIZE,
+              reinterpret_cast<struct sockaddr_in *>(&client));
         }
       }
     }

@@ -12,10 +12,10 @@
 
 #include "protective_stop_machine/announce.hpp"
 
-using protective_stop_machine::MachineSnapshot;
-using protective_stop_machine::RemoteInfo;
 using protective_stop_machine::build_announce_payload;
 using protective_stop_machine::json_escape;
+using protective_stop_machine::MachineSnapshot;
+using protective_stop_machine::RemoteInfo;
 
 // A substring is present in the payload.
 static bool has(const std::string & hay, const std::string & needle)

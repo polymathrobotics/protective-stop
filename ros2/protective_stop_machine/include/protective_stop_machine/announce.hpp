@@ -149,7 +149,10 @@ public:
   // Stop the thread and join. Idempotent.
   void stop();
 
-  bool enabled() const {return enabled_.load();}
+  bool enabled() const
+  {
+    return enabled_.load();
+  }
 
 private:
   void run();
