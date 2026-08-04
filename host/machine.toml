@@ -76,9 +76,14 @@ allow_unlisted = true
 # remote-side configuration. 400 => remotes publish every 200 ms (5 Hz);
 # with max_missed_heartbeats = 3 the machine STOPs after ~1.2 s of silence.
 default_heartbeat_ms = 400
-# Unlisted remotes as stop-only? (stop_only = may command STOP but can never
-# arm the machine to OK). Usually false.
-default_stop_only = false
+# SAFETY DEFAULT. Unlisted remotes are accepted as STOP-ONLY: they may command
+# STOP and are heartbeat-monitored, but may NEVER re-arm the machine (STOP->OK).
+# Only remotes named in an [[operator]] entry with stop_only = false may re-arm.
+# With the operator list empty (the default below) every remote is stop-only =
+# maximally safe out of the box; add operator entries during configuration to
+# grant re-arm authority. Leave this true unless you deliberately want any
+# unlisted remote to be able to arm the machine.
+default_stop_only = true
 # ARMING POLICY. Minimum time (ms) between the STOP that opens an arming
 # cycle and the OK that completes it; an earlier OK is refused (machine
 # replies STOP and stays STOPPED — the episode can still complete by waiting
@@ -119,18 +124,22 @@ announce_interval_s = 60
 #   stop_only    : true => this remote may STOP the machine but never arm it OK.
 #   allowed      : false => the machine rejects this remote's bonds outright.
 #
-# With allow_unlisted = true (above) any per-unit ID is accepted and these
-# entries are optional overrides — the simplest setup for a mixed fleet. With
-# allow_unlisted = false, list every remote's exact 0x01xxxxxx ID here.
+# This is the OPERATOR ALLOWLIST and it is EMPTY by default: with no entries,
+# every remote that bonds is stop-only (default_stop_only above) and NONE can
+# re-arm. To grant a specific remote re-arm authority, add an entry for its
+# 0x01xxxxxx ID with stop_only = false. (With allow_unlisted = false these
+# entries also become the only remotes accepted at all.)
 # -----------------------------------------------------------------------------
+# Example operator (commented out) — uncomment and set the real ID to grant this
+# remote FULL operator authority (may STOP *and* re-arm):
 # [[operator]]
 # device_id    = 0x01xxxxxx   # a specific pstop remote (see its boot log)
 # heartbeat_ms = 1000
-# stop_only    = false
+# stop_only    = false        # false => may re-arm; true => stop-only override
 # allowed      = true
 
-# Example second remote (commented out) — uncomment to test multi-remote /
-# stop-only behavior:
+# Example second remote (commented out) — an explicit STOP-ONLY entry (same as
+# the default treatment, but pinned so it survives allow_unlisted = false):
 # [[operator]]
 # device_id    = 0x01020381
 # heartbeat_ms = 500

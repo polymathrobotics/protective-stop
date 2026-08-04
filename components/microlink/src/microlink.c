@@ -739,6 +739,14 @@ void microlink_set_data_callback(microlink_t * ml, microlink_data_cb_t cb, void 
   }
 }
 
+void microlink_set_peer_wanted_cb(microlink_t * ml, microlink_peer_wanted_cb_t cb, void * ctx)
+{
+  if (ml) {
+    ml->peer_wanted_cb = cb;
+    ml->peer_wanted_ctx = ctx;
+  }
+}
+
 /* ============================================================================
  * Utilities
  * ========================================================================== */

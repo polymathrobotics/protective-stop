@@ -40,7 +40,9 @@ re-establishes on its own after either end reboots. On a shared subnet
 the remote also advertises its LAN address so peers can take the direct
 local path instead of the relay. The machine wrapper adds a
 minimum-hold arming policy so an electrical blip can never perform the
-arming gesture.
+arming gesture. A machine accepts every remote that bonds but treats it
+as stop-only by default — any remote can STOP, but only remotes on the
+machine's operator allowlist (empty by default) can re-arm it.
 
 ```mermaid
 flowchart LR
@@ -135,7 +137,8 @@ releasing. The runner logs `ARMED` and the ring turns green.
 ## Key facts
 
 - 10 Hz heartbeat; stop-on-silence is `heartbeat_ms ×
-  (max_missed_heartbeats+1)`, about 1 to 2 s as configured.
+  max_missed_heartbeats`, about 2.0 s as configured (400 ms × 5;
+  `max_missed_heartbeats` raised 3 → 5 on 2026-08-04).
 - One remote can heartbeat up to 4 machines (`/api/pstop_peers`), each an
   independent session with its own bond and reply watchdog; one dead
   machine never stalls the others. STOP and the arming gesture broadcast
@@ -145,6 +148,14 @@ releasing. The runner logs `ARMED` and the ring turns green.
   vetoed machine-side. The remote also debounces loop re-close by 3
   ticks and holds all transmission until the loops settle at boot, so
   an EMC blip can't arm.
+- Operator vs stop-only remote: every remote that bonds is accepted and
+  can command STOP (and its silence stops the machine), but by default
+  it is **stop-only** — it can never re-arm (STOP→OK). Only remotes on
+  the machine's **operator allowlist** may re-arm, and that allowlist is
+  **empty by default**, so out of the box every remote is stop-only
+  (maximally safe) and operators are named during configuration
+  (`docs/FAILOVER_AND_ARMING_DESIGN_2026-07-21.md`; enforced in
+  `pstop_c` `machine.c:135-142`).
 - Fail-safe silence: lockstep mismatch, loop fault, VPN-down
   (source-bound socket), and comparator stall all result in no message,
   which the machine treats as STOP.
@@ -181,6 +192,13 @@ was removed from production firmware; tests exercise the machine policy
 through the scripted test remote instead, and arming a real unit
 requires a physical press.
 
+For long-run remote-to-machine connectivity soaks over Tailscale,
+`tools/soak_disconnect_monitor.py` polls remotes and machines, records
+every disconnect with the context needed to localize its cause
+(`sf_route`/errno, `ml_reconnects`, `wg_direct`, `rebonds`), and supports
+an "N-hours-clean" acceptance exit
+([`docs/CONNECTIVITY_SOAK.md`](docs/CONNECTIVITY_SOAK.md)).
+
 `./tools/misra_check.sh` runs a free-cppcheck MISRA C:2012 pass over
 the code we own (`pstop_c` is excluded; see
 `docs/MISRA_COMPLIANCE_2026-07-21.md` for results and the deviation
@@ -197,6 +215,10 @@ left the heartbeat intact, and a total link loss degraded to STOP with
 autonomous recovery in about 3 to 6 s
 (`docs/TWO_SITE_FAILOVER_2026-07-21.md`). Many-remotes-to-one-machine
 logic is validated in `docs/MULTI_REMOTE_VALIDATION_2026-07-22.md`.
+**How to bond and operate multiple remotes and machines over Tailscale —
+including the 128-peer cap rule that governs whether a cross-site remote can
+reach a machine — is documented in
+[`docs/MULTI_REMOTE_MULTI_MACHINE.md`](docs/MULTI_REMOTE_MULTI_MACHINE.md).**
 
 ## Current status and open items (2026-07-22)
 

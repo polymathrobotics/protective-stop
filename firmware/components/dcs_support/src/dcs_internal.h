@@ -36,6 +36,7 @@ extern "C"
 #define DCS_NVS_KEY_PSTOP_NUM "ps_num" /* USB "PSTOPxx" unit number (0=auto) */
 #define DCS_NVS_KEY_RING_OFF "ring_off" /* ring rotation: physical index of LED 1 */
 #define DCS_NVS_KEY_PSTOP_PEERS "ps_peers" /* multi-machine peer table (blob, see dcs_nvs.c) */
+#define DCS_NVS_KEY_OPERATORS "operators" /* operator allowlist (blob: count byte + u32 ids) */
 
 #define DCS_RST_HIST_LEN 16
 
@@ -157,6 +158,7 @@ extern "C"
   extern atomic_uint_fast32_t g_dcs_machn_r_age_ms[DCS_MACHN_MAX_REMOTES];
   extern atomic_uint_fast32_t g_dcs_machn_r_rtt_ms[DCS_MACHN_MAX_REMOTES];
   extern atomic_uint_fast32_t g_dcs_machn_r_ip[DCS_MACHN_MAX_REMOTES]; /* UDP source = remote's tailnet IP */
+  extern atomic_uint_fast32_t g_dcs_machn_r_stop_only[DCS_MACHN_MAX_REMOTES]; /* 1 = stop-only (no re-arm) */
   extern atomic_uint_fast32_t g_dcs_pstop_rtt_ms;
   extern atomic_uint_fast64_t g_dcs_pstop_last_reply_ms;
   extern atomic_uint_fast32_t g_dcs_pstop_peer_ip;
@@ -285,6 +287,12 @@ extern "C"
 
   void dcs_nvs_read_pstop_peers(dcs_pstop_peer_rec_t out[DCS_PSTOP_MAX_MACHINES]);
   esp_err_t dcs_nvs_write_pstop_peers(const dcs_pstop_peer_rec_t recs[DCS_PSTOP_MAX_MACHINES]);
+
+  /* Operator allowlist (blob: count byte + count*u32 ids, big-endian). Read
+   * fills out[] and returns the count (0 on blank NVS = empty = all stop-only).
+   * Write persists the given ids. See dcs_operator_* in dcs_support.h. */
+  int dcs_nvs_read_operators(uint32_t out[DCS_MAX_OPERATORS]);
+  esp_err_t dcs_nvs_write_operators(const uint32_t ids[DCS_MAX_OPERATORS], int count);
 
   /* dcs_safety.c */
   void dcs_safety_account_boot(void); /* increments crash counter + applies

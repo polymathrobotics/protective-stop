@@ -29,6 +29,21 @@ protective_stop_machine:
       description: UDP port for the in-process software backend.
       validation:
         bounds<>: [1, 65535]
+    # Operator authorization (SAFETY). A bonded remote is accepted and
+    # heartbeat-monitored but STOP-ONLY by default: it may command STOP but may
+    # NEVER re-arm (STOP -> OK). Only a remote whose 32-bit pstop id is listed in
+    # `operators` gets re-arm authority. An empty list (the default) leaves every
+    # remote stop-only = maximally safe out of the box.
+    default_stop_only:
+      type: bool
+      default_value: true
+      read_only: true
+      description: Policy for UNLISTED remotes. True (the default, and what a deployment should keep) makes them stop-only, so they may STOP but never re-arm.
+    operators:
+      type: int_array
+      default_value: []
+      read_only: true
+      description: 32-bit pstop ids granted re-arm authority, e.g. [30234300]. Empty (default) means no remote may re-arm.
 
   hardware:
     device_url:

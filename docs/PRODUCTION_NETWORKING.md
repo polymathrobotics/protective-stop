@@ -35,7 +35,7 @@ under adverse NAT:
    no relay dependency. Prefer this in deployment layout.
 2. **Self-hosted DERP near sites.** For links that must relay, a DERP node close
    to the deployment cuts latency/jitter and removes dependence on public DERP
-   capacity. The safety heartbeat (400 ms / 1.2 s timeout) tolerates the
+   capacity. The safety heartbeat (400 ms / 2.0 s timeout) tolerates the
    measured public-DERP RTT (~40–160 ms) today, but a local DERP widens the
    margin and improves determinism — worth it for short-PST vehicles.
 3. **Outbound-initiated fleet command channel (management, not the safety
@@ -46,7 +46,9 @@ under adverse NAT:
    firmware addition; needs a fleet-side command queue.)
 
 ## 3. Heartbeat-timing under relay — validated tolerance
-The safety link's liveness = `heartbeat_ms × max_missed` = 400 × 3 ≈ 1.2 s.
+The safety link's liveness = `heartbeat_ms × max_missed` = 400 × 5 ≈ 2.0 s
+(`max_missed` raised 3 → 5 on 2026-08-04 to ride through ~90-min Tailscale
+control-plane re-syncs; was 400 × 3 ≈ 1.2 s).
 Over the public DERP relay the remote DUT bonded and streamed OK/crc=ok with the
 machine armed and STOPping correctly on press/discordance — i.e. the timing
 budget already absorbs public-DERP latency + jitter. Re-confirm this margin for

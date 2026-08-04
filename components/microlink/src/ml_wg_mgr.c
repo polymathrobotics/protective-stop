@@ -56,6 +56,7 @@ static inline bool ml_lwip_core_lock_needed(void)
 
 /* Forward declarations */
 static void disco_send_call_me_maybe(microlink_t * ml, int peer_idx);
+static void wg_mgr_drain_wg_rx(microlink_t * ml);
 
 /* v15.22 — WG data-packet dedup ring.
  *
@@ -544,7 +545,7 @@ static uint32_t fleet_server_ip_cached(void)
  * the tailnet after the chip's last full netmap (or that has no recent
  * activity) gets trimmed by the ML_MAX_PEERS cap and the remote can never
  * bond to it (observed: EHOSTUNREACH on every BOND, bench 2026-07-31). */
-#define ML_EXTRA_PINS 8
+#define ML_EXTRA_PINS 16
 static uint32_t s_extra_pins[ML_EXTRA_PINS];
 
 /* True path RTT to a peer from the disco layer (txid-matched ping->pong,
@@ -811,6 +812,21 @@ static int add_peer(microlink_t * ml, const ml_peer_update_t * update)
         idx = i;
         break;
       }
+    }
+
+    /* Peer table full, and this peer isn't pinned yet — but the application
+         * (machn) may still need it: an incoming peer whose device identity is on
+         * the operator allowlist must be kept, or the machine never learns its WG
+         * key and the remote can never bond. Pin it NOW (bounded set: operators
+         * are ≤ DCS_MAX_OPERATORS) so is_pinned_peer() below is true and the
+         * existing LRU-evict-for-pinned path makes room; pinning also persists it
+         * for future netmap syncs. Stop-only accept-all remotes are NOT pinned
+         * here and remain best-effort. Null cb (e.g. remotes) = current behavior. */
+    if (
+      idx < 0 && !is_pinned_peer(ml, update->vpn_ip) && ml->peer_wanted_cb != NULL &&
+      ml->peer_wanted_cb(ml->peer_wanted_ctx, update->hostname, update->vpn_ip))
+    {
+      microlink_pin_peer_ip(ml, update->vpn_ip, true);
     }
 
     /* Peer table full — evict LRU non-pinned peer if the incoming peer is
@@ -1125,6 +1141,10 @@ static void process_peer_updates(microlink_t * ml)
     switch (update->action) {
       case ML_PEER_ADD:
         add_peer(ml, update);
+        /* Interleave any pending safety-heartbeat decrypt between the heavy
+             * X25519 peer-adds so a 10 Hz heartbeat is never starved behind a
+             * netmap-resync burst. */
+        wg_mgr_drain_wg_rx(ml);
         /* Each add costs an X25519 (~30 ms). Ingesting a 100-peer
              * MapResponse in one pass stalled the loop for ~10 s while the
              * pstop RX queue overflowed — pace it and let the 10 ms loop
@@ -1533,10 +1553,59 @@ static void process_disco_pong(
 
     /* If direct reply, update best path */
     if (!pkt->via_derp && pkt->src_ip != 0) {
-      p->best_ip = pkt->src_ip;
-      p->best_port = pkt->src_port;
+      /* FIX A — sticky safety path. The priority/health-tracked (pstop) peer
+       * keeps its proven direct endpoint across a netmap rebond: a pong from a
+       * DIFFERENT non-upgrade endpoint must NOT flip best_ip and force a WG
+       * re-handshake (that momentary DERP fallback is what dropped the safety
+       * heartbeat). Mirrors tailscale magicsock trustBestAddrUntil+betterAddr. */
+      bool had_direct = p->has_direct_path;
+      bool is_prio =
+        (ml->config.priority_peer_ip != 0 && p->vpn_ip == ml->config.priority_peer_ip) || is_health_tracked(p->vpn_ip);
+
+      /* Any direct pong proves reachability — renew liveness first, regardless
+       * of whether we adopt this specific endpoint below. */
       p->has_direct_path = true;
       p->trust_until_ms = now + ML_DISCO_TRUST_DURATION_MS;
+
+      bool same_ep = (pkt->src_ip == p->best_ip && pkt->src_port == p->best_port);
+      /* A move from a WAN/STUN address to a LAN address is a genuine upgrade
+       * (lower latency, no hairpin) and IS allowed to switch even for pinned peers. */
+      bool genuine_upgrade = is_lan_ip(pkt->src_ip) && !is_lan_ip(p->best_ip);
+
+      if (is_prio && had_direct && p->best_ip != 0 && !same_ep && !genuine_upgrade) {
+        /* Keep the established direct path. Remember the alternate endpoint as
+         * a candidate (dedup; bounded by ML_MAX_ENDPOINTS) so a later probe can
+         * still find it if the current path actually fails. */
+        bool present = false;
+        for (int e = 0; e < p->endpoint_count && e < ML_MAX_ENDPOINTS; e++) {
+          if (p->endpoints[e].ip == pkt->src_ip && p->endpoints[e].port == pkt->src_port) {
+            present = true;
+            break;
+          }
+        }
+        if (!present && p->endpoint_count < ML_MAX_ENDPOINTS) {
+          p->endpoints[p->endpoint_count].ip = pkt->src_ip;
+          p->endpoints[p->endpoint_count].port = pkt->src_port;
+          p->endpoints[p->endpoint_count].is_ipv6 = false;
+          p->endpoint_count++;
+        }
+        ESP_LOGI(
+          TAG,
+          "Keeping established direct path for %s (alt %d.%d.%d.%d:%d recorded as candidate)",
+          p->hostname,
+          (int)((pkt->src_ip >> 24) & 0xFF),
+          (int)((pkt->src_ip >> 16) & 0xFF),
+          (int)((pkt->src_ip >> 8) & 0xFF),
+          (int)(pkt->src_ip & 0xFF),
+          (int)pkt->src_port);
+        /* Consume this probe exactly like the normal matched-pong exit below. */
+        pending_probes[i].active = false;
+        matched = true;
+        break;
+      }
+
+      p->best_ip = pkt->src_ip;
+      p->best_port = pkt->src_port;
 
       /* Update WireGuard endpoint to direct path.
              * Always update the stored endpoint. Only force a handshake if we
@@ -1965,6 +2034,19 @@ static void process_wg_packet(microlink_t * ml, const ml_rx_packet_t * pkt)
   wireguardif_network_rx(device, NULL, p, &addr, pkt->src_port);
   if (need_lock) {
     UNLOCK_TCPIP_CORE();
+  }
+}
+
+/* Drain pending inbound WG packets now, so a 10 Hz safety heartbeat decrypt is
+ * never queued behind a burst of netmap-resync X25519 work. Bounded: returns
+ * when the queue is empty; an established session's data decrypt is sub-ms.
+ * Only makes the EXISTING decrypt run sooner via the EXISTING core-lock in
+ * process_wg_packet — no reordering (replay window + dedup still apply), no drop. */
+static void wg_mgr_drain_wg_rx(microlink_t * ml)
+{
+  ml_rx_packet_t wg_pkt;
+  while (xQueueReceive(ml->wg_rx_queue, &wg_pkt, 0) == pdTRUE) {
+    process_wg_packet(ml, &wg_pkt);
   }
 }
 
@@ -2586,11 +2668,18 @@ void ml_wg_mgr_task(void * arg)
       /* Only UNKNOWN-key packets consume budget: they cost a full X25519.
              * Known-peer packets (cached DH, ~1 ms) flow freely, so pstop
              * counterparts' pings/pongs never wait behind tailnet chatter. */
-      if (!disco_pkt_known_key(ml, &disco_pkt)) {
+      bool unknown_key = !disco_pkt_known_key(ml, &disco_pkt);
+      if (unknown_key) {
         disco_budget--;
       }
       process_disco_packet(ml, &disco_pkt);
       free(disco_pkt.data);
+      if (unknown_key) {
+        /* That box-open was a full X25519 (~30 ms). Interleave any pending
+                 * safety-heartbeat decrypt now so it isn't starved behind a
+                 * burst of unknown-key DISCO opens. */
+        wg_mgr_drain_wg_rx(ml);
+      }
     }
 
     /* WG packets again — a full disco budget may have taken ~120 ms;

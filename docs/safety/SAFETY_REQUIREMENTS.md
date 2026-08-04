@@ -11,7 +11,7 @@ backbone (`docs/safety/SYSTEM_DEFINITION.md` §4). Numbers, formulas, and
 Option-A/B/C status follow `docs/safety/RECONCILIATION.md` (**code wins**):
 Option A + Option B **live**, Option C **dropped**, GPIO config-integrity
 re-verification **not implemented**, heartbeat timeout = `heartbeat_ms ×
-max_missed` (400 × 3 ≈ 1.2 s).
+max_missed` (400 × 5 ≈ 2.0 s; `max_missed` raised 3 → 5 on 2026-08-04).
 
 **Standard frame:** IEC 61508 (SIL / systematic capability) + ISO 13849 (PL for
 the actuation side). Allocated target: **SIL 3 / PL e** for the on-demand stop —
@@ -67,14 +67,15 @@ below is therefore conditional and tagged as such.
 
 | ID | Requirement (shall) | Derived from | Allocated to | Integrity | Verify | Status |
 |---|---|---|---|---|---|---|
-| **SR-SYS-01** | On any stop demand **or** any detected fault, the pstop system shall drive the machine to de-energized STOP such that the end-to-end reaction time (sense → verdict → transmit → machine detection → final-element de-energize) does not exceed the vehicle Process Safety Time; the worst-case internal budget shall be **≤ 1.3 s** (heartbeat `400 ms × max_missed 3` = 1.2 s + one 100 ms tick, HARA A-05). | SG-1, H-01/H-03/H-09/H-11 | F-R-01..05, F-H-03, F-M-03/04, final element | SIL 3 / PL e | Analysis (timing budget) + Test (injected demand → STOP latency) | **Gap** (budget asserted; PST is integrator input A-05; measured latency not yet evidenced) |
-| **SR-SYS-02** | The machine shall hold OK **only** while a sustained OK is freshly and causally derived from a correct live both-channel read on the remote **and** a valid black-channel round-trip; any staleness, replay, or forgery shall resolve to STOP within the heartbeat timeout (≤ 1.2 s). | SG-2, H-05/H-06/H-11 | F-R-02/06, F-H-03, F-P-03/04 | SIL 3 / PL e | Test + Fault-injection (stale/replayed/forged OK) | **Gap** at system level (constituent SRs partly Satisfied; end-to-end staleness test outstanding) |
+| **SR-SYS-01** | On any stop demand **or** any detected fault, the pstop system shall drive the machine to de-energized STOP such that the end-to-end reaction time (sense → verdict → transmit → machine detection → final-element de-energize) does not exceed the vehicle Process Safety Time; the worst-case internal budget shall be **≤ 2.1 s** (heartbeat `400 ms × max_missed 5` = 2.0 s + one 100 ms tick, HARA A-05). `max_missed` is a tunable, raised 3 → 5 on 2026-08-04 (was ≤ 1.3 s at `max_missed 3`); the PST budget must accommodate the ~2.0 s detection time. | SG-1, H-01/H-03/H-09/H-11 | F-R-01..05, F-H-03, F-M-03/04, final element | SIL 3 / PL e | Analysis (timing budget) + Test (injected demand → STOP latency) | **Gap** (budget asserted; PST is integrator input A-05; measured latency not yet evidenced) |
+| **SR-SYS-02** | The machine shall hold OK **only** while a sustained OK is freshly and causally derived from a correct live both-channel read on the remote **and** a valid black-channel round-trip; any staleness, replay, or forgery shall resolve to STOP within the heartbeat timeout (≤ 2.0 s at `max_missed` 5, since 2026-08-04). | SG-2, H-05/H-06/H-11 | F-R-02/06, F-H-03, F-P-03/04 | SIL 3 / PL e | Test + Fault-injection (stale/replayed/forged OK) | **Gap** at system level (constituent SRs partly Satisfied; end-to-end staleness test outstanding) |
 | **SR-SYS-03** | The machine shall transition STOP→OK **only** via a deliberate arming gesture (STOP held ≥ `min_stop_ms` = 500 ms, then released) — never spontaneously, on a transient, or at boot. | SG-3, H-04/H-08 | F-R-03, F-H-02, F-M-03 | SIL 3 / PL e | Test (transient/boot-glitch never arms) | **Partially satisfied** (machine min-stop veto live; boot hold live; host floor is a Gap — see SR-H-03) |
 | **SR-SYS-04** | In many-remotes→one-machine, **any** bonded remote's STOP or silence shall force STOP regardless of other remotes (fail-safe OR); arming shall require a single owning gesture, and a lost/ghost bond shall not read as present-and-OK. | SG-4, H-07 | F-H-05, F-P-04 | SIL 3 / PL e | Test (multi-remote E2E; 1 STOP masks N OK) | **Partially satisfied** (`pstop_multi_remote_test.py` 32/32; ghost-bond random-fault masking unquantified) |
 | **SR-SYS-05** | The final actuation element shall de-energize-to-safe with **HFT = 1** and diagnosable stuck-on (output feedback), **or** the integrator shall supply an element of ≥ the allocated integrity. Software/ROS 2 machine outputs are non-safety and shall not be the sole enforcement path. | SG-5, H-10/H-12 | F-M-03/04, `machn` relay, A-07 | SIL 3 / PL e (allocated to integrator for software machine) | Analysis (architecture) + Test (`machn` series-relay + feedback) | **Partially satisfied** (`machn` dual series relay + feedback live; software-machine final element is an allocated **Gap** to the integrator) |
 | **SR-SYS-06** | The system shall bound the spurious-STOP (nuisance) rate so it introduces no secondary hazard, **without ever filtering, delaying, or debouncing the OPEN→STOP direction**; only the re-arm (reclose) direction may be gated. | SG-6, H-02 | F-R-03 | **No de-energize SIL** — availability goal, fail-safe by construction (asymmetric debounce); managed per A-06 | Test (STOP edge never debounced) | **Satisfied** (`firmware/main/main.c` reclose-only debounce; STOP is single-tick — see SR-R-05) |
 | **SR-SYS-07** | The machine's default and power-on state shall be STOP; OK shall be the exceptional, continuously-justified state, reachable only through the arming path. | SG-1/SG-3, H-08 | F-P-02, F-H/M dispatch | SIL 3 / PL e | Inspection + Test (default→STOP) | **Satisfied** (`pstop_c` `machine.c` default→STOP; see SR-I-02) |
 | **SR-SYS-08** | The transport shall be treated as an **untrusted black channel**; all safety detection (CRC-16, counter/stamp echo, heartbeat/liveness) shall reside in the endpoints and no timing/config value received over the channel shall widen the safe envelope. | SG-2, A-08, H-06/H-11 | F-R-06/07, F-P-01/04 | SIL 3 / PL e | Analysis (black-channel argument, FMEDA feed) | **Partially satisfied** (endpoint CRC/echo/clamp live — SR-R-13/14; residual bit-error/masquerade rate is an FMEDA **Gap**) |
+| **SR-SYS-09** | STOP→OK (re-arm) shall be permitted **only** for remotes on the machine's **operator allowlist** (`is_stop_only == false`); every other accepted remote shall be **stop-only** — able to command STOP and heartbeat-monitored (its silence ⇒ fail-safe STOP), but unable to re-arm. The operator allowlist shall **default to empty**, so out of the box every bonded remote is stop-only (maximally safe) and operators are added only during configuration. | SG-3, **H-13**, FMEA H02-4 | F-P-02, F-H-05 (+ F-M / `machn` operator-list config) | SIL 3 / PL e | Test (stop-only remote's OK never re-arms; operator's does) + Inspection (default-empty allowlist) | **Satisfied** (`pstop_c` gates STOP→OK ownership on `is_stop_only==false` — `pstop_c/.../machine.c:135-142`; a stop-only remote's STOP still forces STOP `:131,155-156` and it is heartbeat-monitored `machine_check_heartbeats:266-320`; `remote_details_cb`→`is_stop_only` `:16,31`; upstream `machine_test.c:677,1165`) — residual: the newly-added shell operator-list config surface (machn `/api/operators`) wants its own plumbing test |
 
 ---
 
@@ -111,7 +112,7 @@ below is therefore conditional and tagged as such.
 
 | ID | Requirement (shall) | Derived from | Allocated to | Integrity | Verify | Status |
 |---|---|---|---|---|---|---|
-| **SR-H-01** | The host runner shall monitor per-remote liveness on the machine's own `CLOCK_MONOTONIC` and command STOP when a remote's silence reaches `heartbeat_ms × max_missed_heartbeats` (**not** `× (max_missed+1)`), i.e. ≈ 1.2 s at defaults. | SG-1/SG-2, H-05, RECONCILIATION R-08 | F-H-03, F-P-03 | SIL 3 / PL e | Test (silence → STOP at boundary) | **Satisfied** (library `check_heartbeats` on `machine_now_ms`; timeout `hb×max_missed` — `pstop_c/.../machine.c:290-298`; host wires `get_time_cb` and the corrected comment at `machine_app_runner.c:721`) |
+| **SR-H-01** | The host runner shall monitor per-remote liveness on the machine's own `CLOCK_MONOTONIC` and command STOP when a remote's silence reaches `heartbeat_ms × max_missed_heartbeats` (**not** `× (max_missed+1)`), i.e. ≈ 2.0 s at defaults (`max_missed` = 5 since 2026-08-04; was ≈ 1.2 s at 3). | SG-1/SG-2, H-05, RECONCILIATION R-08 | F-H-03, F-P-03 | SIL 3 / PL e | Test (silence → STOP at boundary) | **Satisfied** (library `check_heartbeats` on `machine_now_ms`; timeout `hb×max_missed` — `pstop_c/.../machine.c:290-298`; host wires `get_time_cb` and the corrected comment at `machine_app_runner.c:721`) |
 | **SR-H-02** | The host runner shall enforce the arming policy: an OK from the library shall be committed to the robot only **after** a STOPPED→OK transition that followed a STOP held ≥ `min_stop_ms`; short STOP→OK cycles shall be vetoed. | SG-3, H-04, FMEA H02-3 | F-H-02 | SIL 3 / PL e | Test (short cycle vetoed; latch) | **Satisfied** (`robot_status_commit_ok` latch `:375-379,834-844`; library native `delay_between_stop_ms` = `min_stop_ms` `:666`) |
 | **SR-H-03** | The host runner shall validate all timing config (`min_stop_ms`, `default_heartbeat_ms`, `max_missed_heartbeats`) against a **compiled safety envelope** and refuse to start (or clamp to safe) any value outside it — at parity with the ROS 2 node's declared parameter-range floors (`min_stop_ms ≥ 100`, `heartbeat_ms ∈ [50,1000]`, `max_missed ∈ [1,5]`). | SG-1/SG-3, **H-01/H-04**, **DU-4** | F-H-02 | SIL 3 / PL e | Test (reject `min_stop_ms=0`, huge heartbeat) | **Gap** — cheap/high-value. `cfg_load` uses raw `parse_uint` with no floor (`machine_app_runner.c:228-241`); ROS 2 has the envelope, host does not (FMEA DU-4) |
 | **SR-H-04** | The host machine shall detect a **frozen/backward monotonic clock** (e.g. an independent second time source or an external hardware watchdog) so that a stalled `get_time_cb` cannot silently disable heartbeat detection; a non-advancing clock shall force STOP. | SG-2, **H-05**, **DU-2**, F-P-03 | F-H-03, F-P-03 | SIL 3 / PL e | Fault-injection (freeze clock → STOP) | **Gap** — highest-priority DU with SR-R-09. `check_heartbeats` skips when `now ≤ last_timestamp` (`machine.c:282`); no independent clock check |
@@ -189,7 +190,7 @@ Partial = one or more derived SRs are Gaps.
 |---|---|---|
 | **SG-1** (stop on demand/fault ≤ FTTI) | SR-SYS-01/07, SR-R-01/04/05/07/09/10/11, SR-H-01/03/06, SR-M-01/02/03/05, SR-I-01/02 | **Partial** (Gaps: SR-R-09/10/11, SR-H-03) |
 | **SG-2** (no spurious OK; freshness) | SR-SYS-02/08, SR-R-02/08/12/13/14, SR-H-04, SR-I-01/03/04 | **Partial** (Gaps: SR-R-08/12, SR-H-04) |
-| **SG-3** (arming integrity) | SR-SYS-03, SR-R-06, SR-H-02/03, SR-M-01 | **Partial** (Gap: SR-H-03 host floor) |
+| **SG-3** (arming integrity + operator authorization) | SR-SYS-03/09, SR-R-06, SR-H-02/03, SR-M-01 | **Partial** (Gap: SR-H-03 host floor; SR-SYS-09 authorization Satisfied) |
 | **SG-4** (many→one fail-safe OR) | SR-SYS-04, SR-H-05, SR-I-04 | **Partial** (ghost-bond masking unquantified) |
 | **SG-5** (final element HFT=1 / integrator) | SR-SYS-05, SR-M-03/04 | **Partial** (software-machine final element allocated to integrator) |
 | **SG-6** (bounded spurious STOP, fail-safe debounce) | SR-SYS-06, SR-R-05 | **Full** (Satisfied by construction) |
@@ -217,12 +218,12 @@ requirement-traced test.
 
 | Area | Count | Satisfied | Partial | Gap | Residual-accepted |
 |---|---|---|---|---|---|
-| SR-SYS | 8 | 2 | 4 | 2 | 0 |
+| SR-SYS | 9 | 3 | 4 | 2 | 0 |
 | SR-R | 15 | 8 | 0 | 7 | 0 |
 | SR-H | 6 | 3 | 1 | 2 | 0 |
 | SR-M | 6 | 4 | 0 | 0 | 2 |
 | SR-I | 4 | 1 | 3 | 0 | 0 |
-| **Total** | **39** | **18** | **8** | **11** | **2** |
+| **Total** | **40** | **19** | **8** | **11** | **2** |
 
 "Partial" = the safety-argument leg is in place but a required test, quantification,
 or a decomposed leg is still outstanding (e.g. SR-I-01/04 satisfied-by-contract but

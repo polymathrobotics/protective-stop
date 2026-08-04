@@ -86,6 +86,7 @@ eliminating hand-rolled `declare_parameter` + validation boilerplate.
 
 **Static (`read_only`, require reconfigure):**
 `backend` (`software|hardware`), `machine_id`, software `bind_addr`/`port`,
+software `default_stop_only`/`operators` (operator authorization — see below),
 hardware `device_url`/`admin_user`, `frame_id`, topic QoS depths.
 
 **Dynamic (runtime-settable, re-validated on set):**
@@ -272,6 +273,13 @@ where `my_overrides.yaml` looks like:
     software:                   # used when backend == software
       bind_addr: 0.0.0.0
       port: 8890                # read_only
+      # Operator authorization (SAFETY). A bonded remote is accepted and
+      # heartbeat-monitored but STOP-ONLY by default: it may command STOP but may
+      # NEVER re-arm (STOP -> OK). Only a remote whose 32-bit pstop id is listed
+      # in `operators` gets re-arm authority. Empty list (the default) = every
+      # remote is stop-only = maximally safe out of the box.
+      default_stop_only: true   # read_only
+      # operators: [30234300]   # read_only; 32-bit pstop ids granted re-arm (default: none)
 
     hardware:                   # used when backend == hardware
       device_url: http://100.84.155.111

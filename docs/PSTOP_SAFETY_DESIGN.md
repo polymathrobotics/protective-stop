@@ -233,8 +233,13 @@ Any disagreement, stale proof, or missing proof → send nothing → STOP.
   heartbeat-timeout).
 - Diagnostic test interval = one 10 Hz tick (100 ms). Detection→STOP is
   bounded by the machine heartbeat timeout =
-  `heartbeat_ms × max_missed_heartbeats` — today 400 × 3 ≈ **1.2 s**
+  `heartbeat_ms × max_missed_heartbeats` — today 400 × 5 ≈ **2.0 s**
   (`machine.c:290-298`; defaults per SYSTEM_DEFINITION §2).
+  <!-- [Updated 2026-08-04] max_missed_heartbeats raised 3 → 5 (was 400 × 3 ≈
+  1.2 s) to ride through ~90-min Tailscale control-plane re-syncs (transient
+  ~1.4 s RTT spikes) that were tripping false STOPs; trades detection latency
+  (1.2 s → 2.0 s) for far fewer nuisance stops. FTTI/PST budget must now cover
+  ~2.0 s + one tick ≈ 2.1 s (HARA A-05, SR-SYS-01). -->
   <!-- [Reconciled 2026-08-02] Was `heartbeat_ms × (max_missed_heartbeats + 1)`,
   "1000 × 2 ≈ 1–2 s" — stale formula AND values; corrected to the library math
   (OK while diff ≤ hb; STOP when diff/hb ≥ max_missed). See RECONCILIATION R-03. -->

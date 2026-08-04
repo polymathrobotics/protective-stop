@@ -64,12 +64,12 @@ system HARA** before any SIL/PL claim is final.
 | **A-02** | Operator / bystander exposure to the hazard zone is **frequent-to-continuous** (IEC F2, ISO F2). | Autonomous vehicle operating in shared/occupied space; a remote implies humans nearby. | Integrator (site, traffic, exclusion zones) |
 | **A-03** | Possibility of **avoiding** the hazard is **scarcely possible / almost impossible** (IEC P2, ISO P2). | Autonomous motion, limited human perception of intent, potential blind approach. May reduce to P1 with low speed + audible/visual warning + clear sightlines. | Integrator (speed, warning devices, sightlines) |
 | **A-04** | **Demand rate** on the stop function is **unknown**; assumed **W2–W3** (moderate-to-high). | Cannot be inferred from firmware. This single parameter moves the IEC result by up to two SIL steps. | Integrator (operational demand analysis) |
-| **A-05** | **Process Safety Time (PST)** is a vehicle-level number and is **unknown**. Placeholder **PST_min**. The pstop's own worst-case signal-latency budget is **≈ 1.3 s** on the silence/link-loss path (heartbeat timeout `heartbeat_ms × max_missed` = 400 ms × 3 ≈ 1.2 s + one 100 ms tick). | FTTI must satisfy `pstop latency + actuation/braking time ≤ PST`. | Integrator (must confirm `PST ≥ 1.3 s + braking`; else tighten `heartbeat_ms`/`max_missed`) |
+| **A-05** | **Process Safety Time (PST)** is a vehicle-level number and is **unknown**. Placeholder **PST_min**. The pstop's own worst-case signal-latency budget is **≈ 2.1 s** on the silence/link-loss path (heartbeat timeout `heartbeat_ms × max_missed` = 400 ms × 5 ≈ 2.0 s + one 100 ms tick). **`max_missed` is a tunable, raised 3 → 5 on 2026-08-04** to eliminate control-plane-re-sync nuisance stops; this lengthened the budget from ≈ 1.3 s to ≈ 2.1 s. | FTTI must satisfy `pstop latency + actuation/braking time ≤ PST`. | Integrator (must confirm `PST ≥ 2.1 s + braking`; **any vehicle previously sized for the 1.3 s budget must be re-checked** — else tighten `heartbeat_ms`/`max_missed`, at the cost of nuisance-stop margin) |
 | **A-06** | **De-energize = STOP is genuinely safe** for this vehicle (no rollaway on grade, no hazardous load release, no loss of steering/brake authority when de-energized). | The entire architecture rests on de-energize-to-safe (SYSTEM_DEFINITION §5). A vehicle that rolls when de-energized breaks this and needs a held/spring-applied brake. | Integrator (grade, brake type, load dynamics) |
 | **A-07** | The **final actuation element** is either the in-scope ESP32 `machn` **dual relay in series + feedback** (MACHINE_ESP32_DESIGN), or an **integrator-supplied element of ≥ the allocated PL/SIL**. The host/ROS 2 **software** machine emits a **non-safety** signal only (MACHINE_ROS2_NODE_DESIGN §1). | The safety function is only as good as its final element; the software machine has none in scope. | Integrator (actuator selection & rating) |
 | **A-08** | The transport (Tailscale/WireGuard/DERP over WiFi/Eth/USB-NCM) is an **untrusted black channel** per IEC 61508 / IEC 62280 §; all safety detection lives in the endpoints (CRC-16, counter/stamp echo, heartbeat). | The design explicitly treats `pstop_c` as a black-channel protocol (PSTOP_SAFETY_DESIGN §3). | Assessor (residual bit-error / insertion / masquerade rate argued in FMEDA) |
 | **A-09** | `pstop_c` is a **validated SEooC** with systematic capability ≥ the allocated target, and its interface obligations F-P-01..04 are met by the shell. | SYSTEM_DEFINITION §1 declares it pre-qualified and out of scope. | Assessor (SEooC assumptions-of-use vs this integration) |
-| **A-10** | As-configured timing is **10 Hz tick, `heartbeat_ms` = 400, `max_missed` = 3, `min_stop_ms` = 500** and any field reconfiguration stays inside the validated safe envelope (ROS 2 validator refuses looser values). | SYSTEM_DEFINITION §2; MACHINE_ROS2_NODE_DESIGN §4/§12. | Integrator (commissioned config) |
+| **A-10** | As-configured timing on the safety-credited machine (machn, A-07) is **10 Hz tick, `heartbeat_ms` = 400, `max_missed` = 5 (raised from 3 on 2026-08-04), `min_stop_ms` = 500** and any field reconfiguration stays inside the validated safe envelope `max_missed ∈ [1,5]` (ROS 2 validator refuses looser values). `max_missed` = 5 now sits at the **envelope ceiling** — there is no headroom to loosen it further without widening the validated envelope. | SYSTEM_DEFINITION §2; MACHINE_ROS2_NODE_DESIGN §4/§12 (envelope). | Integrator (commissioned config) |
 
 ---
 
@@ -93,6 +93,7 @@ BC = black-channel / comms; H/O = human / operational.
 | **H-10** | **Machine-side relay weld / stuck-on** — the final element cannot de-energize; commanded STOP does not open the stop circuit. | Contact welds after many cycles / driver short. | SF-1 | RHW |
 | **H-11** | **Forged / fail-danger OK on the black channel** — partial corruption or the all-zeros/`OK==0x00` polarity produces an OK the machine accepts. | Bit errors, buffer zeroing, malicious injection. | SF-1 / SF-2 | BC, RHW |
 | **H-12** | **Final actuation element not safety-rated** — software/ROS 2 machine's STOP is a non-safety signal the robot control stack may ignore or delay. | Software or hardware-proxy machine deployment. | SF-1 | (architectural / scope) |
+| **H-13** | **Non-operator remote re-arms the machine** — an accepted-but-not-authorized (stop-only) remote, or any remote absent from the machine's operator allowlist, performs a STOP→OK re-arm and resumes the machine. | Machine STOPPED; a remote that was admitted only to *stop* drives (or completes) the arming gesture. | SF-3 | SW, H/O (mis-configured operator allowlist) |
 
 ---
 
@@ -123,6 +124,7 @@ serious/irreversible); F = exposure (F1 seldom, F2 frequent); P = avoidance
 | **H-10** | C2+ | F2 | P2 | W2 | **SIL 3** | S2 | F2 | P2 | **e** | Classic dangerous-undetected. ESP32 `machn`: two relays **in series** (either breaks) + feedback contradiction → stop-on-contradiction ≥ ~1 s gives HFT=1 + diagnosis. Residual: a **single-channel or software** machine has **no** in-scope rated relay (A-07, H-12). |
 | **H-11** | C2+ | F2 | P2 | W2 | **SIL 3** | S2 | F2 | P2 | **e** | `OK==0x00` is an **inherited fail-danger polarity** (all-zeros decodes toward OK, SYSTEM_DEFINITION §5). Compensated by CRC-16 over bytes[0..37] (a zeroed CRC won't match), transmit-on-agreement, and the live-sample derivation. Standing FMEA anchor. |
 | **H-12** | C2+ | F2 | P2 | W2 | **SIL 3** | S2 | F2 | P2 | **e** | For the software/ROS 2 machine the "STOP" is a ROS topic explicitly carrying **no safety responsibility**; enforcement reduces to remotes fail-safe-stopping on their own heartbeat timeout. The **final element integrity is unallocated** unless the integrator supplies it. Architectural gap, not a coding defect. |
+| **H-13** | C2+ | F2 | P2 | W2 | **SIL 3** | S2 | F2 | P2 | **e** | Same collision outcome as H-04: an unattended machine re-energized by a remote never authorized to *resume* it (only to *stop* it). The control is `pstop_c` gating the STOP→OK ownership on `is_stop_only == false` (`machine.c:135-142`); a stop-only remote's STOP still forces STOP (`:131,155-156`) and it is heartbeat-monitored (`machine_check_heartbeats:266-320`). The **default is maximally safe** — the operator allowlist is empty out of the box, so every bonded remote is stop-only until explicitly promoted. Residual is a **mis-configured allowlist** that mints a non-operator as operator (FMEA H02-4). |
 
 ---
 
@@ -134,9 +136,9 @@ absolute number is a vehicle-level input.
 
 | SG | Safety goal (positive requirement) | Safe state | FTTI / PST | Allocated target | Closes |
 |---|---|---|---|---|---|
-| **SG-1** | On any stop demand **or** any detected fault, command the machine to **de-energized STOP** within the fault-tolerant time. | De-energized (no valid OK) | ≤ PST_min (A-05); pstop budget ≈ 1.3 s worst case | **SIL 3 / PL e** | H-01, H-03, H-09, H-11 |
-| **SG-2** | Sustain OK **only** while it is *freshly and causally* derived from a live both-channel read **and** a valid black-channel round-trip; stale/replayed/forged OK must fail to STOP. | De-energized on any staleness | ≤ heartbeat timeout ≈ 1.2 s | **SIL 3 / PL e** | H-05, H-06, H-11 |
-| **SG-3** | Permit STOP→OK **only** via a deliberate arming gesture (STOP held ≥ `min_stop_ms` = 500 ms, then release); never spontaneously, on a transient, or at boot. | Remain STOPPED until valid gesture | n/a (state guard) | **SIL 3 / PL e** | H-04, H-08 |
+| **SG-1** | On any stop demand **or** any detected fault, command the machine to **de-energized STOP** within the fault-tolerant time. | De-energized (no valid OK) | ≤ PST_min (A-05); pstop budget ≈ 2.1 s worst case (`max_missed` = 5 since 2026-08-04) | **SIL 3 / PL e** | H-01, H-03, H-09, H-11 |
+| **SG-2** | Sustain OK **only** while it is *freshly and causally* derived from a live both-channel read **and** a valid black-channel round-trip; stale/replayed/forged OK must fail to STOP. | De-energized on any staleness | ≤ heartbeat timeout ≈ 2.0 s | **SIL 3 / PL e** | H-05, H-06, H-11 |
+| **SG-3** | Permit STOP→OK **only** via a deliberate arming gesture (STOP held ≥ `min_stop_ms` = 500 ms, then release) **and only from a remote on the machine's operator allowlist** (`is_stop_only == false`, default empty); never spontaneously, on a transient, at boot, or from a stop-only / non-operator remote. | Remain STOPPED until a valid gesture from an authorized operator | n/a (state guard) | **SIL 3 / PL e** | H-04, H-08, H-13 |
 | **SG-4** | In many→one, **any** bonded remote's STOP or silence forces STOP regardless of other remotes (fail-safe OR); arming requires a single owning gesture, and a lost/ghost bond must not read as present-and-OK. | De-energized if any remote demands/absent | ≤ heartbeat timeout | **SIL 3 / PL e** | H-07 |
 | **SG-5** | The **final actuation element** shall de-energize-to-safe with **HFT = 1** and diagnosable stuck-on (relay-output feedback), **or** the integrator shall provide an element of ≥ the allocated integrity. Software/ROS 2 machine outputs are non-safety and must not be the sole enforcement path. | Stop circuit open | ≤ `RELAY_FEEDBACK_MS` + ~1 s contradiction hold | **SIL 3 / PL e** (allocated to integrator for software machine) | H-10, H-12 |
 | **SG-6** | Bound the spurious-STOP rate so it does not introduce a secondary hazard (traffic/grade/load), **without ever filtering or delaying the stop path** (asymmetric, fail-safe-direction-only debounce). | STOP is always permitted; only re-arm is gated | open→STOP single-tick (~100 ms) | **No de-energize SIL** (availability goal, fail-safe by construction); manage per A-06 | H-02 |
@@ -147,7 +149,7 @@ absolute number is a vehicle-level input.
 
 **ISO 13849 (PLr): confirmed at PL e.** Under the worst-case assumptions the
 severity/exposure/avoidance triple for the primary hazards (H-01/03/04/05/06/07/
-09/10/11/12) is **S2 · F2 · P2**, which lands directly on **PLr = e** with no
+09/10/11/12/13) is **S2 · F2 · P2**, which lands directly on **PLr = e** with no
 ambiguity. PL e is the correct machinery-side requirement for an unattended
 mobile autonomous vehicle whose pstop failure can kill an unavoidable bystander.
 It is not higher (there is no PL above e); it drops to **PL d** only if the
@@ -230,7 +232,10 @@ evidence + integrator confirmation of A-01..A-05.
 5. **DERP dark-window vs PST** (H-03): the measured 5–9 s failover gap and the
    degraded-mode ladder must be shown ≤ PST, or STOP must be forced during the
    gap. **This is likely to fail for any short-PST vehicle** and needs explicit
-   treatment.
+   treatment. **Note (2026-08-04):** the silent-remote detection latency itself
+   was lengthened from ≈ 1.2 s to ≈ 2.0 s (`max_missed` 3 → 5), which further
+   tightens the H-03 PST margin for short-PST vehicles even on the non-failover
+   path — re-check A-05 against the vehicle PST.
 6. Confirm the pstop is **not** credited as the machine's emergency-stop; verify
    an independent IEC 60204-1 / ISO 13850 E-stop exists.
 
@@ -238,7 +243,7 @@ evidence + integrator confirmation of A-01..A-05.
 
 | # | Location | Inconsistency |
 |---|---|---|
-| D1 | PSTOP_SAFETY_DESIGN §5.6 vs SYSTEM_DEFINITION §2 (+ MACHINE_ROS2 §12, memory) | Heartbeat timeout formula **and** values are stale: design doc says `heartbeat_ms × (max_missed + 1)`, "1000 × 2 ≈ 1–2 s"; the code/backbone is `heartbeat_ms × max_missed`, **400 × 3 ≈ 1.2 s**. |
+| D1 | PSTOP_SAFETY_DESIGN §5.6 vs SYSTEM_DEFINITION §2 (+ MACHINE_ROS2 §12, memory) | Heartbeat timeout formula **and** values are stale: design doc says `heartbeat_ms × (max_missed + 1)`, "1000 × 2 ≈ 1–2 s"; the code/backbone is `heartbeat_ms × max_missed`, **400 × 5 ≈ 2.0 s** (`max_missed` raised 3 → 5 on 2026-08-04; was 400 × 3 ≈ 1.2 s). |
 | D2 | PSTOP_SAFETY_DESIGN (whole doc) vs SYSTEM_DEFINITION | Design doc is **SIL 2**-framed throughout; the backbone target is **SIL 3 / PL e**. |
 | D3 | PSTOP_SAFETY_DESIGN §5, §6 (fault→reaction map), §7 vs SYSTEM_DEFINITION reconciliation | §5–§7 describe **Option C** (LFSR challenge `Cn`, liveness accumulator `S ^= (Cn^En)`, stamp echo-signature) as the *implemented* target architecture. **Option C was dropped 2026-07.** The actual stuck-at/systematic controls are **Option A** (both-phase fresh sample) + **Option B** (diverse expressions). The §6 fault→reaction map cites mechanisms **that do not exist in the code**. |
 | D4 | PSTOP_SAFETY_DESIGN §4 gap G3 | Lists predictable `counter&1` as an open gap "lowering DC". Moot/misleading: Option A both-phase is the adopted compensating measure, not the dropped LFSR. |

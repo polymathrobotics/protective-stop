@@ -63,8 +63,8 @@ polls it once per iteration. Detection rules (all in the pure module):
 - **Backward** (`mono < highest-seen`) → latch `FAULT_BACKWARD` immediately.
 - **Frozen** (`mono` not advancing) **and** an independent reference advanced
   past the **500 ms window** → latch `FAULT_FROZEN`. 500 ms is well under the
-  ~1.2 s heartbeat timeout, so a freeze is caught *before* it can mask a dead
-  remote.
+  ~2.0 s heartbeat timeout (`max_missed` = 5 since 2026-08-04; was ~1.2 s at 3),
+  so a freeze is caught *before* it can mask a dead remote.
 - **Frozen** and the **call-count backstop** (2000 stalled calls) is reached
   (all clocks wedged, only the loop advancing) → latch `FAULT_FROZEN`.
 
@@ -242,6 +242,6 @@ SIL 3 with HFT margin. The machn term remains DU until its HW validation closes.
    item for the sub-tick window before the next ~1 s re-verify.
 4. **Re-verify latency.** The pad check runs at ~1 s cadence; a pull-down lost
    *and* an E-stop opened within the same ≤ 1 s window is covered by the machine
-   heartbeat/PST budget (≤ 1.3 s, SR-SYS-01) but the pad-fault itself is detected
+   heartbeat/PST budget (≤ 2.1 s, SR-SYS-01; `max_missed` = 5 since 2026-08-04) but the pad-fault itself is detected
    only at the next tick. Tightening the cadence trades CPU for latency; 1 s
    matches the design doc's claim and is well inside the PST.

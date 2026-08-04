@@ -26,7 +26,24 @@ menu "MicroLink V2 Configuration"
         range 1 128
         help
             Maximum number of peers with active WireGuard tunnels. Each peer
-            uses approximately 200 bytes plus endpoint storage.
+            uses approximately 200 bytes plus endpoint storage. This is the HARD
+            ceiling (peer-table array size); the working set is capped by
+            ML_DEFAULT_MAX_PEERS / the runtime max_peers setting.
+
+    config ML_DEFAULT_MAX_PEERS
+        int "Default active WireGuard peer set (0 = use ML_MAX_PEERS ceiling)"
+        default 32
+        range 0 128
+        help
+            Default working-set size for the active WireGuard peer table when the
+            runtime max_peers setting (POST /api/settings) is unset. 32 is the
+            production default: it comfortably covers a machine's remote fan-out +
+            fleet + operators while keeping DISCO/WG probing churn low on a large
+            (100s-of-node) shared tailnet, and stays well under the ML_MAX_PEERS
+            ceiling. Pinned peers (configured machines on a remote, operators on a
+            machine) are exempt and always kept. Raise toward the ceiling only for
+            a machine that must serve more than ~28 remotes. See
+            docs/MULTI_REMOTE_MULTI_MACHINE.md.
 
             Most deployments need 1-4 peers (only the peers you actively
             communicate with). For large tailnets, set this to the actual

@@ -143,7 +143,12 @@ static void cfg_defaults(machine_cfg_t * c)
    * (2x margin), so 400 ms => a 5 Hz remote update rate. */
   c->default_heartbeat_ms = 400U;
   c->min_stop_ms = 500U;
-  c->default_stop_only = 0;
+  /* SAFETY default: an unlisted remote is accepted (allow_unlisted) and
+   * heartbeat-monitored but STOP-ONLY — it may command STOP, never re-arm
+   * (STOP->OK). Only a remote named in a [[operator]] entry (stop_only=false)
+   * may re-arm. Empty operator list => every remote is stop-only = maximally
+   * safe. This replaces the previous accept-any-as-full-operator default. */
+  c->default_stop_only = 1;
   c->n_operators = 0;
   c->announce_url[0] = '\0';
   c->announce_key_file[0] = '\0';

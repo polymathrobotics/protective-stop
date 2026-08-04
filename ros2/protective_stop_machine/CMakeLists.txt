@@ -81,6 +81,12 @@ if(BUILD_TESTING)
   ament_add_gtest(test_json_lite test/test_json_lite.cpp)
   target_include_directories(test_json_lite PRIVATE include)
 
+  # Operator-authorization policy (SAFETY): unlisted remote = stop-only (may STOP,
+  # never re-arm); only a listed operator may re-arm. Header-only decision fn, no
+  # ROS runtime / no pstop link.
+  ament_add_gtest(test_operator_policy test/test_operator_policy.cpp)
+  target_include_directories(test_operator_policy PRIVATE include)
+
   # Pure /state.json -> MachineSnapshot mapping (SR-M-03 / DU-9).
   ament_add_gtest(test_hardware_parse test/test_hardware_parse.cpp)
   target_link_libraries(test_hardware_parse ${PROJECT_NAME} CURL::libcurl)

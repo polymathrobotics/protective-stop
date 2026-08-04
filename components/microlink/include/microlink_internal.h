@@ -480,6 +480,8 @@ extern "C"
     /* Coordination socket (owned exclusively by coord task) */
     int coord_sock;
     uint32_t h2_next_stream_id; /* Next H2 stream ID for endpoint updates (odd, starts at 7) */
+    uint32_t
+      map_stream_id; /* H2 stream id of the active streaming map long-poll; 0 until first poll; a soft refresh moves it to a fresh odd id (an ended H2 stream can't be reused). */
 
     /* WireGuard netif (owned exclusively by wg_mgr task) */
     void * wg_netif;
@@ -532,6 +534,10 @@ extern "C"
     void * peer_cb_data;
     microlink_data_cb_t data_cb;
     void * data_cb_data;
+    /* "Keep this peer when the table is full" hook (NULL = disabled). See
+     * microlink_set_peer_wanted_cb() / add_peer() in ml_wg_mgr.c. */
+    microlink_peer_wanted_cb_t peer_wanted_cb;
+    void * peer_wanted_ctx;
 
     /* HTTP Config Server (peer allowlist, runtime settings) */
     ml_config_ctx_t * config_httpd;

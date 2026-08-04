@@ -198,7 +198,7 @@ static esp_err_t page_state(httpd_req_t * req)
      * internal heap which runs tight on this build). */
   enum
   {
-    JSON_CAP = 3328 /* +256 headroom for the eth-watchdog fields */
+    JSON_CAP = 3712 /* eth-watchdog fields + bonded-remote stop_only + operator list */
   };
 
   char * buf = heap_caps_malloc(JSON_CAP, MALLOC_CAP_SPIRAM);
@@ -400,12 +400,13 @@ static esp_err_t page_state(httpd_req_t * req)
       n += snprintf(
         buf + n,
         cap - n,
-        "%s{\"id\":%lu,\"ip\":%lu,\"state\":%lu,\"age_ms\":%lu,\"rtt_ms\":%lu,"
+        "%s{\"id\":%lu,\"ip\":%lu,\"state\":%lu,\"stop_only\":%d,\"age_ms\":%lu,\"rtt_ms\":%lu,"
         "\"wg_rtt_ms\":%lu,\"wg_rtt_age_ms\":%lu,\"wg_direct\":%d}",
         first ? "" : ",",
         (unsigned long)rid,
         (unsigned long)rip,
         (unsigned long)atomic_load(&g_dcs_machn_r_state[i]),
+        (int)atomic_load(&g_dcs_machn_r_stop_only[i]),
         (unsigned long)atomic_load(&g_dcs_machn_r_age_ms[i]),
         (unsigned long)atomic_load(&g_dcs_machn_r_rtt_ms[i]),
         (unsigned long)wg_rtt2,
@@ -413,6 +414,19 @@ static esp_err_t page_state(httpd_req_t * req)
         wg_dir2 ? 1 : 0);
       CLAMP_N();
       first = false;
+    }
+  }
+  /* Operator allowlist (machine-role): the 32-bit pstop ids granted re-arm
+     * authority. Empty => every remote is stop-only. Observable so config
+     * tooling and HIL can confirm the active policy. */
+  n += snprintf(buf + n, cap - n, "],\"operators\":[");
+  CLAMP_N();
+  {
+    uint32_t ops[DCS_MAX_OPERATORS];
+    int nops = dcs_operator_get_list(ops);
+    for (int i = 0; i < nops; i++) {
+      n += snprintf(buf + n, cap - n, "%s%lu", (i != 0) ? "," : "", (unsigned long)ops[i]);
+      CLAMP_N();
     }
   }
   n += snprintf(buf + n, cap - n, "],\"tk0\":");
@@ -933,6 +947,92 @@ static esp_err_t api_ring_led1(httpd_req_t * req)
   return httpd_resp_send(req, buf, len);
 }
 
+/* === /api/operators — machine-role operator allowlist ===================== *
+ * SAFETY-config surface: the operator allowlist decides which remotes may
+ * RE-ARM the machine (unlisted remotes are stop-only). Admin-authenticated
+ * (same Basic-auth credential as /admin and /api/enter_download) because it
+ * changes who can clear the robot to run.
+ *
+ *   GET  /api/operators                       -> {"ok":true,"operators":[...]}
+ *   POST /api/operators?add=<id>              add an operator (hex 0x.. or dec)
+ *   POST /api/operators?del=<id>              remove an operator
+ *
+ * Applies live to the RAM cache AND persists to NVS. New authority takes effect
+ * on a remote's next BOND (pstop_c latches is_stop_only at bond). */
+static bool operators_require_admin(httpd_req_t * req)
+{
+  if (ml_app_check_admin_auth(req)) {
+    return true;
+  }
+  (void)httpd_resp_set_status(req, "401 Unauthorized");
+  (void)httpd_resp_set_hdr(req, "WWW-Authenticate", "Basic realm=\"pstop admin\"");
+  (void)httpd_resp_set_type(req, "application/json");
+  (void)httpd_resp_sendstr(req, "{\"ok\":false,\"error\":\"admin auth required\"}");
+  return false;
+}
+
+static esp_err_t operators_send_list(httpd_req_t * req, bool ok)
+{
+  uint32_t ops[DCS_MAX_OPERATORS];
+  int n = dcs_operator_get_list(ops);
+  /* {"ok":true,"count":16,"operators":[4294967295,...]} — 16 * 11 digits + commas */
+  char buf[64 + (DCS_MAX_OPERATORS * 12)];
+  int len = snprintf(buf, sizeof(buf), "{\"ok\":%s,\"count\":%d,\"operators\":[", ok ? "true" : "false", n);
+  for (int i = 0; (i < n) && (len < (int)sizeof(buf)); i++) {
+    len += snprintf(buf + len, sizeof(buf) - (size_t)len, "%s%lu", (i != 0) ? "," : "", (unsigned long)ops[i]);
+  }
+  if (len < (int)sizeof(buf)) {
+    len += snprintf(buf + len, sizeof(buf) - (size_t)len, "]}");
+  }
+  (void)httpd_resp_set_type(req, "application/json");
+  return httpd_resp_send(req, buf, len);
+}
+
+static esp_err_t api_operators_get(httpd_req_t * req)
+{
+  if (!operators_require_admin(req)) {
+    return ESP_OK;
+  }
+  return operators_send_list(req, true);
+}
+
+static esp_err_t api_operators_post(httpd_req_t * req)
+{
+  if (!operators_require_admin(req)) {
+    return ESP_OK;
+  }
+  char query[64], val[20];
+  (void)httpd_resp_set_type(req, "application/json");
+  if (httpd_req_get_url_query_str(req, query, sizeof(query)) != ESP_OK) {
+    (void)httpd_resp_set_status(req, "400 Bad Request");
+    return httpd_resp_sendstr(req, "{\"ok\":false,\"error\":\"missing ?add=<id> or ?del=<id>\"}");
+  }
+  bool adding;
+  if (httpd_query_key_value(query, "add", val, sizeof(val)) == ESP_OK) {
+    adding = true;
+  } else if (httpd_query_key_value(query, "del", val, sizeof(val)) == ESP_OK) {
+    adding = false;
+  } else {
+    (void)httpd_resp_set_status(req, "400 Bad Request");
+    return httpd_resp_sendstr(req, "{\"ok\":false,\"error\":\"need ?add=<id> or ?del=<id>\"}");
+  }
+  uint32_t id = (uint32_t)strtoul(val, NULL, 0); /* 0x.. hex or decimal */
+  if (id == 0u) {
+    (void)httpd_resp_set_status(req, "400 Bad Request");
+    return httpd_resp_sendstr(req, "{\"ok\":false,\"error\":\"bad id (nonzero 32-bit pstop id)\"}");
+  }
+  esp_err_t r = adding ? dcs_operator_add(id) : dcs_operator_del(id);
+  if (r == ESP_ERR_NO_MEM) {
+    (void)httpd_resp_set_status(req, "409 Conflict");
+    return httpd_resp_sendstr(req, "{\"ok\":false,\"error\":\"operator list full\"}");
+  }
+  if (r != ESP_OK) {
+    (void)httpd_resp_set_status(req, "500 Internal Server Error");
+    return httpd_resp_sendstr(req, "{\"ok\":false,\"error\":\"NVS write failed\"}");
+  }
+  return operators_send_list(req, true);
+}
+
 /* === Public registration =================================================== */
 void dcs_admin_pages_register(ml_app_t * app)
 {
@@ -959,4 +1059,6 @@ void dcs_admin_pages_register(ml_app_t * app)
   (void)ml_app_add_page(app, "/api/ring_offset", HTTP_POST, api_ring_offset);
   (void)ml_app_add_page(app, "/api/ring_led1", HTTP_POST, api_ring_led1);
   (void)ml_app_add_page(app, "/api/enter_download", HTTP_POST, api_enter_download);
+  (void)ml_app_add_page(app, "/api/operators", HTTP_GET, api_operators_get);
+  (void)ml_app_add_page(app, "/api/operators", HTTP_POST, api_operators_post);
 }

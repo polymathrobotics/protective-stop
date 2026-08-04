@@ -2045,9 +2045,24 @@ static int do_start_long_poll(microlink_t * ml, ml_noise_state_t * noise)
     return -1;
   }
 
+  /* Choose the H2 stream id for this long-poll. The first poll on a fresh
+   * connection uses stream 5 (byte-identical to the historical behavior). A
+   * soft refresh cannot reuse the ended stream 5 — an ended H2 stream id is
+   * never reusable — so allocate a fresh odd id from the endpoint-update
+   * counter (>=7) instead of tearing down the whole connection. */
+  uint32_t sid;
+  if (ml->map_stream_id == 0) {
+    sid = 5; /* First poll — keep byte-identical to the original */
+  } else {
+    if (ml->h2_next_stream_id < 7) ml->h2_next_stream_id = 7;
+    sid = ml->h2_next_stream_id;
+    ml->h2_next_stream_id += 2;
+  }
+  ml->map_stream_id = sid;
+
   int h2_pos = 0;
   int hdr_len = ml_h2_build_headers_frame(
-    h2_buf, json_len + 512, "POST", "/machine/map", CTRL_HOST(ml), "application/json", 5, false);
+    h2_buf, json_len + 512, "POST", "/machine/map", CTRL_HOST(ml), "application/json", sid, false);
   if (hdr_len < 0) {
     free(json_str);
     free(h2_buf);
@@ -2056,7 +2071,7 @@ static int do_start_long_poll(microlink_t * ml, ml_noise_state_t * noise)
   h2_pos += hdr_len;
 
   int data_len =
-    ml_h2_build_data_frame(h2_buf + h2_pos, json_len + 512 - h2_pos, (uint8_t *)json_str, json_len, 5, true);
+    ml_h2_build_data_frame(h2_buf + h2_pos, json_len + 512 - h2_pos, (uint8_t *)json_str, json_len, sid, true);
   free(json_str);
   if (data_len < 0) {
     free(h2_buf);
@@ -2070,7 +2085,7 @@ static int do_start_long_poll(microlink_t * ml, ml_noise_state_t * noise)
   }
   free(h2_buf);
 
-  ESP_LOGI(TAG, "Streaming MapRequest sent on stream 5");
+  ESP_LOGI(TAG, "Streaming MapRequest sent on stream %lu", (unsigned long)sid);
   return 0;
 }
 
@@ -2242,6 +2257,7 @@ static int poll_map_update(microlink_t * ml, ml_noise_state_t * noise)
   uint32_t data_stream_id = 0;
   int map_stream_seen = 0;
   int stream_lost = 0;
+  int conn_lost = 0;
   int pos = 0;
 
   while (pos + 9 <= frame_len) {
@@ -2256,8 +2272,8 @@ static int poll_map_update(microlink_t * ml, ml_noise_state_t * noise)
 
     if (f_type == 0x00) { /* DATA frame */
       total_data_bytes += f_len;
-      if (f_stream == 5) {
-        /* Long-poll MapResponse data (stream 5) — parse as JSON */
+      if (f_stream == ml->map_stream_id) {
+        /* Long-poll MapResponse data (map stream) — parse as JSON */
         data_stream_id = f_stream;
         map_stream_seen = 1;
         if (f_flags & 0x01) { /* END_STREAM: control ended the long-poll */
@@ -2301,8 +2317,8 @@ static int poll_map_update(microlink_t * ml, ml_noise_state_t * noise)
                   ((uint32_t)frame_buf[pos + 6] << 8) | (uint32_t)frame_buf[pos + 7];
       }
       ESP_LOGW(TAG, "Map long-poll GOAWAY from control (err=0x%lx) — reconnecting", (unsigned long)errcode);
-      stream_lost = 1;
-    } else if ((f_type == 0x03) && (f_stream == 5)) {
+      conn_lost = 1;
+    } else if ((f_type == 0x03) && (f_stream == ml->map_stream_id)) {
       /* RST_STREAM on the map stream: control killed the long-poll. */
       uint32_t errcode = 0;
       if (f_len == 4) {
@@ -2311,7 +2327,7 @@ static int poll_map_update(microlink_t * ml, ml_noise_state_t * noise)
       }
       ESP_LOGW(TAG, "Map long-poll RST_STREAM from control (err=0x%lx) — reconnecting", (unsigned long)errcode);
       stream_lost = 1;
-    } else if ((f_type == 0x01) && (f_stream == 5) && ((f_flags & 0x01) != 0)) {
+    } else if ((f_type == 0x01) && (f_stream == ml->map_stream_id) && ((f_flags & 0x01) != 0)) {
       /* HEADERS with END_STREAM on the map stream = trailers closing the
        * long-poll (graceful server-side termination). */
       ESP_LOGW(TAG, "Map long-poll closed by control (trailers) — reconnecting");
@@ -2334,12 +2350,23 @@ static int poll_map_update(microlink_t * ml, ml_noise_state_t * noise)
     noise_send(ml, noise, wu_buf, wu_len);
   }
 
-  if (stream_lost) {
-    /* Map stream (or the whole connection) terminated by control: report
-     * connection loss so the caller re-issues the streaming MapRequest
-     * immediately. Any DATA in this same batch is stale — discard it. */
+  if (conn_lost) {
+    /* The whole H2 connection is going away (GOAWAY): the TCP+Noise session
+     * is dead, so tear it down and fully reconnect. Any DATA in this same
+     * batch is stale — discard it. */
     free(frame_buf);
     return -1;
+  }
+
+  if (stream_lost) {
+    /* Only the map long-poll stream ended (RST_STREAM / END_STREAM / trailers)
+     * — routine ~90 min expiry — while the TCP+Noise connection stays healthy.
+     * Return -2 so the caller does a soft refresh (re-issue the streaming
+     * MapRequest on a fresh stream id with OmitPeers=true) instead of a full
+     * reconnect that would re-download all peers. Any DATA in this batch is
+     * stale — discard it. */
+    free(frame_buf);
+    return -2;
   }
 
   if (!json_data || json_data_len == 0) {
@@ -2497,6 +2524,7 @@ void ml_coord_task(void * arg)
           break;
         }
         ml->h2_next_stream_id = 7; /* Reset H2 stream counter for new connection */
+        ml->map_stream_id = 0; /* No map long-poll stream on a fresh connection yet */
         state = COORD_NOISE_HANDSHAKE;
         break;
 
@@ -2836,6 +2864,17 @@ void ml_coord_task(void * arg)
         int poll_ret = poll_map_update(ml, &noise);
         if (poll_ret > 0) {
           last_activity_ms = now; /* Reset watchdog */
+        } else if (poll_ret == -2) {
+          /* Routine map-stream expiry, TCP+Noise connection still healthy:
+           * soft-refresh the long-poll on a fresh stream id instead of a full
+           * reconnect. do_start_long_poll() sends OmitPeers=true, so this does
+           * NOT re-download the ~128 peers (the rebond flood we are removing). */
+          ESP_LOGI(TAG, "Map long-poll stream refresh (connection preserved)");
+          if (do_start_long_poll(ml, &noise) < 0) {
+            state = COORD_RECONNECTING;
+            break;
+          }
+          last_activity_ms = now; /* Fresh stream — reset watchdog */
         } else if (poll_ret < 0) {
           ESP_LOGW(TAG, "Long-poll connection lost");
           state = COORD_RECONNECTING;

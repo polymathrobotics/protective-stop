@@ -88,6 +88,31 @@ change to sign off: a transient STOP while running no longer
 self-recovers in <min_stop_ms; resuming requires a deliberate
 press-and-hold (strictly more conservative).
 
+### Remote authorization model — operator vs stop-only remote
+
+Orthogonal to the *timing* gate above (the min-hold veto — *how* a re-arm
+is performed) is a *who-may-arm* gate. A machine **accepts every remote that
+bonds** (`allowed=true`) but by default treats it as **stop-only**
+(`is_stop_only=true`): that remote may command STOP and is heartbeat-monitored
+(its silence → fail-safe STOP), but it can **never** re-arm the machine
+(STOP→OK). Only remotes on the machine's **operator allowlist**
+(`is_stop_only=false`) may re-arm.
+
+**The operator allowlist is empty by default** — out of the box every bonded
+remote is stop-only (maximally safe); operator remote IDs are added during
+configuration. Enforced entirely in `pstop_c` (untouched): `handle_stop_msg`
+gates the STOP→OK ownership on `is_stop_only==false`
+(`pstop_c/pstop/src/pstop/machine.c:135-142`); a stop-only remote's STOP still
+forces STOP (`:131,155-156`) and it is heartbeat-monitored
+(`machine_check_heartbeats`, `:266-320`). The shell supplies the per-remote
+authorization through `remote_details_cb` (`:16,31`). Upstream tests:
+`test_bond_stop_ok_stop_only_operator` (`machine_test.c:677`),
+`test_2_clients_stop_only_stop` (`:1165`).
+
+In short: **unlisted remote = accepted, stop-capable, heartbeat-monitored,
+resume-INcapable; operator (allowlisted) = stop + resume; default operator list
+empty.** Safety case: HARA H-13, SR-SYS-09, FMEA H02-4.
+
 ### If the policy must itself be certified (option, not taken)
 ~15-line pstop_c patch: `min_stop_ms` in `pstop_application_config_t`,
 episode timestamp in `handle_stop_msg`, guard before the arming branch
