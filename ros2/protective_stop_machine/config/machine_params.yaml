@@ -29,3 +29,17 @@
       publish_rate_hz: 10.0
       state_poll_hz: 5.0  # hardware poll rate
       diagnostics_rate_hz: 1.0
+
+    # Optional fleet check-in (software backend only). Default DISABLED (empty
+    # url) so a non-fleet deployment is unaffected. When set, the node POSTs a
+    # bearer-authenticated {"name","port", ...} to the console every interval_s
+    # while ACTIVE, exactly like the host runner's [announce] — the console shows
+    # this software machine as RUNNING alongside the hardware ones. Entirely off
+    # the safety path: a dead console only logs. Prefer the ENVIRONMENT for the
+    # URL + key file so secrets stay out of committed config —
+    # PSTOP_ANNOUNCE_URL and PSTOP_ANNOUNCE_KEY_FILE override these two keys.
+    announce:
+      url: ''  # http://host[:port]/path — empty = disabled (read-only)
+      key_file: ''  # path whose first line is the bearer token, chmod 600 (read-only)
+      name: ''  # console display name; empty = this host's hostname (read-only)
+      interval_s: 60  # seconds between check-ins (read-only)

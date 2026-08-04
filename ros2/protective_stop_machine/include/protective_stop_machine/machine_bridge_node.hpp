@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "diagnostic_updater/diagnostic_updater.hpp"
+#include "protective_stop_machine/announce.hpp"
 #include "protective_stop_machine/backend.hpp"
 #include "protective_stop_msgs/msg/bonded_remote_array.hpp"
 #include "protective_stop_msgs/msg/machine_relay_status.hpp"
@@ -52,7 +53,14 @@ private:
   MachineTiming timing_;
   MachineSnapshot last_snapshot_;
 
+  // Fleet check-in (optional, opt-in, software backend only). Resolved at
+  // configure time; the announcer thread runs only while the node is ACTIVE.
+  AnnounceConfig announce_cfg_;
+  int announce_port_{0};
+  uint32_t machine_id_{0};
+
   std::unique_ptr<IMachineBackend> backend_;
+  std::unique_ptr<MachineAnnouncer> announcer_;
 
   rclcpp_lifecycle::LifecyclePublisher<protective_stop_msgs::msg::ProtectiveStopStatus>::SharedPtr
     state_pub_;

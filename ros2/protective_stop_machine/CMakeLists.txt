@@ -34,6 +34,7 @@ add_executable(machine_bridge_node
   src/machine_bridge_node.cpp
   src/software_backend.cpp
   src/hardware_backend.cpp
+  src/announce.cpp
   ${PSTOP_SRCS}
   ${TRANSPORT_SRCS}
 )
@@ -90,11 +91,18 @@ if(BUILD_TESTING)
   ament_add_gtest(test_operator_policy test/test_operator_policy.cpp)
   target_include_directories(test_operator_policy PRIVATE include)
 
+  # Fleet check-in payload builder — header-inline, network-free. Verifies the
+  # JSON shape matches the host runner's announce (name+port core) plus the
+  # additive machine/status fields. No POST, no live fleet.
+  ament_add_gtest(test_announce test/test_announce.cpp)
+  target_include_directories(test_announce PRIVATE include)
+
   # Lifecycle transitions (configure/activate/.../reject unsafe config). Links
   # the node + both backends + pstop_c, same as the executable but with its own
   # main(). SR-M-01 / SR-M-07.
   ament_add_gtest(test_lifecycle test/test_lifecycle.cpp
     src/machine_bridge_node.cpp src/software_backend.cpp src/hardware_backend.cpp
+    src/announce.cpp
     ${PSTOP_SRCS} ${TRANSPORT_SRCS})
   target_include_directories(test_lifecycle PRIVATE
     include ${PSTOP_ROOT}/pstop/include ${PSTOP_ROOT}/transport/include)
@@ -108,6 +116,7 @@ if(BUILD_TESTING)
   # transitions. Same link set as the executable, own main(). SR-M-01 / SR-M-07.
   ament_add_gtest(test_node_runtime test/test_node_runtime.cpp
     src/machine_bridge_node.cpp src/software_backend.cpp src/hardware_backend.cpp
+    src/announce.cpp
     ${PSTOP_SRCS} ${TRANSPORT_SRCS})
   target_include_directories(test_node_runtime PRIVATE
     include test ${PSTOP_ROOT}/pstop/include ${PSTOP_ROOT}/transport/include)
