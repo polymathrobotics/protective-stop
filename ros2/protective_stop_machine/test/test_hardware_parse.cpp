@@ -53,7 +53,8 @@ TEST(HwParse, MissingRelayDefaultsStopFailSafe)
 
 TEST(HwParse, FaultBitsAndMismatch)
 {
-  const auto s = parse(R"({"relay_stop":false,"relay_fault_a":true,"relay_fault_b":true,"pstop_mismatch":7})");
+  const auto s =
+    parse(R"({"relay_stop":false,"relay_fault_a":true,"relay_fault_b":true,"pstop_mismatch":7})");
   EXPECT_TRUE(s.relay.fault_a);
   EXPECT_TRUE(s.relay.fault_b);
   EXPECT_EQ(s.relay.mismatch, 7u);
@@ -61,9 +62,10 @@ TEST(HwParse, FaultBitsAndMismatch)
 
 TEST(HwParse, BondedRemotesEnumerated)
 {
-  const auto s = parse(R"({"relay_stop":true,"bonded_remotes":[)"
-                       R"({"id":30928592,"state":2,"age_ms":101,"rtt_ms":209,"wg_rtt_ms":50},)"
-                       R"({"id":123,"state":1,"age_ms":5,"rtt_ms":9}]})");
+  const auto s = parse(
+    R"({"relay_stop":true,"bonded_remotes":[)"
+    R"({"id":30928592,"state":2,"age_ms":101,"rtt_ms":209,"wg_rtt_ms":50},)"
+    R"({"id":123,"state":1,"age_ms":5,"rtt_ms":9}]})");
   ASSERT_EQ(s.remotes.size(), 2u);
   EXPECT_EQ(s.active_remotes, 2u);
   EXPECT_EQ(s.remotes[0].device_id, "01d7eed0");  // 30928592 == 0x01D7EED0
@@ -79,7 +81,8 @@ TEST(HwParse, BondedRemotesEnumerated)
 // fixed on real hardware: count real peers, not array length).
 TEST(HwParse, SkipsZeroIdGhostEntries)
 {
-  const auto s = parse(R"({"relay_stop":false,"bonded_remotes":[{"id":0,"state":0},{"id":5,"state":2}]})");
+  const auto s =
+    parse(R"({"relay_stop":false,"bonded_remotes":[{"id":0,"state":0},{"id":5,"state":2}]})");
   ASSERT_EQ(s.remotes.size(), 1u);
   EXPECT_EQ(s.active_remotes, 1u);
   EXPECT_EQ(s.remotes[0].device_id, "00000005");

@@ -11,8 +11,8 @@
 
 #include "protective_stop_machine/software_backend.hpp"
 
-using protective_stop_machine::software_remote_is_stop_only;
 using protective_stop_machine::SoftwareConfig;
+using protective_stop_machine::software_remote_is_stop_only;
 
 // The out-of-the-box default: no operators listed -> every remote is stop-only,
 // i.e. cannot re-arm. This is the hole the fix closes (was accept-all-as-op).

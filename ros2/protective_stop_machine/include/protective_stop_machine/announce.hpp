@@ -133,7 +133,9 @@ inline std::string build_announce_payload(
 class MachineAnnouncer
 {
 public:
-  MachineAnnouncer(AnnounceConfig cfg, int port, uint32_t machine_id, std::function<MachineSnapshot()> snapshot_fn);
+  MachineAnnouncer(
+    AnnounceConfig cfg, int port, uint32_t machine_id,
+    std::function<MachineSnapshot()> snapshot_fn);
   ~MachineAnnouncer();
 
   MachineAnnouncer(const MachineAnnouncer &) = delete;
@@ -147,10 +149,7 @@ public:
   // Stop the thread and join. Idempotent.
   void stop();
 
-  bool enabled() const
-  {
-    return enabled_.load();
-  }
+  bool enabled() const {return enabled_.load();}
 
 private:
   void run();
