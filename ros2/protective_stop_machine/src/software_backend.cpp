@@ -63,18 +63,24 @@ static uint64_t now_ms()
          1000000ULL;
 }
 
-static remote_details_t cb_remote_details(const device_id_t * /*id*/)
+static remote_details_t cb_remote_details(const device_id_t * id)
 {
   remote_details_t d;
   remote_detail_init(&d);
   uint64_t hb = 400;
   bool allow = true;
+  // STOP-ONLY unless this remote is a listed operator. Default (empty operator
+  // list) => stop-only, so an unlisted remote may STOP + is heartbeat-monitored
+  // but can NEVER re-arm. Replaces the previous hardcoded is_stop_only=false,
+  // which accepted every remote as a full operator.
+  bool stop_only = true;
   if (g_impl) {
     std::lock_guard<std::mutex> lk(g_impl->mtx);
     hb = g_impl->timing.heartbeat_ms;
     allow = g_impl->cfg.allow_unlisted;
+    stop_only = software_remote_is_stop_only(g_impl->cfg, (id != nullptr) ? id->data : 0U);
   }
-  remote_detail_set(&d, allow, hb, /*is_stop_only=*/ false);
+  remote_detail_set(&d, allow, hb, stop_only);
   return d;
 }
 

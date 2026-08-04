@@ -306,6 +306,66 @@ esp_err_t dcs_nvs_write_pstop_peers(const dcs_pstop_peer_rec_t recs[DCS_PSTOP_MA
   return r;
 }
 
+/* operators blob layout (byte-serialized):
+ *   [0]            count (0..DCS_MAX_OPERATORS)
+ *   per id, big-endian u32
+ * Absent/corrupt -> empty list (0 operators = every remote stop-only = safe). */
+#define OPERATORS_BLOB_LEN (1 + (DCS_MAX_OPERATORS * 4))
+
+int dcs_nvs_read_operators(uint32_t out[DCS_MAX_OPERATORS])
+{
+  (void)memset(out, 0, DCS_MAX_OPERATORS * sizeof(out[0]));
+
+  uint8_t blob[OPERATORS_BLOB_LEN] = {0};
+  size_t len = sizeof(blob);
+  nvs_handle_t h;
+  esp_err_t r = ESP_FAIL;
+  if (nvs_open(DCS_NVS_NS, NVS_READONLY, &h) == ESP_OK) {
+    r = nvs_get_blob(h, DCS_NVS_KEY_OPERATORS, blob, &len);
+    nvs_close(h);
+  }
+  if ((r != ESP_OK) || (len < 1u)) {
+    return 0; /* blank NVS: empty allowlist */
+  }
+  int count = blob[0];
+  if (count > DCS_MAX_OPERATORS) {
+    count = DCS_MAX_OPERATORS; /* corrupt length degrades safely (never over-reads) */
+  }
+  int n = 0;
+  for (int i = 0; i < count; i++) {
+    size_t off = (size_t)1 + ((size_t)i * 4u);
+    if ((off + 4u) > len) {
+      break; /* truncated blob: stop at what we have */
+    }
+    uint32_t id = ps_peers_get_u32(&blob[off]);
+    if (id != 0u) {
+      out[n++] = id; /* skip cleared/zero slots */
+    }
+  }
+  return n;
+}
+
+esp_err_t dcs_nvs_write_operators(const uint32_t ids[DCS_MAX_OPERATORS], int count)
+{
+  if ((count < 0) || (count > DCS_MAX_OPERATORS)) {
+    return ESP_ERR_INVALID_ARG;
+  }
+  uint8_t blob[OPERATORS_BLOB_LEN] = {0};
+  blob[0] = (uint8_t)count;
+  for (int i = 0; i < count; i++) {
+    ps_peers_put_u32(&blob[1 + (i * 4)], ids[i]);
+  }
+  nvs_handle_t h;
+  esp_err_t r = nvs_open(DCS_NVS_NS, NVS_READWRITE, &h);
+  if (r != ESP_OK) return r;
+  r = nvs_set_blob(h, DCS_NVS_KEY_OPERATORS, blob, sizeof(blob));
+  if (r == ESP_OK) {
+    r = nvs_commit(h);
+  }
+  nvs_close(h);
+  return r;
+}
+
 int dcs_nvs_read_reset_history(uint8_t * out, int max)
 {
   if ((out == NULL) || (max <= 0)) return 0;

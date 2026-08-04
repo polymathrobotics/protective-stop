@@ -82,12 +82,13 @@ Two definitions, reported both ways to stay honest:
 
 | Metric | Value |
 |---|---|
-| SRs with ≥1 passing verifying test | **27/39 = 69.2%** |
-| SRs **strictly fully-verified** | **15/39 = 38.5%** |
+| SRs with ≥1 passing verifying test | **28/40 = 70.0%** |
+| SRs **strictly fully-verified** | **15/40 = 37.5%** |
 | Safety functions (F-xx) traced to ≥1 SR | **22/27 = 81.5%** (88% excl. 2 declared-non-safety) |
 
-Status of the 39 SRs: **15 Verified · 11 Partial · 11 Unverified-gap · 2 Residual-accepted**
-(SR-M-01 + SR-M-03 verified 2026-08-02 by the new ROS 2 executor/HTTP-seam suites).
+Status of the 40 SRs: **15 Verified · 12 Partial · 11 Unverified-gap · 2 Residual-accepted**
+(SR-SYS-09 operator-vs-stop-only authorization added 2026-08-03; SR-M-01 + SR-M-03
+verified 2026-08-02 by the new ROS 2 executor/HTTP-seam suites).
 `SR-R` (remote firmware) is the weak spot — 8/15 unverified, holding 5 of the 6
 top DU gaps. Full matrix + test-gap register + function→SR reverse map in
 `TRACEABILITY.md`. SIL3/PLe stays **allocated, not achieved**.

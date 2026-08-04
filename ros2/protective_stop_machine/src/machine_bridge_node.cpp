@@ -49,6 +49,12 @@ void MachineBridgeNode::declare_all_parameters()
 
   declare_parameter<std::string>("software.bind_addr", "0.0.0.0", ro());
   declare_parameter<int>("software.port", 8890, ro());
+  // Operator authorization (SAFETY). Unlisted remotes are STOP-ONLY by default
+  // (accepted + heartbeat-monitored, may STOP, may NEVER re-arm). Only remotes
+  // whose 32-bit pstop id appears in software.operators may re-arm. Empty list
+  // (default) => every remote is stop-only = maximally safe.
+  declare_parameter<bool>("software.default_stop_only", true, ro());
+  declare_parameter<std::vector<int64_t>>("software.operators", std::vector<int64_t>{}, ro());
 
   declare_parameter<std::string>("hardware.device_url", "http://127.0.0.1", ro());
   declare_parameter<std::string>("hardware.admin_user", "admin", ro());
@@ -87,6 +93,13 @@ bool MachineBridgeNode::build_backend(std::string & error)
     sc.port = static_cast<int>(get_parameter("software.port").as_int());
     sc.machine_id = static_cast<uint32_t>(get_parameter("machine_id").as_int());
     sc.timing = timing_;
+    sc.default_stop_only = get_parameter("software.default_stop_only").as_bool();
+    const auto operator_ids = get_parameter("software.operators").as_integer_array();
+    sc.operators.clear();
+    sc.operators.reserve(operator_ids.size());
+    for (int64_t operator_id : operator_ids) {
+      sc.operators.push_back(static_cast<uint32_t>(operator_id));
+    }
     backend_ = std::make_unique<SoftwareMachineBackend>(sc);
     return true;
   } else if (backend_kind_ == "hardware") {

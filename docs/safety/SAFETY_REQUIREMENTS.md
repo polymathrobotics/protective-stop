@@ -75,6 +75,7 @@ below is therefore conditional and tagged as such.
 | **SR-SYS-06** | The system shall bound the spurious-STOP (nuisance) rate so it introduces no secondary hazard, **without ever filtering, delaying, or debouncing the OPEN→STOP direction**; only the re-arm (reclose) direction may be gated. | SG-6, H-02 | F-R-03 | **No de-energize SIL** — availability goal, fail-safe by construction (asymmetric debounce); managed per A-06 | Test (STOP edge never debounced) | **Satisfied** (`firmware/main/main.c` reclose-only debounce; STOP is single-tick — see SR-R-05) |
 | **SR-SYS-07** | The machine's default and power-on state shall be STOP; OK shall be the exceptional, continuously-justified state, reachable only through the arming path. | SG-1/SG-3, H-08 | F-P-02, F-H/M dispatch | SIL 3 / PL e | Inspection + Test (default→STOP) | **Satisfied** (`pstop_c` `machine.c` default→STOP; see SR-I-02) |
 | **SR-SYS-08** | The transport shall be treated as an **untrusted black channel**; all safety detection (CRC-16, counter/stamp echo, heartbeat/liveness) shall reside in the endpoints and no timing/config value received over the channel shall widen the safe envelope. | SG-2, A-08, H-06/H-11 | F-R-06/07, F-P-01/04 | SIL 3 / PL e | Analysis (black-channel argument, FMEDA feed) | **Partially satisfied** (endpoint CRC/echo/clamp live — SR-R-13/14; residual bit-error/masquerade rate is an FMEDA **Gap**) |
+| **SR-SYS-09** | STOP→OK (re-arm) shall be permitted **only** for remotes on the machine's **operator allowlist** (`is_stop_only == false`); every other accepted remote shall be **stop-only** — able to command STOP and heartbeat-monitored (its silence ⇒ fail-safe STOP), but unable to re-arm. The operator allowlist shall **default to empty**, so out of the box every bonded remote is stop-only (maximally safe) and operators are added only during configuration. | SG-3, **H-13**, FMEA H02-4 | F-P-02, F-H-05 (+ F-M / `machn` operator-list config) | SIL 3 / PL e | Test (stop-only remote's OK never re-arms; operator's does) + Inspection (default-empty allowlist) | **Satisfied** (`pstop_c` gates STOP→OK ownership on `is_stop_only==false` — `pstop_c/.../machine.c:135-142`; a stop-only remote's STOP still forces STOP `:131,155-156` and it is heartbeat-monitored `machine_check_heartbeats:266-320`; `remote_details_cb`→`is_stop_only` `:16,31`; upstream `machine_test.c:677,1165`) — residual: the newly-added shell operator-list config surface (machn `/api/operators`) wants its own plumbing test |
 
 ---
 
@@ -189,7 +190,7 @@ Partial = one or more derived SRs are Gaps.
 |---|---|---|
 | **SG-1** (stop on demand/fault ≤ FTTI) | SR-SYS-01/07, SR-R-01/04/05/07/09/10/11, SR-H-01/03/06, SR-M-01/02/03/05, SR-I-01/02 | **Partial** (Gaps: SR-R-09/10/11, SR-H-03) |
 | **SG-2** (no spurious OK; freshness) | SR-SYS-02/08, SR-R-02/08/12/13/14, SR-H-04, SR-I-01/03/04 | **Partial** (Gaps: SR-R-08/12, SR-H-04) |
-| **SG-3** (arming integrity) | SR-SYS-03, SR-R-06, SR-H-02/03, SR-M-01 | **Partial** (Gap: SR-H-03 host floor) |
+| **SG-3** (arming integrity + operator authorization) | SR-SYS-03/09, SR-R-06, SR-H-02/03, SR-M-01 | **Partial** (Gap: SR-H-03 host floor; SR-SYS-09 authorization Satisfied) |
 | **SG-4** (many→one fail-safe OR) | SR-SYS-04, SR-H-05, SR-I-04 | **Partial** (ghost-bond masking unquantified) |
 | **SG-5** (final element HFT=1 / integrator) | SR-SYS-05, SR-M-03/04 | **Partial** (software-machine final element allocated to integrator) |
 | **SG-6** (bounded spurious STOP, fail-safe debounce) | SR-SYS-06, SR-R-05 | **Full** (Satisfied by construction) |
@@ -217,12 +218,12 @@ requirement-traced test.
 
 | Area | Count | Satisfied | Partial | Gap | Residual-accepted |
 |---|---|---|---|---|---|
-| SR-SYS | 8 | 2 | 4 | 2 | 0 |
+| SR-SYS | 9 | 3 | 4 | 2 | 0 |
 | SR-R | 15 | 8 | 0 | 7 | 0 |
 | SR-H | 6 | 3 | 1 | 2 | 0 |
 | SR-M | 6 | 4 | 0 | 0 | 2 |
 | SR-I | 4 | 1 | 3 | 0 | 0 |
-| **Total** | **39** | **18** | **8** | **11** | **2** |
+| **Total** | **40** | **19** | **8** | **11** | **2** |
 
 "Partial" = the safety-argument leg is in place but a required test, quantification,
 or a decomposed leg is still outstanding (e.g. SR-I-01/04 satisfied-by-contract but

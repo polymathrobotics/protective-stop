@@ -40,7 +40,9 @@ re-establishes on its own after either end reboots. On a shared subnet
 the remote also advertises its LAN address so peers can take the direct
 local path instead of the relay. The machine wrapper adds a
 minimum-hold arming policy so an electrical blip can never perform the
-arming gesture.
+arming gesture. A machine accepts every remote that bonds but treats it
+as stop-only by default — any remote can STOP, but only remotes on the
+machine's operator allowlist (empty by default) can re-arm it.
 
 ```mermaid
 flowchart LR
@@ -145,6 +147,14 @@ releasing. The runner logs `ARMED` and the ring turns green.
   vetoed machine-side. The remote also debounces loop re-close by 3
   ticks and holds all transmission until the loops settle at boot, so
   an EMC blip can't arm.
+- Operator vs stop-only remote: every remote that bonds is accepted and
+  can command STOP (and its silence stops the machine), but by default
+  it is **stop-only** — it can never re-arm (STOP→OK). Only remotes on
+  the machine's **operator allowlist** may re-arm, and that allowlist is
+  **empty by default**, so out of the box every remote is stop-only
+  (maximally safe) and operators are named during configuration
+  (`docs/FAILOVER_AND_ARMING_DESIGN_2026-07-21.md`; enforced in
+  `pstop_c` `machine.c:135-142`).
 - Fail-safe silence: lockstep mismatch, loop fault, VPN-down
   (source-bound socket), and comparator stall all result in no message,
   which the machine treats as STOP.

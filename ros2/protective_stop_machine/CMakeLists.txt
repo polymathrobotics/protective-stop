@@ -84,6 +84,12 @@ if(BUILD_TESTING)
   ament_add_gtest(test_timing_floors test/test_timing_floors.cpp)
   target_include_directories(test_timing_floors PRIVATE include)
 
+  # Operator-authorization policy (SAFETY): unlisted remote = stop-only (may STOP,
+  # never re-arm); only a listed operator may re-arm. Header-only decision fn, no
+  # ROS runtime / no pstop link.
+  ament_add_gtest(test_operator_policy test/test_operator_policy.cpp)
+  target_include_directories(test_operator_policy PRIVATE include)
+
   # Lifecycle transitions (configure/activate/.../reject unsafe config). Links
   # the node + both backends + pstop_c, same as the executable but with its own
   # main(). SR-M-01 / SR-M-07.

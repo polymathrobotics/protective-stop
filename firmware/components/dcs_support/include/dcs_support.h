@@ -217,11 +217,43 @@ extern "C"
 
   /**
  * @brief Publish one machine-role bonded-remote entry (slot 0..7); id 0
- * clears the slot. Shown in /state.json's bonded_remotes array.
+ * clears the slot. Shown in /state.json's bonded_remotes array. stop_only
+ * reflects the library's per-remote authorization (true = may STOP but may
+ * never re-arm; false = full operator) so it is observable over HTTP.
  */
 #define DCS_MACHN_MAX_REMOTES 8
   void dcs_publish_machn_remote(
-    int slot, uint32_t remote_id, uint32_t ip, uint32_t state, uint32_t age_ms, uint32_t rtt_ms);
+    int slot, uint32_t remote_id, uint32_t ip, uint32_t state, uint32_t age_ms, uint32_t rtt_ms, bool stop_only);
+
+  /* ============================================================================
+ * Operator allowlist (machine-role authorization).
+ *
+ * A bonded remote is ACCEPTED and heartbeat-monitored but STOP-ONLY by default:
+ * it may command STOP, never re-arm (STOP->OK). Only a remote whose 32-bit
+ * pstop id is on THIS list is a full operator (stop_only=false, may re-arm).
+ * The list is EMPTY on blank NVS, so out of the box every remote is stop-only =
+ * maximally safe; operator ids are added during configuration. Persisted in the
+ * dcs_app NVS namespace and mirrored to a lock-free RAM cache that the safety
+ * cores read from their remote_details callback (never touching NVS/flash).
+ * ========================================================================== */
+#define DCS_MAX_OPERATORS 16
+
+  /** @brief True if remote_id is a listed operator (RAM-only, lock-free — safe
+   * to call from the safety cores' remote_details callback). Empty list => the
+   * fail-safe: every id returns false => every remote is stop-only. */
+  bool dcs_operator_is_listed(uint32_t remote_id);
+
+  /** @brief Copy the current operator ids into out[] (up to DCS_MAX_OPERATORS);
+   * returns the count. Used by the admin API + /state.json. */
+  int dcs_operator_get_list(uint32_t out[DCS_MAX_OPERATORS]);
+
+  /** @brief Add an operator id (idempotent) to the RAM cache AND NVS. Returns
+   * ESP_ERR_NO_MEM when the list is full, ESP_ERR_INVALID_ARG for id 0. */
+  esp_err_t dcs_operator_add(uint32_t remote_id);
+
+  /** @brief Remove an operator id from the RAM cache AND NVS (no error if
+   * absent). */
+  esp_err_t dcs_operator_del(uint32_t remote_id);
 
   /**
  * @brief Tell the transport whether the pstop link to the machine is alive.

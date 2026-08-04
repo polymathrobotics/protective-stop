@@ -20,6 +20,7 @@
 #include "esp_system.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/idf_additions.h" /* xTaskCreatePinnedToCoreWithCaps */
+#include "freertos/semphr.h" /* operator-allowlist writer mutex */
 #include "freertos/task.h"
 #include "microlink.h"
 #include "ml_app.h"
@@ -147,8 +148,121 @@ atomic_uint_fast32_t g_dcs_machn_r_state[DCS_MACHN_MAX_REMOTES];
 atomic_uint_fast32_t g_dcs_machn_r_age_ms[DCS_MACHN_MAX_REMOTES];
 atomic_uint_fast32_t g_dcs_machn_r_rtt_ms[DCS_MACHN_MAX_REMOTES];
 atomic_uint_fast32_t g_dcs_machn_r_ip[DCS_MACHN_MAX_REMOTES];
+atomic_uint_fast32_t g_dcs_machn_r_stop_only[DCS_MACHN_MAX_REMOTES];
+
+/* Operator allowlist RAM cache. Lock-free for readers: the safety cores scan
+ * these atomics from their remote_details callback, never touching NVS/flash.
+ * Each slot holds 0 (empty) or a real operator id, so a torn read can never
+ * FABRICATE a match — it can at worst miss a just-added id (=> stop-only = safe)
+ * or briefly still see a just-removed id (a de-auth lag, harmless). Writers
+ * (admin API + boot load) serialize on g_dcs_operators_mtx and also persist to
+ * NVS. Loaded once at boot in dcs_support_init(); empty on blank NVS. */
+static atomic_uint_fast32_t g_dcs_operators[DCS_MAX_OPERATORS];
+static SemaphoreHandle_t g_dcs_operators_mtx; /* writer serialization only */
 
 static void pstop_slot_pins_sync(void);
+
+static void dcs_operators_load_from_nvs(void)
+{
+  uint32_t ids[DCS_MAX_OPERATORS];
+  int n = dcs_nvs_read_operators(ids);
+  for (int i = 0; i < DCS_MAX_OPERATORS; i++) {
+    atomic_store(&g_dcs_operators[i], (i < n) ? ids[i] : 0u);
+  }
+  ESP_LOGI(TAG, "operator allowlist: %d id(s) loaded (empty => every remote is stop-only)", n);
+}
+
+bool dcs_operator_is_listed(uint32_t remote_id)
+{
+  if (remote_id == 0u) {
+    return false;
+  }
+  for (int i = 0; i < DCS_MAX_OPERATORS; i++) {
+    if ((uint32_t)atomic_load(&g_dcs_operators[i]) == remote_id) {
+      return true;
+    }
+  }
+  return false;
+}
+
+int dcs_operator_get_list(uint32_t out[DCS_MAX_OPERATORS])
+{
+  int n = 0;
+  for (int i = 0; i < DCS_MAX_OPERATORS; i++) {
+    uint32_t id = (uint32_t)atomic_load(&g_dcs_operators[i]);
+    if (id != 0u) {
+      out[n++] = id;
+    }
+  }
+  return n;
+}
+
+/* Serialize a write, snapshot the current ids into a compact array, persist to
+ * NVS, and only on NVS success republish the compacted set into the RAM cache.
+ * Keeping NVS the source of truth means a failed write leaves RAM unchanged. */
+static esp_err_t dcs_operators_commit(const uint32_t * ids, int count)
+{
+  esp_err_t r = dcs_nvs_write_operators(ids, count);
+  if (r != ESP_OK) {
+    return r;
+  }
+  for (int i = 0; i < DCS_MAX_OPERATORS; i++) {
+    atomic_store(&g_dcs_operators[i], (i < count) ? ids[i] : 0u);
+  }
+  return ESP_OK;
+}
+
+esp_err_t dcs_operator_add(uint32_t remote_id)
+{
+  if (remote_id == 0u) {
+    return ESP_ERR_INVALID_ARG;
+  }
+  if (g_dcs_operators_mtx != NULL) {
+    (void)xSemaphoreTake(g_dcs_operators_mtx, portMAX_DELAY);
+  }
+  uint32_t ids[DCS_MAX_OPERATORS];
+  int n = dcs_operator_get_list(ids);
+  esp_err_t r = ESP_OK;
+  bool present = false;
+  for (int i = 0; i < n; i++) {
+    if (ids[i] == remote_id) {
+      present = true;
+      break;
+    }
+  }
+  if (present) {
+    r = ESP_OK; /* idempotent */
+  } else if (n >= DCS_MAX_OPERATORS) {
+    r = ESP_ERR_NO_MEM;
+  } else {
+    ids[n++] = remote_id;
+    r = dcs_operators_commit(ids, n);
+  }
+  if (g_dcs_operators_mtx != NULL) {
+    (void)xSemaphoreGive(g_dcs_operators_mtx);
+  }
+  return r;
+}
+
+esp_err_t dcs_operator_del(uint32_t remote_id)
+{
+  if (g_dcs_operators_mtx != NULL) {
+    (void)xSemaphoreTake(g_dcs_operators_mtx, portMAX_DELAY);
+  }
+  uint32_t ids[DCS_MAX_OPERATORS];
+  int n = dcs_operator_get_list(ids);
+  int w = 0;
+  for (int i = 0; i < n; i++) {
+    if (ids[i] != remote_id) {
+      ids[w++] = ids[i];
+    }
+  }
+  esp_err_t r = (w == n) ? ESP_OK /* absent: nothing to persist */ : dcs_operators_commit(ids, w);
+  if (g_dcs_operators_mtx != NULL) {
+    (void)xSemaphoreGive(g_dcs_operators_mtx);
+  }
+  return r;
+}
 
 /* === Public API ============================================================ */
 
@@ -236,9 +350,10 @@ dcs_boot_state_t dcs_support_init(void)
      * API + fleet-ota + verbose) and dcs_admin_pages registers 18; at 16 the
      * total overflowed 32 and the LAST-registered app routes silently failed
      * to register (observed: /api/pstop_num and /api/enter_download 404'd on
-     * shipped firmware). 26 gives 42 total slots with headroom — re-check this
+     * shipped firmware). dcs now registers 21 (incl. /api/operators GET+POST);
+     * 30 gives 46 total slots with headroom — re-check this
      * arithmetic whenever a route is added on either side. */
-  cfg.max_user_uri_handlers = 28;
+  cfg.max_user_uri_handlers = 30;
   g_dcs.app = ml_app_start(&cfg);
   g_dcs.ml_handle = ml_app_get_microlink(g_dcs.app);
 
@@ -296,6 +411,17 @@ dcs_boot_state_t dcs_support_init(void)
   /* Pin every configured machine target in the WG peer table so the cap
      * trim can never orphan a safety link (see pstop_slot_pins_sync). */
   pstop_slot_pins_sync();
+
+  /* Operator allowlist (machine-role authorization): create the writer mutex
+     * and load the persisted ids into the lock-free RAM cache BEFORE main.c
+     * spawns the safety cores (their remote_details callback reads the cache)
+     * and before the admin API can mutate it. Empty on blank NVS = every remote
+     * stop-only = safe. */
+  g_dcs_operators_mtx = xSemaphoreCreateMutex();
+  if (g_dcs_operators_mtx == NULL) {
+    ESP_LOGW(TAG, "operator-allowlist mutex alloc failed — add/del will run unserialized");
+  }
+  dcs_operators_load_from_nvs();
 
   /* Register the admin pages now that ml_app is up. */
   dcs_admin_pages_register(g_dcs.app);
@@ -403,7 +529,7 @@ void dcs_publish_relay_fault(uint32_t fault_a_ticks, uint32_t fault_b_ticks, boo
 }
 
 void dcs_publish_machn_remote(
-  int slot, uint32_t remote_id, uint32_t ip, uint32_t state, uint32_t age_ms, uint32_t rtt_ms)
+  int slot, uint32_t remote_id, uint32_t ip, uint32_t state, uint32_t age_ms, uint32_t rtt_ms, bool stop_only)
 {
   if ((slot < 0) || (slot >= DCS_MACHN_MAX_REMOTES)) {
     return;
@@ -413,6 +539,7 @@ void dcs_publish_machn_remote(
   atomic_store(&g_dcs_machn_r_state[slot], state);
   atomic_store(&g_dcs_machn_r_age_ms[slot], age_ms);
   atomic_store(&g_dcs_machn_r_rtt_ms[slot], rtt_ms);
+  atomic_store(&g_dcs_machn_r_stop_only[slot], stop_only ? 1u : 0u);
 }
 
 void dcs_publish_pstop_sf_causes(

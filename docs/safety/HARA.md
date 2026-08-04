@@ -93,6 +93,7 @@ BC = black-channel / comms; H/O = human / operational.
 | **H-10** | **Machine-side relay weld / stuck-on** — the final element cannot de-energize; commanded STOP does not open the stop circuit. | Contact welds after many cycles / driver short. | SF-1 | RHW |
 | **H-11** | **Forged / fail-danger OK on the black channel** — partial corruption or the all-zeros/`OK==0x00` polarity produces an OK the machine accepts. | Bit errors, buffer zeroing, malicious injection. | SF-1 / SF-2 | BC, RHW |
 | **H-12** | **Final actuation element not safety-rated** — software/ROS 2 machine's STOP is a non-safety signal the robot control stack may ignore or delay. | Software or hardware-proxy machine deployment. | SF-1 | (architectural / scope) |
+| **H-13** | **Non-operator remote re-arms the machine** — an accepted-but-not-authorized (stop-only) remote, or any remote absent from the machine's operator allowlist, performs a STOP→OK re-arm and resumes the machine. | Machine STOPPED; a remote that was admitted only to *stop* drives (or completes) the arming gesture. | SF-3 | SW, H/O (mis-configured operator allowlist) |
 
 ---
 
@@ -123,6 +124,7 @@ serious/irreversible); F = exposure (F1 seldom, F2 frequent); P = avoidance
 | **H-10** | C2+ | F2 | P2 | W2 | **SIL 3** | S2 | F2 | P2 | **e** | Classic dangerous-undetected. ESP32 `machn`: two relays **in series** (either breaks) + feedback contradiction → stop-on-contradiction ≥ ~1 s gives HFT=1 + diagnosis. Residual: a **single-channel or software** machine has **no** in-scope rated relay (A-07, H-12). |
 | **H-11** | C2+ | F2 | P2 | W2 | **SIL 3** | S2 | F2 | P2 | **e** | `OK==0x00` is an **inherited fail-danger polarity** (all-zeros decodes toward OK, SYSTEM_DEFINITION §5). Compensated by CRC-16 over bytes[0..37] (a zeroed CRC won't match), transmit-on-agreement, and the live-sample derivation. Standing FMEA anchor. |
 | **H-12** | C2+ | F2 | P2 | W2 | **SIL 3** | S2 | F2 | P2 | **e** | For the software/ROS 2 machine the "STOP" is a ROS topic explicitly carrying **no safety responsibility**; enforcement reduces to remotes fail-safe-stopping on their own heartbeat timeout. The **final element integrity is unallocated** unless the integrator supplies it. Architectural gap, not a coding defect. |
+| **H-13** | C2+ | F2 | P2 | W2 | **SIL 3** | S2 | F2 | P2 | **e** | Same collision outcome as H-04: an unattended machine re-energized by a remote never authorized to *resume* it (only to *stop* it). The control is `pstop_c` gating the STOP→OK ownership on `is_stop_only == false` (`machine.c:135-142`); a stop-only remote's STOP still forces STOP (`:131,155-156`) and it is heartbeat-monitored (`machine_check_heartbeats:266-320`). The **default is maximally safe** — the operator allowlist is empty out of the box, so every bonded remote is stop-only until explicitly promoted. Residual is a **mis-configured allowlist** that mints a non-operator as operator (FMEA H02-4). |
 
 ---
 
@@ -136,7 +138,7 @@ absolute number is a vehicle-level input.
 |---|---|---|---|---|---|
 | **SG-1** | On any stop demand **or** any detected fault, command the machine to **de-energized STOP** within the fault-tolerant time. | De-energized (no valid OK) | ≤ PST_min (A-05); pstop budget ≈ 1.3 s worst case | **SIL 3 / PL e** | H-01, H-03, H-09, H-11 |
 | **SG-2** | Sustain OK **only** while it is *freshly and causally* derived from a live both-channel read **and** a valid black-channel round-trip; stale/replayed/forged OK must fail to STOP. | De-energized on any staleness | ≤ heartbeat timeout ≈ 1.2 s | **SIL 3 / PL e** | H-05, H-06, H-11 |
-| **SG-3** | Permit STOP→OK **only** via a deliberate arming gesture (STOP held ≥ `min_stop_ms` = 500 ms, then release); never spontaneously, on a transient, or at boot. | Remain STOPPED until valid gesture | n/a (state guard) | **SIL 3 / PL e** | H-04, H-08 |
+| **SG-3** | Permit STOP→OK **only** via a deliberate arming gesture (STOP held ≥ `min_stop_ms` = 500 ms, then release) **and only from a remote on the machine's operator allowlist** (`is_stop_only == false`, default empty); never spontaneously, on a transient, at boot, or from a stop-only / non-operator remote. | Remain STOPPED until a valid gesture from an authorized operator | n/a (state guard) | **SIL 3 / PL e** | H-04, H-08, H-13 |
 | **SG-4** | In many→one, **any** bonded remote's STOP or silence forces STOP regardless of other remotes (fail-safe OR); arming requires a single owning gesture, and a lost/ghost bond must not read as present-and-OK. | De-energized if any remote demands/absent | ≤ heartbeat timeout | **SIL 3 / PL e** | H-07 |
 | **SG-5** | The **final actuation element** shall de-energize-to-safe with **HFT = 1** and diagnosable stuck-on (relay-output feedback), **or** the integrator shall provide an element of ≥ the allocated integrity. Software/ROS 2 machine outputs are non-safety and must not be the sole enforcement path. | Stop circuit open | ≤ `RELAY_FEEDBACK_MS` + ~1 s contradiction hold | **SIL 3 / PL e** (allocated to integrator for software machine) | H-10, H-12 |
 | **SG-6** | Bound the spurious-STOP rate so it does not introduce a secondary hazard (traffic/grade/load), **without ever filtering or delaying the stop path** (asymmetric, fail-safe-direction-only debounce). | STOP is always permitted; only re-arm is gated | open→STOP single-tick (~100 ms) | **No de-energize SIL** (availability goal, fail-safe by construction); manage per A-06 | H-02 |
@@ -147,7 +149,7 @@ absolute number is a vehicle-level input.
 
 **ISO 13849 (PLr): confirmed at PL e.** Under the worst-case assumptions the
 severity/exposure/avoidance triple for the primary hazards (H-01/03/04/05/06/07/
-09/10/11/12) is **S2 · F2 · P2**, which lands directly on **PLr = e** with no
+09/10/11/12/13) is **S2 · F2 · P2**, which lands directly on **PLr = e** with no
 ambiguity. PL e is the correct machinery-side requirement for an unattended
 mobile autonomous vehicle whose pstop failure can kill an unavoidable bystander.
 It is not higher (there is no PL above e); it drops to **PL d** only if the

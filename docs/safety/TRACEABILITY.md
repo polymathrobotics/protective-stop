@@ -3,7 +3,7 @@
 
 # Protective-Stop — Requirements Traceability Matrix & Requirements-Driven Coverage
 
-**Status:** verification-engineering work product. Traces the 39 safety
+**Status:** verification-engineering work product. Traces the 40 safety
 requirements (`docs/safety/SAFETY_REQUIREMENTS.md`) bidirectionally to the code
 that implements them and the tests that exercise them, then computes
 requirements-driven coverage. Spine = the SR table; function IDs =
@@ -70,6 +70,7 @@ Test-file shorthand:
 | SR-SYS-06 | F-R-03 | `main.c` reclose-only debounce | EV #1 ("open → immediate STOP" same tick; reclose re-runs debounce) | Test | **Verified** |
 | SR-SYS-07 | F-P-02, F-H/M dispatch | `machine.c` default→STOP | MR[A] I3, HIL10 (fresh needs gesture), HIL30 (boot), REQ 3_04 | Inspection + Test | **Verified** |
 | SR-SYS-08 | F-R-06/07, F-P-01/04 | endpoint CRC/echo/clamp | REQ 2_01 (corruption), MR[F] (bad-CRC→STOP). **Residual bit-error/FMEDA NO TEST** | Analysis | **Partially-verified** |
+| SR-SYS-09 | F-P-02, F-H-05 (+F-M/`machn` cfg) | `machine.c:135-142` (STOP→OK gated on `is_stop_only==false`), `:131,155-156` (stop-only STOP still stops), `:16,31` (`remote_details_cb`→`is_stop_only`), `:266-320` (heartbeat-monitored) | `machine_test.c:677` (`test_bond_stop_ok_stop_only_operator`), `machine_test.c:1165` (`test_2_clients_stop_only_stop`); MR[E] (allowlist / stop-only). **Shell operator-list config plumbing (machn `/api/operators`) NO TEST** | Test + Insp | **Partially-verified** |
 
 ### 2.2 Remote firmware (SR-R)
 
@@ -128,14 +129,16 @@ Test-file shorthand:
 
 ### 3.1 Headline numbers
 
-- **(a) SRs with ≥1 passing verifying test: 27 / 39 = 69.2 %** (was 25/39;
-  SR-M-01 + SR-M-03 gained verifying ROS 2 tests 2026-08-02).
-  (15 Verified + 11 Partially-verified + 1 Residual-with-test [SR-M-06]. The
+- **(a) SRs with ≥1 passing verifying test: 28 / 40 = 70.0 %** (was 27/39
+  before SR-SYS-09 was added; SR-M-01 + SR-M-03 gained verifying ROS 2 tests
+  2026-08-02).
+  (15 Verified + 12 Partially-verified + 1 Residual-with-test [SR-M-06]. The
   remaining Residual [SR-M-04] is inspection-only; the 11 Unverified-gap SRs
   have no test.)
-  **Strict, fully-verified only: 15 / 39 = 38.5 %.** This is the honest number
-  for "requirement completely discharged by test" — the 11 Partials each leave a
-  named leg (end-to-end, quantification, or golden-vector/replay) untested.
+  **Strict, fully-verified only: 15 / 40 = 37.5 %.** This is the honest number
+  for "requirement completely discharged by test" — the 12 Partials each leave a
+  named leg (end-to-end, quantification, golden-vector/replay, or the new
+  operator-list config plumbing) untested.
 
 - **(b) Safety functions F-xx traced to ≥1 SR: 22 / 27 = 81.5 %.**
   Five functions carry **no** requirement (§5): F-R-08, F-R-10 (both declared
@@ -147,12 +150,12 @@ Test-file shorthand:
 
 | Area | Count | Verified | Partially-verified | Unverified-gap | Residual-accepted | ≥1-test % | Fully-verified % |
 |---|---|---|---|---|---|---|---|
-| SR-SYS | 8 | 2 | 5 | 1 | 0 | 87.5 % | 25.0 % |
+| SR-SYS | 9 | 2 | 6 | 1 | 0 | 88.9 % | 22.2 % |
 | SR-R | 15 | 6 | 1 | 8 | 0 | 46.7 % | 40.0 % |
 | SR-H | 6 | 3 | 1 | 2 | 0 | 66.7 % | 50.0 % |
 | SR-M | 6 | 3 | 1 | 0 | 2 | 83.3 %† | 50.0 % |
 | SR-I | 4 | 1 | 3 | 0 | 0 | 100 % | 25.0 % |
-| **Total** | **39** | **15** | **11** | **11** | **2** | **69.2 %** | **38.5 %** |
+| **Total** | **40** | **15** | **12** | **11** | **2** | **70.0 %** | **37.5 %** |
 
 † SR-M ≥1-test counts SR-M-01/03/05 (Verified) + SR-M-02 (Partial) + SR-M-06
 (Residual-with-test) = 5/6 = 83.3 % (SR-M-01/03 verified 2026-08-02).
@@ -229,7 +232,7 @@ touches it. A function with **no SR** is a requirements-coverage hole.
 | F-H-02 | Arming policy | SR-SYS-03, SR-H-02/03 |
 | F-H-03 | Heartbeat/liveness | SR-SYS-01/02, SR-H-01/04, SR-I-03 |
 | **F-H-04** | Robot status output + logging | **— none (HOLE: undeclared, no SR)** |
-| F-H-05 | Many-to-one aggregation | SR-SYS-04, SR-H-05 |
+| F-H-05 | Many-to-one aggregation | SR-SYS-04/09, SR-H-05 |
 
 ### 5.3 ROS 2 machine (F-M)
 
@@ -249,7 +252,7 @@ touches it. A function with **no SR** is a requirements-coverage hole.
 | F-xx | Function | SRs touching it |
 |---|---|---|
 | F-P-01 | Encode/decode + CRC-16 | SR-SYS-08, SR-R-12, SR-I-01 |
-| F-P-02 | Machine dispatch (default→STOP) | SR-SYS-07, SR-I-02 |
+| F-P-02 | Machine dispatch (default→STOP) | SR-SYS-07/09, SR-I-02 |
 | F-P-03 | Heartbeat on monotonic clock | SR-SYS-02, SR-H-01/04, SR-I-03 |
 | F-P-04 | Counter/stamp echo + LOST/OOO | SR-SYS-02/04/08, SR-R-14(via 06), SR-I-04 |
 

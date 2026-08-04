@@ -108,6 +108,35 @@ system of your own (configured via `CONFIG_ML_FLEET_SERVER_IP` /
 project. With no backend configured, the direct `/admin/api/ota` upload
 is the update path.
 
+## Machine (`machn`) — operator authorization
+
+> These routes and `/state.json` fields belong to the ESP32 **machine** unit
+> (`machn/`), not the remote documented above. They are grouped here as the
+> single HTTP reference. (Endpoints are being added alongside this doc.)
+
+A machine **accepts every remote that bonds** but by default treats it as
+**stop-only** (`stop_only=true`): the remote may command STOP and is
+heartbeat-monitored (its silence forces a fail-safe STOP), but it can **never**
+re-arm the machine (STOP→OK). Only remotes on the machine's **operator
+allowlist** (`stop_only=false`) may re-arm. **The operator allowlist is empty by
+default** — out of the box every remote is stop-only (maximally safe); operator
+remote IDs are added during commissioning. Enforced in `pstop_c`
+(`machine.c:135-142`). Safety case: HARA H-13, SR-SYS-09, FMEA H02-4.
+
+All routes require admin Basic-auth (enforced in-handler, same credential as `/api/enter_download`).
+
+| Method | Route | Purpose |
+|--------|-------|---------|
+| GET    | `/api/operators` | List the operator allowlist — the remote device IDs permitted to re-arm |
+| POST   | `/api/operators?add=ID` | Add a remote device ID (hex `0x..`/`..` or decimal) to the operator allowlist (that remote becomes `stop_only=false`). Persisted to NVS |
+| POST   | `/api/operators?del=ID` | Remove a remote from the allowlist (it reverts to stop-only). Persisted to NVS |
+
+The machine's `/state.json` exposes the authorization state: an `operators`
+array (the configured operator device IDs) and, per bonded remote, a `stop_only`
+boolean — `true` = accepted, stop-capable, heartbeat-monitored, re-arm-**IN**capable;
+`false` = full operator (stop **and** re-arm). A remote absent from `operators`
+reads `stop_only=true`.
+
 ## Source of truth
 
 - Diagnostic/config routes: `firmware/components/dcs_support/src/dcs_admin_pages.c`

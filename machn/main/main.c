@@ -27,10 +27,11 @@
  *     carries the stop.
  *
  * pstop_c (certification track) is UNMODIFIED — this file is the shell.
- * Design: docs/MACHINE_ESP32_DESIGN.md. Scaffold status: config is
- * compile-time constants (NVS/admin UI wiring is a follow-up), telemetry
- * reuses the dcs comparator/core atomics (machn-specific /state.json
- * fields are a follow-up).
+ * Design: docs/MACHINE_ESP32_DESIGN.md. Scaffold status: timing config is
+ * compile-time constants; operator authorization is now NVS-backed (the
+ * operator allowlist via dcs_operator_*, managed at /api/operators) so unlisted
+ * remotes are STOP-ONLY by default. Telemetry reuses the dcs comparator/core
+ * atomics (machn-specific /state.json fields are a follow-up).
  */
 
 #include <stdatomic.h>
@@ -169,14 +170,14 @@ static void seen_publish(uint64_t now)
 {
   for (int i = 0; i < DCS_MACHN_MAX_REMOTES; i++) {
     if (g_seen[i].id == 0u) {
-      dcs_publish_machn_remote(i, 0u, 0u, 0u, 0u, 0u);
+      dcs_publish_machn_remote(i, 0u, 0u, 0u, 0u, 0u, false);
       continue;
     }
     uint64_t age = (now > g_seen[i].last_rx_ms) ? (now - g_seen[i].last_rx_ms) : 0u;
     if (age > 30000u) { /* gone half a minute: drop from the page */
       dcs_untrack_peer_health(g_seen[i].ip); /* stop heartbeat-pinging it */
       g_seen[i].id = 0u;
-      dcs_publish_machn_remote(i, 0u, 0u, 0u, 0u, 0u);
+      dcs_publish_machn_remote(i, 0u, 0u, 0u, 0u, 0u, false);
       continue;
     }
     /* Keep the disco heartbeat (and thus the path-RTT sample) alive toward
@@ -185,12 +186,14 @@ static void seen_publish(uint64_t now)
          * machine->remote direction the zombie-session recovery kick. */
     dcs_notify_peer_health(g_seen[i].ip, age < 2000u);
     uint32_t st = 0u;
+    bool stop_only = false;
     device_id_t rid = {.data = g_seen[i].id};
     const pstop_remote_data_t * rd = machine_get_remote_data(&g_core[0].machine, &rid);
     if (rd != NULL) {
       st = (uint32_t)rd->remote_state;
+      stop_only = rd->is_stop_only; /* library's per-remote authorization (latched at bond) */
     }
-    dcs_publish_machn_remote(i, g_seen[i].id, g_seen[i].ip, st, (uint32_t)age, g_seen[i].rtt_ms);
+    dcs_publish_machn_remote(i, g_seen[i].id, g_seen[i].ip, st, (uint32_t)age, g_seen[i].rtt_ms, stop_only);
   }
 }
 
@@ -220,12 +223,18 @@ static volatile uint32_t g_cycle_seq;
 
 static remote_details_t details_default(const device_id_t * device_id)
 {
-  (void)device_id;
   remote_details_t d;
-  /* Scaffold policy: accept any remote (bench allow_unlisted). The NVS
-     * allowlist (allowed / stop_only / per-remote heartbeat) is a follow-up
-     * and MUST land before any non-bench deployment. */
-  remote_detail_set(&d, true, MACHN_DEFAULT_HEARTBEAT_MS, false);
+  /* Authorization policy. Every bonding remote is ACCEPTED (allowed=true) and
+     * heartbeat-monitored, but STOP-ONLY by default: it may command STOP, never
+     * re-arm (STOP->OK). Only a remote whose 32-bit pstop id is on the
+     * NVS-backed operator allowlist (dcs_operator_*, empty on blank NVS) is a
+     * full operator (stop_only=false). This REPLACES the old bench scaffold that
+     * accepted any remote as a full operator. Read is lock-free RAM (safe on the
+     * safety cores). Latched onto the client at bond (pstop_c machine.c
+     * add_new_client) — an operator added later applies on the remote's next
+     * bond. */
+  const bool is_operator = (device_id != NULL) && dcs_operator_is_listed(device_id->data);
+  remote_detail_set(&d, true, MACHN_DEFAULT_HEARTBEAT_MS, !is_operator);
   return d;
 }
 

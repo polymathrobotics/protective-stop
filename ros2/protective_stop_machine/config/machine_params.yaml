@@ -8,6 +8,13 @@
     software:  # used when backend == software
       bind_addr: 0.0.0.0
       port: 8890  # read-only
+      # Operator authorization (SAFETY). A bonded remote is accepted and
+      # heartbeat-monitored but STOP-ONLY by default: it may command STOP but may
+      # NEVER re-arm (STOP -> OK). Only a remote whose 32-bit pstop id is listed
+      # in `operators` gets re-arm authority. Empty list (the default) = every
+      # remote is stop-only = maximally safe out of the box.
+      default_stop_only: true  # read-only
+      # operators: [30234300]  # read-only; 32-bit pstop ids granted re-arm (default: none)
 
     hardware:  # used when backend == hardware
       device_url: http://127.0.0.1
