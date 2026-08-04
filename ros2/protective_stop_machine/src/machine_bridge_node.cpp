@@ -66,6 +66,22 @@ bool MachineBridgeNode::build_backend(std::string & error)
       sc.operators.push_back(static_cast<uint32_t>(operator_id));
     }
     backend_ = std::make_unique<SoftwareMachineBackend>(sc);
+
+    // Resolve the optional fleet check-in (software machine only — the ESP32
+    // machn already checks in on its own). Env overrides the params so URL/key
+    // stay out of committed config, mirroring the host runner.
+    announce_cfg_.url = params_.announce.url;
+    announce_cfg_.key_file = params_.announce.key_file;
+    announce_cfg_.name = params_.announce.name;
+    announce_cfg_.interval_s = static_cast<int>(params_.announce.interval_s);
+    if (const char * env_url = std::getenv("PSTOP_ANNOUNCE_URL"); env_url && env_url[0] != '\0') {
+      announce_cfg_.url = env_url;
+    }
+    if (const char * env_key = std::getenv("PSTOP_ANNOUNCE_KEY_FILE"); env_key && env_key[0] != '\0') {
+      announce_cfg_.key_file = env_key;
+    }
+    announce_port_ = sc.port;
+    machine_id_ = sc.machine_id;
     return true;
   } else if (backend_kind_ == "hardware") {
     HardwareConfig hc;
@@ -126,6 +142,20 @@ MachineBridgeNode::CallbackReturn MachineBridgeNode::on_activate(const rclcpp_li
   diag_->setHardwareID(backend_kind_);
   diag_->add("machine", this, &MachineBridgeNode::diagnostics);
 
+  // Optional fleet check-in — starts only while ACTIVE, software backend only,
+  // and only when a URL is configured. Off the safety path: a failure to start
+  // (or a dead console) only logs and never fails activation.
+  if (backend_kind_ == "software" && !announce_cfg_.url.empty()) {
+    announcer_ = std::make_unique<MachineAnnouncer>(announce_cfg_, announce_port_, machine_id_, [this]() {
+      return backend_ ? backend_->snapshot() : MachineSnapshot{};
+    });
+    if (announcer_->start()) {
+      RCLCPP_INFO(get_logger(), "announce: every %ds to %s", announce_cfg_.interval_s, announce_cfg_.url.c_str());
+    } else {
+      RCLCPP_WARN(get_logger(), "announce: configured but did not start (see stderr)");
+    }
+  }
+
   RCLCPP_INFO(get_logger(), "activated: publishing at %.1f Hz", hz);
   return CallbackReturn::SUCCESS;
 }
@@ -137,6 +167,12 @@ MachineBridgeNode::CallbackReturn MachineBridgeNode::on_deactivate(const rclcpp_
     pub_timer_.reset();
   }
   diag_.reset();
+  // Stop the check-in BEFORE the backend so its snapshot getter never races a
+  // backend teardown.
+  if (announcer_) {
+    announcer_->stop();
+    announcer_.reset();
+  }
   if (backend_) {
     backend_->stop();
   }  // -> machine safe (remotes fail-safe)
@@ -150,6 +186,10 @@ MachineBridgeNode::CallbackReturn MachineBridgeNode::on_deactivate(const rclcpp_
 
 MachineBridgeNode::CallbackReturn MachineBridgeNode::on_cleanup(const rclcpp_lifecycle::State &)
 {
+  if (announcer_) {
+    announcer_->stop();
+    announcer_.reset();
+  }
   param_cb_handle_.reset();
   state_pub_.reset();
   relay_pub_.reset();
@@ -162,6 +202,10 @@ MachineBridgeNode::CallbackReturn MachineBridgeNode::on_shutdown(const rclcpp_li
 {
   if (pub_timer_) {
     pub_timer_->cancel();
+  }
+  if (announcer_) {
+    announcer_->stop();
+    announcer_.reset();
   }
   if (backend_) {
     backend_->stop();
@@ -178,6 +222,10 @@ MachineBridgeNode::CallbackReturn MachineBridgeNode::on_error(const rclcpp_lifec
     pub_timer_.reset();
   }
   diag_.reset();
+  if (announcer_) {
+    announcer_->stop();
+    announcer_.reset();
+  }
   if (backend_) {
     backend_->stop();
   }  // safe: machine stops -> remotes fail-safe

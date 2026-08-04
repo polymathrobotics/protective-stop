@@ -35,6 +35,7 @@ add_library(${PROJECT_NAME} SHARED
   src/machine_bridge_node.cpp
   src/software_backend.cpp
   src/hardware_backend.cpp
+  src/announce.cpp
   ${PSTOP_SRCS}
   ${TRANSPORT_SRCS}
 )
@@ -86,6 +87,12 @@ if(BUILD_TESTING)
   # ROS runtime / no pstop link.
   ament_add_gtest(test_operator_policy test/test_operator_policy.cpp)
   target_include_directories(test_operator_policy PRIVATE include)
+
+  # Fleet check-in payload builder — header-inline, network-free. Verifies the
+  # JSON shape matches the host runner's announce (name+port core) plus the
+  # additive machine/status fields. No POST, no live fleet.
+  ament_add_gtest(test_announce test/test_announce.cpp)
+  target_include_directories(test_announce PRIVATE include)
 
   # Pure /state.json -> MachineSnapshot mapping (SR-M-03 / DU-9).
   ament_add_gtest(test_hardware_parse test/test_hardware_parse.cpp)

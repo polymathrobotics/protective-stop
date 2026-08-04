@@ -104,6 +104,37 @@ protective_stop_machine:
       validation:
         gt_eq<>: 0.1
 
+  # Optional fleet check-in (software backend only). Default DISABLED (empty url)
+  # so a non-fleet deployment is unaffected. When set, the node POSTs a
+  # bearer-authenticated {"name","port", ...} to the console every interval_s
+  # while ACTIVE, exactly like the host runner's [announce]. Entirely off the
+  # safety path: a dead console only logs. Prefer the ENVIRONMENT for the URL +
+  # key file so secrets stay out of committed config — PSTOP_ANNOUNCE_URL and
+  # PSTOP_ANNOUNCE_KEY_FILE override the two keys below.
+  announce:
+    url:
+      type: string
+      default_value: ''
+      read_only: true
+      description: Fleet console check-in endpoint, http://host[:port]/path. Empty (default) disables check-in entirely.
+    key_file:
+      type: string
+      default_value: ''
+      read_only: true
+      description: Path to a chmod-600 file whose first line is the bearer token. Empty means no Authorization header.
+    name:
+      type: string
+      default_value: ''
+      read_only: true
+      description: Display name on the console. Empty (default) uses this host's hostname, like the host runner.
+    interval_s:
+      type: int
+      default_value: 60
+      read_only: true
+      description: Seconds between check-ins.
+      validation:
+        gt_eq<>: 1
+
   autostart:
     type: bool
     default_value: true

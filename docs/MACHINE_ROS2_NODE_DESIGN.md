@@ -101,6 +101,25 @@ A `config_file` convenience param may point at a machine-specific YAML the node
 merges in `on_configure` for operators who prefer one file per unit; the
 ROS-native params-file remains the source of truth.
 
+**Fleet check-in (`announce.*`, software backend only, opt-in):**
+`announce.url`, `announce.key_file`, `announce.name`, `announce.interval_s` —
+all `read_only`, and **default DISABLED** (empty `url`). When a URL is set, the
+node runs a background thread (started on `on_activate`, stopped on
+`deactivate`/`error`/`shutdown`) that POSTs a bearer-authenticated JSON check-in
+every `interval_s`, so the software machine appears in the fleet console's
+machines/overview exactly like the host runner (`host/machine_app_runner.c`
+`[announce]`) and the ESP32 machn. The body's core `{"name","port"}` matches the
+host runner byte-for-byte (the console keys on `name` and attributes the source
+IP itself); additive fields carry the machine's status for the overview
+(`device_type:"machine"`, `machine_id`, `running`, `active_remotes`, and a
+per-remote `remotes[]` summary). Deliberately **off the safety path**: its own
+thread, libcurl only, log-only on failure — a dead console never affects pstop.
+Prefer the **environment** for the deployment secrets: `PSTOP_ANNOUNCE_URL` and
+`PSTOP_ANNOUNCE_KEY_FILE` override the params so URL/key stay out of committed
+config (same convention as the host runner). See `announce.hpp` /
+`src/announce.cpp`; payload builder is header-inline + unit-tested
+(`test/test_announce.cpp`, network-free).
+
 ---
 
 ## 5. Interfaces
@@ -294,4 +313,14 @@ where `my_overrides.yaml` looks like:
       state_poll_hz: 5.0        # hardware poll
       publish_rate_hz: 10.0
       diagnostics_rate_hz: 1.0
+
+    # Optional fleet check-in (software backend only). Default DISABLED (empty
+    # url) so a non-fleet deployment is unaffected. Prefer the ENVIRONMENT for
+    # the URL + key file so secrets stay out of committed config —
+    # PSTOP_ANNOUNCE_URL and PSTOP_ANNOUNCE_KEY_FILE override these two keys.
+    announce:
+      url: ''                   # http://host[:port]/path — empty = disabled (read_only)
+      key_file: ''              # path whose first line is the bearer token, chmod 600 (read_only)
+      name: ''                  # console display name; empty = this host's hostname (read_only)
+      interval_s: 60            # seconds between check-ins (read_only)
 ```
