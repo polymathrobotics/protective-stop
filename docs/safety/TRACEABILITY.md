@@ -107,7 +107,7 @@ Test-file shorthand:
 
 | SR | Alloc F-xx | Code (file:line) | Verifying test(s) | Method | Status |
 |---|---|---|---|---|---|
-| SR-M-01 | F-M-07 | `protective_stop_machine_params.yaml` (`timing.*` `bounds<>`/`gt_eq<>` ranges) enforced by the generated ParamListener | `test_lifecycle` `RejectsMinStopZero`/`RejectsOversizeHeartbeat` (out-of-floor override throws at declare) + `test_node_runtime` `SetParametersRejectsUnsafeMinStop`/`RejectsOversizeHeartbeat`/`AcceptsTighter` (loosening runtime set rejected before it applies) — reject-loosening exercised at construction and set-param levels (closes M07-1/DU-4) | Test | **Verified** (2026-08-02) |
+| SR-M-01 | F-M-07 | `machine_bridge_node.cpp:72-97,323,354,28-35` | `test_timing_floors` (8/8, every accept/reject boundary) + `test_node_runtime` runtime rejection: `SetParametersRejectsUnsafeMinStop`/`RejectsOversizeHeartbeat`/`AcceptsTighter` (set-param) and `ConfigureServiceApplies`/`RejectsUnsafe` (service) — reject-loosening exercised at unit, param, and service levels (closes M07-1/DU-4) | Test | **Verified** (2026-08-02) |
 | SR-M-02 | F-M-04/05 | `hardware_backend.cpp:119` (`bool_at("relay_stop", true)`) | JL exercises `bool_at` default mechanism (present-key), **not** the missing-key→STOP safety default directly | Test | **Partially-verified** |
 | SR-M-03 | F-M-04, F-M-08 | `hardware_backend.cpp` / `machine_bridge_node.cpp:286` | `test_hardware_parse` (malformed/empty→blind) + `test_hardware_backend` `ClosedPortUnreachable`/`Non2xxUnreachable` (backend→unreachable) + `test_node_runtime` `HardwareUnreachableDiagnosesError` (state→UNSTABLE **and** diagnostics ERROR) — closes M04-1 | Test | **Verified** (2026-08-02) |
 | SR-M-04 | F-M-03 | `software_backend.cpp:199` (`relay.applicable=false`) | Inspection (safety-case scope statement) | Inspection | **Residual-accepted** |
@@ -186,7 +186,7 @@ Partial→Verified closers; **P3** = requirements-completeness holes (§5).
 | **P0-5** | SR-R-08 | `memcmp` mis-returns equal undetected | **DU-7** | Per-offset positive-diff self-test (40 offsets) |
 | **P0-6** | SR-R-12 | Common-mode encode fault | **DU-5**, SR-I-01 | Golden-vector encode test + second encoder image |
 | P1-1 | SR-R-14 | VPN-drop → dark path (implemented, untested) | FMEA R06-3 | VPN-drop regression test |
-| ~~P1-2~~ | SR-M-01 | ~~floor reject-loosening~~ **DONE 2026-08-02** (declared parameter ranges; `test_lifecycle` construction-throw + `test_node_runtime` set-param rejection) | DU-4/M07-1 | ✅ ROS 2 param-range rejection tests added |
+| ~~P1-2~~ | SR-M-01 | ~~`validate_timing` reject-loosening~~ **DONE 2026-08-02** (`test_node_runtime` set-param + service rejection, `test_timing_floors`) | DU-4/M07-1 | ✅ ROS 2 set-param rejection test added |
 | ~~P1-3~~ | SR-M-03 | ~~Unreachable `/state.json`→UNSTABLE~~ **DONE 2026-08-02** (`test_hardware_backend` + `test_node_runtime` `HardwareUnreachableDiagnosesError`) | M04-1 | ✅ Drop-`/state.json` backend + node test added |
 | P1-4 | SR-M-02 | Missing-`relay_stop`→STOP default (partial) | M04-2 | Field-level missing-key→true test |
 | P2-1 | SR-I-01 | Golden-vector encode/decode both ends | (= SR-R-12) | Author golden-vector both-end pin |
