@@ -1,5 +1,27 @@
 ---
-# Apply Polymath Code Standard formatters and linters
+# Apply Polymath Code Standard formatters and linters.
+#
+# The standard applies to Polymath-authored, actively-maintained code only.
+# Excluded from ALL hooks:
+#   - pstop_c/            certified protocol library, on its own upstream track
+#   - ros2/               colcon packages governed by the ROS 2 ament linters
+#                         (uncrustify/flake8/pep257 via ros2_build.yml). Running
+#                         polymath clang-format/black on top double-formats the
+#                         same files and the two toolchains disagree, so exactly
+#                         one owns ros2/ — ament, the ROS 2 ecosystem standard.
+#   - wireguard_lwip/     vendored WireGuard-lwip lib + its reference crypto
+#   - x25519.c/.h         third-party (Cryptography Research, MIT) — keep notice
+#   - archive/            deprecated ROS2 packages, pending removal
+#   - hardware/ binaries  CAD / images / PDF (not text)
+exclude: |
+  (?x)^(
+    pstop_c/|
+    ros2/|
+    archive/|
+    components/microlink/components/wireguard_lwip/|
+    components/microlink/src/x25519\.(c|h)$|
+    hardware/.*\.(step|STEP|stp|STP|stl|STL|3mf|3MF|FCStd|jpe?g|pdf)$
+  )
 repos:
   - repo: https://github.com/polymathrobotics/polymath_code_standard
     rev: v2.1.1
@@ -11,11 +33,31 @@ repos:
       # Implementation
       - id: polymath-cmake
       - id: polymath-cpp
-        exclude: ^pstop_c/
       - id: polymath-json
       - id: polymath-python
       # Mark(up/down)
       - id: polymath-markdown
       - id: polymath-shell
+        # Lint shipped/deployment shell (host/setup/*). The dev-only bench and
+        # chaos harnesses under test/ and tools/ rely on intentional word
+        # splitting (tc/netem/curl argument expansion, e.g. `netem $1`), so they
+        # are exempt here rather than peppered with disable directives.
+        exclude: ^(test/|tools/).*\.sh$
       - id: polymath-xml
       - id: polymath-yaml
+
+  # Opt-in gate for the ROS 2 ament linters that ros2_build.yml enforces
+  # (flake8 / pep257 / uncrustify / xmllint / lint_cmake on jazzy). Runs ONLY on
+  # `git push`, never on commit or `pre-commit run --all-files`, so it does not
+  # slow the normal flow. Needs Docker; no local ROS install. Enable with
+  # `pre-commit install --hook-type pre-push`; skip once with `git push
+  # --no-verify` or `SKIP=ros2-ament-lint git push`.
+  - repo: local
+    hooks:
+      - id: ros2-ament-lint
+        name: ROS 2 ament lint (jazzy, via Docker)
+        entry: scripts/ros2_lint.sh
+        language: script
+        stages: [pre-push]
+        pass_filenames: false
+        files: ^(ros2|archive)/

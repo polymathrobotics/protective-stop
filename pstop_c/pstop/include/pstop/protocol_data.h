@@ -21,7 +21,8 @@ typedef struct {
     // the counter indicating each message we are sending
     uint32_t msg_counter;
 
-    uint32_t last_sent_counter;
+    uint64_t last_received_stamp;
+    uint32_t last_received_counter;
 
 } protocol_data_t;
 

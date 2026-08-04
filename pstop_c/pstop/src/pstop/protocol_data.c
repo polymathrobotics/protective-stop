@@ -11,5 +11,6 @@ protocol_data_init(protocol_data_t *remote)
     remote->last_timestamp = 0U;
     remote->heartbeat_ms = 0U;
     remote->msg_counter = 0U;
-    remote->last_sent_counter = 0U;
+    remote->last_received_stamp = 0U;
+    remote->last_received_counter = 0U;
 }

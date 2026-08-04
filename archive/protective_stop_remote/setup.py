@@ -12,6 +12,7 @@ setup(
     version='0.0.0',
     packages=find_packages(include=['protective_stop_remote', 'protective_stop_remote.*']),
     install_requires=['RPi.GPIO', 'flask', 'roslibpy', 'smbus'],
+    tests_require=['pytest'],
     entry_points={
         'console_scripts': [
             'protective_stop_remote = protective_stop_remote.main:main',

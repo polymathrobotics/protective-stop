@@ -29,7 +29,16 @@ static
 int
 is_message_type_valid(uint8_t message)
 {
-    return (message <= PSTOP_MESSAGE_UNBOND);
+    switch(message) {
+    case PSTOP_MESSAGE_OK:
+    case PSTOP_MESSAGE_STOP:
+    case PSTOP_MESSAGE_BOND:
+    case PSTOP_MESSAGE_UNBOND:
+        return 1;
+    default:
+        break;
+    }
+    return 0;
 }
 
 static
@@ -119,7 +128,7 @@ static
 void
 read_device_id(device_id_t *device_id, const uint8_t *data, size_t *pos)
 {
-#if PSTOP_VERSION == 0x00
+#if PSTOP_VERSION == 0x01
     device_id->data = read_uint32(data, pos);
 #else
 #   error "Unsupported PSTOP_VERSION"
@@ -130,7 +139,7 @@ static
 void
 write_device_id(const device_id_t *device_id, uint8_t *data, size_t *pos)
 {
-#if PSTOP_VERSION == 0x00
+#if PSTOP_VERSION == 0x01
     write_uint32(device_id->data, data, pos);
 #else
 #   error "Unsupported PSTOP_VERSION"

@@ -43,12 +43,13 @@ init_new_client(pstop_application_t *application, pstop_remote_data_t *client, c
     device_id_copy(&(client->remote_data.remote_id), &(msg->id));
     client->remote_data.last_timestamp = now;
     client->remote_data.msg_counter = 0U;
-    client->remote_data.last_sent_counter = 0U;
+    client->remote_data.last_received_counter = 0U;
+    client->remote_data.last_received_stamp = 0U;
 }
 
 static
 pstop_error_t
-handle_bond_msg(pstop_machine_t *machine, pstop_remote_data_t *client, const pstop_msg_t *msg, pstop_msg_t *resp)
+handle_bond_msg(pstop_machine_t *machine, pstop_remote_data_t *client, pstop_msg_t *resp)
 {
     // if we're already bonded, then don't do anything else
     if(client->remote_state == PSTOP_REMOTE_BONDED) {
@@ -82,7 +83,7 @@ handle_bond_msg(pstop_machine_t *machine, pstop_remote_data_t *client, const pst
 
 static
 pstop_error_t
-handle_ok_msg(pstop_machine_t *machine, pstop_remote_data_t *client, const pstop_msg_t *msg, pstop_msg_t *resp)
+handle_ok_msg(pstop_machine_t *machine, pstop_remote_data_t *client, pstop_msg_t *resp)
 {
     client->remote_state = PSTOP_REMOTE_OK;
 
@@ -125,7 +126,7 @@ handle_ok_msg(pstop_machine_t *machine, pstop_remote_data_t *client, const pstop
 
 static
 pstop_error_t
-handle_stop_msg(pstop_machine_t *machine, pstop_remote_data_t *client, const pstop_msg_t *msg, pstop_msg_t *resp)
+handle_stop_msg(pstop_machine_t *machine, pstop_remote_data_t *client, pstop_msg_t *resp)
 {
     resp->message = PSTOP_MESSAGE_STOP;
     client->remote_state = PSTOP_REMOTE_STOPPED;
@@ -159,7 +160,7 @@ handle_stop_msg(pstop_machine_t *machine, pstop_remote_data_t *client, const pst
 
 static
 pstop_error_t
-handle_unbond_msg(pstop_machine_t *machine, pstop_remote_data_t *client, const pstop_msg_t *msg, pstop_msg_t *resp)
+handle_unbond_msg(pstop_machine_t *machine, pstop_remote_data_t *client, pstop_msg_t *resp)
 {
     resp->message = PSTOP_MESSAGE_UNBOND;
 
@@ -187,17 +188,17 @@ dispatch_message(pstop_machine_t *machine, pstop_remote_data_t *client , const p
 {
     switch(req->message) {
     case PSTOP_MESSAGE_BOND:
-        return handle_bond_msg(machine, client, req, resp);
+        return handle_bond_msg(machine, client, resp);
     case PSTOP_MESSAGE_UNBOND:
-        return handle_unbond_msg(machine, client, req, resp);
+        return handle_unbond_msg(machine, client, resp);
     case PSTOP_MESSAGE_OK:
-        return handle_ok_msg(machine, client, req, resp);
+        return handle_ok_msg(machine, client, resp);
     default:
         break;
     }
 
     // by default we'll assume any invalid message means stop
-    return handle_stop_msg(machine, client, req, resp);
+    return handle_stop_msg(machine, client, resp);
 }
 
 pstop_error_t
@@ -352,4 +353,38 @@ machine_stop_robot(pstop_machine_t *machine)
     machine->robot_state.remote_stop_id = 0U;
 
     machine_notify_hal(machine, PSTOP_STATUS_STOP);
+}
+
+const pstop_remote_data_t *
+machine_get_remote_data(const pstop_machine_t *machine, const device_id_t *remote_id)
+{
+    return pstop_remote_get(&(machine->remotes), remote_id);
+#if 0
+    for(uint16_t i = 0U; i < machine->remotes.max_remotes; ++i) {
+        const protocol_data_t *remote = &(machine->remotes.remotes[i].remote_data);
+
+        if(device_id_cmp(&(remote->remote_id), remote_id) == 0) {
+            return remote;
+        }
+    }
+
+    return NULL;
+#endif
+}
+
+const protocol_data_t *
+machine_get_protocol_data(const pstop_machine_t *machine, const device_id_t *remote_id)
+{
+    const pstop_remote_data_t *remote = pstop_remote_get(&(machine->remotes), remote_id);
+    if(remote == NULL) {
+        return NULL;
+    }
+
+    return &(remote->remote_data);
+}
+
+const robot_state_t *
+machine_get_robot_state(const pstop_machine_t *machine)
+{
+    return &(machine->robot_state);
 }

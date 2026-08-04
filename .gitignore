@@ -6,3 +6,52 @@ node_modules
 */build/
 */build-cov/
 *.cov
+
+# ESP-IDF firmware build artifacts
+firmware/build/
+firmware/sdkconfig
+firmware/sdkconfig.old
+firmware/sdkconfig.credentials
+# host runner binary
+host/machine_app_runner
+# host unit-test binary
+host/test_clock_guard
+# cppcheck
+*.ctu-info
+cppcheck-build/
+firmware/managed_components/
+
+# Production flash image — contains baked-in secrets (Tailscale key, WiFi
+# creds, admin password, fleet key). Never commit.
+tools/production_image/
+
+# analysis / CAD / stray artifacts
+*.dump
+*.pyc
+*.FCBak
+nohup.out
+machn/build/
+machn/sdkconfig
+machn/sdkconfig.credentials
+machn/sdkconfig.old
+machn/managed_components/
+
+# LOCAL build-source plugin for flash_station.py (fleet client + creds).
+# Nextcloud-only, never committed.
+tools/app_source.py
+
+# coverage artifacts
+*.gcda
+*.gcno
+*.gcov
+docs/safety/coverage/*.html
+docs/safety/coverage/*.css
+ros2/build-cov/
+ros2/install-cov/
+ros2/log/
+firmware/test/test_estop_verdict
+firmware/test/coverage-summary.json
+
+build/
+install/
+log/
