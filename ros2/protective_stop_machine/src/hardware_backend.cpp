@@ -10,6 +10,7 @@
 
 #include <chrono>
 #include <cstdio>
+#include <mutex>
 #include <string>
 #include <utility>
 
@@ -27,10 +28,7 @@ static size_t write_cb(char * ptr, size_t size, size_t nmemb, void * userdata)
 
 HardwareMachineBackend::HardwareMachineBackend(const HardwareConfig & cfg)
 : cfg_(cfg)
-{
-  // curl_global_init/cleanup are process-global and not thread-safe; they are
-  // done once in main() rather than per backend instance.
-}
+{}
 
 HardwareMachineBackend::~HardwareMachineBackend()
 {
@@ -42,8 +40,14 @@ bool HardwareMachineBackend::start()
   if (running_.load()) {
     return true;
   }
+  // libcurl global init is process-wide and not thread-safe: do it once before
+  // the poll thread starts. No matching cleanup() — as a component we may share
+  // the process with other curl users, so we leak it until exit rather than tear
+  // it down underneath them.
+  static std::once_flag curl_once;
+  std::call_once(curl_once, [] { curl_global_init(CURL_GLOBAL_DEFAULT); });
   running_ = true;
-  th_ = std::thread([this] {poll_loop();});
+  th_ = std::thread([this] { poll_loop(); });
   return true;
 }
 
@@ -222,7 +226,7 @@ bool HardwareMachineBackend::configure(const MachineTiming & timing, std::string
     return true;
   }
   error = "device did not accept timing config (http " + std::to_string(status) +
-    "); hardware timing is set via device config";
+          "); hardware timing is set via device config";
   return false;
 }
 

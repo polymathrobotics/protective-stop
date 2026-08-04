@@ -132,7 +132,7 @@ not re-verified — only its interface contract is in scope).
 | F-M-04 | Hardware backend — poll ESP32 machine `/state.json` over libcurl | `hardware_backend.cpp` |
 | F-M-05 | JSON parsing (depth-capped `json_lite`) | `json_lite.hpp` |
 | F-M-06 | Publish status / relay / bonded-remotes on ROS2 topics | `machine_bridge_node.cpp` |
-| F-M-07 | Parameter validation + dynamic (re)config | `on_set_parameters`, `validate_timing` |
+| F-M-07 | Parameter validation + dynamic (re)config | generated ParamListener ranges (`protective_stop_machine_params.yaml`), `on_set_parameters` |
 | F-M-08 | Diagnostics (`diagnostic_updater`) | `diagnostics()` |
 
 ### 4.4 Pre-qualified `pstop_c` interface boundary (`F-P-xx`) — referenced

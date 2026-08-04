@@ -109,7 +109,8 @@ static const char k_index_html[] =
   /* Machine-role: operator allowlist is the add/remove-peer equivalent —
    * which remotes may re-arm this machine (empty => every remote stop-only). */
   "<div class='panel'>"
-  "<div class='secttl'>Operator allowlist <small>(remotes allowed to re-arm this machine; empty = all stop-only)</small></div>"
+  "<div class='secttl'>Operator allowlist <small>(remotes allowed to re-arm this machine; empty = all "
+  "stop-only)</small></div>"
   "<div class='tblwrap'><table><thead><tr><th>Operator ID</th><th></th></tr></thead>"
   "<tbody id='opbody'></tbody></table></div>"
   "<div class='mrow'><input id='opid' placeholder='0x01d7791c or decimal' style='min-width:16em'>"

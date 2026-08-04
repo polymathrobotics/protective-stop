@@ -28,7 +28,7 @@ _Baselines as of 2026-08-02. Numbers are first measurements, not targets met._
 | Codebase | Tool | Line | Branch | MC/DC | Driver |
 |---|---|---|---|---|---|
 | **Host machine** `machine_app_runner.c` | gcov-14 / gcovr | **71.4%** (332/465) | **57.9%** (202/349) | **58.3%** (189/324) | `pstop_multi_remote_test.py` (34/34) + `test_config_floor.py` (7/7, SR-H-03) |
-| **ROS2 machine** (hand-written) | gcov-11 / gcovr | **~89%** (624/703) | see per-module | — | 6 gtest suites (56 tests): `test_json_lite`, `test_timing_floors`, `test_hardware_parse`, `test_hardware_backend`, `test_lifecycle`, `test_node_runtime` |
+| **ROS2 machine** (hand-written) | gcov-11 / gcovr | ~89% (re-measure pending — see note) | see per-module | — | 5 gtest suites (45 tests): `test_json_lite`, `test_hardware_parse`, `test_hardware_backend`, `test_lifecycle`, `test_node_runtime` |
 | **Remote firmware — decision core** `estop_verdict.c` | **host harness, gcc-14** | **100%** (26/26) | **100%** (36/36) | **100% MC/DC** (36/36) | `firmware/test/test_estop_verdict` (39/39) |
 
 **Firmware = hybrid (decided 2026-08-02).** On-target gcov is infeasible — the
@@ -44,23 +44,27 @@ specific build is pending a direct tailnet path (bench currently DERP-relayed)._
 ### ROS2 per-module — updated 2026-08-02 (executor + HTTP-seam suites added)
 Re-measured with gcovr 8.6 (line/branch counts differ slightly from the earlier
 snapshot — 8.6 counts inline/header lines differently — so the `json_lite.hpp`
-and `timing_floors.hpp` rows, untouched this round, are restated in the same
-tool for consistency). `2026-08-02 was:` shows the prior figure where a module
-was driven up this round.
+row, untouched this round, is restated in the same tool for consistency).
+`2026-08-02 was:` shows the prior figure where a module was driven up this round.
+The `timing.*` safety floors are now enforced declaratively by the generated
+ParamListener (`protective_stop_machine_params.yaml` ranges), so the former
+`timing_floors.hpp` validator and its `test_timing_floors` suite were removed;
+the aggregate line/branch figures below predate that removal and are pending a
+gcovr re-run.
 
 | Module | Lines | Line cov | Branch cov | Note |
 |---|---|---|---|---|
 | `json_lite.hpp` | 183 | **76.5%** | 56.8% | unit-tested (`test_json_lite`); functions 100% |
 | `software_backend.cpp` | 120 | **75.0%** (was 65.0%) | **40.0%** (was 34.0%) | `test_lifecycle` + `test_node_runtime` now run the machine loop live (start/activate/publish/stop); residual is pstop_c protocol callbacks + remote-enumeration, reachable only with live UDP remote traffic |
 | `hardware_backend.cpp` | 142 | **98.6%** (was 24.6%) | **59.5%** (was 22.4%) | `test_hardware_parse` (parse) + new `test_hardware_backend` drives `http_get`/`http_post`/`write_cb`/poll/start/stop/`configure` against a loopback HTTP stub + a closed port (SR-M-03). Only the two `curl_easy_init()==NULL` OOM guards remain |
-| `timing_floors.hpp` | 13 | **100%** | 65.6% | `test_timing_floors` (8/8) — runtime-config safety envelope (SR-M-01) |
-| `machine_bridge_node.cpp` | 245 | **98.4%** (was 43.3%) | **49.8%** (was 27.7%) | `test_lifecycle` + new `test_node_runtime` spin an executor: `publish_tick`, every `diagnostics` summary branch (OK/WARN/ERROR, driven off canned `/state.json`), `on_set_parameters` accept/reject, the `~/configure_machine` service (apply/reject/backend-refused), and `on_error`/`on_shutdown`/activate-start-failure (SR-M-01/03/07). Functions 100% |
+| `machine_bridge_node.cpp` | 245 | **98.4%** (was 43.3%) | **49.8%** (was 27.7%) | `test_lifecycle` + new `test_node_runtime` spin an executor: `publish_tick`, every `diagnostics` summary branch (OK/WARN/ERROR, driven off canned `/state.json`), `on_set_parameters` accept/backend-refused (floor rejection now handled by the generated ParamListener ranges), and `on_error`/`on_shutdown`/activate-start-failure (SR-M-01/03/07). Functions 100% |
 | `main.cpp` | 11 | **0%** | — | entry point only (deliberately excluded) |
 
-Hand-written ROS2 is now **~89% line** (624/703 across `src`+`include`, excluding
-the entry-point `main.cpp`) over **6 test suites (56 tests)** — up from ~53% line
-/ 4 suites (27 tests) at the start of this round. The remaining structural gaps
-are honest and bounded:
+Hand-written ROS2 was ~89% line across `src`+`include` (excluding the entry-point
+`main.cpp`) at the 2026-08-02 measurement, over what is now **5 test suites (45
+tests)** after the `timing_floors.hpp`/`test_timing_floors` removal (a gcovr re-run
+is pending to refresh the aggregate). The remaining structural gaps are honest and
+bounded:
 - **software_backend.cpp** — the pstop_c C callbacks (`cb_remote_details`,
   `cb_log`), the UDP message-processing branch in `run()`, and the
   remote-enumeration loop in `rebuild_snapshot()` fire only when a live pstop
@@ -70,8 +74,7 @@ are honest and bounded:
   guards (2 lines) are uncovered; not reachable without malloc fault injection.
 - **machine_bridge_node.cpp** — the residual lines are unreachable guards: the
   `publish_tick` null-backend early-return (the timer only exists while a backend
-  does) and the `handle_configure` "no backend" branch (the service only exists
-  once a backend is built). Branch % is bounded by rclcpp-internal conditionals
+  does). Branch % is bounded by rclcpp-internal conditionals
   in the message/QoS templates, not node logic.
 - Branch coverage still trails line coverage because the libcurl 2xx/auth
   option-setting and the rclcpp publish/QoS machinery expand many

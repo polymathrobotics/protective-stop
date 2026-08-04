@@ -10,10 +10,10 @@
 #include "diagnostic_updater/diagnostic_updater.hpp"
 #include "protective_stop_machine/announce.hpp"
 #include "protective_stop_machine/backend.hpp"
+#include "protective_stop_machine/protective_stop_machine_parameters.hpp"
 #include "protective_stop_msgs/msg/bonded_remote_array.hpp"
 #include "protective_stop_msgs/msg/machine_relay_status.hpp"
 #include "protective_stop_msgs/msg/protective_stop_status.hpp"
-#include "protective_stop_msgs/srv/configure_machine.hpp"
 #include "rcl_interfaces/msg/set_parameters_result.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "rclcpp_lifecycle/lifecycle_node.hpp"
@@ -36,16 +36,17 @@ public:
   CallbackReturn on_error(const rclcpp_lifecycle::State &) override;
 
 private:
-  void declare_all_parameters();
   bool build_backend(std::string & error);
   void publish_tick();
   void diagnostics(diagnostic_updater::DiagnosticStatusWrapper & stat);
-  bool validate_timing(const MachineTiming & t, std::string & reason) const;
-  rcl_interfaces::msg::SetParametersResult on_set_parameters(
-    const std::vector<rclcpp::Parameter> & params);
-  void handle_configure(
-    const std::shared_ptr<protective_stop_msgs::srv::ConfigureMachine::Request> req,
-    std::shared_ptr<protective_stop_msgs::srv::ConfigureMachine::Response> resp);
+  // Live timing.* sets: floors are enforced declaratively by the generated
+  // ParamListener; this handler only pushes an accepted change to the backend
+  // and rejects it if the backend refuses (which the ParamListener can't do).
+  rcl_interfaces::msg::SetParametersResult on_set_parameters(const std::vector<rclcpp::Parameter> & params);
+
+  // Typed, validated parameters (see protective_stop_machine_params.yaml).
+  ParamListener param_listener_;
+  Params params_;
 
   // config
   std::string backend_kind_;
@@ -62,14 +63,10 @@ private:
   std::unique_ptr<IMachineBackend> backend_;
   std::unique_ptr<MachineAnnouncer> announcer_;
 
-  rclcpp_lifecycle::LifecyclePublisher<protective_stop_msgs::msg::ProtectiveStopStatus>::SharedPtr
-    state_pub_;
-  rclcpp_lifecycle::LifecyclePublisher<protective_stop_msgs::msg::MachineRelayStatus>::SharedPtr
-    relay_pub_;
-  rclcpp_lifecycle::LifecyclePublisher<protective_stop_msgs::msg::BondedRemoteArray>::SharedPtr
-    remotes_pub_;
+  rclcpp_lifecycle::LifecyclePublisher<protective_stop_msgs::msg::ProtectiveStopStatus>::SharedPtr state_pub_;
+  rclcpp_lifecycle::LifecyclePublisher<protective_stop_msgs::msg::MachineRelayStatus>::SharedPtr relay_pub_;
+  rclcpp_lifecycle::LifecyclePublisher<protective_stop_msgs::msg::BondedRemoteArray>::SharedPtr remotes_pub_;
   rclcpp::TimerBase::SharedPtr pub_timer_;
-  rclcpp::Service<protective_stop_msgs::srv::ConfigureMachine>::SharedPtr configure_srv_;
   std::shared_ptr<diagnostic_updater::Updater> diag_;
   rclcpp::node_interfaces::OnSetParametersCallbackHandle::SharedPtr param_cb_handle_;
 };

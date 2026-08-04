@@ -19,20 +19,11 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/ProtectiveStopHeartbeat.msg"
   "msg/ProtectiveStopDebug.msg"
   "msg/ProtectiveStopDebugRemote.msg"
-  "srv/ProtectiveStop.srv"
   # machine-side (new)
   "msg/MachineRelayStatus.msg"
   "msg/BondedRemote.msg"
   "msg/BondedRemoteArray.msg"
-  "srv/ConfigureMachine.srv"
   DEPENDENCIES builtin_interfaces
 )
-
-if(BUILD_TESTING)
-  find_package(ament_lint_auto REQUIRED)
-  set(ament_cmake_copyright_FOUND TRUE)
-  set(ament_cmake_cpplint_FOUND TRUE)
-  ament_lint_auto_find_test_dependencies()
-endif()
 
 ament_package()

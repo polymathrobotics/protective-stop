@@ -40,7 +40,7 @@ ROS 2 merely goes blind. This property is a design invariant, re-checked in §8.
 Allowed control, none of which can *create* an unsafe RUN state:
 
 - **Reconfigure timing** — heartbeat period, `max_missed`, `min_stop_ms`, poll
-  rate — via dynamic parameters and/or a `configure_machine` service. Tightening
+  rate — via dynamic parameters. Tightening
   these can only make the machine *more* conservative at runtime; validation
   (§4) refuses values looser than the compile-time safe envelope.
 - **Target/peer management** — which remotes the software machine expects, or
@@ -67,10 +67,12 @@ assert it.
 | `on_shutdown`  | ensure loop stopped, release | ensure polling stopped | idempotent safe teardown |
 | `on_error`     | stop loop, publish `UNSTABLE`, → `errorprocessing` | mark backend unreachable, publish `UNSTABLE` | fault ⇒ conservative state |
 
-Bringup via **`nav2_lifecycle_manager`** (the archived node already test-depended
-on it) or a launch file with `RegisterEventHandler` autostart. Managed lifecycle
-is what lets an operator/orchestrator hold the node in `inactive` (configured but
-not servicing) — useful on the bench.
+Bringup is self-managed: the `autostart` parameter (default true) makes the node
+configure and activate itself in its constructor, so a bare `ros2 run` comes up
+active with no `nav2_lifecycle_manager` or launch event handlers. Set
+`autostart:=false` to hold the node in `unconfigured` for manual/orchestrated
+lifecycle control (tests, bench, an external lifecycle manager) — useful when an
+operator needs the node configured but not yet servicing.
 
 ---
 
@@ -84,6 +86,7 @@ eliminating hand-rolled `declare_parameter` + validation boilerplate.
 
 **Static (`read_only`, require reconfigure):**
 `backend` (`software|hardware`), `machine_id`, software `bind_addr`/`port`,
+software `default_stop_only`/`operators` (operator authorization — see below),
 hardware `device_url`/`admin_user`, `frame_id`, topic QoS depths.
 
 **Dynamic (runtime-settable, re-validated on set):**
@@ -135,8 +138,10 @@ messages there so remote/machine share one interface package.
 ### Services (bridge + control)
 | Service | Type | Effect |
 |---|---|---|
-| `~/configure_machine` | extend `ProtectiveStop.srv` (carries `ProtectiveStopParams`) | push validated timing to the backend at runtime |
 | `~/get_status` | `Trigger`-like | synchronous snapshot for scripting |
+
+Runtime timing reconfiguration is done through dynamic parameters (validated
+against the safety floor on `on_set_parameters`), not a dedicated service.
 
 No `arm` service (see §2).
 
@@ -189,9 +194,7 @@ protective_stop_machine/                 # ament_cmake, C++17
     machine_bridge_node.cpp              # lifecycle + ROS glue only
     software_backend.cpp                 # links pstop_c
     hardware_backend.cpp                 # libcurl + nlohmann/json
-    main.cpp
-  config/machine_params.yaml             # generate_parameter_library source + defaults
-  launch/machine_bridge.launch.py        # lifecycle bringup (+ optional lifecycle_manager)
+    protective_stop_machine_params.yaml  # generate_parameter_library source + defaults
   test/                                   # gtest (backend logic) + launch_testing (transitions)
 protective_stop_msg/                      # restored from archive/, + MachineRelayStatus, BondedRemoteArray
 ```
@@ -242,7 +245,7 @@ only observe, report, and tighten.
    ROS 2 build deps that #53 slimmed out.
 3. **Hardware backend scope** — **full control proxy**: the hardware backend not
    only publishes state but proxies config/peer-slot changes to the ESP32 via
-   its admin API, so `~/configure_machine` and target management work uniformly
+   its admin API, so timing reconfiguration and target management work uniformly
    across both backends (§5). Still bounded by the safety validator (§4): proxied
    config can only tighten, never arm.
 4. **`machine_app_runner`** — **kept** as a headless / CI tool. The node's
@@ -258,7 +261,26 @@ adopted (station uses newest).
 
 ---
 
-## 12. Example `config/machine_params.yaml`
+## 12. Running the node and overriding parameters
+
+There is no launch file — the node is a composable component with a
+code-generated executable. Defaults (and the SR-M-01 validation ranges) live in
+the `generate_parameter_library` source `src/protective_stop_machine_params.yaml`
+and are compiled in, so `autostart` defaults to true and a bare run comes up
+active:
+
+```sh
+ros2 run protective_stop_machine machine_bridge_node
+```
+
+To override any parameter, pass your own params file:
+
+```sh
+ros2 run protective_stop_machine machine_bridge_node \
+  --ros-args --params-file my_overrides.yaml
+```
+
+where `my_overrides.yaml` looks like:
 
 ```yaml
 /machine_bridge:
@@ -270,6 +292,13 @@ adopted (station uses newest).
     software:                   # used when backend == software
       bind_addr: 0.0.0.0
       port: 8890                # read_only
+      # Operator authorization (SAFETY). A bonded remote is accepted and
+      # heartbeat-monitored but STOP-ONLY by default: it may command STOP but may
+      # NEVER re-arm (STOP -> OK). Only a remote whose 32-bit pstop id is listed
+      # in `operators` gets re-arm authority. Empty list (the default) = every
+      # remote is stop-only = maximally safe out of the box.
+      default_stop_only: true   # read_only
+      # operators: [30234300]   # read_only; 32-bit pstop ids granted re-arm (default: none)
 
     hardware:                   # used when backend == hardware
       device_url: http://100.84.155.111
@@ -284,4 +313,14 @@ adopted (station uses newest).
       state_poll_hz: 5.0        # hardware poll
       publish_rate_hz: 10.0
       diagnostics_rate_hz: 1.0
+
+    # Optional fleet check-in (software backend only). Default DISABLED (empty
+    # url) so a non-fleet deployment is unaffected. Prefer the ENVIRONMENT for
+    # the URL + key file so secrets stay out of committed config —
+    # PSTOP_ANNOUNCE_URL and PSTOP_ANNOUNCE_KEY_FILE override these two keys.
+    announce:
+      url: ''                   # http://host[:port]/path — empty = disabled (read_only)
+      key_file: ''              # path whose first line is the bearer token, chmod 600 (read_only)
+      name: ''                  # console display name; empty = this host's hostname (read_only)
+      interval_s: 60            # seconds between check-ins (read_only)
 ```
