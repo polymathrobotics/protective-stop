@@ -29,9 +29,27 @@ machine_app_runner: machine_app_runner.c clock_guard.c $(PSTOP_SRCS) $(TRANS_SRC
 test_clock_guard: test_clock_guard.c clock_guard.c
 	$(CC) $(CFLAGS) -o $@ $^
 
+# Golden-vector KATs for the safety-path crypto primitives switched to -O3.
+# The primitive .c files are compiled straight into the test at -O3 (matching
+# production) so the test would catch an -O3 miscompile. No ESP-IDF: these are
+# portable C and don't need the SDK. See test_crypto_kat.c for vector sources.
+MICROLINK   := ../components/microlink
+REFC        := $(MICROLINK)/components/wireguard_lwip/src/crypto/refc
+CRYPTO_SRCS := \
+	$(MICROLINK)/src/x25519.c \
+	$(REFC)/chacha20.c \
+	$(REFC)/poly1305-donna.c \
+	$(REFC)/chacha20poly1305.c \
+	$(REFC)/blake2s.c \
+	$(MICROLINK)/components/wireguard_lwip/src/crypto.c
+
+test_crypto_kat: test_crypto_kat.c $(CRYPTO_SRCS)
+	$(CC) -O3 -Wall -Wextra -Wno-unused-parameter -o $@ $^
+
 .PHONY: test clean
-test: test_clock_guard
+test: test_clock_guard test_crypto_kat
 	./test_clock_guard
+	./test_crypto_kat
 
 clean:
-	rm -f machine_app_runner test_clock_guard
+	rm -f machine_app_runner test_clock_guard test_crypto_kat

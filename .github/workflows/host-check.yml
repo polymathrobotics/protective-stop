@@ -40,5 +40,12 @@ jobs:
       - name: Build host runner
         run: make -C host
 
+      - name: Host unit tests (crypto KATs + clock guard)
+        # Builds the crypto primitives at -O3 (matching production) and runs
+        # the RFC 7748 / RFC 8439 / BLAKE2s golden-vector KATs, plus the
+        # clock-guard tests. Fails the build on any KAT mismatch so a future
+        # toolchain change can't silently miscompile safety-path crypto.
+        run: make -C host test
+
       - name: MISRA check (advisory)
         run: ./tools/misra_check.sh || true
