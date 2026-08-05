@@ -305,6 +305,7 @@ microlink_t * microlink_init(const microlink_config_t * config)
 
   /* Create queues */
   ml->derp_tx_queue = xQueueCreate(ML_DERP_TX_QUEUE_DEPTH, sizeof(ml_derp_tx_item_t));
+  ml->derp_tx_prio_queue = xQueueCreate(ML_DERP_TX_PRIO_DEPTH, sizeof(ml_derp_tx_item_t));
   ml->disco_rx_queue = xQueueCreate(ML_DISCO_RX_QUEUE_DEPTH, sizeof(ml_rx_packet_t));
   ml->wg_rx_queue = xQueueCreate(ML_WG_RX_QUEUE_DEPTH, sizeof(ml_rx_packet_t));
   ml->stun_rx_queue = xQueueCreate(ML_STUN_RX_QUEUE_DEPTH, sizeof(ml_rx_packet_t));
@@ -312,8 +313,8 @@ microlink_t * microlink_init(const microlink_config_t * config)
   ml->peer_update_queue = xQueueCreate(ML_PEER_UPDATE_QUEUE_DEPTH, sizeof(ml_peer_update_t *));
 
   if (
-    !ml->derp_tx_queue || !ml->disco_rx_queue || !ml->wg_rx_queue || !ml->stun_rx_queue || !ml->coord_cmd_queue ||
-    !ml->peer_update_queue)
+    !ml->derp_tx_queue || !ml->derp_tx_prio_queue || !ml->disco_rx_queue || !ml->wg_rx_queue || !ml->stun_rx_queue ||
+    !ml->coord_cmd_queue || !ml->peer_update_queue)
   {
     ESP_LOGE(TAG, "Failed to create queues");
     microlink_destroy(ml);
@@ -610,6 +611,7 @@ void microlink_destroy(microlink_t * ml)
 
   /* Delete queues */
   if (ml->derp_tx_queue) vQueueDelete(ml->derp_tx_queue);
+  if (ml->derp_tx_prio_queue) vQueueDelete(ml->derp_tx_prio_queue);
   if (ml->disco_rx_queue) vQueueDelete(ml->disco_rx_queue);
   if (ml->wg_rx_queue) vQueueDelete(ml->wg_rx_queue);
   if (ml->stun_rx_queue) vQueueDelete(ml->stun_rx_queue);
@@ -697,6 +699,7 @@ esp_err_t microlink_get_peer_info(const microlink_t * ml, int index, microlink_p
   memcpy(info->public_key, p->public_key, 32);
   info->online = p->active;
   info->direct_path = p->has_direct_path;
+  info->derp_region = p->derp_region;
   return ESP_OK;
 }
 

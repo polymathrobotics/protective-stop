@@ -418,15 +418,20 @@ static int poll_derp_read(microlink_t * ml, ml_derp_conn_t * c)
     return -1;
   }
 
-  /* Read frame payload - we already got the header so payload should follow.
-     * Use longer timeout (2s) since we KNOW data is coming. */
+  /* Read frame payload - we already got the header so the payload should follow.
+     * Bounded by the per-iteration safety timeout below (see rationale there). */
   uint8_t * buf = ml_psram_malloc(len);
   if (!buf) return -1;
 
   size_t total_read = 0;
   uint64_t payload_start = ml_get_time_ms();
   while (total_read < len) {
-    /* Safety timeout: 5 seconds for payload */
+    /* Safety timeout for payload. Kept at 5 s (NOT lowered to 1 s): once a frame
+     * header has arrived, the payload can straggle across several TCP retransmits
+     * on a lossy NAT'd/cellular link (RTO >= 1 s, backing off). A 1 s cap would
+     * truncate a legit in-flight heartbeat/STOP frame AND trip a home reconnect
+     * that flushes the TX queue and gaps the bond — strictly worse than the brief
+     * egress delay it was meant to avoid (adversarial review 2026-08-04). */
     if (ml_get_time_ms() - payload_start > 5000) {
       ESP_LOGW(TAG, "DERP payload timeout at %d/%lu bytes", (int)total_read, (unsigned long)len);
       free(buf);
@@ -495,30 +500,39 @@ esp_err_t ml_derp_queue_send(microlink_t * ml, const uint8_t * dest_key, const u
   };
   memcpy(item.dest_pubkey, dest_key, 32);
 
-  /* WG handshake packets (type 1=init, 2=response) get priority — front of queue.
-     * This ensures handshake responses aren't delayed behind DISCO pings. */
+  /* Route to the correct FIFO queue: safety/handshake frames -> the PRIORITY
+   * queue (the DERP task drains it first, so a 5 Hz heartbeat is never stuck
+   * behind a disco burst); everything else -> the normal disco queue. Enqueue is
+   * a single atomic op per queue, so it is safe against the concurrent producers
+   * (wg_mgr disco + the TCPIP-thread heartbeat via wg_derp_output_cb) with NO
+   * cross-thread drain, and per-peer frame order is preserved (FIFO within a
+   * queue -> no OK-after-STOP reordering). */
   bool is_wg_handshake = (len >= 4 && (data[0] == 0x01 || data[0] == 0x02));
+  bool is_priority = is_wg_handshake || ml_wg_is_safety_pubkey(ml, dest_key);
+  QueueHandle_t txq = is_priority ? ml->derp_tx_prio_queue : ml->derp_tx_queue;
 
-  /* Try to send to queue */
-  if (
-    (is_wg_handshake ? xQueueSendToFront(ml->derp_tx_queue, &item, 0) : xQueueSend(ml->derp_tx_queue, &item, 0)) ==
-    pdTRUE)
-  {
+  if (xQueueSend(txq, &item, 0) == pdTRUE) {
     return ESP_OK;
   }
 
-  /* Queue full - backpressure: drop oldest, retry up to 3 times */
+  /* Queue full: drop the OLDEST item on THIS queue to admit the newer one, retry
+   * up to 3x. On the PRIORITY queue the oldest is the STALEST heartbeat/handshake
+   * — dropping it to keep the freshest is correct for liveness (a full priority
+   * queue is already a multi-second backlog; the bond is gapping regardless, and
+   * the receiver only cares about the newest heartbeat). A disco frame can NEVER
+   * evict a heartbeat — they live on separate queues. All single-atomic ops, no
+   * cross-thread drain/requeue. */
   for (int i = 0; i < 3; i++) {
     ml_derp_tx_item_t dropped;
-    if (xQueueReceive(ml->derp_tx_queue, &dropped, 0) == pdTRUE) {
-      free(dropped.data); /* Drop oldest */
+    if (xQueueReceive(txq, &dropped, 0) == pdTRUE) {
+      free(dropped.data);
     }
-    if (xQueueSend(ml->derp_tx_queue, &item, 0) == pdTRUE) {
+    if (xQueueSend(txq, &item, 0) == pdTRUE) {
       return ESP_OK;
     }
   }
 
-  /* Still full after 3 attempts, drop new packet */
+  /* Still full after 3 attempts, drop the new packet. */
   free(pkt_data);
   return ESP_ERR_TIMEOUT;
 }
@@ -566,10 +580,20 @@ static void derp_manage_aux(microlink_t * ml, uint16_t eff_home, int aux_burst[]
     if (regs[i] != 0 && regs[i] != eff_home) want[nwant++] = regs[i];
   }
 
-  /* 1) Reap aux slots no longer wanted once they've been idle long enough. */
+  /* 1) Reap aux slots whose region is no longer a safety region. The clock is
+   *    time-since-UNWANTED, not idle time. Incidental (non-safety) tailnet
+   *    traffic to peers on that region routes through the aux and refreshes
+   *    last_used_ms, so an idle-based reap never fired: a boot-transient aux
+   *    region (one briefly in the safety set before the netmap/home settled, or
+   *    a region == the not-yet-settled home) could persist for hours pinning a
+   *    pool slot — the "phantom region-9 aux" seen in soak. Reaping on
+   *    time-since-unwanted is immune to that incidental traffic. */
   for (int s = 1; s < ML_DERP_MAX_CONNS; s++) {
     ml_derp_conn_t * c = &ml->derp[s];
-    if (c->region_id == 0 && !c->tls_inited && !c->connected) continue; /* free slot */
+    if (c->region_id == 0 && !c->tls_inited && !c->connected) {
+      c->aux_unwanted_since_ms = 0;
+      continue; /* free slot */
+    }
     bool wanted = false;
     for (int w = 0; w < nwant; w++) {
       if (want[w] == c->region_id) {
@@ -577,10 +601,16 @@ static void derp_manage_aux(microlink_t * ml, uint16_t eff_home, int aux_burst[]
         break;
       }
     }
-    if (!wanted && (now - c->last_used_ms > ML_DERP_AUX_IDLE_REAP_MS)) {
-      ESP_LOGI(TAG, "Reaping idle aux DERP conn slot %d (region %u)", s, (unsigned)c->region_id);
+    if (wanted) {
+      c->aux_unwanted_since_ms = 0; /* still a current safety region */
+      continue;
+    }
+    if (c->aux_unwanted_since_ms == 0) c->aux_unwanted_since_ms = now;
+    if (now - c->aux_unwanted_since_ms > ML_DERP_AUX_UNWANTED_REAP_MS) {
+      ESP_LOGI(TAG, "Reaping unwanted aux DERP conn slot %d (region %u)", s, (unsigned)c->region_id);
       ml_derp_disconnect(ml, c);
       c->region_id = 0;
+      c->aux_unwanted_since_ms = 0;
       aux_burst[s] = 0;
     }
   }
@@ -823,61 +853,70 @@ void ml_derp_tx_task(void * arg)
          *      frame to the pool connection homed on the destination's region. ---- */
     {
       uint16_t eff_home = ml_effective_home_region(ml);
-      for (int tx_count = 0; tx_count < 8; tx_count++) {
-        ml_derp_tx_item_t item;
-        if (xQueueReceive(ml->derp_tx_queue, &item, 0) != pdTRUE) {
-          break;
-        }
-        ml_derp_conn_t * c = derp_route_conn(ml, item.region_id, eff_home);
-        if (c == NULL) {
-          /* Chosen conn (home fallback) is down — nothing can carry it now.
+      /* Drain the PRIORITY (safety/handshake) queue FULLY first, then the disco
+       * queue (bounded). Two separate FIFO queues => a 5 Hz safety heartbeat is
+       * never stuck behind a disco burst, enqueue stays single-atomic per queue
+       * (no cross-thread drain/requeue = the CRITICAL race is gone), and per-peer
+       * frame order is preserved within a queue (no OK-after-STOP reordering). */
+      for (int q = 0; q < 2; q++) {
+        QueueHandle_t txq = (q == 0) ? ml->derp_tx_prio_queue : ml->derp_tx_queue;
+        int budget = (q == 0) ? ML_DERP_TX_PRIO_DEPTH : 8;
+        for (int tx_count = 0; tx_count < budget; tx_count++) {
+          ml_derp_tx_item_t item;
+          if (xQueueReceive(txq, &item, 0) != pdTRUE) {
+            break;
+          }
+          ml_derp_conn_t * c = derp_route_conn(ml, item.region_id, eff_home);
+          if (c == NULL) {
+            /* Chosen conn (home fallback) is down — nothing can carry it now.
                      * Drop + log rather than block; wg_mgr re-fires safety inits. */
-          ESP_LOGW(TAG, "DERP TX drop: no connected conn for region %u", (unsigned)item.region_id);
-          free(item.data);
-          continue;
-        }
-        bool fell_back = (item.region_id != 0 && item.region_id != eff_home && c == home);
-        if (fell_back) {
-          /* Never silently drop a safety peer's frame: aux for its region isn't
+            ESP_LOGW(TAG, "DERP TX drop: no connected conn for region %u", (unsigned)item.region_id);
+            free(item.data);
+            continue;
+          }
+          bool fell_back = (item.region_id != 0 && item.region_id != eff_home && c == home);
+          if (fell_back) {
+            /* Never silently drop a safety peer's frame: aux for its region isn't
                      * up yet, so relay via home (may still reach if the peer also holds a
                      * home-region conn) and keep the aux opening in the background. */
-          ESP_LOGW(
-            TAG, "DERP TX: no aux conn for region %u, relaying via home (frame preserved)", (unsigned)item.region_id);
-        }
-        int ret;
-        if (item.frame_type == DERP_FRAME_SEND_PACKET) {
-          ESP_LOGI(
-            TAG,
-            "DERP TX: SendPacket %d bytes, dest=%02x%02x%02x%02x, region=%u, hdr=%02x",
-            (int)item.len,
-            item.dest_pubkey[0],
-            item.dest_pubkey[1],
-            item.dest_pubkey[2],
-            item.dest_pubkey[3],
-            (unsigned)item.region_id,
-            item.data[0]);
-          ret = derp_send_packet(ml, c, item.dest_pubkey, item.data, item.len);
-        } else {
-          ret = derp_write_frame(ml, c, item.frame_type, item.data, item.len);
-        }
-        if (ret < 0) {
-          ESP_LOGW(
-            TAG, "DERP write failed on %s conn (region %u)", (c == home) ? "home" : "aux", (unsigned)c->region_id);
-          c->connected = false;
-          if (c == home) {
-            /* Home reconnect is event-driven (handler frees TLS then reconnects). */
-            xEventGroupSetBits(ml->events, ML_EVT_DERP_RECONNECT);
+            ESP_LOGW(
+              TAG, "DERP TX: no aux conn for region %u, relaying via home (frame preserved)", (unsigned)item.region_id);
+          }
+          int ret;
+          if (item.frame_type == DERP_FRAME_SEND_PACKET) {
+            ESP_LOGI(
+              TAG,
+              "DERP TX: SendPacket %d bytes, dest=%02x%02x%02x%02x, region=%u, hdr=%02x",
+              (int)item.len,
+              item.dest_pubkey[0],
+              item.dest_pubkey[1],
+              item.dest_pubkey[2],
+              item.dest_pubkey[3],
+              (unsigned)item.region_id,
+              item.data[0]);
+            ret = derp_send_packet(ml, c, item.dest_pubkey, item.data, item.len);
           } else {
-            /* Aux has no event path: tear it down NOW (frees TLS) so the next
+            ret = derp_write_frame(ml, c, item.frame_type, item.data, item.len);
+          }
+          if (ret < 0) {
+            ESP_LOGW(
+              TAG, "DERP write failed on %s conn (region %u)", (c == home) ? "home" : "aux", (unsigned)c->region_id);
+            c->connected = false;
+            if (c == home) {
+              /* Home reconnect is event-driven (handler frees TLS then reconnects). */
+              xEventGroupSetBits(ml->events, ML_EVT_DERP_RECONNECT);
+            } else {
+              /* Aux has no event path: tear it down NOW (frees TLS) so the next
                          * derp_manage_aux reconnect doesn't leak by re-initing over live
                          * contexts. region_id is preserved for the retry. */
-            ml_derp_disconnect(ml, c);
+              ml_derp_disconnect(ml, c);
+            }
+          } else {
+            frames_tx++;
+            c->last_used_ms = ml_get_time_ms();
           }
-        } else {
-          frames_tx++;
-          c->last_used_ms = ml_get_time_ms();
+          free(item.data);
         }
-        free(item.data);
       }
     }
 

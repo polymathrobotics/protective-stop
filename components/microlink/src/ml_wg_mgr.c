@@ -151,6 +151,29 @@ typedef struct
 #define MAX_PENDING_PROBES 64
 static disco_probe_t pending_probes[MAX_PENDING_PROBES];
 
+/* Small ring of the last few CONSUMED probe txids. The machine answers each ping
+ * on BOTH direct and DERP with the same txid; the direct pong consumes the
+ * probe, so the DERP duplicate arrives "unmatched". Recognising it here lets us
+ * log it at DEBUG ("duplicate via-DERP pong") instead of a misleading WARN.
+ * Cosmetic only — never affects probe matching or heartbeat accounting. */
+#define CONSUMED_TXID_RING 8
+static uint8_t s_consumed_txids[CONSUMED_TXID_RING][DISCO_TXID_LEN];
+static int s_consumed_txid_head = 0;
+
+static void remember_consumed_txid(const uint8_t * txid)
+{
+  memcpy(s_consumed_txids[s_consumed_txid_head], txid, DISCO_TXID_LEN);
+  s_consumed_txid_head = (s_consumed_txid_head + 1) % CONSUMED_TXID_RING;
+}
+
+static bool txid_recently_consumed(const uint8_t * txid)
+{
+  for (int i = 0; i < CONSUMED_TXID_RING; i++) {
+    if (memcmp(s_consumed_txids[i], txid, DISCO_TXID_LEN) == 0) return true;
+  }
+  return false;
+}
+
 /* ============================================================================
  * Base64 Key Encoding (wireguard-lwip API requires base64 keys)
  * ========================================================================== */
@@ -677,6 +700,13 @@ bool ml_wg_is_pinned_peer(microlink_t * ml, uint32_t vpn_ip)
   return is_pinned_peer(ml, vpn_ip);
 }
 
+/* Public wrapper: is this peer in the health-tracked safety set? Diagnostic use
+ * (e.g. /api/peers) to see which peers feed ml_wg_collect_safety_regions. */
+bool ml_wg_is_health_tracked(uint32_t vpn_ip)
+{
+  return is_health_tracked(vpn_ip);
+}
+
 /* DERP home region of a peer identified by its 32-byte WG public key.
  * 0 = unknown peer or region not learned. Called from ml_derp_queue_send on the
  * wg_mgr task (the peer-table owner), so this is a same-task read — no lock. */
@@ -686,6 +716,22 @@ uint16_t ml_wg_region_for_pubkey(microlink_t * ml, const uint8_t * wg_pubkey)
   int idx = find_peer_by_key(ml, wg_pubkey);
   if (idx < 0) return 0;
   return ml->peers[idx].derp_region;
+}
+
+/* True when the WG-pubkey peer is one of the few SAFETY peers (pinned OR
+ * health-tracked) — the ones exempt from the peer-scaling armor. The DERP TX
+ * enqueue path uses this to give the 5 Hz pstop heartbeat frame priority
+ * (front-of-queue) and to shield it from disco-burst backpressure. Same-task
+ * read when called from wg_mgr; when called from wg_derp_output_cb (TCPIP
+ * thread) it shares the existing lock-free tolerance of ml_wg_region_for_pubkey
+ * — word-sized reads, worst case a transiently wrong classification. */
+bool ml_wg_is_safety_pubkey(microlink_t * ml, const uint8_t * wg_pubkey)
+{
+  if (ml == NULL || wg_pubkey == NULL) return false;
+  int idx = find_peer_by_key(ml, wg_pubkey);
+  if (idx < 0) return false;
+  uint32_t vpn_ip = ml->peers[idx].vpn_ip;
+  return is_pinned_peer(ml, vpn_ip) || is_health_tracked(vpn_ip);
 }
 
 /* Collect the DISTINCT DERP regions of the safety peers that are exempt from the
@@ -978,6 +1024,13 @@ static int add_peer(microlink_t * ml, const ml_peer_update_t * update)
     p->best_ip = 0;
     p->best_port = 0;
     p->wg_peer_index = -1;
+    /* Direct-path flap-backoff + DERP throttle state (net/derp-stability): reset
+     * on slot REUSE too, else an evicted peer's stale direct_backoff_until would
+     * spuriously suppress this fresh peer's direct-upgrade probing for up to 60 s. */
+    p->direct_promoted_ms = 0;
+    p->direct_flap_count = 0;
+    p->direct_backoff_until = 0;
+    p->last_derp_reconnect_ms = 0;
   }
 
   char ip_str[16];
@@ -1362,6 +1415,20 @@ static void disco_send_ping_to_peer(microlink_t * ml, int peer_idx, bool force)
     return;
   }
 
+  /* Probe dedup: multiple forced call-sites (disco_wake_peer, upgrade, demotion,
+   * heartbeat) each register a fresh txid within the 5 s probe lifetime, piling
+   * up outstanding probes. If this peer already has an ACTIVE probe younger than
+   * 2 s, a fresh one is pure redundancy — skip it. The 2 s floor is well under
+   * the 3 s liveness/heartbeat cadence (which also spaces last_ping_sent_ms by
+   * >= 3 s), so a genuine liveness ping is never suppressed. */
+  for (int pi = 0; pi < MAX_PENDING_PROBES; pi++) {
+    if (
+      pending_probes[pi].active && pending_probes[pi].peer_index == peer_idx && now - pending_probes[pi].sent_ms < 2000)
+    {
+      return;
+    }
+  }
+
   uint8_t pkt[256];
   size_t pkt_len = 0;
   disco_build_ping(ml, peer_idx, pkt, &pkt_len);
@@ -1620,6 +1687,16 @@ static void process_disco_pong(
       p->has_direct_path = true;
       p->trust_until_ms = now + ML_DISCO_TRUST_DURATION_MS;
 
+      /* Flap-damping bookkeeping (FIX 2). Timestamp only the genuine false->true
+       * promotion edge (NOT every heartbeat pong, else the path never looks
+       * "established"). Once a path survives past 15 s, clear the flap counter so
+       * a long-stable peer that later legitimately fails isn't penalized. */
+      if (!had_direct) {
+        p->direct_promoted_ms = now;
+      } else if (now - p->direct_promoted_ms > 15000) {
+        p->direct_flap_count = 0;
+      }
+
       bool same_ep = (pkt->src_ip == p->best_ip && pkt->src_port == p->best_port);
       /* A move from a WAN/STUN address to a LAN address is a genuine upgrade
        * (lower latency, no hairpin) and IS allowed to switch even for pinned peers. */
@@ -1744,8 +1821,16 @@ static void process_disco_pong(
       bool is_safety = is_pinned_peer(ml, p->vpn_ip) || is_health_tracked(p->vpn_ip);
       if (is_safety && ml->wg_netif && p->wg_peer_index >= 0) {
         struct netif * netif = (struct netif *)ml->wg_netif;
-        if (wireguardif_peer_is_up(netif, (u8_t)p->wg_peer_index, NULL, NULL) != ERR_OK) {
+        /* FIX 4: a DERP-only safety peer answers every ~3 s ping via DERP, so this
+         * fired connect_derp ~every 3 s — a redundant storm. wireguardif's own
+         * periodic init retransmit already provides the steady bring-up cadence;
+         * throttle this driver to >= 5 s apart. */
+        if (
+          (wireguardif_peer_is_up(netif, (u8_t)p->wg_peer_index, NULL, NULL) != ERR_OK) &&
+          (now - p->last_derp_reconnect_ms > 5000))
+        {
           wireguardif_connect_derp(netif, (u8_t)p->wg_peer_index);
+          p->last_derp_reconnect_ms = now;
           ESP_LOGI(TAG, "via-DERP pong from %s: no WG session, (re)firing DERP handshake init", p->hostname);
         }
       }
@@ -1756,24 +1841,42 @@ static void process_disco_pong(
     break;
   }
 
-  if (!matched) {
+  if (matched) {
+    /* Remember this txid so the machine's DUPLICATE answer on the other transport
+     * (direct answered here -> DERP copy arrives next, or vice-versa) is logged as
+     * a benign duplicate below instead of a scary "unmatched" WARN. */
+    remember_consumed_txid(txid);
+  } else {
     /* Find peer by disco key for logging */
     int peer_idx = find_peer_by_disco_key(ml, sender_disco_key);
     const char * name = peer_idx >= 0 ? ml->peers[peer_idx].hostname : "?";
-    int active_count = 0;
-    for (int i = 0; i < MAX_PENDING_PROBES; i++) {
-      if (pending_probes[i].active) active_count++;
+    if (pkt->via_derp && txid_recently_consumed(txid)) {
+      /* The direct pong already consumed this probe; this is just the machine's
+       * DERP duplicate. Benign — DEBUG, not WARN. */
+      ESP_LOGD(
+        TAG,
+        "duplicate via-DERP pong from %s txid=%02x%02x%02x%02x (direct already consumed)",
+        name,
+        txid[0],
+        txid[1],
+        txid[2],
+        txid[3]);
+    } else {
+      int active_count = 0;
+      for (int i = 0; i < MAX_PENDING_PROBES; i++) {
+        if (pending_probes[i].active) active_count++;
+      }
+      ESP_LOGW(
+        TAG,
+        "DISCO PONG unmatched from %s (via %s) txid=%02x%02x%02x%02x, active_probes=%d",
+        name,
+        pkt->via_derp ? "DERP" : "direct",
+        txid[0],
+        txid[1],
+        txid[2],
+        txid[3],
+        active_count);
     }
-    ESP_LOGW(
-      TAG,
-      "DISCO PONG unmatched from %s (via %s) txid=%02x%02x%02x%02x, active_probes=%d",
-      name,
-      pkt->via_derp ? "DERP" : "direct",
-      txid[0],
-      txid[1],
-      txid[2],
-      txid[3],
-      active_count);
   }
 }
 
@@ -2480,6 +2583,23 @@ static void disco_periodic_probes(microlink_t * ml)
         pong_dead ? "went silent (pong watchdog)" : "expired");
       p->has_direct_path = false;
 
+      /* FIX 2: hard-NAT flap damping. A direct path that lived < 15 s is a flap
+       * (a lucky direct pong promoted, the reverse NAT mapping then died and the
+       * pong watchdog demoted). Count it and exponentially back off the
+       * direct-UPGRADE re-probe (10 s -> 20 -> 40 -> 60 s cap) so a provably
+       * hard-NAT peer holds a STEADY DERP bond instead of swapping every 5 s and
+       * wobbling the heartbeat. Only priority/health-tracked peers arm the
+       * backoff — bulk peers keep direct_backoff_until == 0, so the peer-scaling
+       * armor and the >15 s-established failover are untouched. This changes only
+       * WHEN we re-probe; it never installs a direct endpoint (827386f preserved).*/
+      if (is_priority && p->direct_promoted_ms != 0 && now - p->direct_promoted_ms < 15000) {
+        if (p->direct_flap_count < 8) p->direct_flap_count++;
+        uint32_t shift = p->direct_flap_count < 4 ? p->direct_flap_count : 4;
+        uint64_t backoff = (uint64_t)5000u << shift;
+        if (backoff > 60000u) backoff = 60000u;
+        p->direct_backoff_until = now + backoff;
+      }
+
       /* Only do DERP fallback + re-probe for allowed peers.
              * Non-allowed peers just get their state cleaned above. */
       if (peer_allowed) {
@@ -2507,7 +2627,10 @@ static void disco_periodic_probes(microlink_t * ml)
     /* Probe for direct path upgrade (every UPGRADE_INTERVAL when on DERP).
          * Throttled to DISCO_PROBES_PER_TICK to spread load and reduce jitter. */
     uint64_t upgrade_interval = is_priority ? ML_DISCO_PRIORITY_REPROBE_MS : ML_DISCO_UPGRADE_INTERVAL_MS;
-    if (!p->has_direct_path && now - p->last_upgrade_ms > upgrade_interval) {
+    /* FIX 2: while a hard-NAT safety peer is in flap-backoff, hold the direct
+     * upgrade re-probe so it stays on its steady DERP bond. Bulk peers keep
+     * direct_backoff_until == 0, so this gate is a no-op for them. */
+    if (!p->has_direct_path && now - p->last_upgrade_ms > upgrade_interval && now > p->direct_backoff_until) {
       if (upgrade_probes_sent < DISCO_PROBES_PER_TICK) {
         disco_send_ping_to_peer(ml, i, false);
         p->last_upgrade_ms = now;

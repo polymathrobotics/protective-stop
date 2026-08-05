@@ -61,6 +61,7 @@ extern "C"
     uint8_t public_key[32];
     bool online;
     bool direct_path; /* true if communicating via direct UDP */
+    uint16_t derp_region; /* learned DERP home region (0 = unknown) — diagnostic */
   } microlink_peer_info_t;
 
   /* Connection state */

@@ -681,6 +681,14 @@ static esp_err_t handler_get_peers(httpd_req_t * req)
       cJSON_AddStringToObject(peer, "hostname", info.hostname);
       cJSON_AddBoolToObject(peer, "direct", info.direct_path);
       cJSON_AddBoolToObject(peer, "allowed", ml_config_peer_is_allowed(ctx, info.vpn_ip));
+      /* Diagnostics for the multi-region aux pool: derp_region is the peer's
+       * learned DERP home; pinned/health say whether it feeds
+       * ml_wg_collect_safety_regions (i.e. can open a safety aux conn). Lets us
+       * spot a peer that pulls a stray region into the pool. */
+      cJSON_AddNumberToObject(peer, "derp_region", info.derp_region);
+      cJSON_AddBoolToObject(peer, "active", info.online);
+      cJSON_AddBoolToObject(peer, "pinned", ml_wg_is_pinned_peer(ml, info.vpn_ip));
+      cJSON_AddBoolToObject(peer, "health", ml_wg_is_health_tracked(info.vpn_ip));
       cJSON_AddItemToArray(arr, peer);
     }
   }

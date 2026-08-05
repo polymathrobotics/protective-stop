@@ -14,8 +14,9 @@ firmware/sdkconfig.old
 firmware/sdkconfig.credentials
 # host runner binary
 host/machine_app_runner
-# host unit-test binary
+# host unit-test binaries
 host/test_clock_guard
+host/test_crypto_kat
 # cppcheck
 *.ctu-info
 cppcheck-build/
