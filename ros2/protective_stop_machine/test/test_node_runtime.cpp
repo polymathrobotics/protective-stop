@@ -9,8 +9,7 @@
 //     lockstep-mismatch WARN / running OK / stopped OK), driven by feeding the
 //     hardware backend canned /state.json off a loopback HTTP stub,
 //   - on_set_parameters: accept a tighter timing envelope, reject one that would
-//     breach the safety floor (SR-M-01, mirrors test_timing_floors at runtime),
-//   - the ~/configure_machine service handler (apply + reject),
+//     breach the safety floor (SR-M-01) — the generated ParamListener ranges,
 //   - the error/shutdown transitions and the on_activate backend-start failure.
 // No real robot: the hardware backend talks to the in-process stub or a closed
 // port; the software backend binds a private test port.
@@ -19,6 +18,7 @@
 #include <gtest/gtest.h>
 
 #include <chrono>
+#include <future>
 #include <memory>
 #include <string>
 #include <utility>
@@ -31,12 +31,10 @@
 #include "protective_stop_msgs/msg/bonded_remote_array.hpp"
 #include "protective_stop_msgs/msg/machine_relay_status.hpp"
 #include "protective_stop_msgs/msg/protective_stop_status.hpp"
-#include "protective_stop_msgs/srv/configure_machine.hpp"
 #include "rclcpp/rclcpp.hpp"
 
 using protective_stop_machine::MachineBridgeNode;
 using pstop_test::LoopbackHttpStub;
-using ConfigureMachine = protective_stop_msgs::srv::ConfigureMachine;
 using DiagnosticArray = diagnostic_msgs::msg::DiagnosticArray;
 using DiagnosticStatus = diagnostic_msgs::msg::DiagnosticStatus;
 using MachineRelayStatus = protective_stop_msgs::msg::MachineRelayStatus;
@@ -46,8 +44,13 @@ using State = lifecycle_msgs::msg::State;
 
 static rclcpp::NodeOptions with(std::vector<rclcpp::Parameter> overrides)
 {
+  // These tests drive the lifecycle by hand, so suppress the constructor's
+  // self-activation (autostart defaults to true for `ros2 run`). Placed first
+  // so any explicit per-test override still wins.
+  std::vector<rclcpp::Parameter> params{rclcpp::Parameter("autostart", false)};
+  params.insert(params.end(), overrides.begin(), overrides.end());
   rclcpp::NodeOptions o;
-  o.parameter_overrides(std::move(overrides));
+  o.parameter_overrides(std::move(params));
   return o;
 }
 
@@ -85,12 +88,11 @@ protected:
 // not-applicable, and diagnostics reports an OK/stopped summary.
 TEST_F(NodeRuntime, SoftwarePublishesAndDiagnoses)
 {
-  auto node = std::make_shared<MachineBridgeNode>(
-    with(
-      {rclcpp::Parameter("backend", "software"),
-        rclcpp::Parameter("software.port", 18921),
-        rclcpp::Parameter("rates.publish_rate_hz", 30.0),
-        rclcpp::Parameter("rates.diagnostics_rate_hz", 30.0)}));
+  auto node = std::make_shared<MachineBridgeNode>(with(
+        {rclcpp::Parameter("backend", "software"),
+          rclcpp::Parameter("software.port", 18921),
+          rclcpp::Parameter("rates.publish_rate_hz", 30.0),
+          rclcpp::Parameter("rates.diagnostics_rate_hz", 30.0)}));
   ASSERT_EQ(node->configure().id(), State::PRIMARY_STATE_INACTIVE);
   ASSERT_EQ(node->activate().id(), State::PRIMARY_STATE_ACTIVE);
 
@@ -115,16 +117,15 @@ TEST_F(NodeRuntime, SoftwarePublishesAndDiagnoses)
   auto s3 = sub->create_subscription<BondedRemoteArray>(
     "/machine_bridge/remotes", rclcpp::QoS(5), [&](BondedRemoteArray::SharedPtr) {
       got_remotes = true;
-    });
+                                                                                                     });
   auto s4 =
-    sub->create_subscription<DiagnosticArray>(
-    "/diagnostics", rclcpp::QoS(5),
-    [&](DiagnosticArray::SharedPtr m) {
-      for (const auto & st : m->status) {
-        if (st.name.find("machine") != std::string::npos) {
-          got_diag = true;
+    sub->create_subscription<DiagnosticArray>("/diagnostics", rclcpp::QoS(5),
+      [&](DiagnosticArray::SharedPtr m) {
+        for (const auto & st : m->status) {
+          if (st.name.find("machine") != std::string::npos) {
+            got_diag = true;
+          }
         }
-      }
     });
 
   rclcpp::executors::SingleThreadedExecutor exec;
@@ -142,13 +143,12 @@ TEST_F(NodeRuntime, SoftwarePublishesAndDiagnoses)
 // snapshot to UNSTABLE, and diagnostics raises the "backend unreachable" ERROR.
 TEST_F(NodeRuntime, HardwareUnreachableDiagnosesError)
 {
-  auto node = std::make_shared<MachineBridgeNode>(
-    with(
-      {rclcpp::Parameter("backend", "hardware"),
-        rclcpp::Parameter("hardware.device_url", "http://127.0.0.1:9"),
-        rclcpp::Parameter("rates.state_poll_hz", 40.0),
-        rclcpp::Parameter("rates.publish_rate_hz", 40.0),
-        rclcpp::Parameter("rates.diagnostics_rate_hz", 40.0)}));
+  auto node = std::make_shared<MachineBridgeNode>(with(
+        {rclcpp::Parameter("backend", "hardware"),
+          rclcpp::Parameter("hardware.device_url", "http://127.0.0.1:9"),
+          rclcpp::Parameter("rates.state_poll_hz", 40.0),
+          rclcpp::Parameter("rates.publish_rate_hz", 40.0),
+          rclcpp::Parameter("rates.diagnostics_rate_hz", 40.0)}));
   ASSERT_EQ(node->configure().id(), State::PRIMARY_STATE_INACTIVE);
   ASSERT_EQ(node->activate().id(), State::PRIMARY_STATE_ACTIVE);
 
@@ -161,16 +161,15 @@ TEST_F(NodeRuntime, HardwareUnreachableDiagnosesError)
       status = m->status;
     });
   auto s2 =
-    sub->create_subscription<DiagnosticArray>(
-    "/diagnostics", rclcpp::QoS(5),
-    [&](DiagnosticArray::SharedPtr m) {
-      for (const auto & st : m->status) {
-        if (st.level == DiagnosticStatus::ERROR &&
-        st.message.find("unreachable") != std::string::npos)
-        {
-          err_diag = true;
+    sub->create_subscription<DiagnosticArray>("/diagnostics", rclcpp::QoS(5),
+      [&](DiagnosticArray::SharedPtr m) {
+        for (const auto & st : m->status) {
+          if (st.level == DiagnosticStatus::ERROR &&
+          st.message.find("unreachable") != std::string::npos)
+          {
+            err_diag = true;
+          }
         }
-      }
     });
 
   rclcpp::executors::SingleThreadedExecutor exec;
@@ -193,13 +192,12 @@ static void run_hardware_stub_case(
   bool expect_remote)
 {
   LoopbackHttpStub stub(state_json);
-  auto node = std::make_shared<MachineBridgeNode>(
-    with(
-      {rclcpp::Parameter("backend", "hardware"),
-        rclcpp::Parameter("hardware.device_url", stub.url()),
-        rclcpp::Parameter("rates.state_poll_hz", 40.0),
-        rclcpp::Parameter("rates.publish_rate_hz", 40.0),
-        rclcpp::Parameter("rates.diagnostics_rate_hz", 40.0)}));
+  auto node = std::make_shared<MachineBridgeNode>(with(
+        {rclcpp::Parameter("backend", "hardware"),
+          rclcpp::Parameter("hardware.device_url", stub.url()),
+          rclcpp::Parameter("rates.state_poll_hz", 40.0),
+          rclcpp::Parameter("rates.publish_rate_hz", 40.0),
+          rclcpp::Parameter("rates.diagnostics_rate_hz", 40.0)}));
   ASSERT_EQ(node->configure().id(), State::PRIMARY_STATE_INACTIVE);
   ASSERT_EQ(node->activate().id(), State::PRIMARY_STATE_ACTIVE);
 
@@ -217,26 +215,24 @@ static void run_hardware_stub_case(
       remote_count = m->remotes.size();
     });
   auto s3 =
-    sub->create_subscription<DiagnosticArray>(
-    "/diagnostics", rclcpp::QoS(5),
-    [&](DiagnosticArray::SharedPtr m) {
-      for (const auto & st : m->status) {
-        if (st.level == want_diag_level &&
-        st.message.find(want_msg_substr) != std::string::npos)
-        {
-          diag_hit = true;
+    sub->create_subscription<DiagnosticArray>("/diagnostics", rclcpp::QoS(5),
+      [&](DiagnosticArray::SharedPtr m) {
+        for (const auto & st : m->status) {
+          if (st.level == want_diag_level &&
+          st.message.find(want_msg_substr) != std::string::npos)
+          {
+            diag_hit = true;
+          }
         }
-      }
     });
 
   rclcpp::executors::SingleThreadedExecutor exec;
   exec.add_node(node->get_node_base_interface());
   exec.add_node(sub);
   EXPECT_TRUE(
-    spin_until(
-      exec, [&] {
-        return diag_hit && status == want_status && (!expect_remote || remote_count == 1U);
-      }));
+    spin_until(exec, [&] {
+      return diag_hit && status == want_status && (!expect_remote || remote_count == 1U);
+                                                                                                             }));
   EXPECT_TRUE(diag_hit);
   EXPECT_EQ(status, want_status);
   if (expect_remote) {
@@ -296,15 +292,16 @@ TEST_F(NodeRuntime, SetParametersAcceptsTighter)
   EXPECT_TRUE(res.successful);
 }
 
-// on_set_parameters: a change that would breach the compile-time safety floor is
-// rejected with a "safety floor" reason (SR-M-01 at runtime).
+// A runtime set that would breach the safety floor (SR-M-01) is rejected by the
+// generated ParamListener's declared range before it can apply; the reason names
+// the offending parameter.
 TEST_F(NodeRuntime, SetParametersRejectsUnsafeMinStop)
 {
   auto node = std::make_shared<MachineBridgeNode>(with({rclcpp::Parameter("backend", "software")}));
   ASSERT_EQ(node->configure().id(), State::PRIMARY_STATE_INACTIVE);
   auto res = node->set_parameter(rclcpp::Parameter("timing.min_stop_ms", 10));
   EXPECT_FALSE(res.successful);
-  EXPECT_NE(res.reason.find("safety floor"), std::string::npos);
+  EXPECT_NE(res.reason.find("min_stop_ms"), std::string::npos);
 }
 
 TEST_F(NodeRuntime, SetParametersRejectsOversizeHeartbeat)
@@ -313,7 +310,7 @@ TEST_F(NodeRuntime, SetParametersRejectsOversizeHeartbeat)
   ASSERT_EQ(node->configure().id(), State::PRIMARY_STATE_INACTIVE);
   auto res = node->set_parameter(rclcpp::Parameter("timing.heartbeat_ms", 5000));
   EXPECT_FALSE(res.successful);
-  EXPECT_NE(res.reason.find("safety floor"), std::string::npos);
+  EXPECT_NE(res.reason.find("heartbeat_ms"), std::string::npos);
 }
 
 // A safe-but-unappliable change: the value passes the floor, but the (hardware)
@@ -322,118 +319,13 @@ TEST_F(NodeRuntime, SetParametersRejectsOversizeHeartbeat)
 TEST_F(NodeRuntime, SetParameterHardwareBackendRefuses)
 {
   auto node = std::make_shared<MachineBridgeNode>(
-    with(
-      {rclcpp::Parameter("backend", "hardware"),
-        rclcpp::Parameter("hardware.device_url", "http://127.0.0.1:9")}));
+    with({rclcpp::Parameter("backend", "hardware"),
+      rclcpp::Parameter("hardware.device_url", "http://127.0.0.1:9")}));
   ASSERT_EQ(node->configure().id(), State::PRIMARY_STATE_INACTIVE);
-  auto res = node->set_parameter(rclcpp::Parameter("timing.heartbeat_ms", 300));  // safe, but device unreachable
+  // safe value (clears the floor), but the device is unreachable so the backend refuses
+  auto res = node->set_parameter(rclcpp::Parameter("timing.heartbeat_ms", 300));
   EXPECT_FALSE(res.successful);
   EXPECT_NE(res.reason.find("backend refused"), std::string::npos);
-}
-
-// The ~/configure_machine service applies a tighter envelope and echoes the
-// values now in effect.
-TEST_F(NodeRuntime, ConfigureServiceApplies)
-{
-  auto node = std::make_shared<MachineBridgeNode>(
-    with({rclcpp::Parameter("backend", "software"), rclcpp::Parameter("software.port", 18922)}));
-  ASSERT_EQ(node->configure().id(), State::PRIMARY_STATE_INACTIVE);
-  ASSERT_EQ(node->activate().id(), State::PRIMARY_STATE_ACTIVE);
-
-  auto client_node = std::make_shared<rclcpp::Node>("cfg_client_ok");
-  auto client = client_node->create_client<ConfigureMachine>("/machine_bridge/configure_machine");
-
-  rclcpp::executors::SingleThreadedExecutor exec;
-  exec.add_node(node->get_node_base_interface());
-  exec.add_node(client_node);
-  ASSERT_TRUE(spin_until(exec, [&] {return client->service_is_ready();}));
-
-  auto req = std::make_shared<ConfigureMachine::Request>();
-  req->heartbeat_ms = 300;
-  req->max_missed = 2;
-  req->min_stop_ms = 600;
-  auto future = client->async_send_request(req);
-  ASSERT_TRUE(
-    spin_until(
-      exec, [&] {
-        return future.wait_for(std::chrono::seconds(0)) == std::future_status::ready;
-      }));
-  auto resp = future.get();
-  EXPECT_TRUE(resp->success);
-  EXPECT_EQ(resp->heartbeat_ms, 300);
-  EXPECT_EQ(resp->max_missed, 2);
-  EXPECT_EQ(resp->min_stop_ms, 600);
-
-  EXPECT_EQ(node->deactivate().id(), State::PRIMARY_STATE_INACTIVE);
-  EXPECT_EQ(node->cleanup().id(), State::PRIMARY_STATE_UNCONFIGURED);
-}
-
-// The service rejects an envelope below the safety floor (unchanged values echo).
-TEST_F(NodeRuntime, ConfigureServiceRejectsUnsafe)
-{
-  auto node = std::make_shared<MachineBridgeNode>(
-    with({rclcpp::Parameter("backend", "software"), rclcpp::Parameter("software.port", 18923)}));
-  ASSERT_EQ(node->configure().id(), State::PRIMARY_STATE_INACTIVE);
-  ASSERT_EQ(node->activate().id(), State::PRIMARY_STATE_ACTIVE);
-
-  auto client_node = std::make_shared<rclcpp::Node>("cfg_client_bad");
-  auto client = client_node->create_client<ConfigureMachine>("/machine_bridge/configure_machine");
-
-  rclcpp::executors::SingleThreadedExecutor exec;
-  exec.add_node(node->get_node_base_interface());
-  exec.add_node(client_node);
-  ASSERT_TRUE(spin_until(exec, [&] {return client->service_is_ready();}));
-
-  auto req = std::make_shared<ConfigureMachine::Request>();
-  req->min_stop_ms = 10;  // below the floor
-  auto future = client->async_send_request(req);
-  ASSERT_TRUE(
-    spin_until(
-      exec, [&] {
-        return future.wait_for(std::chrono::seconds(0)) == std::future_status::ready;
-      }));
-  auto resp = future.get();
-  EXPECT_FALSE(resp->success);
-  EXPECT_NE(resp->message.find("safety floor"), std::string::npos);
-
-  EXPECT_EQ(node->deactivate().id(), State::PRIMARY_STATE_INACTIVE);
-  EXPECT_EQ(node->cleanup().id(), State::PRIMARY_STATE_UNCONFIGURED);
-}
-
-// The service path of a "backend refused": the envelope is safe but the
-// (hardware) device is unreachable, so handle_configure reports failure and
-// echoes the still-in-effect values.
-TEST_F(NodeRuntime, ConfigureServiceHardwareBackendRefuses)
-{
-  auto node = std::make_shared<MachineBridgeNode>(
-    with(
-      {rclcpp::Parameter("backend", "hardware"),
-        rclcpp::Parameter("hardware.device_url", "http://127.0.0.1:9")}));
-  ASSERT_EQ(node->configure().id(), State::PRIMARY_STATE_INACTIVE);
-
-  auto client_node = std::make_shared<rclcpp::Node>("cfg_client_hw");
-  auto client = client_node->create_client<ConfigureMachine>("/machine_bridge/configure_machine");
-
-  rclcpp::executors::SingleThreadedExecutor exec;
-  exec.add_node(node->get_node_base_interface());
-  exec.add_node(client_node);
-  ASSERT_TRUE(spin_until(exec, [&] {return client->service_is_ready();}));
-
-  auto req = std::make_shared<ConfigureMachine::Request>();
-  req->heartbeat_ms = 300;  // all-safe envelope so it clears the floor and reaches
-  req->max_missed = 3;  // the backend, where the unreachable device refuses it
-  req->min_stop_ms = 600;
-  auto future = client->async_send_request(req);
-  ASSERT_TRUE(
-    spin_until(
-      exec, [&] {
-        return future.wait_for(std::chrono::seconds(0)) == std::future_status::ready;
-      }));
-  auto resp = future.get();
-  EXPECT_FALSE(resp->success);
-  EXPECT_NE(resp->message.find("backend refused"), std::string::npos);
-
-  EXPECT_EQ(node->cleanup().id(), State::PRIMARY_STATE_UNCONFIGURED);
 }
 
 // on_activate returns FAILURE when the backend refuses to start. The software

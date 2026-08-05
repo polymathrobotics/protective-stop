@@ -62,10 +62,9 @@ TEST(HwParse, FaultBitsAndMismatch)
 
 TEST(HwParse, BondedRemotesEnumerated)
 {
-  const auto s = parse(
-    R"({"relay_stop":true,"bonded_remotes":[)"
-    R"({"id":30928592,"state":2,"age_ms":101,"rtt_ms":209,"wg_rtt_ms":50},)"
-    R"({"id":123,"state":1,"age_ms":5,"rtt_ms":9}]})");
+  const auto s = parse(R"({"relay_stop":true,"bonded_remotes":[)"
+                       R"({"id":30928592,"state":2,"age_ms":101,"rtt_ms":209,"wg_rtt_ms":50},)"
+                       R"({"id":123,"state":1,"age_ms":5,"rtt_ms":9}]})");
   ASSERT_EQ(s.remotes.size(), 2u);
   EXPECT_EQ(s.active_remotes, 2u);
   EXPECT_EQ(s.remotes[0].device_id, "01d7eed0");  // 30928592 == 0x01D7EED0

@@ -135,6 +135,35 @@ protective_stop_machine:
       validation:
         gt_eq<>: 1
 
+  # Optional fleet DEVICE CHECK-IN (software backend only). Registers this
+  # software machine with pstop-fleet EXACTLY like an ESP32 machine does — a
+  # `device_type:"machine"` device record with full metadata — by POSTing the
+  # ESP32 check-in schema to <checkin_url>/api/v1/checkin every check_interval_s
+  # (plus an immediate boot check-in). Complementary to announce.* (which feeds
+  # the live overview); default DISABLED (empty url). Entirely off the safety
+  # path: a dead fleet only logs, and no firmware OTA is ever attempted. Prefer
+  # the ENVIRONMENT for the secrets — PSTOP_FLEET_CHECKIN_URL and
+  # PSTOP_FLEET_API_KEY_FILE override the two keys below so the proprietary fleet
+  # URL/key stay out of committed config.
+  fleet:
+    checkin_url:
+      type: string
+      default_value: ''
+      read_only: true
+      description: Fleet BASE url, http://host[:port]. The node appends /api/v1/checkin. Empty (default) disables device check-in entirely.
+    api_key_file:
+      type: string
+      default_value: ''
+      read_only: true
+      description: Path to a chmod-600 file whose first line is the fleet API key (Bearer token). Empty means no Authorization header.
+    check_interval_s:
+      type: int
+      default_value: 300
+      read_only: true
+      description: Seconds between device check-ins. Clamped to [60, 300] to match the ESP32 machn cadence.
+      validation:
+        bounds<>: [60, 300]
+
   autostart:
     type: bool
     default_value: true

@@ -13,11 +13,10 @@ using jsonlite::Value;
 TEST(JsonLite, ParsesMachnStateShape)
 {
   Value v;
-  ASSERT_TRUE(
-    parse(
-      R"({"relay_stop":false,"relay_fault_a":false,"pstop_mismatch":3,)"
-      R"("bonded_remotes":[{"id":30928592,"state":2,"age_ms":101,"rtt_ms":209}]})",
-      v));
+  ASSERT_TRUE(parse(
+    R"({"relay_stop":false,"relay_fault_a":false,"pstop_mismatch":3,)"
+    R"("bonded_remotes":[{"id":30928592,"state":2,"age_ms":101,"rtt_ms":209}]})",
+    v));
   EXPECT_TRUE(v.is_obj());
   EXPECT_FALSE(v.bool_at("relay_stop", true));
   EXPECT_EQ(v.num_at("pstop_mismatch"), 3.0);

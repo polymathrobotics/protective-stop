@@ -15,75 +15,81 @@ if(NOT CMAKE_C_STANDARD)
 endif()
 add_compile_options(-Wall -Wextra)
 
-find_package(ament_cmake REQUIRED)
-find_package(rclcpp REQUIRED)
-find_package(rclcpp_lifecycle REQUIRED)
-find_package(lifecycle_msgs REQUIRED)
-find_package(diagnostic_updater REQUIRED)
-find_package(diagnostic_msgs REQUIRED)
-find_package(protective_stop_msgs REQUIRED)
+find_package(ament_cmake_auto REQUIRED)
+ament_auto_find_build_dependencies()
+# libcurl is a system dep (rosdep libcurl-dev), so ament_auto skips it.
 find_package(CURL REQUIRED)
+
+# Typed, validated parameters (SR-M-01 floors are the timing.* bounds).
+generate_parameter_library(${PROJECT_NAME}_parameters
+  src/${PROJECT_NAME}_params.yaml
+)
 
 # Vendored, unmodified pstop_c sources (same set host/machine_app_runner links).
 set(PSTOP_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/../../pstop_c)
 file(GLOB PSTOP_SRCS CONFIGURE_DEPENDS ${PSTOP_ROOT}/pstop/src/pstop/*.c)
 set(TRANSPORT_SRCS ${PSTOP_ROOT}/transport/src/transport/udp/udp_transport.c)
 
-add_executable(machine_bridge_node
-  src/main.cpp
+# app_version for the fleet check-in payload — single source of truth is
+# package.xml, so extract it here rather than hardcoding a second copy.
+file(READ ${CMAKE_CURRENT_SOURCE_DIR}/package.xml _pkg_xml)
+string(REGEX MATCH "<version>([0-9]+\\.[0-9]+\\.[0-9]+)</version>" _ "${_pkg_xml}")
+set(PSTOP_MACHINE_APP_VERSION "${CMAKE_MATCH_1}")
+
+# Composable component library; the executable is code-generated below.
+add_library(${PROJECT_NAME} SHARED
   src/machine_bridge_node.cpp
   src/software_backend.cpp
   src/hardware_backend.cpp
   src/announce.cpp
+  src/fleet_checkin.cpp
   ${PSTOP_SRCS}
   ${TRANSPORT_SRCS}
 )
-target_include_directories(machine_bridge_node PRIVATE
-  include
+target_compile_definitions(${PROJECT_NAME} PRIVATE
+  PSTOP_MACHINE_APP_VERSION="${PSTOP_MACHINE_APP_VERSION}")
+target_include_directories(${PROJECT_NAME} PUBLIC
+  "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
+  "$<INSTALL_INTERFACE:include>"
+)
+# pstop_c headers are implementation detail, not public API.
+target_include_directories(${PROJECT_NAME} PRIVATE
   ${PSTOP_ROOT}/pstop/include
   ${PSTOP_ROOT}/transport/include
 )
-ament_target_dependencies(machine_bridge_node
-  rclcpp
-  rclcpp_lifecycle
-  lifecycle_msgs
-  diagnostic_updater
-  diagnostic_msgs
-  protective_stop_msgs
+target_link_libraries(${PROJECT_NAME}
+  PUBLIC
+    rclcpp::rclcpp
+    rclcpp_lifecycle::rclcpp_lifecycle
+    diagnostic_updater::diagnostic_updater
+    ${lifecycle_msgs_TARGETS}
+    ${diagnostic_msgs_TARGETS}
+    ${protective_stop_msgs_TARGETS}
+    ${PROJECT_NAME}_parameters
+  PRIVATE
+    rclcpp_components::component
+    CURL::libcurl
 )
-target_link_libraries(machine_bridge_node CURL::libcurl)
 
-install(TARGETS machine_bridge_node DESTINATION lib/${PROJECT_NAME})
-install(DIRECTORY launch config DESTINATION share/${PROJECT_NAME})
+rclcpp_components_register_node(${PROJECT_NAME}
+  PLUGIN "protective_stop_machine::MachineBridgeNode"
+  EXECUTABLE machine_bridge_node
+)
+
+# ${PROJECT_NAME}_parameters is a header-only INTERFACE target (compiled into the
+# component .so), so it needs no separate install.
+install(TARGETS ${PROJECT_NAME}
+  ARCHIVE DESTINATION lib
+  LIBRARY DESTINATION lib
+  RUNTIME DESTINATION bin
+)
 
 if(BUILD_TESTING)
-  find_package(ament_lint_auto REQUIRED)
-  # vendored C + house C++ style: skip the picky copyright/cpplint hooks
-  set(ament_cmake_copyright_FOUND TRUE)
-  set(ament_cmake_cpplint_FOUND TRUE)
-  ament_lint_auto_find_test_dependencies()
-
   find_package(ament_cmake_gtest REQUIRED)
+
+  # Tests link the component library instead of recompiling its sources.
   ament_add_gtest(test_json_lite test/test_json_lite.cpp)
   target_include_directories(test_json_lite PRIVATE include)
-
-  # Unit-test the pure /state.json -> MachineSnapshot mapping (SR-M-03 / DU-9).
-  # Links hardware_backend.cpp (parse_state lives there) + libcurl for its HTTP
-  # helpers; no ROS runtime is exercised by the test.
-  ament_add_gtest(test_hardware_parse test/test_hardware_parse.cpp src/hardware_backend.cpp)
-  target_include_directories(test_hardware_parse PRIVATE include)
-  target_link_libraries(test_hardware_parse CURL::libcurl)
-
-  # HTTP/threading paths of the hardware backend (http_get/http_post/write_cb,
-  # poll loop, start/stop, configure) exercised against a loopback HTTP stub +
-  # a closed port — no live device. SR-M-03.
-  ament_add_gtest(test_hardware_backend test/test_hardware_backend.cpp src/hardware_backend.cpp)
-  target_include_directories(test_hardware_backend PRIVATE include test)
-  target_link_libraries(test_hardware_backend CURL::libcurl)
-
-  # Timing-floor validator (SR-M-01) — header-only, no ROS runtime.
-  ament_add_gtest(test_timing_floors test/test_timing_floors.cpp)
-  target_include_directories(test_timing_floors PRIVATE include)
 
   # Operator-authorization policy (SAFETY): unlisted remote = stop-only (may STOP,
   # never re-arm); only a listed operator may re-arm. Header-only decision fn, no
@@ -91,38 +97,38 @@ if(BUILD_TESTING)
   ament_add_gtest(test_operator_policy test/test_operator_policy.cpp)
   target_include_directories(test_operator_policy PRIVATE include)
 
-  # Fleet check-in payload builder — header-inline, network-free. Verifies the
-  # JSON shape matches the host runner's announce (name+port core) plus the
-  # additive machine/status fields. No POST, no live fleet.
+  # Fleet overview check-in (announce) payload builder — header-inline,
+  # network-free. Verifies the JSON shape matches the host runner's announce
+  # (name+port core) plus the additive machine/status fields. No POST, no live fleet.
   ament_add_gtest(test_announce test/test_announce.cpp)
   target_include_directories(test_announce PRIVATE include)
 
-  # Lifecycle transitions (configure/activate/.../reject unsafe config). Links
-  # the node + both backends + pstop_c, same as the executable but with its own
-  # main(). SR-M-01 / SR-M-07.
-  ament_add_gtest(test_lifecycle test/test_lifecycle.cpp
-    src/machine_bridge_node.cpp src/software_backend.cpp src/hardware_backend.cpp
-    src/announce.cpp
-    ${PSTOP_SRCS} ${TRANSPORT_SRCS})
-  target_include_directories(test_lifecycle PRIVATE
-    include ${PSTOP_ROOT}/pstop/include ${PSTOP_ROOT}/transport/include)
-  ament_target_dependencies(test_lifecycle
-    rclcpp rclcpp_lifecycle lifecycle_msgs diagnostic_updater diagnostic_msgs protective_stop_msgs)
-  target_link_libraries(test_lifecycle CURL::libcurl)
+  # Fleet DEVICE check-in — network-free. build_checkin_payload / checkin_state /
+  # checkin_endpoint are header-inline; the disabled-when-empty guard is exercised
+  # via the real FleetCheckin (linked from the component lib), which never touches
+  # the network when the base URL is empty. Locks the ESP32 fleet_ota_checkin()
+  # schema (device_type="machine" + required fields).
+  ament_add_gtest(test_fleet_checkin test/test_fleet_checkin.cpp)
+  target_include_directories(test_fleet_checkin PRIVATE include)
+  target_link_libraries(test_fleet_checkin ${PROJECT_NAME} CURL::libcurl)
 
-  # Runtime node paths that need a spun executor: publish_tick, every diagnostics
-  # summary branch (driven off a loopback /state.json stub), on_set_parameters,
-  # the ~/configure_machine service, and the error/shutdown/start-failure
-  # transitions. Same link set as the executable, own main(). SR-M-01 / SR-M-07.
-  ament_add_gtest(test_node_runtime test/test_node_runtime.cpp
-    src/machine_bridge_node.cpp src/software_backend.cpp src/hardware_backend.cpp
-    src/announce.cpp
-    ${PSTOP_SRCS} ${TRANSPORT_SRCS})
-  target_include_directories(test_node_runtime PRIVATE
-    include test ${PSTOP_ROOT}/pstop/include ${PSTOP_ROOT}/transport/include)
-  ament_target_dependencies(test_node_runtime
-    rclcpp rclcpp_lifecycle lifecycle_msgs diagnostic_updater diagnostic_msgs protective_stop_msgs)
-  target_link_libraries(test_node_runtime CURL::libcurl)
+  # Pure /state.json -> MachineSnapshot mapping (SR-M-03 / DU-9).
+  ament_add_gtest(test_hardware_parse test/test_hardware_parse.cpp)
+  target_link_libraries(test_hardware_parse ${PROJECT_NAME} CURL::libcurl)
+
+  # Hardware backend HTTP/threading against a loopback stub + closed port (SR-M-03).
+  ament_add_gtest(test_hardware_backend test/test_hardware_backend.cpp)
+  target_include_directories(test_hardware_backend PRIVATE test)
+  target_link_libraries(test_hardware_backend ${PROJECT_NAME} CURL::libcurl)
+
+  # Lifecycle transitions + spun-executor runtime paths (SR-M-01 / SR-M-07).
+  ament_add_gtest(test_lifecycle test/test_lifecycle.cpp)
+  target_link_libraries(test_lifecycle ${PROJECT_NAME})
+
+  # test_node_runtime drives the loopback HTTP stub (http_stub.hpp) directly.
+  ament_add_gtest(test_node_runtime test/test_node_runtime.cpp)
+  target_include_directories(test_node_runtime PRIVATE test)
+  target_link_libraries(test_node_runtime ${PROJECT_NAME} CURL::libcurl)
 endif()
 
 ament_package()
