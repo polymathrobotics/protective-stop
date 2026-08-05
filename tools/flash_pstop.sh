@@ -2,21 +2,29 @@
 # SPDX-FileCopyrightText: 2026 Polymath Robotics
 # SPDX-License-Identifier: Apache-2.0
 #
-# flash_pstop.sh — provision a pstop remote over USB from a known-good image.
+# flash_pstop.sh — provision a pstop device (remote OR machine) over USB from a
+# known-good image.
 #
-# Flashes the pre-built binaries in tools/production_image/ (bootloader,
-# partition table, otadata, app) to an ESP32-S3 over USB. Use this to bring up
-# new units in production from ONE compiled image — no ESP-IDF or rebuild
-# needed, just esptool. After flashing, the chip self-provisions (per-unit ID
-# from its MAC, auto-joins Tailscale, checks in to the OTA backend if one is
-# configured) and takes all future updates over the network.
+# Flashes the pre-built binaries (bootloader, partition table, otadata, app) to
+# an ESP32-S3 over USB. Use this to bring up new units in production from ONE
+# compiled image per role — no ESP-IDF or rebuild needed, just esptool. After
+# flashing, the chip self-provisions (per-unit ID from its MAC, auto-joins
+# Tailscale, checks in to the OTA backend if one is configured) and takes all
+# future updates over the network.
 #
-# The image in tools/production_image/ contains secrets (Tailscale key, WiFi
-# creds, admin password, OTA API key) and is git-ignored — never commit it.
+# Two device roles, each with its own staged image directory:
+#   remote  -> tools/production_image/        (app: pstop_remote.bin)
+#   machine -> tools/production_image_machn/   (app: machn_machine.bin)
+# If you don't pass --remote/--machine, the tool ASKS which one to flash.
+#
+# The image directories contain secrets (Tailscale key, WiFi creds, admin
+# password, OTA API key) and are git-ignored — never commit them.
 #
 # Usage:
-#   tools/flash_pstop.sh                 # auto-detect a chip in download mode
-#   tools/flash_pstop.sh /dev/ttyACM0    # explicit port
+#   tools/flash_pstop.sh                 # ask role, auto-detect a chip in download mode
+#   tools/flash_pstop.sh --remote        # flash the remote build (no prompt)
+#   tools/flash_pstop.sh --machine       # flash the machine build (no prompt)
+#   tools/flash_pstop.sh /dev/ttyACM0    # explicit port (still asks role)
 #   tools/flash_pstop.sh --from-ip 10.42.0.106   # reflash a RUNNING unit
 #   tools/flash_pstop.sh --erase /dev/ttyACM0    # full chip erase first
 #
@@ -28,17 +36,19 @@
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-IMG="$HERE/production_image"
 BAUD=460800
 PORT=""
 FROM_IP=""
 ERASE=0
+ROLE=""
 ADMIN_USER="admin"
 
-usage() { sed -n '2,32p' "$0"; exit "${1:-0}"; }
+usage() { sed -n '2,35p' "$0"; exit "${1:-0}"; }
 
 while [ $# -gt 0 ]; do
   case "$1" in
+    --remote)  ROLE=remote; shift ;;
+    --machine) ROLE=machine; shift ;;
     --from-ip) FROM_IP="$2"; shift 2 ;;
     --erase)   ERASE=1; shift ;;
     --baud)    BAUD="$2"; shift 2 ;;
@@ -48,9 +58,33 @@ while [ $# -gt 0 ]; do
   esac
 done
 
+# --- device role: which build for the plugged-in chip? --------------------
+# Ask if not told. Each role has its own staged image dir + app binary; the
+# bootloader/partition-table/otadata come from the same dir so the layout
+# always matches the app.
+if [ -z "$ROLE" ]; then
+  if [ -t 0 ]; then
+    printf 'Flash which build for the plugged-in device?\n  [r] remote  (pstop_remote)\n  [m] machine (machn_machine)\n> ' >&2
+    read -r ans
+    case "$ans" in
+      r|R|remote|Remote|REMOTE)    ROLE=remote ;;
+      m|M|machine|Machine|MACHINE) ROLE=machine ;;
+      *) echo "ERROR: answer 'r' (remote) or 'm' (machine)." >&2; exit 1 ;;
+    esac
+  else
+    echo "ERROR: no device role given — pass --remote or --machine (stdin isn't a TTY to ask)." >&2
+    exit 1
+  fi
+fi
+case "$ROLE" in
+  remote)  IMG="$HERE/production_image";        APP="pstop_remote.bin" ;;
+  machine) IMG="$HERE/production_image_machn";   APP="machn_machine.bin" ;;
+  *) echo "ERROR: bad role '$ROLE'." >&2; exit 1 ;;
+esac
+
 # --- image present? -------------------------------------------------------
-for f in bootloader.bin partition-table.bin ota_data_initial.bin pstop_remote.bin; do
-  [ -f "$IMG/$f" ] || { echo "ERROR: missing $IMG/$f — stage a build into production_image/ first." >&2; exit 1; }
+for f in bootloader.bin partition-table.bin ota_data_initial.bin "$APP"; do
+  [ -f "$IMG/$f" ] || { echo "ERROR: missing $IMG/$f — stage a $ROLE build into $(basename "$IMG")/ first." >&2; exit 1; }
 done
 
 # --- esptool available? (prefer the modern 'esptool' entrypoint) ----------
@@ -136,7 +170,7 @@ if [ "$rpid" = "4001" ]; then
 fi
 
 echo "=========================================================="
-echo " Flashing pstop -> $PORT"
+echo " Flashing pstop $ROLE ($APP) -> $PORT"
 grep -E '^(version|app sha256):' "$IMG/MANIFEST.txt" 2>/dev/null || true
 echo "=========================================================="
 
@@ -151,7 +185,7 @@ fi
   0x0     "$IMG/bootloader.bin" \
   0x8000  "$IMG/partition-table.bin" \
   0x19000 "$IMG/ota_data_initial.bin" \
-  0x20000 "$IMG/pstop_remote.bin"
+  0x20000 "$IMG/$APP"
 
 echo
 echo ">> DONE. The unit will reboot, derive its ID from its MAC, join Tailscale,"
