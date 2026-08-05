@@ -15,7 +15,6 @@
 #include "protective_stop_msgs/msg/bonded_remote_array.hpp"
 #include "protective_stop_msgs/msg/machine_relay_status.hpp"
 #include "protective_stop_msgs/msg/protective_stop_status.hpp"
-#include "protective_stop_msgs/srv/configure_machine.hpp"
 #include "rcl_interfaces/msg/set_parameters_result.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "rclcpp_lifecycle/lifecycle_node.hpp"
@@ -46,13 +45,6 @@ private:
   // and rejects it if the backend refuses (which the ParamListener can't do).
   rcl_interfaces::msg::SetParametersResult on_set_parameters(
     const std::vector<rclcpp::Parameter> & params);
-  // ~/configure_machine: runtime timing reconfiguration for callers that are not
-  // the parameter system. Request values <= 0 mean "leave unchanged"; the SR-M-01
-  // floor is re-checked here (timing_within_floors) because these values do NOT
-  // pass through the generated ParamListener's declared ranges.
-  void handle_configure(
-    const std::shared_ptr<protective_stop_msgs::srv::ConfigureMachine::Request> req,
-    std::shared_ptr<protective_stop_msgs::srv::ConfigureMachine::Response> resp);
 
   // Typed, validated parameters (see protective_stop_machine_params.yaml).
   ParamListener param_listener_;
@@ -86,7 +78,6 @@ private:
   rclcpp_lifecycle::LifecyclePublisher<protective_stop_msgs::msg::BondedRemoteArray>::SharedPtr
     remotes_pub_;
   rclcpp::TimerBase::SharedPtr pub_timer_;
-  rclcpp::Service<protective_stop_msgs::srv::ConfigureMachine>::SharedPtr configure_srv_;
   std::shared_ptr<diagnostic_updater::Updater> diag_;
   rclcpp::node_interfaces::OnSetParametersCallbackHandle::SharedPtr param_cb_handle_;
 };

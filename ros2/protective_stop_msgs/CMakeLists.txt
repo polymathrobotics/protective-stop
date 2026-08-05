@@ -19,12 +19,10 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/ProtectiveStopHeartbeat.msg"
   "msg/ProtectiveStopDebug.msg"
   "msg/ProtectiveStopDebugRemote.msg"
-  "srv/ProtectiveStop.srv"
   # machine-side (new)
   "msg/MachineRelayStatus.msg"
   "msg/BondedRemote.msg"
   "msg/BondedRemoteArray.msg"
-  "srv/ConfigureMachine.srv"
   DEPENDENCIES builtin_interfaces
 )
 

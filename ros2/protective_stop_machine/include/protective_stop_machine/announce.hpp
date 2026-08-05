@@ -15,7 +15,7 @@
 //
 // The payload builder (build_announce_payload) is header-inline and rclcpp-free
 // so it is unit-testable with no network and no ROS runtime, matching the
-// repo's timing_floors / operator_policy testable-logic pattern.
+// repo's operator_policy testable-logic pattern.
 #ifndef PROTECTIVE_STOP_MACHINE__ANNOUNCE_HPP_
 #define PROTECTIVE_STOP_MACHINE__ANNOUNCE_HPP_
 

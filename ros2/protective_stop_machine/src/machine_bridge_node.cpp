@@ -15,7 +15,6 @@
 #include "lifecycle_msgs/msg/state.hpp"
 #include "protective_stop_machine/hardware_backend.hpp"
 #include "protective_stop_machine/software_backend.hpp"
-#include "protective_stop_machine/timing_floors.hpp"
 
 namespace protective_stop_machine
 {
@@ -24,7 +23,6 @@ using ProtectiveStopStatus = protective_stop_msgs::msg::ProtectiveStopStatus;
 using MachineRelayStatus = protective_stop_msgs::msg::MachineRelayStatus;
 using BondedRemoteArray = protective_stop_msgs::msg::BondedRemoteArray;
 using BondedRemote = protective_stop_msgs::msg::BondedRemote;
-using ConfigureMachine = protective_stop_msgs::srv::ConfigureMachine;
 
 // The timing.* safety floors (SR-M-01) are enforced declaratively by the
 // generated ParamListener — the bounds<>/gt_eq<> ranges in
@@ -145,11 +143,6 @@ MachineBridgeNode::CallbackReturn MachineBridgeNode::on_configure(const rclcpp_l
   relay_pub_ = create_publisher<MachineRelayStatus>("~/relay_status", data);
   remotes_pub_ = create_publisher<BondedRemoteArray>("~/remotes", data);
 
-  configure_srv_ = create_service<ConfigureMachine>(
-    "~/configure_machine",
-    std::bind(&MachineBridgeNode::handle_configure, this, std::placeholders::_1,
-      std::placeholders::_2));
-
   param_cb_handle_ =
     add_on_set_parameters_callback(std::bind(&MachineBridgeNode::on_set_parameters, this,
       std::placeholders::_1));
@@ -259,7 +252,6 @@ MachineBridgeNode::CallbackReturn MachineBridgeNode::on_cleanup(const rclcpp_lif
     fleet_checkin_.reset();
   }
   param_cb_handle_.reset();
-  configure_srv_.reset();
   state_pub_.reset();
   relay_pub_.reset();
   remotes_pub_.reset();
@@ -317,7 +309,6 @@ MachineBridgeNode::CallbackReturn MachineBridgeNode::on_error(const rclcpp_lifec
     remotes_pub_->on_deactivate();
   }
   param_cb_handle_.reset();
-  configure_srv_.reset();
   state_pub_.reset();
   relay_pub_.reset();
   remotes_pub_.reset();
@@ -428,44 +419,6 @@ rcl_interfaces::msg::SetParametersResult MachineBridgeNode::on_set_parameters(
     timing_ = proposed;
   }
   return res;
-}
-
-void MachineBridgeNode::handle_configure(
-  const std::shared_ptr<ConfigureMachine::Request> req,
-  std::shared_ptr<ConfigureMachine::Response> resp)
-{
-  // Values <= 0 mean "leave unchanged". These arrive OUTSIDE the parameter
-  // system, so the SR-M-01 floor is re-checked here (timing_within_floors) — the
-  // generated ParamListener's declared ranges only guard parameter sets.
-  MachineTiming proposed = timing_;
-  if (req->heartbeat_ms > 0) {
-    proposed.heartbeat_ms = static_cast<uint64_t>(req->heartbeat_ms);
-  }
-  if (req->max_missed > 0) {
-    proposed.max_missed = static_cast<uint16_t>(req->max_missed);
-  }
-  if (req->min_stop_ms >= 0) {
-    proposed.min_stop_ms = static_cast<uint64_t>(req->min_stop_ms);
-  }
-
-  std::string reason;
-  if (!timing_within_floors(proposed, reason)) {
-    resp->success = false;
-    resp->message = "rejected (safety floor): " + reason;
-  } else if (!backend_) {
-    resp->success = false;
-    resp->message = "no backend";
-  } else if (!backend_->configure(proposed, reason)) {
-    resp->success = false;
-    resp->message = "backend refused: " + reason;
-  } else {
-    timing_ = proposed;
-    resp->success = true;
-    resp->message = "applied";
-  }
-  resp->heartbeat_ms = static_cast<int64_t>(timing_.heartbeat_ms);
-  resp->max_missed = static_cast<int32_t>(timing_.max_missed);
-  resp->min_stop_ms = static_cast<int64_t>(timing_.min_stop_ms);
 }
 
 }  // namespace protective_stop_machine

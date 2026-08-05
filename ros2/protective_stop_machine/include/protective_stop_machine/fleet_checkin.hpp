@@ -24,7 +24,7 @@
 //
 // The payload builder (build_checkin_payload) and state mapping (checkin_state)
 // are header-inline and rclcpp-free so they are unit-testable with no network
-// and no ROS runtime, matching the repo's announce / timing_floors pattern.
+// and no ROS runtime, matching the repo's announce / operator_policy pattern.
 #ifndef PROTECTIVE_STOP_MACHINE__FLEET_CHECKIN_HPP_
 #define PROTECTIVE_STOP_MACHINE__FLEET_CHECKIN_HPP_
 

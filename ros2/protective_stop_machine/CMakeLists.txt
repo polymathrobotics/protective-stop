@@ -97,11 +97,6 @@ if(BUILD_TESTING)
   ament_add_gtest(test_operator_policy test/test_operator_policy.cpp)
   target_include_directories(test_operator_policy PRIVATE include)
 
-  # Timing-floor validator (SR-M-01) — header-only, no ROS runtime. The pure
-  # envelope check re-used by the ~/configure_machine service handler.
-  ament_add_gtest(test_timing_floors test/test_timing_floors.cpp)
-  target_include_directories(test_timing_floors PRIVATE include)
-
   # Fleet overview check-in (announce) payload builder — header-inline,
   # network-free. Verifies the JSON shape matches the host runner's announce
   # (name+port core) plus the additive machine/status fields. No POST, no live fleet.

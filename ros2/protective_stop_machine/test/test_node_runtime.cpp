@@ -31,12 +31,10 @@
 #include "protective_stop_msgs/msg/bonded_remote_array.hpp"
 #include "protective_stop_msgs/msg/machine_relay_status.hpp"
 #include "protective_stop_msgs/msg/protective_stop_status.hpp"
-#include "protective_stop_msgs/srv/configure_machine.hpp"
 #include "rclcpp/rclcpp.hpp"
 
 using protective_stop_machine::MachineBridgeNode;
 using pstop_test::LoopbackHttpStub;
-using ConfigureMachine = protective_stop_msgs::srv::ConfigureMachine;
 using DiagnosticArray = diagnostic_msgs::msg::DiagnosticArray;
 using DiagnosticStatus = diagnostic_msgs::msg::DiagnosticStatus;
 using MachineRelayStatus = protective_stop_msgs::msg::MachineRelayStatus;
@@ -385,111 +383,6 @@ TEST_F(NodeRuntime, OnErrorTeardownWithoutActivation)
   EXPECT_EQ(
     node->on_error(node->get_current_state()),
     rclcpp_lifecycle::node_interfaces::LifecycleNodeInterface::CallbackReturn::SUCCESS);
-}
-
-// The ~/configure_machine service applies a tighter envelope and echoes the
-// values now in effect.
-TEST_F(NodeRuntime, ConfigureServiceApplies)
-{
-  auto node = std::make_shared<MachineBridgeNode>(
-    with({rclcpp::Parameter("backend", "software"), rclcpp::Parameter("software.port", 18922)}));
-  ASSERT_EQ(node->configure().id(), State::PRIMARY_STATE_INACTIVE);
-  ASSERT_EQ(node->activate().id(), State::PRIMARY_STATE_ACTIVE);
-
-  auto client_node = std::make_shared<rclcpp::Node>("cfg_client_ok");
-  auto client = client_node->create_client<ConfigureMachine>("/machine_bridge/configure_machine");
-
-  rclcpp::executors::SingleThreadedExecutor exec;
-  exec.add_node(node->get_node_base_interface());
-  exec.add_node(client_node);
-  ASSERT_TRUE(spin_until(exec, [&] {return client->service_is_ready();}));
-
-  auto req = std::make_shared<ConfigureMachine::Request>();
-  req->heartbeat_ms = 300;
-  req->max_missed = 2;
-  req->min_stop_ms = 600;
-  auto future = client->async_send_request(req);
-  ASSERT_TRUE(
-    spin_until(
-      exec, [&] {
-        return future.wait_for(std::chrono::seconds(0)) == std::future_status::ready;
-      }));
-  auto resp = future.get();
-  EXPECT_TRUE(resp->success);
-  EXPECT_EQ(resp->heartbeat_ms, 300);
-  EXPECT_EQ(resp->max_missed, 2);
-  EXPECT_EQ(resp->min_stop_ms, 600);
-
-  EXPECT_EQ(node->deactivate().id(), State::PRIMARY_STATE_INACTIVE);
-  EXPECT_EQ(node->cleanup().id(), State::PRIMARY_STATE_UNCONFIGURED);
-}
-
-// The service rejects an envelope below the safety floor (unchanged values echo).
-TEST_F(NodeRuntime, ConfigureServiceRejectsUnsafe)
-{
-  auto node = std::make_shared<MachineBridgeNode>(
-    with({rclcpp::Parameter("backend", "software"), rclcpp::Parameter("software.port", 18923)}));
-  ASSERT_EQ(node->configure().id(), State::PRIMARY_STATE_INACTIVE);
-  ASSERT_EQ(node->activate().id(), State::PRIMARY_STATE_ACTIVE);
-
-  auto client_node = std::make_shared<rclcpp::Node>("cfg_client_bad");
-  auto client = client_node->create_client<ConfigureMachine>("/machine_bridge/configure_machine");
-
-  rclcpp::executors::SingleThreadedExecutor exec;
-  exec.add_node(node->get_node_base_interface());
-  exec.add_node(client_node);
-  ASSERT_TRUE(spin_until(exec, [&] {return client->service_is_ready();}));
-
-  auto req = std::make_shared<ConfigureMachine::Request>();
-  req->min_stop_ms = 10;  // below the floor
-  auto future = client->async_send_request(req);
-  ASSERT_TRUE(
-    spin_until(
-      exec, [&] {
-        return future.wait_for(std::chrono::seconds(0)) == std::future_status::ready;
-      }));
-  auto resp = future.get();
-  EXPECT_FALSE(resp->success);
-  EXPECT_NE(resp->message.find("safety floor"), std::string::npos);
-
-  EXPECT_EQ(node->deactivate().id(), State::PRIMARY_STATE_INACTIVE);
-  EXPECT_EQ(node->cleanup().id(), State::PRIMARY_STATE_UNCONFIGURED);
-}
-
-// The service path of a "backend refused": the envelope is safe but the
-// (hardware) device is unreachable, so handle_configure reports failure and
-// echoes the still-in-effect values.
-TEST_F(NodeRuntime, ConfigureServiceHardwareBackendRefuses)
-{
-  auto node = std::make_shared<MachineBridgeNode>(
-    with(
-      {rclcpp::Parameter("backend", "hardware"),
-        rclcpp::Parameter("hardware.device_url", "http://127.0.0.1:9")}));
-  ASSERT_EQ(node->configure().id(), State::PRIMARY_STATE_INACTIVE);
-
-  auto client_node = std::make_shared<rclcpp::Node>("cfg_client_hw");
-  auto client = client_node->create_client<ConfigureMachine>("/machine_bridge/configure_machine");
-
-  rclcpp::executors::SingleThreadedExecutor exec;
-  exec.add_node(node->get_node_base_interface());
-  exec.add_node(client_node);
-  ASSERT_TRUE(spin_until(exec, [&] {return client->service_is_ready();}));
-
-  auto req = std::make_shared<ConfigureMachine::Request>();
-  req->heartbeat_ms = 300;  // all-safe envelope so it clears the floor and reaches
-  req->max_missed = 3;  // the backend, where the unreachable device refuses it
-  req->min_stop_ms = 600;
-  auto future = client->async_send_request(req);
-  ASSERT_TRUE(
-    spin_until(
-      exec, [&] {
-        return future.wait_for(std::chrono::seconds(0)) == std::future_status::ready;
-      }));
-  auto resp = future.get();
-  EXPECT_FALSE(resp->success);
-  EXPECT_NE(resp->message.find("backend refused"), std::string::npos);
-
-  EXPECT_EQ(node->cleanup().id(), State::PRIMARY_STATE_UNCONFIGURED);
 }
 
 int main(int argc, char ** argv)
