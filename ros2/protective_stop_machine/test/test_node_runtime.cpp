@@ -30,6 +30,7 @@
 #include "protective_stop_machine/machine_bridge_node.hpp"
 #include "protective_stop_msgs/msg/bonded_remote_array.hpp"
 #include "protective_stop_msgs/msg/machine_relay_status.hpp"
+#include "protective_stop_msgs/msg/protective_stop_heartbeat.hpp"
 #include "protective_stop_msgs/msg/protective_stop_status.hpp"
 #include "rclcpp/rclcpp.hpp"
 
@@ -39,6 +40,7 @@ using DiagnosticArray = diagnostic_msgs::msg::DiagnosticArray;
 using DiagnosticStatus = diagnostic_msgs::msg::DiagnosticStatus;
 using MachineRelayStatus = protective_stop_msgs::msg::MachineRelayStatus;
 using ProtectiveStopStatus = protective_stop_msgs::msg::ProtectiveStopStatus;
+using ProtectiveStopHeartbeat = protective_stop_msgs::msg::ProtectiveStopHeartbeat;
 using BondedRemoteArray = protective_stop_msgs::msg::BondedRemoteArray;
 using State = lifecycle_msgs::msg::State;
 
@@ -136,6 +138,72 @@ TEST_F(NodeRuntime, SoftwarePublishesAndDiagnoses)
   EXPECT_FALSE(relay_applicable);  // software backend has no physical relays
 
   EXPECT_EQ(node->deactivate().id(), State::PRIMARY_STATE_INACTIVE);
+  EXPECT_EQ(node->cleanup().id(), State::PRIMARY_STATE_UNCONFIGURED);
+}
+
+TEST_F(NodeRuntime, SoftwarePublishesStampedStopHeartbeat)
+{
+  auto node = std::make_shared<MachineBridgeNode>(with(
+        {rclcpp::Parameter("backend", "software"),
+          rclcpp::Parameter("software.port", 18922),
+          rclcpp::Parameter("rates.publish_rate_hz", 30.0)}));
+  ASSERT_EQ(node->configure().id(), State::PRIMARY_STATE_INACTIVE);
+  ASSERT_EQ(node->activate().id(), State::PRIMARY_STATE_ACTIVE);
+
+  auto subscriber_node = std::make_shared<rclcpp::Node>("listener_hb");
+  bool heartbeat_received = false;
+  bool stop_asserted = false;
+  int64_t stamp_nanoseconds = 0;
+  auto heartbeat_sub = subscriber_node->create_subscription<ProtectiveStopHeartbeat>(
+    "/machine_bridge/pstop_hb", rclcpp::QoS(10),
+    [&](ProtectiveStopHeartbeat::SharedPtr heartbeat) {
+      heartbeat_received = true;
+      stop_asserted = heartbeat->stop;
+      stamp_nanoseconds = rclcpp::Time(heartbeat->stamp).nanoseconds();
+    });
+
+  rclcpp::executors::SingleThreadedExecutor exec;
+  exec.add_node(node->get_node_base_interface());
+  exec.add_node(subscriber_node);
+  EXPECT_TRUE(spin_until(exec, [&] {return heartbeat_received;}));
+  EXPECT_TRUE(stop_asserted);
+  EXPECT_GT(stamp_nanoseconds, 0);
+
+  EXPECT_EQ(node->deactivate().id(), State::PRIMARY_STATE_INACTIVE);
+  EXPECT_EQ(node->cleanup().id(), State::PRIMARY_STATE_UNCONFIGURED);
+}
+
+TEST_F(NodeRuntime, HeartbeatClearsWhileRunningAndStopsOnDeactivate)
+{
+  LoopbackHttpStub stub(R"({"relay_stop":false})");
+  auto node = std::make_shared<MachineBridgeNode>(with(
+        {rclcpp::Parameter("backend", "hardware"),
+          rclcpp::Parameter("hardware.device_url", stub.url()),
+          rclcpp::Parameter("rates.state_poll_hz", 40.0),
+          rclcpp::Parameter("rates.publish_rate_hz", 40.0)}));
+  ASSERT_EQ(node->configure().id(), State::PRIMARY_STATE_INACTIVE);
+  ASSERT_EQ(node->activate().id(), State::PRIMARY_STATE_ACTIVE);
+
+  auto subscriber_node = std::make_shared<rclcpp::Node>("listener_hb_run");
+  bool heartbeat_received = false;
+  bool stop_asserted = true;
+  auto heartbeat_sub = subscriber_node->create_subscription<ProtectiveStopHeartbeat>(
+    "/machine_bridge/pstop_hb", rclcpp::QoS(10),
+    [&](ProtectiveStopHeartbeat::SharedPtr heartbeat) {
+      heartbeat_received = true;
+      stop_asserted = heartbeat->stop;
+    });
+
+  rclcpp::executors::SingleThreadedExecutor exec;
+  exec.add_node(node->get_node_base_interface());
+  exec.add_node(subscriber_node);
+  EXPECT_TRUE(spin_until(exec, [&] {return heartbeat_received && !stop_asserted;}));
+  EXPECT_FALSE(stop_asserted);
+
+  EXPECT_EQ(node->deactivate().id(), State::PRIMARY_STATE_INACTIVE);
+  EXPECT_TRUE(spin_until(exec, [&] {return stop_asserted;}));
+  EXPECT_TRUE(stop_asserted);
+
   EXPECT_EQ(node->cleanup().id(), State::PRIMARY_STATE_UNCONFIGURED);
 }
 

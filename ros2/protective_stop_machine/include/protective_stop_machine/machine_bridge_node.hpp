@@ -14,6 +14,7 @@
 #include "protective_stop_machine/protective_stop_machine_parameters.hpp"
 #include "protective_stop_msgs/msg/bonded_remote_array.hpp"
 #include "protective_stop_msgs/msg/machine_relay_status.hpp"
+#include "protective_stop_msgs/msg/protective_stop_heartbeat.hpp"
 #include "protective_stop_msgs/msg/protective_stop_status.hpp"
 #include "rcl_interfaces/msg/set_parameters_result.hpp"
 #include "rclcpp/rclcpp.hpp"
@@ -39,6 +40,7 @@ public:
 private:
   bool build_backend(std::string & error);
   void publish_tick();
+  void publish_heartbeat(bool stop, const rclcpp::Time & stamp);
   void diagnostics(diagnostic_updater::DiagnosticStatusWrapper & stat);
   // Live timing.* sets: floors are enforced declaratively by the generated
   // ParamListener; this handler only pushes an accepted change to the backend
@@ -77,6 +79,8 @@ private:
     relay_pub_;
   rclcpp_lifecycle::LifecyclePublisher<protective_stop_msgs::msg::BondedRemoteArray>::SharedPtr
     remotes_pub_;
+  rclcpp_lifecycle::LifecyclePublisher<
+    protective_stop_msgs::msg::ProtectiveStopHeartbeat>::SharedPtr heartbeat_pub_;
   rclcpp::TimerBase::SharedPtr pub_timer_;
   std::shared_ptr<diagnostic_updater::Updater> diag_;
   rclcpp::node_interfaces::OnSetParametersCallbackHandle::SharedPtr param_cb_handle_;
