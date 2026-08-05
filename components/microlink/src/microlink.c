@@ -700,6 +700,7 @@ esp_err_t microlink_get_peer_info(const microlink_t * ml, int index, microlink_p
   memcpy(info->public_key, p->public_key, 32);
   info->online = p->active;
   info->direct_path = p->has_direct_path;
+  info->derp_region = p->derp_region;
   return ESP_OK;
 }
 

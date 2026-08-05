@@ -700,6 +700,13 @@ bool ml_wg_is_pinned_peer(microlink_t * ml, uint32_t vpn_ip)
   return is_pinned_peer(ml, vpn_ip);
 }
 
+/* Public wrapper: is this peer in the health-tracked safety set? Diagnostic use
+ * (e.g. /api/peers) to see which peers feed ml_wg_collect_safety_regions. */
+bool ml_wg_is_health_tracked(uint32_t vpn_ip)
+{
+  return is_health_tracked(vpn_ip);
+}
+
 /* DERP home region of a peer identified by its 32-byte WG public key.
  * 0 = unknown peer or region not learned. Called from ml_derp_queue_send on the
  * wg_mgr task (the peer-table owner), so this is a same-task read — no lock. */
