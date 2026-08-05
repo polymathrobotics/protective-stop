@@ -1422,8 +1422,9 @@ static void disco_send_ping_to_peer(microlink_t * ml, int peer_idx, bool force)
    * the 3 s liveness/heartbeat cadence (which also spaces last_ping_sent_ms by
    * >= 3 s), so a genuine liveness ping is never suppressed. */
   for (int pi = 0; pi < MAX_PENDING_PROBES; pi++) {
-    if (pending_probes[pi].active && pending_probes[pi].peer_index == peer_idx &&
-        now - pending_probes[pi].sent_ms < 2000) {
+    if (
+      pending_probes[pi].active && pending_probes[pi].peer_index == peer_idx && now - pending_probes[pi].sent_ms < 2000)
+    {
       return;
     }
   }

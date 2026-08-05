@@ -866,56 +866,56 @@ void ml_derp_tx_task(void * arg)
           if (xQueueReceive(txq, &item, 0) != pdTRUE) {
             break;
           }
-        ml_derp_conn_t * c = derp_route_conn(ml, item.region_id, eff_home);
-        if (c == NULL) {
-          /* Chosen conn (home fallback) is down — nothing can carry it now.
+          ml_derp_conn_t * c = derp_route_conn(ml, item.region_id, eff_home);
+          if (c == NULL) {
+            /* Chosen conn (home fallback) is down — nothing can carry it now.
                      * Drop + log rather than block; wg_mgr re-fires safety inits. */
-          ESP_LOGW(TAG, "DERP TX drop: no connected conn for region %u", (unsigned)item.region_id);
-          free(item.data);
-          continue;
-        }
-        bool fell_back = (item.region_id != 0 && item.region_id != eff_home && c == home);
-        if (fell_back) {
-          /* Never silently drop a safety peer's frame: aux for its region isn't
+            ESP_LOGW(TAG, "DERP TX drop: no connected conn for region %u", (unsigned)item.region_id);
+            free(item.data);
+            continue;
+          }
+          bool fell_back = (item.region_id != 0 && item.region_id != eff_home && c == home);
+          if (fell_back) {
+            /* Never silently drop a safety peer's frame: aux for its region isn't
                      * up yet, so relay via home (may still reach if the peer also holds a
                      * home-region conn) and keep the aux opening in the background. */
-          ESP_LOGW(
-            TAG, "DERP TX: no aux conn for region %u, relaying via home (frame preserved)", (unsigned)item.region_id);
-        }
-        int ret;
-        if (item.frame_type == DERP_FRAME_SEND_PACKET) {
-          ESP_LOGI(
-            TAG,
-            "DERP TX: SendPacket %d bytes, dest=%02x%02x%02x%02x, region=%u, hdr=%02x",
-            (int)item.len,
-            item.dest_pubkey[0],
-            item.dest_pubkey[1],
-            item.dest_pubkey[2],
-            item.dest_pubkey[3],
-            (unsigned)item.region_id,
-            item.data[0]);
-          ret = derp_send_packet(ml, c, item.dest_pubkey, item.data, item.len);
-        } else {
-          ret = derp_write_frame(ml, c, item.frame_type, item.data, item.len);
-        }
-        if (ret < 0) {
-          ESP_LOGW(
-            TAG, "DERP write failed on %s conn (region %u)", (c == home) ? "home" : "aux", (unsigned)c->region_id);
-          c->connected = false;
-          if (c == home) {
-            /* Home reconnect is event-driven (handler frees TLS then reconnects). */
-            xEventGroupSetBits(ml->events, ML_EVT_DERP_RECONNECT);
+            ESP_LOGW(
+              TAG, "DERP TX: no aux conn for region %u, relaying via home (frame preserved)", (unsigned)item.region_id);
+          }
+          int ret;
+          if (item.frame_type == DERP_FRAME_SEND_PACKET) {
+            ESP_LOGI(
+              TAG,
+              "DERP TX: SendPacket %d bytes, dest=%02x%02x%02x%02x, region=%u, hdr=%02x",
+              (int)item.len,
+              item.dest_pubkey[0],
+              item.dest_pubkey[1],
+              item.dest_pubkey[2],
+              item.dest_pubkey[3],
+              (unsigned)item.region_id,
+              item.data[0]);
+            ret = derp_send_packet(ml, c, item.dest_pubkey, item.data, item.len);
           } else {
-            /* Aux has no event path: tear it down NOW (frees TLS) so the next
+            ret = derp_write_frame(ml, c, item.frame_type, item.data, item.len);
+          }
+          if (ret < 0) {
+            ESP_LOGW(
+              TAG, "DERP write failed on %s conn (region %u)", (c == home) ? "home" : "aux", (unsigned)c->region_id);
+            c->connected = false;
+            if (c == home) {
+              /* Home reconnect is event-driven (handler frees TLS then reconnects). */
+              xEventGroupSetBits(ml->events, ML_EVT_DERP_RECONNECT);
+            } else {
+              /* Aux has no event path: tear it down NOW (frees TLS) so the next
                          * derp_manage_aux reconnect doesn't leak by re-initing over live
                          * contexts. region_id is preserved for the retry. */
-            ml_derp_disconnect(ml, c);
+              ml_derp_disconnect(ml, c);
+            }
+          } else {
+            frames_tx++;
+            c->last_used_ms = ml_get_time_ms();
           }
-        } else {
-          frames_tx++;
-          c->last_used_ms = ml_get_time_ms();
-        }
-        free(item.data);
+          free(item.data);
         }
       }
     }

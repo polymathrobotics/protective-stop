@@ -314,8 +314,7 @@ microlink_t * microlink_init(const microlink_config_t * config)
 
   if (
     !ml->derp_tx_queue || !ml->derp_tx_prio_queue || !ml->disco_rx_queue || !ml->wg_rx_queue || !ml->stun_rx_queue ||
-    !ml->coord_cmd_queue ||
-    !ml->peer_update_queue)
+    !ml->coord_cmd_queue || !ml->peer_update_queue)
   {
     ESP_LOGE(TAG, "Failed to create queues");
     microlink_destroy(ml);

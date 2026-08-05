@@ -106,7 +106,8 @@ extern "C"
  * relays between peers connected to IT (root cause of the cross-region errno-128
  * bond failure). 6 slots covers home + up to 5 distinct safety-peer regions. */
 #define ML_DERP_MAX_CONNS 6
-#define ML_DERP_AUX_UNWANTED_REAP_MS 30000 /* reap an aux conn whose region is no
+#define ML_DERP_AUX_UNWANTED_REAP_MS \
+  30000 /* reap an aux conn whose region is no
                                             * longer a safety region after 30 s,
                                             * regardless of traffic through it */
 
