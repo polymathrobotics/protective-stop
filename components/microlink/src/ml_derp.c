@@ -580,10 +580,20 @@ static void derp_manage_aux(microlink_t * ml, uint16_t eff_home, int aux_burst[]
     if (regs[i] != 0 && regs[i] != eff_home) want[nwant++] = regs[i];
   }
 
-  /* 1) Reap aux slots no longer wanted once they've been idle long enough. */
+  /* 1) Reap aux slots whose region is no longer a safety region. The clock is
+   *    time-since-UNWANTED, not idle time. Incidental (non-safety) tailnet
+   *    traffic to peers on that region routes through the aux and refreshes
+   *    last_used_ms, so an idle-based reap never fired: a boot-transient aux
+   *    region (one briefly in the safety set before the netmap/home settled, or
+   *    a region == the not-yet-settled home) could persist for hours pinning a
+   *    pool slot — the "phantom region-9 aux" seen in soak. Reaping on
+   *    time-since-unwanted is immune to that incidental traffic. */
   for (int s = 1; s < ML_DERP_MAX_CONNS; s++) {
     ml_derp_conn_t * c = &ml->derp[s];
-    if (c->region_id == 0 && !c->tls_inited && !c->connected) continue; /* free slot */
+    if (c->region_id == 0 && !c->tls_inited && !c->connected) {
+      c->aux_unwanted_since_ms = 0;
+      continue; /* free slot */
+    }
     bool wanted = false;
     for (int w = 0; w < nwant; w++) {
       if (want[w] == c->region_id) {
@@ -591,10 +601,16 @@ static void derp_manage_aux(microlink_t * ml, uint16_t eff_home, int aux_burst[]
         break;
       }
     }
-    if (!wanted && (now - c->last_used_ms > ML_DERP_AUX_IDLE_REAP_MS)) {
-      ESP_LOGI(TAG, "Reaping idle aux DERP conn slot %d (region %u)", s, (unsigned)c->region_id);
+    if (wanted) {
+      c->aux_unwanted_since_ms = 0; /* still a current safety region */
+      continue;
+    }
+    if (c->aux_unwanted_since_ms == 0) c->aux_unwanted_since_ms = now;
+    if (now - c->aux_unwanted_since_ms > ML_DERP_AUX_UNWANTED_REAP_MS) {
+      ESP_LOGI(TAG, "Reaping unwanted aux DERP conn slot %d (region %u)", s, (unsigned)c->region_id);
       ml_derp_disconnect(ml, c);
       c->region_id = 0;
+      c->aux_unwanted_since_ms = 0;
       aux_burst[s] = 0;
     }
   }

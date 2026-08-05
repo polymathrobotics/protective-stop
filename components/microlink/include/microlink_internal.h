@@ -106,7 +106,9 @@ extern "C"
  * relays between peers connected to IT (root cause of the cross-region errno-128
  * bond failure). 6 slots covers home + up to 5 distinct safety-peer regions. */
 #define ML_DERP_MAX_CONNS 6
-#define ML_DERP_AUX_IDLE_REAP_MS 120000 /* reap an unused aux conn after 120 s idle */
+#define ML_DERP_AUX_UNWANTED_REAP_MS 30000 /* reap an aux conn whose region is no
+                                            * longer a safety region after 30 s,
+                                            * regardless of traffic through it */
 
 /* Tailscale control plane */
 #define ML_CTRL_HOST "controlplane.tailscale.com"
@@ -439,6 +441,10 @@ extern "C"
     bool tls_inited; /* the four mbedTLS contexts above are live (must be freed) */
     uint64_t last_connect_attempt_ms; /* per-slot connect backoff timestamp */
     uint64_t last_used_ms; /* last time a frame egressed here (aux reap clock) */
+    uint64_t aux_unwanted_since_ms; /* when this aux region left the safety set (0
+                                     * = currently wanted). Reap clock decoupled
+                                     * from traffic so incidental (non-safety)
+                                     * frames can't keep a stale slot pinned. */
   } ml_derp_conn_t;
 
   /* ============================================================================
