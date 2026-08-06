@@ -12,18 +12,19 @@ find_package(rosidl_default_generators REQUIRED)
 find_package(builtin_interfaces REQUIRED)
 
 rosidl_generate_interfaces(${PROJECT_NAME}
-  # remote-side
   "msg/ProtectiveStopStatus.msg"
-  "msg/ProtectiveStop.msg"
-  "msg/ProtectiveStopParams.msg"
   "msg/ProtectiveStopHeartbeat.msg"
-  "msg/ProtectiveStopDebug.msg"
-  "msg/ProtectiveStopDebugRemote.msg"
-  "srv/ProtectiveStop.srv"
-  # machine-side
   "msg/MachineRelayStatus.msg"
   "msg/BondedRemote.msg"
   "msg/BondedRemoteArray.msg"
+  # Slated for removal: the block below has no consumer outside archive/
+  # (protective_stop_node and the Foxglove remote example). Delete it when those
+  # packages are phased out; it is a closed set, so nothing else drops with it.
+  "msg/ProtectiveStop.msg"
+  "msg/ProtectiveStopParams.msg"
+  "msg/ProtectiveStopDebug.msg"
+  "msg/ProtectiveStopDebugRemote.msg"
+  "srv/ProtectiveStop.srv"
   DEPENDENCIES builtin_interfaces
 )
 
