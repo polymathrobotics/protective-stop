@@ -35,7 +35,7 @@ power_cut_energizes = false
 [timing]
 # Must match the machine config the suite generates (conftest does this).
 heartbeat_ms = 400
-max_missed_heartbeats = 3
+max_missed_heartbeats = 5
 min_stop_ms = 500
 # Rig-level allowances.
 bond_timeout_s = 20 # slot set -> first message at the HIL machine

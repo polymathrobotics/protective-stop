@@ -35,7 +35,7 @@ min_stop_ms = {min_stop}
 """
 
 
-def cfg(hb=400, max_missed=3, min_stop=500):
+def cfg(hb=400, max_missed=5, min_stop=500):
     return BASE.format(hb=hb, max_missed=max_missed, min_stop=min_stop)
 
 

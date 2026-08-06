@@ -69,8 +69,10 @@ protective_stop_machine:
         bounds<>: [50, 1000]
     max_missed:
       type: int
-      default_value: 3
-      description: Missed heartbeats tolerated before STOP. Floor SR-M-01.
+      default_value: 5
+      description: Missed heartbeats tolerated before STOP. Floor SR-M-01. Default 5
+        matches the ESP32 machine (MACHN_MAX_MISSED_HEARTBEATS) — timeout hb×5 ≈ 2.0s,
+        riding through the ~90-min control-plane re-sync RTT spikes.
       validation:
         bounds<>: [1, 5]
     min_stop_ms:

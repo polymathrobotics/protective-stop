@@ -31,11 +31,12 @@ _Last updated: 2026-08-04 (heartbeat-timeout tunable `max_missed` 3 → 5 propag
 > - [ ] **`max_missed` = 5 now equals the validated-envelope ceiling `[1,5]`**
 >   (SR-H-03 / ROS 2 `validate_timing`). No headroom remains to raise it further
 >   without widening the envelope (which would need re-validation).
-> - [ ] **ROS 2 node default not confirmed changed.** Commit `01e4c10` is
->   machn-specific; `docs/MACHINE_ROS2_NODE_DESIGN.md` still shows `max_missed: 3`.
->   Confirm whether the ROS 2 node default should track machn (=5) or the two
->   paths intentionally differ, then reconcile doc + code. (Code is out of this
->   docs-only change's scope.)
+> - [x] **ROS 2 node default reconciled to 5 (2026-08-05).** Integrator decision:
+>   `max_missed` default = 5 in **all** cases. ROS 2 node param default
+>   (`protective_stop_machine_params.yaml`) 3 → 5, matching machn and the host
+>   runner; design doc + test configs (hil.toml, stop_reset_battery, config-floor)
+>   updated to the 2.0 s timeout. Default now sits at the validated-envelope
+>   ceiling `[1,5]` by design.
 
 > **2026-08-02 — "do them in order" batch merged + verified:**
 > 1. **#1 — SR-H-04b machine clock-freeze guard + DU-1 GPIO re-verify DONE**

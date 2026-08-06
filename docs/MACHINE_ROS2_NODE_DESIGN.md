@@ -336,7 +336,7 @@ ros2 run protective_stop_machine machine_bridge_node \
 
     timing:                     # the only dynamic group; validated on every set
       heartbeat_ms: 400         # [50, 1000]
-      max_missed: 3             # [1, 5]
+      max_missed: 5             # [1, 5] — default 5, matches machn (timeout ~2.0s)
       min_stop_ms: 500          # >= 100
 
     rates:                      # read_only; read at configure/activate
