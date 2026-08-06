@@ -40,15 +40,27 @@ SPI driver queues the frame and returns OK). It is USB-NCM-specific, under TX lo
 
 ## Deferred (documented for a fault-injection-tested follow-up)
 
-Higher-value W5500 items from the research that need hardware fault injection
-(cable pull, SPI glitch, black-hole) to validate — shipping them untested onto the
-currently-flawless Ethernet path was judged the wrong call for safety firmware:
+> **STATUS 2026-08-05 — the half-open black-hole family is now CLOSED + validated.**
+> The three detection layers all shipped and are on main (`7867d4b`):
+> - **W5500 health-watchdog + reset-recovery ladder** — `dcs_eth.c`
+>   (`eth_blackhole_suspected()`, `DCS_ETHWD_REASON_BLACKHOLE`, RST-pulse ladder);
+>   HW-validated on real silicon via a throwaway fault-injector (all 3 rungs,
+>   `eth_recoveries` 0→3, restored each time). Closes the "driver wedges, link UP,
+>   traffic black-holes, no disconnect event" field failure. **DONE.**
+> - **Control-plane half-open** — coord watchdog fed by *received* activity only
+>   (`ml_coord.c`; a send no longer masks a dead peer). **DONE.**
+> - **Safety-path half-open** — validated 2026-08-05 via a controlled **sustained
+>   90 s bidirectional black-hole** on a bonded slot (chaos proxy): the bond
+>   detected within ~10 s (state→1, correctly *not* bonded — no false "up"), stayed
+>   correctly not-bonded the whole 90 s (no wedge), and **recovered in 2.0 s** the
+>   instant the path returned, no manual intervention. **NO WEDGE.**
+>
+> Remaining below are smaller, lower-value, or lockstep-timing-sensitive:
 
-- **W5500 health-watchdog + reset-recovery ladder** (stop/start → RST pulse →
-  driver reinstall) for the documented "driver wedges, link still reports UP,
-  traffic black-holes, no disconnect event" field failure. *Highest deferred value.*
 - **Instant demote-on-link-down** (event-driven failover kick; key failover off
-  link state with asymmetric debounce).
+  link state with asymmetric debounce) — partly covered by the `dcs_net_liveness`
+  route supervisor (pstop-silence cross-check demote); a pure event-driven kick
+  is the residual.
 - TinyUSB task-priority bump (interacts with lockstep timing); Ethernet TX mutex
   (priority-inversion risk on the safety send); full static IP (deployment choice).
 
