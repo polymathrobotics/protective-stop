@@ -282,7 +282,6 @@ MachineBridgeNode::CallbackReturn MachineBridgeNode::on_shutdown(const rclcpp_li
   if (backend_) {
     backend_->stop();
   }
-  publish_heartbeat(true, this->now());
   return CallbackReturn::SUCCESS;
 }
 
