@@ -28,20 +28,20 @@
 #include "http_stub.hpp"  // NOLINT(build/include_subdir)
 #include "lifecycle_msgs/msg/state.hpp"
 #include "protective_stop_machine/machine_bridge_node.hpp"
-#include "protective_stop_msgs/msg/bonded_remote_array.hpp"
-#include "protective_stop_msgs/msg/machine_relay_status.hpp"
-#include "protective_stop_msgs/msg/protective_stop_heartbeat.hpp"
-#include "protective_stop_msgs/msg/protective_stop_status.hpp"
+#include "protective_stop_msg/msg/bonded_remote_array.hpp"
+#include "protective_stop_msg/msg/machine_relay_status.hpp"
+#include "protective_stop_msg/msg/protective_stop_heartbeat.hpp"
+#include "protective_stop_msg/msg/protective_stop_status.hpp"
 #include "rclcpp/rclcpp.hpp"
 
 using protective_stop_machine::MachineBridgeNode;
 using pstop_test::LoopbackHttpStub;
 using DiagnosticArray = diagnostic_msgs::msg::DiagnosticArray;
 using DiagnosticStatus = diagnostic_msgs::msg::DiagnosticStatus;
-using MachineRelayStatus = protective_stop_msgs::msg::MachineRelayStatus;
-using ProtectiveStopStatus = protective_stop_msgs::msg::ProtectiveStopStatus;
-using ProtectiveStopHeartbeat = protective_stop_msgs::msg::ProtectiveStopHeartbeat;
-using BondedRemoteArray = protective_stop_msgs::msg::BondedRemoteArray;
+using MachineRelayStatus = protective_stop_msg::msg::MachineRelayStatus;
+using ProtectiveStopStatus = protective_stop_msg::msg::ProtectiveStopStatus;
+using ProtectiveStopHeartbeat = protective_stop_msg::msg::ProtectiveStopHeartbeat;
+using BondedRemoteArray = protective_stop_msg::msg::BondedRemoteArray;
 using State = lifecycle_msgs::msg::State;
 
 static rclcpp::NodeOptions with(std::vector<rclcpp::Parameter> overrides)

@@ -12,10 +12,10 @@
 #include "protective_stop_machine/backend.hpp"
 #include "protective_stop_machine/fleet_checkin.hpp"
 #include "protective_stop_machine/protective_stop_machine_parameters.hpp"
-#include "protective_stop_msgs/msg/bonded_remote_array.hpp"
-#include "protective_stop_msgs/msg/machine_relay_status.hpp"
-#include "protective_stop_msgs/msg/protective_stop_heartbeat.hpp"
-#include "protective_stop_msgs/msg/protective_stop_status.hpp"
+#include "protective_stop_msg/msg/bonded_remote_array.hpp"
+#include "protective_stop_msg/msg/machine_relay_status.hpp"
+#include "protective_stop_msg/msg/protective_stop_heartbeat.hpp"
+#include "protective_stop_msg/msg/protective_stop_status.hpp"
 #include "rcl_interfaces/msg/set_parameters_result.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "rclcpp_lifecycle/lifecycle_node.hpp"
@@ -73,14 +73,14 @@ private:
   std::unique_ptr<MachineAnnouncer> announcer_;
   std::unique_ptr<FleetCheckin> fleet_checkin_;
 
-  rclcpp_lifecycle::LifecyclePublisher<protective_stop_msgs::msg::ProtectiveStopStatus>::SharedPtr
+  rclcpp_lifecycle::LifecyclePublisher<protective_stop_msg::msg::ProtectiveStopStatus>::SharedPtr
     state_pub_;
-  rclcpp_lifecycle::LifecyclePublisher<protective_stop_msgs::msg::MachineRelayStatus>::SharedPtr
+  rclcpp_lifecycle::LifecyclePublisher<protective_stop_msg::msg::MachineRelayStatus>::SharedPtr
     relay_pub_;
-  rclcpp_lifecycle::LifecyclePublisher<protective_stop_msgs::msg::BondedRemoteArray>::SharedPtr
+  rclcpp_lifecycle::LifecyclePublisher<protective_stop_msg::msg::BondedRemoteArray>::SharedPtr
     remotes_pub_;
   rclcpp_lifecycle::LifecyclePublisher<
-    protective_stop_msgs::msg::ProtectiveStopHeartbeat>::SharedPtr heartbeat_pub_;
+    protective_stop_msg::msg::ProtectiveStopHeartbeat>::SharedPtr heartbeat_pub_;
   rclcpp::TimerBase::SharedPtr pub_timer_;
   std::shared_ptr<diagnostic_updater::Updater> diag_;
   rclcpp::node_interfaces::OnSetParametersCallbackHandle::SharedPtr param_cb_handle_;

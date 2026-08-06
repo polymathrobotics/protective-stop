@@ -4,7 +4,7 @@ Status: **READY TO IMPLEMENT** (2026-08-01). Decisions locked from Q&A:
 role = **bridge + control**; software backend = **node hosts pstop_c itself**;
 distro = **Jazzy**; interfaces = **machine-state + relay/fault + remotes/RTT**;
 arming stays **remote-only** (§2, §8). Implementation decisions resolved in §10:
-extend `protective_stop_msgs`, in-repo `ros2/` workspace, **full control-proxy**
+extend `protective_stop_msg`, in-repo `ros2/` workspace, **full control-proxy**
 hardware backend, keep `machine_app_runner`.
 
 ---
@@ -131,10 +131,10 @@ config (same convention as the host runner). See `announce.hpp` /
 ### Topics (QoS chosen per data semantics)
 | Topic | Type | QoS | Notes |
 |---|---|---|---|
-| `~/machine_state` | `protective_stop_msgs/ProtectiveStopStatus` (ACTIVE/DEACTIVATED/UNSTABLE) + reason string | **reliable, transient_local (latched)**, depth 1 | publish on-change **and** at `publish_rate_hz` heartbeat; late subscribers get current state |
+| `~/machine_state` | `protective_stop_msg/ProtectiveStopStatus` (ACTIVE/DEACTIVATED/UNSTABLE) + reason string | **reliable, transient_local (latched)**, depth 1 | publish on-change **and** at `publish_rate_hz` heartbeat; late subscribers get current state |
 | `~/relay_status` | new `MachineRelayStatus` (relay_stop, relay_fault_a/b, mismatch, run) | reliable, depth 5 | hardware: from `/state.json`; software: relays N/A → fields flagged `not_applicable` |
 | `~/remotes` | new `BondedRemoteArray` (id, bond_state, reply_age_ms, loop_rtt_ms, disco_rtt_ms, rebonds) | reliable, depth 5 | uniform across backends |
-| `~/pstop_hb` | `protective_stop_msgs/ProtectiveStopHeartbeat` (`stamp`, `stop`) | **reliable, volatile**, depth 1 | the **desired-state signal + liveness** — see "Stop signal" below. Republished every `publish_rate_hz` tick regardless of change; deliberately **not** transient_local |
+| `~/pstop_hb` | `protective_stop_msg/ProtectiveStopHeartbeat` (`stamp`, `stop`) | **reliable, volatile**, depth 1 | the **desired-state signal + liveness** — see "Stop signal" below. Republished every `publish_rate_hz` tick regardless of change; deliberately **not** transient_local |
 | `/diagnostics` | `diagnostic_msgs/DiagnosticArray` via `diagnostic_updater` | default | backend reachability, bond count, faults, mismatch, loop jitter |
 
 ### Stop signal (what a downstream consumer acts on)
@@ -170,12 +170,12 @@ This makes the signal *usable*; it does not make it *rated*. SR-M-04 still
 stands — a software-machine deployment is non-safety-rated and the final-element
 integrity remains the integrator's (HARA A-07).
 
-Interfaces ship as **`protective_stop_msgs`** (`ros2/protective_stop_msgs/`),
-restored from `archive/protective_stop_msg` and renamed to the plural. It keeps
-the six original remote-side messages — including `ProtectiveStopHeartbeat`,
-reused unchanged for `~/pstop_hb` — and adds **three** machine-side ones:
-`MachineRelayStatus`, `BondedRemote` and `BondedRemoteArray`, so remote and
-machine share one interface package.
+Interfaces ship as **`protective_stop_msg`** (`ros2/protective_stop_msg/`),
+moved out of `archive/` so there is a single interface package. It keeps the six
+original remote-side messages and the `ProtectiveStop` service — including
+`ProtectiveStopHeartbeat`, reused unchanged for `~/pstop_hb` — and adds **three**
+machine-side ones: `MachineRelayStatus`, `BondedRemote` and `BondedRemoteArray`,
+so remote and machine share one interface package.
 
 ### Diagnostics
 `diagnostic_updater` publishes OK/WARN/ERROR: backend unreachable ⇒ ERROR (but
@@ -269,10 +269,9 @@ only observe, report, and tighten.
 
 ## 10. Decisions (resolved 2026-08-01)
 
-1. **Message ownership** — **extend `protective_stop_msgs`** (restored from
-   `archive/protective_stop_msg` and renamed to the plural); add
-   `MachineRelayStatus` + `BondedRemote` + `BondedRemoteArray` there so remote
-   and machine share one interface package.
+1. **Message ownership** — **extend `protective_stop_msg`** (moved out of
+   `archive/` into `ros2/`); add `MachineRelayStatus` + `BondedRemote` +
+   `BondedRemoteArray` there so remote and machine share one interface package.
 2. **Package location** — **in-repo `ros2/` colcon workspace** at repo root. The
    archived packages already live here and CI can build it; accepts re-adding
    ROS 2 build deps that #53 slimmed out.
