@@ -73,7 +73,20 @@ peer isn't in the WG table at all (netmap-absent). Don't confuse the two.
 **Triage:** if the tailnet is < 128 nodes and you see errno 128, it is
 **precondition A (region homing)**, full stop — do not go down the peer-cap path.
 
-## The fix (2026-08-04, in progress) — multi-region DERP relay
+## The fix (DEPLOYED + VALIDATED — `7867d4b` on main, 2026-08-05) — multi-region DERP relay
+
+> **Status: precondition A CLOSED.** Validated on the deployed fleet build via the
+> reproduce rig below on real silicon: forcing a bonded remote's `derp_region`
+> override to region 9 (mismatched with its machine's region 2) opened an
+> auxiliary DERP conn to region 2 (`pool=[(0,9),(1,2)]`) and the safety bond held
+> unbroken — `bond=2`, rebonds flat, **zero errno-128**, heartbeats flowing, **no
+> manual `tailscale ping`.** An earlier airtight run forced `wg_direct=0` and
+> confirmed frames delivered via the aux conn with zero errno-128. Restoring the
+> home region reaps the now-redundant aux (time-since-unwanted reap, `c571580`).
+> The Tailscale-ACL / netmap-bounding half is a separate deployment concern
+> (`TAILSCALE_ISOLATION.md`), not firmware.
+
+
 
 The durable fix is the magicsock model: the chip maintains a **small pool of DERP
 connections** (home region + one per distinct region among its pinned/priority
