@@ -91,6 +91,9 @@ add_executable(pstop_requirements_test
 
   test/src/pstop/requirements/req_3_13_test.c
 
+
+  test/src/pstop/requirements/req_3_14_test.c
+
   test/src/pstop/requirements/test_utils.c
 
   test/src/pstop/requirements/main.c
