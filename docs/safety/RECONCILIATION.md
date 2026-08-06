@@ -17,6 +17,10 @@ Simply-wrong numeric/formula values were corrected directly.
 here. This register supersedes those two lists as the single reconciliation
 artifact and adds R-09 (found during this pass).
 
+**Later additions:** R-10 and R-11 (2026-08-05) — `MACHINE_ROS2_NODE_DESIGN.md`
+§6 threading model, and a cluster of stale interface/layout/bringup claims in
+the same doc. Both found while adding the stop-heartbeat publisher to the node.
+
 **Discrepancy classes:** `dropped-feature` (design describes an assessed-and-not-
 adopted mechanism as live) · `unimplemented-claim` (design credits a control the
 code does not contain) · `stale-value` (a numeric/formula/description that is
@@ -38,6 +42,7 @@ the wrong rationale) · `target-change` (integrity target moved).
 | **R-07** | `MULTI_REMOTE_VALIDATION_2026-07-22.md` (logic-under-test bullet) | "a remote goes silent past `heartbeat_ms x (max_missed_heartbeats+1)`". | `heartbeat_ms × max_missed_heartbeats` (`machine.c:290-298`). | stale-value | Med | Formula corrected in place + a short reconciliation banner added near the top pointing here. | yes |
 | **R-08** | `host/machine_app_runner.c:721` (code comment) | "the timeout is each operator's `heartbeat_ms x (max_missed_heartbeats + 1)`". | `heartbeat_ms × max_missed_heartbeats` (`machine.c:290-298`; e.g. 400 × 5 ≈ 2.0 s at the current `max_missed` = 5). | stale-value | **High** (safety code comment) | Comment corrected to the library math with a code cite and worked example. | yes |
 | **R-09** | `PSTOP_SAFETY_DESIGN.md` §2 "Rolling drive level" bullet | "Each tick the owning core drives its OUT pin with the tick counter's LSB … Until both phases have been sampled the channel reads OPEN" — i.e. **one phase per tick, two ticks to a verdict**. | **Superseded.** Code samples **both phases every tick** (drive HIGH→read→drive LOW→read in one call, `main.c:274-279`) and **ignores the counter** (`:269`). This *is* what Option A ("fresh both-phase sample every tick") refers to; the rolling-LSB text is the predecessor design. | stale-value | Med | §2 bullet marked *(superseded)* with a reconciled note describing both-phase-per-tick; original retained as history. | yes |
+| **R-10** (2026-08-05) | `MACHINE_ROS2_NODE_DESIGN.md` §6 "Threading & determinism" | The hardware backend "polls on a ROS timer in a **`Reentrant` callback group**", and "a **`MultiThreadedExecutor`** runs the node". | **Neither is implemented, and the code is deliberately the other way.** The hardware backend polls on its own `std::thread` (`hardware_backend.cpp` `poll_loop`), the node declares **no callback groups** (so every callback is in the default `MutuallyExclusive` group), and the code-generated executable spins a **`SingleThreadedExecutor`**. Single-threaded execution is load-bearing: `publish_tick` and the lifecycle transitions both touch the publisher handles and `last_snapshot_`, and `pub_timer_->cancel()` does not wait for an in-flight callback, so serialisation is what keeps `on_cleanup`/`on_error` publisher `reset()` free of a use-after-free without locks. | unimplemented-claim | Med | Both bullets marked *(superseded)* with a `[Reconciled 2026-08-05]` note giving ground truth and stating single-threaded execution as a **design requirement**, with the guards any future `MultiThreadedExecutor`/`Reentrant` move would owe. | yes |
 
 ---
 
@@ -64,7 +69,7 @@ distinction correctly.
 |---|---|
 | `docs/safety/SYSTEM_DEFINITION.md` | Authoritative backbone — reflects Option A+B / C-dropped, `hb×max_missed`, SIL 3 / PL e. **Updated 2026-08-04:** `max_missed` 3 → 5, so timeout is now 400×5≈2.0 s (was 400×3≈1.2 s). |
 | `docs/safety/HARA.md`, `docs/safety/FMEA.md` | Seed findings; already code-accurate. Their D1–D6 / §6 lists are subsumed by this register. No change. |
-| `docs/MACHINE_ROS2_NODE_DESIGN.md` | Uses `max_missed` correctly; example config still shows defaults 400/3/500 (§4, §12). No stale heartbeat formula, no Option C, no SIL2. **Note (2026-08-04):** the machn (safety-credited, A-07) default was raised to `max_missed` = 5; the ROS 2 node's own compiled default was **not** confirmed changed by that commit (machn-specific), so its example still reads 3. **Open reconciliation item:** confirm whether the ROS 2 node default should track machn (=5) and update the example + code accordingly, or document the two paths intentionally differ. 5 is within the ROS 2 validator envelope [1,5]. |
+| `docs/MACHINE_ROS2_NODE_DESIGN.md` | Uses `max_missed` correctly; example config still shows defaults 400/3/500 (§4, §12). No stale heartbeat formula, no Option C, no SIL2. **§6 threading model corrected 2026-08-05 — see R-10.** **Note (2026-08-04):** the machn (safety-credited, A-07) default was raised to `max_missed` = 5; the ROS 2 node's own compiled default was **not** confirmed changed by that commit (machn-specific), so its example still reads 3. **Open reconciliation item:** confirm whether the ROS 2 node default should track machn (=5) and update the example + code accordingly, or document the two paths intentionally differ. 5 is within the ROS 2 validator envelope [1,5]. |
 | `docs/MACHINE_ESP32_DESIGN.md` | Series-relay + feedback actuator description matches design intent; no stale safety claim. |
 | `docs/SAFETY_CHAIN.md` | Reboot/rollback recovery only; correctly states machine holds STOP on silence. No verdict/heartbeat/Option-C claims. |
 | `docs/FAILOVER_AND_ARMING_DESIGN_2026-07-21.md` | Arming policy + debounce match the code (`min_stop_ms=500`, single-tick STOP, 3-tick reclose). No stale claim. |

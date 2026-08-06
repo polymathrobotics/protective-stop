@@ -20,6 +20,7 @@ namespace protective_stop_machine
 {
 
 using ProtectiveStopStatus = protective_stop_msgs::msg::ProtectiveStopStatus;
+using ProtectiveStopHeartbeat = protective_stop_msgs::msg::ProtectiveStopHeartbeat;
 using MachineRelayStatus = protective_stop_msgs::msg::MachineRelayStatus;
 using BondedRemoteArray = protective_stop_msgs::msg::BondedRemoteArray;
 using BondedRemote = protective_stop_msgs::msg::BondedRemote;
@@ -142,6 +143,8 @@ MachineBridgeNode::CallbackReturn MachineBridgeNode::on_configure(const rclcpp_l
   state_pub_ = create_publisher<ProtectiveStopStatus>("~/machine_state", latched);
   relay_pub_ = create_publisher<MachineRelayStatus>("~/relay_status", data);
   remotes_pub_ = create_publisher<BondedRemoteArray>("~/remotes", data);
+  heartbeat_pub_ =
+    create_publisher<ProtectiveStopHeartbeat>("~/pstop_hb", rclcpp::QoS(1).reliable());
 
   param_cb_handle_ =
     add_on_set_parameters_callback(std::bind(&MachineBridgeNode::on_set_parameters, this,
@@ -165,6 +168,7 @@ MachineBridgeNode::CallbackReturn MachineBridgeNode::on_activate(
   state_pub_->on_activate();
   relay_pub_->on_activate();
   remotes_pub_->on_activate();
+  heartbeat_pub_->on_activate();
 
   const double hz = params_.rates.publish_rate_hz;  // floored at 1.0 by param validation
   pub_timer_ =
@@ -233,9 +237,11 @@ MachineBridgeNode::CallbackReturn MachineBridgeNode::on_deactivate(
   if (backend_) {
     backend_->stop();
   }  // -> machine safe (remotes fail-safe)
+  publish_heartbeat(true, this->now());
   state_pub_->on_deactivate();
   relay_pub_->on_deactivate();
   remotes_pub_->on_deactivate();
+  heartbeat_pub_->on_deactivate();
   LifecycleNode::on_deactivate(state);
   RCLCPP_INFO(get_logger(), "deactivated: backend stopped (safe state)");
   return CallbackReturn::SUCCESS;
@@ -255,6 +261,7 @@ MachineBridgeNode::CallbackReturn MachineBridgeNode::on_cleanup(const rclcpp_lif
   state_pub_.reset();
   relay_pub_.reset();
   remotes_pub_.reset();
+  heartbeat_pub_.reset();
   backend_.reset();
   return CallbackReturn::SUCCESS;
 }
@@ -299,6 +306,7 @@ MachineBridgeNode::CallbackReturn MachineBridgeNode::on_error(const rclcpp_lifec
     backend_->stop();
   }  // safe: machine stops -> remotes fail-safe
   // Emit one explicit UNSTABLE before tearing down the publishers (design §8).
+  publish_heartbeat(true, this->now());
   if (state_pub_ && state_pub_->is_activated()) {
     ProtectiveStopStatus st;
     st.status = static_cast<uint8_t>(MachineState::UNSTABLE);
@@ -307,11 +315,13 @@ MachineBridgeNode::CallbackReturn MachineBridgeNode::on_error(const rclcpp_lifec
     state_pub_->on_deactivate();
     relay_pub_->on_deactivate();
     remotes_pub_->on_deactivate();
+    heartbeat_pub_->on_deactivate();
   }
   param_cb_handle_.reset();
   state_pub_.reset();
   relay_pub_.reset();
   remotes_pub_.reset();
+  heartbeat_pub_.reset();
   backend_.reset();
   RCLCPP_ERROR(get_logger(), "error transition: safe teardown + UNSTABLE published");
   return CallbackReturn::SUCCESS;
@@ -323,64 +333,77 @@ void MachineBridgeNode::publish_tick()
     return;
   }
   last_snapshot_ = backend_->snapshot();
-  const auto & s = last_snapshot_;
-  const auto now = this->now();
+  const auto & snapshot = last_snapshot_;
+  const auto stamp = this->now();
 
-  ProtectiveStopStatus st;
-  st.status = static_cast<uint8_t>(s.state());
-  st.message = s.status_reason;
-  state_pub_->publish(st);
+  ProtectiveStopStatus status;
+  status.status = static_cast<uint8_t>(snapshot.state());
+  status.message = snapshot.status_reason;
+  state_pub_->publish(status);
 
-  MachineRelayStatus relay;
-  relay.stamp = now;
-  relay.applicable = s.relay.applicable;
-  relay.run = s.relay.run;
-  relay.relay_stop = s.relay.relay_stop;
-  relay.relay_fault_a = s.relay.fault_a;
-  relay.relay_fault_b = s.relay.fault_b;
-  relay.mismatch = s.relay.mismatch;
-  relay_pub_->publish(relay);
+  publish_heartbeat(!snapshot.running, stamp);
 
-  BondedRemoteArray arr;
-  arr.stamp = now;
-  for (const auto & r : s.remotes) {
-    BondedRemote b;
-    b.device_id = r.device_id;
-    b.bond_state = r.bond_state;
-    b.in_use = r.in_use;
-    b.stop_only = r.stop_only;
-    b.reply_age_ms = r.reply_age_ms;
-    b.loop_rtt_ms = r.loop_rtt_ms;
-    b.disco_rtt_ms = r.disco_rtt_ms;
-    b.rebonds = r.rebonds;
-    arr.remotes.push_back(std::move(b));
+  MachineRelayStatus relay_status;
+  relay_status.stamp = stamp;
+  relay_status.applicable = snapshot.relay.applicable;
+  relay_status.run = snapshot.relay.run;
+  relay_status.relay_stop = snapshot.relay.relay_stop;
+  relay_status.relay_fault_a = snapshot.relay.fault_a;
+  relay_status.relay_fault_b = snapshot.relay.fault_b;
+  relay_status.mismatch = snapshot.relay.mismatch;
+  relay_pub_->publish(relay_status);
+
+  BondedRemoteArray remote_array;
+  remote_array.stamp = stamp;
+  for (const auto & remote : snapshot.remotes) {
+    BondedRemote bonded_remote;
+    bonded_remote.device_id = remote.device_id;
+    bonded_remote.bond_state = remote.bond_state;
+    bonded_remote.in_use = remote.in_use;
+    bonded_remote.stop_only = remote.stop_only;
+    bonded_remote.reply_age_ms = remote.reply_age_ms;
+    bonded_remote.loop_rtt_ms = remote.loop_rtt_ms;
+    bonded_remote.disco_rtt_ms = remote.disco_rtt_ms;
+    bonded_remote.rebonds = remote.rebonds;
+    remote_array.remotes.push_back(std::move(bonded_remote));
   }
-  remotes_pub_->publish(arr);
+  remotes_pub_->publish(remote_array);
+}
+
+void MachineBridgeNode::publish_heartbeat(bool stop, const rclcpp::Time & stamp)
+{
+  if (!heartbeat_pub_ || !heartbeat_pub_->is_activated()) {
+    return;
+  }
+  ProtectiveStopHeartbeat heartbeat;
+  heartbeat.stamp = stamp;
+  heartbeat.stop = stop;
+  heartbeat_pub_->publish(heartbeat);
 }
 
 void MachineBridgeNode::diagnostics(diagnostic_updater::DiagnosticStatusWrapper & stat)
 {
-  const auto & s = last_snapshot_;
+  const auto & snapshot = last_snapshot_;
   using diagnostic_msgs::msg::DiagnosticStatus;
-  if (!s.reachable) {
+  if (!snapshot.reachable) {
     stat.summary(
       DiagnosticStatus::ERROR,
       "backend unreachable — ROS blind "
       "(machine still enforces independently)");
-  } else if (s.relay.fault_a || s.relay.fault_b) {
+  } else if (snapshot.relay.fault_a || snapshot.relay.fault_b) {
     stat.summary(DiagnosticStatus::ERROR, "relay feedback fault");
-  } else if (s.relay.mismatch > 0) {
+  } else if (snapshot.relay.mismatch > 0) {
     stat.summary(DiagnosticStatus::WARN, "lockstep mismatch present");
-  } else if (s.running) {
+  } else if (snapshot.running) {
     stat.summary(DiagnosticStatus::OK, "running");
   } else {
-    stat.summary(DiagnosticStatus::OK, s.status_reason);
+    stat.summary(DiagnosticStatus::OK, snapshot.status_reason);
   }
   stat.add("backend", backend_kind_);
-  stat.add("running", s.running);
-  stat.add("active_remotes", s.active_remotes);
-  stat.add("relay_stop", s.relay.relay_stop);
-  stat.add("mismatch", s.relay.mismatch);
+  stat.add("running", snapshot.running);
+  stat.add("active_remotes", snapshot.active_remotes);
+  stat.add("relay_stop", snapshot.relay.relay_stop);
+  stat.add("mismatch", snapshot.relay.mismatch);
 }
 
 rcl_interfaces::msg::SetParametersResult MachineBridgeNode::on_set_parameters(
@@ -390,15 +413,15 @@ rcl_interfaces::msg::SetParametersResult MachineBridgeNode::on_set_parameters(
   res.successful = true;
   MachineTiming proposed = timing_;
   bool timing_changed = false;
-  for (const auto & p : params) {
-    if (p.get_name() == "timing.heartbeat_ms") {
-      proposed.heartbeat_ms = static_cast<uint64_t>(p.as_int());
+  for (const auto & parameter : params) {
+    if (parameter.get_name() == "timing.heartbeat_ms") {
+      proposed.heartbeat_ms = static_cast<uint64_t>(parameter.as_int());
       timing_changed = true;
-    } else if (p.get_name() == "timing.max_missed") {
-      proposed.max_missed = static_cast<uint16_t>(p.as_int());
+    } else if (parameter.get_name() == "timing.max_missed") {
+      proposed.max_missed = static_cast<uint16_t>(parameter.as_int());
       timing_changed = true;
-    } else if (p.get_name() == "timing.min_stop_ms") {
-      proposed.min_stop_ms = static_cast<uint64_t>(p.as_int());
+    } else if (parameter.get_name() == "timing.min_stop_ms") {
+      proposed.min_stop_ms = static_cast<uint64_t>(parameter.as_int());
       timing_changed = true;
     }
   }
