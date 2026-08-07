@@ -86,8 +86,6 @@ peer isn't in the WG table at all (netmap-absent). Don't confuse the two.
 > The Tailscale-ACL / netmap-bounding half is a separate deployment concern
 > (`TAILSCALE_ISOLATION.md`), not firmware.
 
-
-
 The durable fix is the magicsock model: the chip maintains a **small pool of DERP
 connections** (home region + one per distinct region among its pinned/priority
 safety peers, capped at `ML_DERP_MAX_CONNS`) and routes each peer's relayed frames
