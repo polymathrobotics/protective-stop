@@ -7,7 +7,29 @@
 what is decided, what is open, and what is next across the safety-analysis +
 code-coverage effort. Newest status at the top of each section.
 
-_Last updated: 2026-08-04 (heartbeat-timeout tunable `max_missed` 3 → 5 propagated to the safety case)._
+_Last updated: 2026-08-07 (C-hardening pass — OTA-lineage, USB-NCM, cold-recovery, peer-scaling validated on the deployed build)._
+
+> **2026-08-07 — C-hardening pass (OTA / USB-NCM / cold-recovery / peer-scaling), validated on `7867d4b`:**
+> - [x] **OTA wrong-lineage rejection at upload (FIX).** The HTTP-upload OTA path
+>   (`handler_ota`) now enforces the first-chunk `project_name` check (mirrors the
+>   fleet-pull path) so a machine refuses a remote image up front (HTTP 400, no
+>   write/reboot) instead of booting it and rolling back; the remote gained
+>   symmetric `CONFIG_ML_OTA_REQUIRE_PROJECT="pstop_remote"`. PENDING_VERIFY
+>   rollback separately confirmed working (a wrong image cleanly rolls back).
+> - [x] **USB-NCM stability VERIFIED (no bug).** 25-min local soak running the
+>   safety bond over USB-NCM: `sf_txdrv=0` (zero UNrecovered TX drops), transients
+>   absorbed by the ERR_IF retry, bond held. The retry fix handles USB-NCM.
+> - [x] **Machine-reboot cold-recovery VERIFIED for a clean reboot.** Traced repro:
+>   remote self-re-bonds in ~35 s (disco demote → DERP fallback → re-handshake).
+>   The earlier prolonged wedge was a *chaotic* reboot (cross-lineage image, now
+>   prevented by the OTA fix) + operator error, not a standalone firmware bug.
+> - [~] **Peer-scaling armor holds the safety function under load; minor churn
+>   observed (FOLLOW-UP).** 60 pps DISCO storm (worst-case per-peer box-open) on a
+>   full 128-peer netmap for 5 min: **zero STOPs**, bond held (state 2), mismatch 0
+>   — the design's bar met. But a few rebonds at the load transitions and a ~6%
+>   heartbeat reply-deficit under sustained load (cores ~60%) show the isolation
+>   isn't perfect; consider tightening `ML_DISCO_OPENS_PER_PASS` or heartbeat TX
+>   priority under safety-bond stress. Not a safety failure (no STOP).
 
 > **2026-08-04 — heartbeat-timeout raised (`max_missed` 3 → 5, commit `01e4c10`):**
 > The machn (safety-credited machine, HARA A-07) `MACHN_MAX_MISSED_HEARTBEATS`
@@ -31,11 +53,12 @@ _Last updated: 2026-08-04 (heartbeat-timeout tunable `max_missed` 3 → 5 propag
 > - [ ] **`max_missed` = 5 now equals the validated-envelope ceiling `[1,5]`**
 >   (SR-H-03 / ROS 2 `validate_timing`). No headroom remains to raise it further
 >   without widening the envelope (which would need re-validation).
-> - [ ] **ROS 2 node default not confirmed changed.** Commit `01e4c10` is
->   machn-specific; `docs/MACHINE_ROS2_NODE_DESIGN.md` still shows `max_missed: 3`.
->   Confirm whether the ROS 2 node default should track machn (=5) or the two
->   paths intentionally differ, then reconcile doc + code. (Code is out of this
->   docs-only change's scope.)
+> - [x] **ROS 2 node default reconciled to 5 (2026-08-05).** Integrator decision:
+>   `max_missed` default = 5 in **all** cases. ROS 2 node param default
+>   (`protective_stop_machine_params.yaml`) 3 → 5, matching machn and the host
+>   runner; design doc + test configs (hil.toml, stop_reset_battery, config-floor)
+>   updated to the 2.0 s timeout. Default now sits at the validated-envelope
+>   ceiling `[1,5]` by design.
 
 > **2026-08-02 — "do them in order" batch merged + verified:**
 > 1. **#1 — SR-H-04b machine clock-freeze guard + DU-1 GPIO re-verify DONE**

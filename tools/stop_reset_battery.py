@@ -31,7 +31,7 @@ SIZE = 40
 MACHINE_ID = 0x01020304
 HEARTBEAT_MS = 400  # matches production machine.toml
 MIN_STOP_MS = 500  # delay_between_stop_ms
-MAX_MISSED = 3  # timeout = hb * max_missed = 1.2 s
+MAX_MISSED = 5  # timeout = hb * max_missed = 2.0 s (matches machn/host default)
 
 PORT = int(sys.argv[1]) if len(sys.argv) > 1 else 8899
 
