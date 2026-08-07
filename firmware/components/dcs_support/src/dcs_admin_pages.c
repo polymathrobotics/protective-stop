@@ -517,6 +517,9 @@ static esp_err_t api_wifi_tx_power(httpd_req_t * req)
     (void)httpd_resp_set_type(req, "application/json");
     return httpd_resp_sendstr(req, "{\"ok\":false,\"error\":\"esp_wifi_set_max_tx_power failed\"}");
   }
+  /* Persist so the override survives power loss; re-applied at WIFI_EVENT_STA_START
+   * (dcs_wifi.c). Best-effort: a failed NVS write must not fail an applied change. */
+  (void)dcs_nvs_write_wifi_tx_power((uint8_t)q);
   int8_t now_q = 0;
   (void)esp_wifi_get_max_tx_power(&now_q);
   char buf[48];

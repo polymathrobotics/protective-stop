@@ -37,6 +37,7 @@ extern "C"
 #define DCS_NVS_KEY_RING_OFF "ring_off" /* ring rotation: physical index of LED 1 */
 #define DCS_NVS_KEY_PSTOP_PEERS "ps_peers" /* multi-machine peer table (blob, see dcs_nvs.c) */
 #define DCS_NVS_KEY_OPERATORS "operators" /* operator allowlist (blob: count byte + u32 ids) */
+#define DCS_NVS_KEY_WIFI_TXP "wifi_txp" /* WiFi max TX power, quarter-dBm (8..84); 0/absent = config default */
 
 #define DCS_RST_HIST_LEN 16
 
@@ -273,6 +274,12 @@ extern "C"
  * assembled unit, 2026-07-24). Absent -> 0. */
   uint8_t dcs_nvs_read_ring_offset(void);
   esp_err_t dcs_nvs_write_ring_offset(uint8_t off);
+  /* WiFi max TX power persisted across power loss, in quarter-dBm (matches
+ * esp_wifi_set_max_tx_power units; valid 8..84). Read returns 0 when unset,
+ * meaning "leave the microlink config default (20 dBm) in force". Applied at
+ * WIFI_EVENT_STA_START so a runtime override survives reboot. */
+  uint8_t dcs_nvs_read_wifi_tx_power(void);
+  esp_err_t dcs_nvs_write_wifi_tx_power(uint8_t quarter_dbm);
 
   /* Multi-machine peer table (ps_peers blob). One record per slot. Read
  * falls back to migrating the legacy ps_ip/ps_port pair into slot 0 when

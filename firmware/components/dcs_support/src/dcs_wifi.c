@@ -159,6 +159,13 @@ static void on_wifi_evt(void * arg, esp_event_base_t base, int32_t id, void * da
   }
   if (id == (int32_t)WIFI_EVENT_STA_START) {
     s_backoff_ms = WIFI_BACKOFF_MIN_MS;
+    /* Re-apply a persisted WiFi TX-power override (survives power loss). 0 =
+     * unset -> leave the microlink config default (applied at ml start) alone.
+     * Valid only after WiFi start, which STA_START guarantees. */
+    uint8_t txp_q = dcs_nvs_read_wifi_tx_power();
+    if (txp_q != 0u) {
+      (void)esp_wifi_set_max_tx_power((int8_t)txp_q);
+    }
     apply_creds_and_connect();
   } else if (id == (int32_t)WIFI_EVENT_STA_DISCONNECTED) {
     atomic_store(&s_connected, 0);
