@@ -52,15 +52,22 @@ re-verified on the bench (bond, verdicts, policy veto) after the sweep.
    `snprintf` offset could underflow `sizeof - rp` (size_t) and write out
    of bounds with corrupt NVS values; buffer also undersized for
    worst-case entries. Clamped per append + resized.
-2. **FLAGGED** — `dcs_eth.c` bring-up error paths leak the driver/SPI
-   bus/semaphore on partial failure (behavior-affecting to fix; needs its
-   own change + test).
-3. **FLAGGED** — `dcs_telemetry.c`: >MAX_TASKS(40) tasks makes
-   `uxTaskGetSystemState` return 0 → load silently reports 0 %.
-4. **FLAGGED** — `dcs_wifi_status()` reads list state unlocked from the
-   httpd task (diagnostics-only data race).
-5. **FLAGGED** — `api_iface_usb` reports the requested state even if the
-   toggle failed (inconsistent with the eth/wifi twins).
+2. **FIXED** (since 2026-07-21) — `dcs_eth.c` now unwinds a full
+   `goto fail_netif → fail_driver → fail_spi → fail_sem` cleanup ladder,
+   freeing exactly what the call created in reverse order (netif, driver
+   handle, phy/mac, SPI bus if owned, semaphore); no handle/semaphore
+   leak on partial bring-up failure.
+3. **FIXED** (since 2026-07-21) — `dcs_telemetry.c` raised `MAX_TASKS`
+   40 → 64 **and** guards the overflow: when `uxTaskGetSystemState`
+   returns 0 the sampler skips the sample (keeps `prev_*`) with a warning
+   instead of computing a bogus 0 % load.
+4. **FIXED** (2026-08-07) — `dcs_wifi_status()` cross-task shared reads
+   are now atomic: `s_disc_reason`, `s_connected`, and `s_idx` are
+   `atomic_int` (load/store/fetch_add); `s_list` is malloc'd once and
+   never freed, so the pointer read is stable. No unlocked data race.
+5. **FIXED** (since 2026-07-21) — `api_iface_usb` now reports the ACTUAL
+   resulting state on failure (`iface_toggle_reply(req, r, (r==ESP_OK) ? on
+   : dcs_usb_is_enabled())`), matching the eth/wifi twins.
 
 ## Deviation register (residual findings, with rationale)
 
@@ -77,9 +84,44 @@ re-verified on the bench (bond, verdicts, policy veto) after the sweep.
 | 18.8 (main.c ×3) | Required | 3 | False positives: `uint8_t buf[PSTOP_MESSAGE_SIZE]` — macro constant unresolved in the standalone scan; arrays are fixed-size. |
 
 ## Follow-ups recommended
-- Sweep `components/microlink` (large; same method).
-- Fix the three flagged defects (eth error paths, telemetry cap, usb
-  toggle reply).
+- ~~Sweep `components/microlink`~~ **DONE 2026-08-07** — see below.
+- ~~Fix the flagged defects~~ **DONE** — all five real defects above are
+  now FIXED (dcs_eth cleanup ladder, telemetry cap+guard, wifi_status
+  atomics, usb toggle reply); the earlier reset-history snprintf was
+  already fixed.
 - For certification evidence, re-run with a licensed MISRA checker
   (rule texts + official compliance report format); this review is the
   engineering pass that precedes it.
+
+## `components/microlink` sweep (2026-08-07)
+
+Swept all 17 `components/microlink/src/*.c` with the same free-cppcheck
+method (`--addon=misra` + `--enable=warning,style`).
+
+**Style/rule profile matches the existing deviation register** — no new
+deviation categories. Top rules are the same platform/idiom-inherited
+findings already disapplied for dcs: 2.5 unused-macros (~1087, header
+constants), 10.4/10.1 essential-type (macro expansions), 15.5
+multiple-returns (~368, codebase idiom), 17.7 unused-return (void-cast
+candidates), 21.3 malloc (non-safety HTTP/PSRAM paths), 11.5 void\*
+(FreeRTOS/IDF API). See the §"Deviation register" rationale — all apply.
+
+**Genuine-defect classes (leak / null / uninit / buffer / race): none in
+the network logic.** The only two warning-level findings are in the
+vetted, KAT-verified crypto primitives, and both are confirmed
+**false positives**:
+- `nacl_box.c:454` `final_block[len]=1` (`arrayIndexOutOfBoundsCond`) —
+  `len` is the post-`len -= (len & ~15UL)` remainder, so `len ∈ [0,15]`;
+  writes indices 0–15, all in-bounds. Standard poly1305 final block;
+  cppcheck can't prove the mask bound.
+- `x25519.c:220` `mul(z2,x2,a24,nb=1)` (`argumentSize`) — the `nb`
+  argument bounds `mul` to read only the single limb `a24` holds;
+  curve25519-donna pattern, cppcheck's size heuristic ignores `nb`.
+
+Byte-identical KAT output already proves both primitives correct.
+
+**httpd URI-handler budget (was flagged at ceiling 16 in
+`MULTI_REMOTE_VALIDATION_2026-07-22.md`) is resolved:** the app httpd is
+now `16 + max_user_uri_handlers`, with `cfg.max_user_uri_handlers = 30`
+(`dcs_support.c`) → 46 slots for microlink's ~20 + dcs's 21, with
+headroom.

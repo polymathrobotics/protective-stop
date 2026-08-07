@@ -72,6 +72,13 @@ reference built); it ships applied.
 
 ## Recommendation
 
+> **STATUS: MERGED + DEPLOYED.** The `-O3`-on-primitives change shipped in
+> PR #74 (`7867d4b`, on `main`/`dev`): `set_source_files_properties(... -O3)`
+> on the vetted AEAD/X25519 primitives in `components/microlink/CMakeLists.txt`
+> and `components/microlink/components/wireguard_lwip/CMakeLists.txt`, with
+> KATs guarding byte-identical output. The text below is the original
+> pre-merge recommendation, retained for rationale.
+
 Merge the **`-O3`-on-primitives** change (the 2.5×, zero-risk part) after
 CI + a HIL soak — it is a pure compile-flag change to already-certified
 code with byte-identical output. Drop donna and Monocypher from the tree
