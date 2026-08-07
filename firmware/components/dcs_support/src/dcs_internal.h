@@ -335,6 +335,7 @@ extern "C"
 
   /* dcs_net_supervisor.c */
   void dcs_net_supervisor_start(void); /* 1 Hz interface-priority enforcer */
+  unsigned dcs_net_supervisor_kicks(void); /* count of link-down event-driven wakes (telemetry) */
 
   /* dcs_rgb.c — onboard WS2812 (GPIO21): colour=active iface, blink=IP last octet. */
   void dcs_rgb_start(void);

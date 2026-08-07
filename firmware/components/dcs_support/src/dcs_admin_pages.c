@@ -216,7 +216,7 @@ static esp_err_t page_state(httpd_req_t * req)
     "\"gpio_cfg_fault\":%lu,"
     "\"load0\":%lu,\"load1\":%lu,"
     "\"e_hi0\":%lu,\"e_lo0\":%lu,\"e_hi1\":%lu,\"e_lo1\":%lu,"
-    "\"active_iface\":%d,\"eth_link\":%d,"
+    "\"active_iface\":%d,\"net_sup_kicks\":%lu,\"eth_link\":%d,"
     "\"eth_recoveries\":%lu,\"eth_rec_r1\":%lu,\"eth_rec_r2\":%lu,\"eth_rec_r3\":%lu,"
     "\"eth_rec_reason\":%lu,\"eth_spi_err\":%lu,"
     "\"eth_en\":%d,\"wifi_en\":%d,\"usbncm_en\":%d,"
@@ -256,6 +256,7 @@ static esp_err_t page_state(httpd_req_t * req)
     (unsigned long)atomic_load(&g_dcs_estop_high_ok[1]),
     (unsigned long)atomic_load(&g_dcs_estop_low_ok[1]),
     (int)atomic_load(&g_dcs_active_iface),
+    (unsigned long)dcs_net_supervisor_kicks(),
     dcs_eth_link_up() ? 1 : 0,
     (unsigned long)atomic_load(&g_dcs_eth_recoveries),
     (unsigned long)atomic_load(&g_dcs_eth_rec_r1),
