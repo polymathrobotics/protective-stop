@@ -151,6 +151,43 @@ int main(void)
 #undef ALLTRUE
   }
 
+  // 7. EMC-blip / spurious-transient-close resistance — the software mitigation
+  //    for the WiFi-TX auto-arm anomaly (a WiFi transmit burst momentarily
+  //    coupling into the open E-stop loop harness and being read as CLOSED).
+  //    Such a transient must NEVER manufacture an OK/arm while the operator is
+  //    holding STOP; only a genuine sustained close (>= debounce) may arm.
+  //    Envelope: this defends transients shorter than LOOP_RECLOSE_DEBOUNCE_TICKS
+  //    (release debounce). A hypothetical coupling sustained for the full
+  //    debounce window is out of scope here and is covered by the machine-side
+  //    min-STOP re-arm gesture (a separate layer, pstop_c).
+  for (int core = 0; core < 2; core++) {
+    // (a) Every sub-threshold blip length, bracketed by opens, stays STOP.
+    for (int blip = 1; blip < (int)LOOP_RECLOSE_DEBOUNCE_TICKS; blip++) {
+      estop_state_t s = fresh();
+      CHECK(estop_decide(&s, core, 0, 0) == PSTOP_MESSAGE_STOP, "blip: baseline open STOP (not armed)");
+      for (int t = 0; t < blip; t++) {
+        CHECK(estop_decide(&s, core, 1, 0) == PSTOP_MESSAGE_STOP, "sub-threshold spurious close never OK");
+      }
+      CHECK(estop_decide(&s, core, 0, 0) == PSTOP_MESSAGE_STOP, "post-blip open STOP");
+    }
+    // (b) A flapping burst (repeated (debounce-1)-close then open) never arms —
+    //     each open resets the closed streak, so the threshold is never reached.
+    estop_state_t f = fresh();
+    for (int i = 0; i < 50; i++) {
+      for (int t = 0; t < (int)LOOP_RECLOSE_DEBOUNCE_TICKS - 1; t++) {
+        CHECK(estop_decide(&f, core, 1, 0) == PSTOP_MESSAGE_STOP, "flap close never OK");
+      }
+      CHECK(estop_decide(&f, core, 0, 0) == PSTOP_MESSAGE_STOP, "flap open STOP");
+    }
+    // (c) The mitigation doesn't wedge legitimate arming: after all that
+    //     flapping, a genuine sustained close still arms exactly at threshold.
+    estop_state_t g = fresh();
+    for (int t = 0; t < (int)LOOP_RECLOSE_DEBOUNCE_TICKS - 1; t++) {
+      CHECK(estop_decide(&g, core, 1, 0) == PSTOP_MESSAGE_STOP, "genuine close pre-threshold STOP");
+    }
+    CHECK(estop_decide(&g, core, 1, 0) == PSTOP_MESSAGE_OK, "genuine sustained close arms at threshold");
+  }
+
   printf("estop_verdict host tests: %d checks, %d failures\n", g_checks, g_fails);
   return g_fails ? 1 : 0;
 }
