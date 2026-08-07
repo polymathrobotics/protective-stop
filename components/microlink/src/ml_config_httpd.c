@@ -1097,9 +1097,34 @@ static esp_err_t handler_ota(httpd_req_t * req)
       free(buf);
       esp_ota_abort(ota_handle);
       s_ota_in_progress = false;
-      s_ota_in_progress = false;
       httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Flash write failed");
       return ESP_FAIL;
+    }
+
+    /* Wrong-lineage backstop (first chunk, before the bulk is written): the app
+     * descriptor sits at a fixed offset in the image; reject a wrong-project
+     * image up front so a machine never reboots into (and then rolls back from)
+     * a remote image, and vice versa. Mirrors the fleet-pull check in ml_app.c.
+     * CONFIG_ML_OTA_REQUIRE_PROJECT empty = disabled. */
+    if (
+      (total_written == 0) &&
+      (recv_len > (int)(sizeof(esp_image_header_t) + sizeof(esp_image_segment_header_t) + sizeof(esp_app_desc_t))) &&
+      (CONFIG_ML_OTA_REQUIRE_PROJECT[0] != '\0'))
+    {
+      const esp_app_desc_t * img_desc =
+        (const esp_app_desc_t *)(buf + sizeof(esp_image_header_t) + sizeof(esp_image_segment_header_t));
+      if (strncmp(img_desc->project_name, CONFIG_ML_OTA_REQUIRE_PROJECT, sizeof(img_desc->project_name)) != 0) {
+        ESP_LOGE(
+          TAG,
+          "OTA: image project '%.32s' != required '%s' — wrong lineage, REJECTED",
+          img_desc->project_name,
+          CONFIG_ML_OTA_REQUIRE_PROJECT);
+        free(buf);
+        esp_ota_abort(ota_handle);
+        s_ota_in_progress = false;
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Wrong firmware lineage (project mismatch) — rejected");
+        return ESP_FAIL;
+      }
     }
 
     remaining -= recv_len;

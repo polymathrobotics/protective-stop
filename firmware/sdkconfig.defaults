@@ -231,3 +231,7 @@ CONFIG_COMPILER_OPTIMIZATION_ASSERTIONS_ENABLE=y
 # Trim bootloader chatter (was INFO).
 CONFIG_BOOTLOADER_LOG_LEVEL_WARN=y
 CONFIG_LWIP_DHCP_RESTORE_LAST_IP=y
+
+# Wrong-lineage OTA backstop: refuse any image that is not the remote app
+# (symmetric with machn CONFIG_ML_OTA_REQUIRE_PROJECT). Empty = disabled.
+CONFIG_ML_OTA_REQUIRE_PROJECT="pstop_remote"
