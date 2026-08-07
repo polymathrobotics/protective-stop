@@ -64,7 +64,7 @@ target_link_libraries(${PROJECT_NAME}
     diagnostic_updater::diagnostic_updater
     ${lifecycle_msgs_TARGETS}
     ${diagnostic_msgs_TARGETS}
-    ${protective_stop_msgs_TARGETS}
+    ${protective_stop_msg_TARGETS}
     ${PROJECT_NAME}_parameters
   PRIVATE
     rclcpp_components::component

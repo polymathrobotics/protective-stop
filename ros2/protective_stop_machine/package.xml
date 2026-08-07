@@ -17,7 +17,7 @@
   <depend>lifecycle_msgs</depend>
   <depend>diagnostic_updater</depend>
   <depend>diagnostic_msgs</depend>
-  <depend>protective_stop_msgs</depend>
+  <depend>protective_stop_msg</depend>
   <depend>libcurl-dev</depend>
 
   <test_depend>ament_cmake_gtest</test_depend>

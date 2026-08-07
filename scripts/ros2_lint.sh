@@ -32,8 +32,7 @@ STYLE_PKG="ros2/protective_stop_machine"
 # All ament_cmake packages get xmllint + lint_cmake.
 CMAKE_PKGS=(
   "ros2/protective_stop_machine"
-  "ros2/protective_stop_msgs"
-  "archive/protective_stop_msg"
+  "ros2/protective_stop_msg"
   "archive/protective_stop_node"
 )
 

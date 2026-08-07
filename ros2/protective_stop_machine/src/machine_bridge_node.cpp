@@ -19,11 +19,11 @@
 namespace protective_stop_machine
 {
 
-using ProtectiveStopStatus = protective_stop_msgs::msg::ProtectiveStopStatus;
-using ProtectiveStopHeartbeat = protective_stop_msgs::msg::ProtectiveStopHeartbeat;
-using MachineRelayStatus = protective_stop_msgs::msg::MachineRelayStatus;
-using BondedRemoteArray = protective_stop_msgs::msg::BondedRemoteArray;
-using BondedRemote = protective_stop_msgs::msg::BondedRemote;
+using ProtectiveStopStatus = protective_stop_msg::msg::ProtectiveStopStatus;
+using ProtectiveStopHeartbeat = protective_stop_msg::msg::ProtectiveStopHeartbeat;
+using MachineRelayStatus = protective_stop_msg::msg::MachineRelayStatus;
+using BondedRemoteArray = protective_stop_msg::msg::BondedRemoteArray;
+using BondedRemote = protective_stop_msg::msg::BondedRemote;
 
 // The timing.* safety floors (SR-M-01) are enforced declaratively by the
 // generated ParamListener — the bounds<>/gt_eq<> ranges in
