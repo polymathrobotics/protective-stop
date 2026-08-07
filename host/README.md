@@ -71,6 +71,11 @@ what (and which one caused a stop or owns the arming cycle).
 
 ## USB tether — one-time host setup (read this first)
 
+> The canonical, cross-platform version of this setup — including Windows
+> and macOS notes and the subnet gotcha — is
+> [`docs/USB_NCM_SETUP.md`](../docs/USB_NCM_SETUP.md). The Linux steps below
+> are the same procedure kept here for convenience.
+
 Plugging a pstop into a Linux host does NOT give you a working network
 link out of the box, and the failure mode is misleading: the laptop's
 new "wired" connection sits in *connecting…* forever while the unit
