@@ -51,7 +51,7 @@ static atomic_bool s_want_up = false; /* admin intent — survives a NO_MEM   */
 static bool s_inited = false; /* driver + netif created by us */
 static esp_netif_t * s_sta = NULL;
 static ml_config_wifi_list_t * s_list = NULL; /* configured networks (PSRAM) */
-static int s_idx = 0; /* which list entry we're trying */
+static atomic_int s_idx = 0; /* which list entry we're trying (atomic: read by dcs_wifi_status from the httpd task) */
 static atomic_int s_disc_reason = 0; /* last STA_DISCONNECTED reason  */
 static atomic_int s_connected = 0; /* associated (pre-DHCP) flag    */
 static esp_timer_handle_t s_reconnect_timer = NULL; /* one-shot paced retry */
@@ -71,7 +71,7 @@ void dcs_wifi_status(int * reason, int * connected, int * idx, int * count)
     *count = (s_list != NULL) ? s_list->count : 0;
   }
   if (idx != NULL) {
-    *idx = ((s_list != NULL) && (s_list->count != 0)) ? (s_idx % s_list->count) : -1;
+    *idx = ((s_list != NULL) && (s_list->count != 0)) ? (atomic_load(&s_idx) % s_list->count) : -1;
   }
 }
 
@@ -81,7 +81,7 @@ static void apply_creds_and_connect(void)
 {
   char ssid[33] = {0}, pass[65] = {0};
   if ((s_list != NULL) && (s_list->count > 0)) {
-    int i = s_idx % s_list->count;
+    int i = atomic_load(&s_idx) % s_list->count;
     (void)snprintf(ssid, sizeof(ssid), "%s", s_list->entries[i].ssid);
     (void)snprintf(pass, sizeof(pass), "%s", s_list->entries[i].pass);
   } else {
@@ -173,7 +173,7 @@ static void on_wifi_evt(void * arg, esp_event_base_t base, int32_t id, void * da
       atomic_store(&s_disc_reason, ((wifi_event_sta_disconnected_t *)data)->reason);
     }
     if ((s_list != NULL) && (s_list->count > 1)) {
-      s_idx++; /* try the next network */
+      (void)atomic_fetch_add(&s_idx, 1); /* try the next network */
     }
     schedule_reconnect(); /* paced retry, not thrash */
   } else {
@@ -255,7 +255,7 @@ static esp_err_t wifi_set_enabled_locked(bool on)
     if ((s_list != NULL) && (!ml_config_get_wifi_list(s_list))) {
       s_list->count = 0;
     }
-    s_idx = 0;
+    atomic_store(&s_idx, 0);
 
     esp_err_t merr = esp_wifi_set_mode(WIFI_MODE_STA);
     if (merr != ESP_OK) {
