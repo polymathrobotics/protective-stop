@@ -101,10 +101,19 @@
 
 /* Reply-loss watchdog, per session. If a machine stops replying for longer
  * than this, that link has desynced and won't recover on its own — re-bond
- * that session to re-sync counters. Must exceed the machine heartbeat
- * timeout (1000 ms) plus normal jitter so healthy single-reply drops never
- * trigger it. Other sessions are untouched. */
-#define REBOND_AFTER_MS 1500u
+ * that session to re-sync counters. Other sessions are untouched.
+ *
+ * MUST exceed the machine's heartbeat timeout + jitter, so the remote only
+ * tears the session AFTER machn would itself have dropped the bond — never on
+ * a sub-timeout reply blip. That timeout is now `heartbeat_ms × max_missed`
+ * = 400 × 5 = 2000 ms (raised 3→5 on 2026-08-04). The old value (1500 ms) was
+ * set against the legacy 1000 ms timeout and was NOT updated with max_missed,
+ * so it dropped BELOW the machine timeout: a ~1.6 s reply lag (e.g. a peer-join
+ * X25519/DISCO crypto burst time-sharing the wg_mgr decrypt task) forced a
+ * nuisance rebond even though machn still held the bond. 2500 ms = 2000 + 500
+ * jitter margin restores the invariant. Safety is unaffected — machn's 2.0 s
+ * timeout remains the STOP authority; this only governs connectivity re-sync. */
+#define REBOND_AFTER_MS 2500u
 
 /* Bond handshake, per session: one BOND in flight at a time; retry after
  * this long without a reply. Long spacing means we never have more than one
@@ -626,7 +635,8 @@ static uint32_t sess_send_period_ms(const pstop_sess_t * s)
 
 /* Reply-loss watchdog threshold: replies arrive once per transmit, so the
  * threshold scales with the adopted send period (4 missed replies), floored
- * at the legacy 1500 ms that the full-rate link was validated with. */
+ * at REBOND_AFTER_MS (2500 ms — kept above the machine's 2.0 s heartbeat
+ * timeout so a sub-timeout blip never forces a rebond). */
 static uint64_t sess_rebond_after_ms(const pstop_sess_t * s)
 {
   uint64_t t = (uint64_t)sess_send_period_ms(s) * 4u;
