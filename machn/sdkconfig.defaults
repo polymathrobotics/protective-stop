@@ -85,6 +85,12 @@ CONFIG_FREERTOS_GENERATE_RUN_TIME_STATS=y
 CONFIG_FREERTOS_VTASKLIST_INCLUDE_COREID=y
 
 # WiFi
+# Internal-RAM Phase 3 (2026-08-08): WiFi static TX buffers 16 -> 6, matching the
+# remote (firmware/sdkconfig.defaults). Returns ~16 KB internal DMA at
+# esp_wifi_init so WiFi fits alongside the resident USB-NCM stack (OOM-panic fix;
+# paired with the dcs_wifi.c WIFI_MIN_INTERNAL_HEAP guard, a shared component).
+# TX-side only; RX ring left at stock to protect the WPA2 EAPOL handshake.
+CONFIG_ESP_WIFI_STATIC_TX_BUFFER_NUM=6
 CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM=10
 CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM=32
 CONFIG_ESP_WIFI_AMPDU_TX_ENABLED=y
