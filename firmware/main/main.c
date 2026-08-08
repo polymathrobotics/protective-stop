@@ -779,14 +779,18 @@ static void sess_drain(pstop_sess_t * s)
 static uint32_t g_sf_txdrv_recovered;
 
 /* Max immediate retries on a TRANSIENT uplink-driver refusal (ERR_IF, errno -1
- * — e.g. USB-NCM all IN NTBs momentarily in-flight). Each retry yields 1 ms
- * (FreeRTOS HZ=1000) so the lower-priority TinyUSB task can complete a bulk-IN
- * transfer and return an NTB to the free list; the resend then succeeds within
- * the SAME 200 ms send tick, so the machine never sees a heartbeat gap. Bounded
- * at 3 (<= 3 ms << the 200 ms period and << the machine's ~1.2 s timeout), and
- * gated on ERR_IF ONLY — a genuinely dead link (route/ENOMEM) still fails on the
- * first attempt, so dead-link detection latency is UNCHANGED. */
-#define PSTOP_TX_RETRY_MAX 3
+ * — e.g. USB-NCM all IN NTBs momentarily in-flight). Each retry yields so the
+ * lower-priority (prio 5, core 1) TinyUSB task can complete a bulk-IN transfer
+ * and return an NTB to the free list; the resend then succeeds within the SAME
+ * send tick, so the machine never sees a heartbeat gap. Raised 3 -> 6 (with a
+ * 1 ms→2 ms backoff, ~9 ms worst case) after a soak at ~70 % core-1 load showed
+ * bursts outrunning the old ~3 ms window (pstop_sf_txdrv=9): at high load the
+ * prio-5 USB task is slow to drain, so a wider window is needed to absorb the
+ * transient. Still ≪ the 200 ms period and ≪ the machine's ~2.0 s timeout
+ * (400 ms × max_missed 5). Gated on ERR_IF ONLY — a genuinely dead link
+ * (route/ENOMEM) still fails on the first attempt, so dead-link detection
+ * latency is UNCHANGED. */
+#define PSTOP_TX_RETRY_MAX 6
 
 static bool sess_sendto(pstop_sess_t * s, const uint8_t * bytes)
 {
@@ -802,7 +806,7 @@ static bool sess_sendto(pstop_sess_t * s, const uint8_t * bytes)
     if (errno != -1) {
       return false; /* not ERR_IF (route / ENOMEM / other): fail fast, never spin */
     }
-    vTaskDelay(1); /* yield 1 ms so the prio-5 USB task can free an IN NTB */
+    vTaskDelay((attempt < 3) ? 1 : 2); /* yield so the prio-5 USB task frees an IN NTB; widen as a burst persists */
   }
   return false; /* still ERR_IF after the bounded retries -> counted as g_sf_txdrv */
 }
