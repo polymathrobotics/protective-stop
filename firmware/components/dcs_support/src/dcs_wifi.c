@@ -56,9 +56,12 @@ static const char * TAG = "dcs_wifi";
  * this floor turns that OOM crash into the same safe, retried deferral the
  * esp_wifi_init-error path already takes. Conservative + tunable: set above the
  * ~73 KB panic point; reachable once mbedTLS frees its ~50 KB of dynamic
- * buffers when TLS is idle. The deeper fix (fitting WiFi alongside a resident
- * USB-NCM stack) is the Internal-RAM Phase-3 work. */
-#define WIFI_MIN_INTERNAL_HEAP (90u * 1024u)
+ * buffers when TLS is idle. Re-tuned 90 KB -> 72 KB after Internal-RAM Phase 3
+ * (2026-08-08) trimmed the WiFi static TX buffers 16 -> 6 (~16 KB less internal
+ * footprint), so WiFi now fits at a lower free-internal level; 72 KB still
+ * leaves a safe post-init margin (init needs ~34 KB after Phase 3) and stays
+ * above the reduced danger zone. */
+#define WIFI_MIN_INTERNAL_HEAP (72u * 1024u)
 
 static atomic_bool s_enabled = false; /* driver running (gates on_wifi_evt) */
 static atomic_bool s_want_up = false; /* admin intent — survives a NO_MEM   */
