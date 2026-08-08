@@ -183,7 +183,7 @@ and the Annex A technique tables (comparison / dynamic principles).
 | MC-1 machine core (20) | `machn` dual-core RX lockstep: both decode+decide, comparator agrees or withholds reply (`main.c:445-463`) | **95 %** — comparison, Annex A Table A.4 (capped by shared-silicon β, §6) | 19 | 1 | DU-3(analogue) |
 | MC-2 relay weld (15) | Per-contact resistor-divider feedback → contradiction ≥ `RELAY_FAULT_STOP_TICKS` (~1 s) forces STOP (`main.c:313-357,486-497`); **series** partner still opens the chain | **90 %** — Medium; output-feedback + 1oo2 series. **Residual = double-weld** (both contacts, commanded-closed) latent to next demand → proof-test governed | 13.5 | 1.5 | FMEA §5 latent weld |
 | MC-3 feedback divider (1) | Divider fault shows as a persistent contradiction (self-diagnosing) | **90 %** — Medium | 0.9 | 0.1 | — |
-| MC-4 machine clock frozen (3) | **NONE** — `check_heartbeats` silently skips when `now ≤ last_timestamp` (`machine.c:282`); no independent clock check | **0 %** — the whole liveness case rests on this one clock (FMEA DU-2) | 0 | 3.0 | **DU-2** |
+| MC-4 machine clock frozen (3) | ~~**NONE**~~ **[Reconciled 2026-08-07: clock-freeze guard now landed — SR-H-04/SR-H-04b `clock_guard`, DU-2 CLOSED; the 0 %/3.0 below is the stale pre-mitigation value, recompute pending — see §5 banner]** | **0 %** (stale) — was: whole liveness case rests on one clock (FMEA DU-2) | 0 | 3.0 | **DU-2** |
 | **Machine channel** | | **DC ≈ 86 %** | **33.4** | **5.6** | |
 
 **Undetected remainder ↔ FMEA DU register.** The λ_DU cells above are exactly
@@ -195,6 +195,18 @@ reason coverage cannot be claimed at 99 %.
 ---
 
 ## 5. Roll-up — SFF, DC, PFH
+
+> **[Reconciled 2026-08-07 — the numbers below are a CONSERVATIVE pre-mitigation
+> snapshot, not yet recomputed.]** This roll-up predates the **DU-1** (SR-R-09
+> GPIO pad re-verify) and **DU-2** (SR-H-04 machine clock-freeze guard) code
+> mitigations, both now landed and CLOSED (see OPEN_ITEMS / SAFETY_REQUIREMENTS).
+> The MC-4 machine-clock row (§4: DC = 0 %, λ_DU = 3.0 — the β≈1 term that
+> **dominates the PFH**) and the DU-1 pad-config term are therefore
+> stale-pessimistic: with the guards in place those λ_DU move toward λ_DD,
+> lifting SFF toward ≥ 99 % and dropping PFH by roughly 5×. **These figures
+> UNDERSTATE the achieved integrity.** A re-run crediting the mitigations is
+> pending — do it together with the real-part-number firm-up (OPEN_ITEMS §8) so
+> it is done once with defensible λ data.
 
 ### 5.1 Per-channel and per-subsystem
 

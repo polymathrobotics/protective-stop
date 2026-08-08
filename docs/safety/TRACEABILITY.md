@@ -78,13 +78,13 @@ Test-file shorthand:
 |---|---|---|---|---|---|
 | SR-R-01 | F-R-01 | `main.c:265-290` (`estop_channel_closed`) | EV #1/#2 (both-phase truth table; every fault→STOP), 100% MC-DC on `estop_verdict.c` | Test + Insp | **Verified** |
 | SR-R-02 | F-R-02 | `main.c:304-306,340-348` | EV #2 (arith-image select; no fault manufactures OK), MC-DC | Test + MC/DC | **Verified** |
-| SR-R-03 | F-R-02 | `main.c:305/307` | EV #3 proves **equivalence** (core0==core1), **not** the required object-code non-identity / identical-fault-injection. Object-code diff **NOT** build-gated | Fault-inj + obj-diff | **Unverified-gap** |
+| SR-R-03 | F-R-02 | `main.c:305/307` | [Reconciled 2026-08-07] Object-code diff gate now shipped + CI-wired (`scripts/check_estop_diversity.sh`, `firmware-build.yml`; `d96129c`, DU-3 CLOSED). EV #3 proves equivalence; the object-code non-identity leg is now tested. Residual: identical-logic-fault-injection divergence still owed | Fault-inj + obj-diff | **Partially-verified** |
 | SR-R-04 | F-R-02 | `main.c:340-348` (STOP-only override) | EV #2 (health/debounce never lowers to OK) | Test + MC/DC | **Verified** |
 | SR-R-05 | F-R-03 | `main.c:323-347` | EV #1 (OPEN→STOP same tick; only reclose debounced) | Test | **Verified** |
 | SR-R-06 | F-R-03 | `main.c:359-363,903` (`estop_primed`) | EV #4/#4b (primed only when both cores settle), HIL30 (cold boot no re-arm; held-open→STOP flows) | Test | **Verified** |
 | SR-R-07 | F-R-04 | `main.c:887-903` (transmit-on-agreement) | HIL20 (single-channel divergence → comparator silent → machine liveness STOP; no STOP on wire) | Test + Fault-inj | **Verified** |
 | SR-R-08 | F-R-04 | (relies on libc `memcmp`) | **NO TEST** — per-offset positive-diff self-test absent (DU-7) | Fault-inj | **Unverified-gap** |
-| SR-R-09 | F-R-01 | pad config set once `main.c:229-247`, never re-verified | **NO TEST** — periodic GPIO re-verify not implemented (DU-1, highest priority) | Fault-inj | **Unverified-gap** |
+| SR-R-09 | F-R-01 | periodic pad-config read-back + drive-low self-test → controlled reset (`gpio_cfg_fault`); `1cfbd9a` | [Reconciled 2026-08-07] Implemented + logic host-reasoned; DU-1 CLOSED (`CLOCK_GUARD_AND_GPIO_REVERIFY.md`). Residual: on-bench corruption of a *live* pad config is bench-blocked | Fault-inj | **Partially-verified** |
 | SR-R-10 | F-R-01 | not implemented | **NO TEST** — common-cause pull-down detection absent (DU-6) | Fault-inj + Analysis | **Unverified-gap** |
 | SR-R-11 | F-R-01 | `ESTOP_SETTLE_US` bench constant | **NO TEST** — settle-vs-deployed-cable characterization absent (DU-8) | Analysis + Test | **Unverified-gap** |
 | SR-R-12 | F-R-05, F-P-01 | single shared encode image | **NO TEST** — golden-vector encode test absent (DU-5) | Test + Fault-inj | **Unverified-gap** |
@@ -98,8 +98,8 @@ Test-file shorthand:
 |---|---|---|---|---|---|
 | SR-H-01 | F-H-03, F-P-03 | `machine.c:290-298`; host `machine_app_runner.c:721` | MR[C] I2 (silence→STOP), MR[F] (timeout→STOP), HIL20/30 liveness | Test | **Verified** |
 | SR-H-02 | F-H-02 | `machine_app_runner.c:375-379,834-844,666` | MR[A] A2a/A2b/A4 I4 (short cycle refused), HIL10 (short blip defers) | Test | **Verified** |
-| SR-H-03 | F-H-02 | `machine_app_runner.c:228-241` (`cfg_load` raw `parse_uint`, no floor) | **NO TEST** — host safety-envelope clamp not implemented (DU-4, cheap/high value) | Test | **Unverified-gap** |
-| SR-H-04 | F-H-03, F-P-03 | `machine.c:282` (skips when `now ≤ last`); no independent clock | **NO TEST** — frozen/backward-clock detection absent (DU-2, highest priority) | Fault-inj | **Unverified-gap** |
+| SR-H-03 | F-H-02 | host `cfg_validate` refuses unsafe timing at startup (`machine_app_runner.c:656+`) | [Reconciled 2026-08-07] `tools/test_config_floor.py` 7/7 (rejects `min_stop_ms=0`, out-of-envelope heartbeat/max_missed); DU-4 CLOSED | Test | **Verified** |
+| SR-H-04 | F-H-03, F-P-03 | machine-side clock-freeze guard (`clock_guard`, host + machn; SR-H-04b `machine_app_runner.c:332`) | [Reconciled 2026-08-07] Pure unit-tested `clock_guard` (host) + machn HIL (`MACHN_CLOCK_GUARD_HIL.md`); DU-2 CLOSED. Residual: genuine esp_timer-freeze can't be injected on unmodified silicon (proven on remote analog) | Fault-inj | **Verified** |
 | SR-H-05 | F-H-05 | `pstop_c` OR property | MR[B/D/E] (OR, ownership, ghost bond). Random-fault ghost-bond masking unquantified | Test | **Partially-verified** |
 | SR-H-06 | F-H-01 | `machine_app_runner.c:752-757` (pre-dispatch filter) | MR[F] F3 (out-of-range type: no crash, no spurious arm), MR[E] allowlist | Insp + Test | **Verified** |
 
@@ -129,16 +129,16 @@ Test-file shorthand:
 
 ### 3.1 Headline numbers
 
-- **(a) SRs with ≥1 passing verifying test: 28 / 40 = 70.0 %** (was 27/39
-  before SR-SYS-09 was added; SR-M-01 + SR-M-03 gained verifying ROS 2 tests
-  2026-08-02).
-  (15 Verified + 12 Partially-verified + 1 Residual-with-test [SR-M-06]. The
-  remaining Residual [SR-M-04] is inspection-only; the 11 Unverified-gap SRs
+- **(a) SRs with ≥1 passing verifying test: 32 / 40 = 80.0 %** [Reconciled
+  2026-08-07: +4 as DU-1/2/3/4 closures gained tests — SR-H-03/SR-H-04 now
+  Verified, SR-R-03/SR-R-09 now Partially-verified].
+  (17 Verified + 14 Partially-verified + 1 Residual-with-test [SR-M-06]. The
+  remaining Residual [SR-M-04] is inspection-only; the 7 Unverified-gap SRs
   have no test.)
-  **Strict, fully-verified only: 15 / 40 = 37.5 %.** This is the honest number
-  for "requirement completely discharged by test" — the 12 Partials each leave a
-  named leg (end-to-end, quantification, golden-vector/replay, or the new
-  operator-list config plumbing) untested.
+  **Strict, fully-verified only: 17 / 40 = 42.5 %.** This is the honest number
+  for "requirement completely discharged by test" — the 14 Partials each leave a
+  named leg (end-to-end, quantification, golden-vector/replay, fault-injection
+  divergence, or the operator-list config plumbing) untested.
 
 - **(b) Safety functions F-xx traced to ≥1 SR: 22 / 27 = 81.5 %.**
   Five functions carry **no** requirement (§5): F-R-08, F-R-10 (both declared
@@ -151,11 +151,11 @@ Test-file shorthand:
 | Area | Count | Verified | Partially-verified | Unverified-gap | Residual-accepted | ≥1-test % | Fully-verified % |
 |---|---|---|---|---|---|---|---|
 | SR-SYS | 9 | 2 | 6 | 1 | 0 | 88.9 % | 22.2 % |
-| SR-R | 15 | 6 | 1 | 8 | 0 | 46.7 % | 40.0 % |
-| SR-H | 6 | 3 | 1 | 2 | 0 | 66.7 % | 50.0 % |
+| SR-R | 15 | 6 | 3 | 6 | 0 | 60.0 % | 40.0 % |
+| SR-H | 6 | 5 | 1 | 0 | 0 | 100 % | 83.3 % |
 | SR-M | 6 | 3 | 1 | 0 | 2 | 83.3 %† | 50.0 % |
 | SR-I | 4 | 1 | 3 | 0 | 0 | 100 % | 25.0 % |
-| **Total** | **40** | **15** | **12** | **11** | **2** | **70.0 %** | **37.5 %** |
+| **Total** | **40** | **17** | **14** | **7** | **2** | **80.0 %** | **42.5 %** |
 
 † SR-M ≥1-test counts SR-M-01/03/05 (Verified) + SR-M-02 (Partial) + SR-M-06
 (Residual-with-test) = 5/6 = 83.3 % (SR-M-01/03 verified 2026-08-02).
@@ -179,10 +179,10 @@ Partial→Verified closers; **P3** = requirements-completeness holes (§5).
 
 | Rank | SR | Gap | DU / cross-ref | Work needed |
 |---|---|---|---|---|
-| **P0-1** | SR-H-03 | Host accepts unsafe timing config (no floor) | **DU-4** (cheapest) | Implement compiled envelope in `cfg_load`; test rejects `min_stop_ms=0`, huge heartbeat |
-| **P0-2** | SR-R-09 | GPIO pad config never re-verified → false-OK | **DU-1** (top) | Implement periodic register read-back + drive-low self-test; fault-injection test |
-| **P0-3** | SR-H-04 | Frozen/backward clock disables heartbeat | **DU-2** (top), SR-I-03 | Independent clock / HW watchdog; freeze-clock fault-injection → STOP |
-| **P0-4** | SR-R-03 | Compiler may erase Option-B diversity | **DU-3** | Object-code diff gate **or** compile-diverse TUs + identical-fault-injection test (EV #3 proves equivalence, not this) |
+| ~~P0-1~~ | SR-H-03 | ~~Host accepts unsafe timing config~~ **DONE 2026-08-02** (`cfg_validate` + `test_config_floor.py` 7/7) | **DU-4** CLOSED | ✅ compiled envelope in host `cfg_load`; rejects unsafe values |
+| ~~P0-2~~ | SR-R-09 | ~~GPIO pad config never re-verified~~ **DONE** (`1cfbd9a`; `gpio_cfg_fault`) | **DU-1** CLOSED | ✅ periodic read-back + drive-low self-test → reset. Residual: live-corruption fault-injection bench-blocked |
+| ~~P0-3~~ | SR-H-04 | ~~Frozen/backward clock disables heartbeat~~ **DONE** (`clock_guard` host + machn HIL) | **DU-2** CLOSED | ✅ clock-freeze guard → STOP; HIL-validated |
+| ~~P0-4~~ | SR-R-03 | ~~Compiler may erase Option-B diversity~~ **DONE** (`check_estop_diversity.sh` CI gate, `d96129c`) | **DU-3** CLOSED | ✅ object-code diff gate. Residual: identical-fault-injection divergence test |
 | **P0-5** | SR-R-08 | `memcmp` mis-returns equal undetected | **DU-7** | Per-offset positive-diff self-test (40 offsets) |
 | **P0-6** | SR-R-12 | Common-mode encode fault | **DU-5**, SR-I-01 | Golden-vector encode test + second encoder image |
 | P1-1 | SR-R-14 | VPN-drop → dark path (implemented, untested) | FMEA R06-3 | VPN-drop regression test |
