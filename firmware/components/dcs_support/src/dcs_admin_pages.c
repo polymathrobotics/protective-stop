@@ -141,6 +141,12 @@ static esp_err_t page_state(httpd_req_t * req)
   }
 
   uint32_t heap_min_internal = atomic_load(&g_dcs_heap_min_internal);
+  /* Instantaneous INTERNAL-SRAM health, alongside the lifetime watermark:
+     * heap_free_int trends down over hours = leak; heap_lfb_int (largest free
+     * block) shrinking while free holds = fragmentation. The watermark alone
+     * cannot distinguish a boot transient from either. */
+  uint32_t heap_free_int = (uint32_t)heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+  uint32_t heap_lfb_int = (uint32_t)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL);
   uint32_t pbuf_fails = wireguardif_pbuf_alloc_fails;
 
   extern uint32_t ml_wg_mgr_get_dedup_drops(void);
@@ -205,7 +211,8 @@ static esp_err_t page_state(httpd_req_t * req)
      * internal heap which runs tight on this build). */
   enum
   {
-    JSON_CAP = 3712 /* eth-watchdog fields + bonded-remote stop_only + operator list */
+    JSON_CAP = 3776 /* eth-watchdog fields + bonded-remote stop_only + operator list
+                       + instantaneous internal-heap fields (heap_free_int/heap_lfb_int) */
   };
 
   char * buf = heap_caps_malloc(JSON_CAP, MALLOC_CAP_SPIRAM);
@@ -244,7 +251,8 @@ static esp_err_t page_state(httpd_req_t * req)
     "rebonds\":%lu,"
     "\"pstop_rtt_ms\":%lu,\"pstop_last_reply_ms\":%llu,"
     "\"rssi\":%d,\"tx_q\":%d,\"free_heap\":%lu,\"largest\":%lu,"
-    "\"heap_min_int\":%lu,\"wg_pbuf_fails\":%lu,\"wg_dedup_drops\":%lu,"
+    "\"heap_min_int\":%lu,\"heap_free_int\":%lu,\"heap_lfb_int\":%lu,"
+    "\"wg_pbuf_fails\":%lu,\"wg_dedup_drops\":%lu,"
     "\"gw_rtt_ms\":%lu,\"gw_rtt_max_ms\":%lu,\"gw_ok\":%lu,\"gw_loss\":%lu,"
     "\"inet_down\":%d,\"inet_silent_ms\":%lu,"
     "\"rst_hist\":%s,\"ota_state\":%d,\"pstop_num\":%d,"
@@ -325,6 +333,8 @@ static esp_err_t page_state(httpd_req_t * req)
     (unsigned long)free_heap,
     (unsigned long)largest,
     (unsigned long)heap_min_internal,
+    (unsigned long)heap_free_int,
+    (unsigned long)heap_lfb_int,
     (unsigned long)pbuf_fails,
     (unsigned long)wg_dedup_drops,
     (unsigned long)gw_rtt,
