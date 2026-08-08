@@ -43,10 +43,20 @@ either match the subnet or repoint the chip with
 
 ---
 
-## Linux (Ubuntu / NetworkManager) — verified
+## Linux — verified
 
-Two files fix this permanently. Both ship in [`host/`](../host/) (and
-[`host/setup/`](../host/setup/)).
+**Easiest: run the installer.** It auto-detects the host's network manager
+(NetworkManager *or* systemd-networkd) and installs the matching variant,
+plus the manager-agnostic interface-naming rule:
+
+```sh
+host/setup/install.sh
+```
+
+Replug the unit afterward so the `esp-pstop0` rename takes effect. The manual
+steps for each manager, if you prefer them:
+
+### NetworkManager
 
 **1. Pin every pstop to one predictable interface name (`esp-pstop0`).**
 Keyed on the USB VID:PID so it holds across units and across reboots, and
@@ -54,7 +64,7 @@ sorts before the default `73-usb-net-by-mac.link` (first match wins), so the
 interface is never the per-unit `enx<mac>` name:
 
 ```sh
-sudo cp host/70-esp-pstop.link /etc/systemd/network/
+sudo cp host/setup/70-esp-pstop.link /etc/systemd/network/
 sudo udevadm control --reload
 ```
 
@@ -70,8 +80,36 @@ sudo nmcli con add type ethernet ifname esp-pstop0 con-name esp-pstop \
 Replug the unit. Within a few seconds the host takes `10.42.0.1`, the chip
 DHCPs `10.42.0.x`, and its active uplink switches to USB.
 
-**Caveat:** only the *first* unit plugged in gets `esp-pstop0`; simultaneous
-extra units fall back to `enx<mac>` names and each needs its own profile.
+### systemd-networkd (no NetworkManager)
+
+Hosts running systemd-networkd (common on HIL / fleet hosts) need the
+`nmcli`-free equivalent — a NetworkManager "shared" profile has no effect
+there. Install the `70-esp-pstop.link` naming rule as above, then:
+
+```sh
+sudo cp host/setup/80-esp-pstop.network /etc/systemd/network/
+sudo cp host/setup/esp-pstop-flush-networkd /etc/networkd-dispatcher/routable.d/esp-pstop-flush
+sudo cp host/setup/esp-pstop-flush-networkd /etc/networkd-dispatcher/degraded.d/esp-pstop-flush
+sudo chmod +x /etc/networkd-dispatcher/routable.d/esp-pstop-flush \
+              /etc/networkd-dispatcher/degraded.d/esp-pstop-flush
+sudo systemctl enable --now networkd-dispatcher   # GOTCHA below
+sudo networkctl reload
+```
+
+`80-esp-pstop.network` gives the host `10.42.0.1/24`, runs the built-in DHCP
+server, and NATs the link out (`ConfigureWithoutCarrier=yes`, so it is ready
+before the chip even enumerates). **Gotcha:** the `networkd-dispatcher`
+package is often *installed but its service disabled* — then the neighbor-cache
+flush hook never fires and the tether can need a manual `ip neigh flush` or a
+power-cycle after a re-enumeration; the `systemctl enable --now` above fixes
+it (or replace the dispatcher hook with a udev-triggered oneshot to drop the
+dependency). Verified on a systemd-networkd HIL host 2026-08-08: the tether
+self-heals unattended across the chip's re-enumerations (interface, neighbor
+table, DHCP lease, ping, and HTTP all recover).
+
+**Caveat (both managers):** only the *first* unit plugged in gets
+`esp-pstop0`; simultaneous extra units fall back to `enx<mac>` names and each
+needs its own profile/match.
 
 Background on why the naming rule (not just a MAC-keyed profile) is required
 is in [`USB_NCM_STABILITY.md`](USB_NCM_STABILITY.md).

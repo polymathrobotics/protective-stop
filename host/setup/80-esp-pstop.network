@@ -1,0 +1,33 @@
+# SPDX-FileCopyrightText: 2026 Polymath Robotics
+# SPDX-License-Identifier: Apache-2.0
+#
+# systemd-networkd equivalent of the NetworkManager "shared" profile for the
+# pstop USB-NCM tether: the HOST owns the link (static address + built-in DHCP
+# server + NAT the chip's traffic out). Use this on hosts running
+# systemd-networkd (no NetworkManager). Install to /etc/systemd/network/.
+#
+# Matches the stable name that 70-esp-pstop.link assigns; that rename applies on
+# the tether's next re-enumeration (power-cycle/replug), so until then the chip
+# still appears as enx<mac> — replug once after install.
+#
+# Subnet note: 10.42.0.0/24 matches the chip's factory-default machine peer
+# (10.42.0.1:8890), so a machine_app_runner ON THIS HOST auto-bonds with no
+# config. When the host is only an uplink (the chip bonds to a *remote* machine
+# over Tailscale, e.g. a HIL/fleet host), the subnet is arbitrary — any /24
+# works because the link is just NAT'd out.
+[Match]
+Name=esp-pstop0
+
+[Network]
+Address=10.42.0.1/24
+DHCPServer=yes
+IPMasquerade=ipv4
+# Bring the address/DHCP up even before the chip has enumerated/carrier is up,
+# so the tether is ready the instant the chip re-appears (self-heal across the
+# chip's re-enumerations).
+ConfigureWithoutCarrier=yes
+
+[DHCPServer]
+PoolOffset=100
+PoolSize=50
+EmitDNS=yes
