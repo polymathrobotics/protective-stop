@@ -216,7 +216,7 @@ static esp_err_t page_state(httpd_req_t * req)
     "\"gpio_cfg_fault\":%lu,"
     "\"load0\":%lu,\"load1\":%lu,"
     "\"e_hi0\":%lu,\"e_lo0\":%lu,\"e_hi1\":%lu,\"e_lo1\":%lu,"
-    "\"active_iface\":%d,\"eth_link\":%d,"
+    "\"active_iface\":%d,\"net_sup_kicks\":%lu,\"eth_link\":%d,"
     "\"eth_recoveries\":%lu,\"eth_rec_r1\":%lu,\"eth_rec_r2\":%lu,\"eth_rec_r3\":%lu,"
     "\"eth_rec_reason\":%lu,\"eth_spi_err\":%lu,"
     "\"eth_en\":%d,\"wifi_en\":%d,\"usbncm_en\":%d,"
@@ -256,6 +256,7 @@ static esp_err_t page_state(httpd_req_t * req)
     (unsigned long)atomic_load(&g_dcs_estop_high_ok[1]),
     (unsigned long)atomic_load(&g_dcs_estop_low_ok[1]),
     (int)atomic_load(&g_dcs_active_iface),
+    (unsigned long)dcs_net_supervisor_kicks(),
     dcs_eth_link_up() ? 1 : 0,
     (unsigned long)atomic_load(&g_dcs_eth_recoveries),
     (unsigned long)atomic_load(&g_dcs_eth_rec_r1),
@@ -517,6 +518,9 @@ static esp_err_t api_wifi_tx_power(httpd_req_t * req)
     (void)httpd_resp_set_type(req, "application/json");
     return httpd_resp_sendstr(req, "{\"ok\":false,\"error\":\"esp_wifi_set_max_tx_power failed\"}");
   }
+  /* Persist so the override survives power loss; re-applied at WIFI_EVENT_STA_START
+   * (dcs_wifi.c). Best-effort: a failed NVS write must not fail an applied change. */
+  (void)dcs_nvs_write_wifi_tx_power((uint8_t)q);
   int8_t now_q = 0;
   (void)esp_wifi_get_max_tx_power(&now_q);
   char buf[48];

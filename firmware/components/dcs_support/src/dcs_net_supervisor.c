@@ -28,13 +28,24 @@
 #include <stdatomic.h>
 
 #include "dcs_internal.h"
+#include "esp_eth.h"
+#include "esp_event.h"
 #include "esp_log.h"
 #include "esp_netif.h"
+#include "esp_timer.h"
+#include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "ml_app.h"
 
 static const char * TAG = "dcs_netsup";
+
+/* Event-driven demote: a link-DOWN event notifies the supervisor task so it
+ * re-arbitrates the default route immediately, instead of waiting up to one
+ * poll period. Only DOWN transitions kick — UP/promote stays on the periodic
+ * loop for natural anti-flap debounce (asymmetric by design). */
+static TaskHandle_t s_sup_task = NULL;
+static atomic_uint s_link_down_kicks = 0;
 
 #define SUPERVISOR_PERIOD_MS 1000
 
@@ -83,6 +94,26 @@ static esp_netif_t * netif_for(dcs_iface_t code)
   return esp_netif_get_handle_from_ifkey(dcs_iface_ifkey(code));
 }
 
+/* Link-DOWN event handler (runs in the esp_event task). Wakes the supervisor
+ * so it demotes off the dead link this instant rather than up to one period
+ * later. Route arbitration is idempotent, so a spurious kick is harmless. */
+static void link_down_kick(void * arg, esp_event_base_t base, int32_t id, void * data)
+{
+  (void)arg;
+  (void)base;
+  (void)id;
+  (void)data;
+  atomic_fetch_add(&s_link_down_kicks, 1u);
+  if (s_sup_task != NULL) {
+    (void)xTaskNotifyGive(s_sup_task); /* task-context give (not ISR) */
+  }
+}
+
+unsigned dcs_net_supervisor_kicks(void)
+{
+  return atomic_load(&s_link_down_kicks);
+}
+
 static void supervisor_task(void * arg)
 {
   (void)arg;
@@ -90,6 +121,11 @@ static void supervisor_task(void * arg)
   bool wifi_auto = false; /* WiFi tier is up because WE enabled it */
   uint32_t eth_bad_s = 0; /* Eth-unusable streak (gates USB bring-up) */
   uint32_t high_bad_s = 0, high_ok_s = 0; /* (Eth&&USB) down / (Eth||USB) up  */
+  /* The ladder streaks below count in *seconds*. Decouple that cadence from the
+   * wake frequency (link-down events can wake us mid-period) by advancing the
+   * ladder only when a real period has elapsed — route arbitration still runs
+   * on every wake, which is the whole point of the instant demote. */
+  int64_t last_ladder_us = esp_timer_get_time();
 
   for (;;) {
     esp_netif_t * eth = netif_for(DCS_IFACE_ETH);
@@ -130,22 +166,29 @@ static void supervisor_task(void * arg)
       /* no uplink and no SoftAP: stays DCS_IFACE_NONE */
     }
 
-    /* --- Streaks driving the ladder. --- */
-    if (eth_ok) {
-      eth_bad_s = 0u;
-    } else {
-      eth_bad_s++;
-    }
-    bool high_ok = eth_ok || usb_ok;
-    if (high_ok) {
-      high_ok_s++;
-      high_bad_s = 0u;
-    } else {
-      high_bad_s++;
-      high_ok_s = 0u;
-    }
+    /* Advance the seconds-based ladder only when a real period has elapsed, so
+     * event-driven wakes (the instant demote) don't over-count the streaks.
+     * Route arbitration above already ran on this (possibly event-driven) wake. */
+    const int64_t now_us = esp_timer_get_time();
+    if ((now_us - last_ladder_us) >= ((int64_t)SUPERVISOR_PERIOD_MS * 1000)) {
+      last_ladder_us = now_us;
 
-    /* --- USB-NCM tier: bring up when Ethernet is gone, then LEAVE IT UP. ---
+      /* --- Streaks driving the ladder. --- */
+      if (eth_ok) {
+        eth_bad_s = 0u;
+      } else {
+        eth_bad_s++;
+      }
+      bool high_ok = eth_ok || usb_ok;
+      if (high_ok) {
+        high_ok_s++;
+        high_bad_s = 0u;
+      } else {
+        high_bad_s++;
+        high_ok_s = 0u;
+      }
+
+      /* --- USB-NCM tier: bring up when Ethernet is gone, then LEAVE IT UP. ---
          * We deliberately never auto-drop USB-NCM. Runtime TinyUSB teardown
          * (ml_dev_tether_stop -> destroy netif -> next bring-up re-runs
          * tinyusb_net_init) leaked internal heap and raced on_usb_rx against
@@ -155,29 +198,30 @@ static void supervisor_task(void * arg)
          * arbitration above already demotes it to a dormant backup the instant
          * Ethernet returns (Eth route_prio 128 > USB-NCM 110). Robustness over a
          * few reclaimed KB on a safety device. */
-    if ((!eth_ok) && (eth_bad_s >= USB_FAILOVER_AFTER_S) && (!dcs_usb_is_enabled())) {
-      ESP_LOGW(TAG, "no Ethernet for %us — bringing up USB-NCM (stays resident)", (unsigned)eth_bad_s);
-      (void)dcs_usb_set_enabled(true);
-    }
+      if ((!eth_ok) && (eth_bad_s >= USB_FAILOVER_AFTER_S) && (!dcs_usb_is_enabled())) {
+        ESP_LOGW(TAG, "no Ethernet for %us — bringing up USB-NCM (stays resident)", (unsigned)eth_bad_s);
+        (void)dcs_usb_set_enabled(true);
+      }
 
-    /* --- WiFi tier — only when dcs_wifi owns the WiFi lifecycle (an
+      /* --- WiFi tier — only when dcs_wifi owns the WiFi lifecycle (an
          * alt-network won at boot). When ml_app owns WiFi (boot fell through to
          * it) ml_app also drives the SoftAP fallback, so we never touch it. --- */
-    if (dcs_boot_alt_network_won()) {
-      if ((!high_ok) && (high_bad_s >= WIFI_FAILOVER_AFTER_S) && (!dcs_wifi_is_enabled())) {
-        ESP_LOGW(TAG, "no Eth/USB for %us — bringing up WiFi", (unsigned)high_bad_s);
-        if (dcs_wifi_set_enabled(true) == ESP_OK) {
-          wifi_auto = true;
+      if (dcs_boot_alt_network_won()) {
+        if ((!high_ok) && (high_bad_s >= WIFI_FAILOVER_AFTER_S) && (!dcs_wifi_is_enabled())) {
+          ESP_LOGW(TAG, "no Eth/USB for %us — bringing up WiFi", (unsigned)high_bad_s);
+          if (dcs_wifi_set_enabled(true) == ESP_OK) {
+            wifi_auto = true;
+          }
+        } else if (high_ok && (high_ok_s >= FAILOVER_DROP_HOLD_S) && wifi_auto && dcs_wifi_is_enabled()) {
+          ESP_LOGW(TAG, "Eth/USB stable %us — dropping WiFi", (unsigned)high_ok_s);
+          if (dcs_wifi_set_enabled(false) == ESP_OK) {
+            wifi_auto = false;
+          }
+        } else {
+          /* ladder idle this tick */
         }
-      } else if (high_ok && (high_ok_s >= FAILOVER_DROP_HOLD_S) && wifi_auto && dcs_wifi_is_enabled()) {
-        ESP_LOGW(TAG, "Eth/USB stable %us — dropping WiFi", (unsigned)high_ok_s);
-        if (dcs_wifi_set_enabled(false) == ESP_OK) {
-          wifi_auto = false;
-        }
-      } else {
-        /* ladder idle this tick */
       }
-    }
+    } /* end elapsed-gated ladder */
 
     if (best_code != last_logged) {
       ESP_LOGI(TAG, "active interface: %s", best_lbl);
@@ -185,7 +229,10 @@ static void supervisor_task(void * arg)
     }
     atomic_store(&g_dcs_active_iface, (int)best_code);
 
-    vTaskDelay(pdMS_TO_TICKS(SUPERVISOR_PERIOD_MS));
+    /* Wake on a link-down kick (instant re-arbitrate / demote) OR the periodic
+     * poll, whichever comes first. pdTRUE clears the notification count so a
+     * burst of events collapses into one re-arbitration pass. */
+    (void)ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(SUPERVISOR_PERIOD_MS));
   }
 }
 
@@ -196,5 +243,14 @@ void dcs_net_supervisor_start(void)
      * esp_netif create/destroy) on auto-failover, which needs more stack than
      * the bare route-arbitration loop. */
   /* PSRAM stack: route supervisor is non-safety, does no flash/NVS. */
-  (void)dcs_task_spawn_psram(supervisor_task, "net_sup", 4608, NULL, 4, tskNO_AFFINITY);
+  s_sup_task = dcs_task_spawn_psram(supervisor_task, "net_sup", 4608, NULL, 4, tskNO_AFFINITY);
+
+  /* Event-driven demote: wake the supervisor the instant a link drops so it
+   * re-arbitrates off the dead link now, not up to one poll period later.
+   * DOWN transitions only — promote/UP stays on the periodic loop (anti-flap).
+   * Extra handlers coexist with dcs_eth / dcs_wifi's own; esp_event fans out. */
+  (void)esp_event_handler_instance_register(ETH_EVENT, ETHERNET_EVENT_DISCONNECTED, link_down_kick, NULL, NULL);
+  (void)esp_event_handler_instance_register(WIFI_EVENT, WIFI_EVENT_STA_DISCONNECTED, link_down_kick, NULL, NULL);
+  (void)esp_event_handler_instance_register(IP_EVENT, IP_EVENT_ETH_LOST_IP, link_down_kick, NULL, NULL);
+  (void)esp_event_handler_instance_register(IP_EVENT, IP_EVENT_STA_LOST_IP, link_down_kick, NULL, NULL);
 }
