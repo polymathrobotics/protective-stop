@@ -1230,7 +1230,21 @@ void wireguardif_periodic(struct netif *netif) {
 	// Perform the same work as wireguardif_tmr but from the caller's task context,
 	// avoiding heavy crypto (X25519, ChaCha20-Poly1305) on the lwIP TCPIP thread.
 	bool link_up = false;
-	for (x = 0; x < WIREGUARD_MAX_PEERS; x++) {
+	/* Pace the expensive X25519 handshake INITIATIONS so a burst (all peers
+	 * re-handshaking after a netmap resync on a full 128-peer table) cannot
+	 * monopolize this single call for seconds and starve the caller's
+	 * safety-heartbeat reply decrypt — root cause of a both-remotes rebond
+	 * under tailnet churn (ml_wg_mgr drains wg_rx only between calls). Cheap
+	 * per-peer work (reset / keepalive / link_up) still runs for every peer;
+	 * only the ~30 ms initiation is budgeted, round-robin across calls so every
+	 * peer is eventually serviced. An established bond has no initiation
+	 * pending, so the pinned safety peer is never itself delayed by the budget.
+	 * Budget 4 => <= ~120 ms of X25519 per call, well under the 2.0 s heartbeat
+	 * timeout and 2.5 s reply-loss rebond threshold. */
+	static uint16_t s_hs_resume = 0;
+	int hs_budget = 4;
+	for (int i = 0; i < WIREGUARD_MAX_PEERS; i++) {
+		x = (int)((s_hs_resume + (uint16_t)i) % (uint16_t)WIREGUARD_MAX_PEERS);
 		peer = &device->peers[x];
 		if (peer->valid) {
 			if (should_reset_peer(peer)) {
@@ -1246,7 +1260,7 @@ void wireguardif_periodic(struct netif *netif) {
 			if (should_send_keepalive(peer)) {
 				wireguardif_send_keepalive(device, peer);
 			}
-			if (should_send_initiation(peer)) {
+			if (should_send_initiation(peer) && (hs_budget > 0)) {
 				WG_PRINT("[WG_PERIODIC] Handshake retry wg_idx=%d key=%02x%02x%02x%02x "
 				       "ip=%s:%u connect_ip=%s:%u active=%d send_hs=%d\n",
 				       x,
@@ -1258,6 +1272,8 @@ void wireguardif_periodic(struct netif *netif) {
 				       peer->connect_port,
 				       peer->active, peer->send_handshake);
 				wireguard_start_handshake(device->netif, peer);
+				hs_budget--;
+				s_hs_resume = (uint16_t)((x + 1) % WIREGUARD_MAX_PEERS);
 			}
 			if ((peer->curr_keypair.valid) || (peer->prev_keypair.valid)) {
 				link_up = true;
