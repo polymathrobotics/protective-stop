@@ -84,7 +84,7 @@ per-device setting. To calibrate from your provisioning tooling:
 | GET    | `/admin/api/status` | Node status |
 | GET    | `/admin/api/settings` | Read settings |
 | POST   | `/admin/api/settings` | Update settings. The `derp_region` field (`0`..`4095`, `0` = auto) locks the DERP home region: it persists to NVS **and** applies live (updates the runtime override + kicks a slot-0 re-home, no reboot). Locking guards the priority path against a region misroute (e.g. region-9/dfw). Example: `{"derp_region":2}` locks to sfo; `{"derp_region":0}` clears to auto |
-| GET    | `/admin/api/monitor` | Heap / DERP / per-task monitor + DERP re-home diagnostics (`derp_home_region`, `fleet_peer_region`, `rehome_*` counters) + same-LAN direct-path diagnostics (`advert_lan_ip`, `pp_has_direct`, `pp_best_ip`/`pp_best_port`, `pp_endpoints`) |
+| GET    | `/admin/api/monitor` | Heap / DERP / per-task monitor + DERP re-home diagnostics (`derp_home_region`, `fleet_peer_region`, `rehome_*` counters) + same-LAN direct-path diagnostics (`advert_lan_ip`, `pp_has_direct`, `pp_best_ip`/`pp_best_port`, `pp_endpoints`) + DISCO observability (`probe_tbl_hw` = pending-probe table occupancy high water since boot, 64 = saturated; `cmm_rx_count` = CallMeMaybe messages received; `regains_safety` = direct-path regains on SAFETY peers only — `direct_regains` also counts bulk tailnet peers) |
 | GET    | `/admin/api/peers` | Active WireGuard peer table |
 | GET    | `/admin/api/peers/allowed` | Read the peer allowlist |
 | POST   | `/admin/api/peers/allowed` | Add an allowed peer (the configured management server, if any, is non-removable) |
