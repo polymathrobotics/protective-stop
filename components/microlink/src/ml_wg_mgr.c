@@ -1075,6 +1075,9 @@ static int add_peer(microlink_t * ml, const ml_peer_update_t * update)
     p->last_derp_reconnect_ms = 0;
     p->relay_retry_next_ms = 0;
     p->relay_retry_count = 0;
+    /* CMM chain-breaker throttle: an evicted slot's stale stamp would eat the
+     * fresh peer's first CallMeMaybe for up to ML_DISCO_CMM_MIN_INTERVAL_MS. */
+    p->last_cmm_sent_ms = 0;
   }
 
   char ip_str[16];
@@ -2367,17 +2370,20 @@ static void disco_send_call_me_maybe(microlink_t * ml, int peer_idx)
    * The demotion-CMM + 5 s relay-retry rounds re-ignite such chains
    * constantly, and each received CMM costs a reply seal + endpoint probes —
    * the fuel of the 2026-08-09 probe-table exhaustion runaway. At most one
-   * CMM per peer per ML_DISCO_CMM_MIN_INTERVAL_MS: the FIRST send in a
-   * window (demotion event, >=5 s-spaced retry round, boot broadcast) always
-   * passes, so recovery intent is untouched; only chain re-fires are eaten.
-   * A suppressed reply is harmless — the exchange it would answer already
-   * carried our endpoints to that peer within the last window. */
+   * CMM per peer per ML_DISCO_CMM_MIN_INTERVAL_MS. Invariant: the FIRST CMM
+   * in any window passes (demotion event, >=5 s-spaced retry round, boot
+   * broadcast). A re-demotion within the same window IS throttled (rapid
+   * flap); its recovery falls to the next relay-retry round — worst case
+   * +5 s, still bounded. A suppressed chain reply is harmless — the exchange
+   * it would answer already carried our endpoints to that peer within the
+   * last window. The stamp is written on the actual-send path below (after
+   * the endpoint check), so a no-endpoint attempt — e.g. pre-STUN cold boot —
+   * does not burn the window while sending nothing. */
   {
     uint64_t cmm_now = ml_get_time_ms();
     if (p->last_cmm_sent_ms != 0 && cmm_now - p->last_cmm_sent_ms < ML_DISCO_CMM_MIN_INTERVAL_MS) {
       return;
     }
-    p->last_cmm_sent_ms = cmm_now;
   }
 
   /* Build plaintext: [type(1)][version(1)][endpoints(N * 18)] */
@@ -2447,6 +2453,10 @@ static void disco_send_call_me_maybe(microlink_t * ml, int peer_idx)
     ESP_LOGW(TAG, "CMM: no endpoints available for %s", p->hostname);
     return;
   }
+
+  /* Endpoints exist — this attempt really sends, so it may burn the throttle
+   * window (see chain-breaker comment above). */
+  p->last_cmm_sent_ms = ml_get_time_ms();
 
   /* Encrypt with NaCl box */
   uint8_t nonce[DISCO_NONCE_LEN];

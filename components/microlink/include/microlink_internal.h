@@ -196,9 +196,11 @@ extern "C"
  *    reply rule is a ping-pong chain sustained at DERP RTT until a frame
  *    drops; the demotion-CMM + 5 s retry round re-ignited chains constantly.
  *    Bound: at most one CMM per peer per ML_DISCO_CMM_MIN_INTERVAL_MS at the
- *    single send choke point (disco_send_call_me_maybe). The first CMM in
- *    any window always passes, so demotion CMMs and the >=5 s-spaced retry
- *    rounds are effectively unthrottled; only chain re-fires are eaten. */
+ *    single send choke point (disco_send_call_me_maybe). Invariant: the
+ *    FIRST CMM in any window passes — >=5 s-spaced retry rounds and isolated
+ *    demotion events are never throttled. A re-demotion within the same
+ *    window (rapid flap) IS throttled; its recovery falls to the next relay-
+ *    retry round — worst case +5 s, still bounded. Chain re-fires are eaten. */
 #define ML_DISCO_DERP_MATCH_GRACE_MS 1000
 #define ML_DISCO_CMM_MIN_INTERVAL_MS 3000
 
