@@ -148,6 +148,20 @@ extern "C"
                                                 * keeps the uplink gapless anyway). */
 #define ML_DISCO_PRIORITY_REPROBE_MS 5000
 
+/* Relay-bound direct-path re-establishment (net/derp-direct-reestablish):
+ * while a SAFETY peer's session is alive but riding DERP, periodically re-run
+ * the full discovery handshake — CallMeMaybe (so the far side re-learns our
+ * CURRENT endpoints and probes back, re-opening a NAT mapping that died) plus
+ * a forced candidate sweep. The 5 s reprobe above only re-pings candidates we
+ * already hold; it cannot recover when the far side's knowledge of US went
+ * stale (NAT rebind, lost endpoint patch). Slow exponential backoff
+ * (30 s -> 60 -> 120 -> 240 -> 300 cap) bounds the added load to one NaCl
+ * seal + a few UDP sends per due peer, at most one peer per 1 s probe tick;
+ * state resets the moment a direct path is regained. Safety peers only —
+ * bulk peers keep the peer-scaling armor. */
+#define ML_DISCO_RELAY_RETRY_MIN_MS 30000
+#define ML_DISCO_RELAY_RETRY_MAX_MS 300000
+
 /* 100+ peer scaling bounds (2026-07-21): pace CPU-heavy per-peer work so a
  * large tailnet can never monopolize the wg_mgr loop that also drains the
  * pstop heartbeat queue. The priority peer is exempt from every one of
@@ -369,6 +383,13 @@ extern "C"
      * DERP-only safety peer answering every 3 s ping doesn't drive a connect_derp
      * storm. 0 = never fired. */
     uint64_t last_derp_reconnect_ms;
+
+    /* Relay-bound direct-path retry (safety peers only, see
+     * ML_DISCO_RELAY_RETRY_MIN_MS): next CallMeMaybe+sweep due time (0 = not
+     * armed) and the attempt count driving the exponential backoff. Both are
+     * cleared on every genuine direct promotion. */
+    uint64_t relay_retry_next_ms;
+    uint8_t relay_retry_count;
 
     /* WireGuard peer index in wireguard-lwip */
     int wg_peer_index;
@@ -741,6 +762,12 @@ extern "C"
   } ml_direct_diag_t;
 
   void ml_wg_get_direct_diag(microlink_t * ml, ml_direct_diag_t * out);
+
+  /* ml_wg_mgr.c — relay-bound direct-path retry counters (log-less bench
+   * visibility, same pattern as ml_wg_get_rehome_diag):
+   * out[0] = retry rounds fired (CallMeMaybe + forced candidate sweep)
+   * out[1] = direct-path regains (has_direct_path false -> true edges) */
+  void ml_wg_get_direct_retry_diag(uint32_t out[2]);
 
   /* ml_peer_nvs.c */
   esp_err_t ml_peer_nvs_init(void);

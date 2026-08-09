@@ -822,6 +822,18 @@ void ml_wg_get_rehome_diag(uint32_t out[6])
   out[5] = s_diag_rehome_applied;
 }
 
+/* Relay-bound direct-path retry counters — counters (not logs) so the retry
+ * loop is verifiable on units with no live-log access, mirroring the re-home
+ * diag pattern above. Read via /admin/api/monitor. */
+static uint32_t s_diag_relay_retries; /* CMM + forced-sweep rounds fired      */
+static uint32_t s_diag_direct_regains; /* has_direct_path false -> true edges */
+
+void ml_wg_get_direct_retry_diag(uint32_t out[2])
+{
+  out[0] = s_diag_relay_retries;
+  out[1] = s_diag_direct_regains;
+}
+
 /* Home our single DERP connection on a pinned peer's region.
  * microlink keeps ONE DERP connection, and a Tailscale DERP server only
  * delivers to peers connected to that same server — so if the chip homes on a
@@ -1031,6 +1043,8 @@ static int add_peer(microlink_t * ml, const ml_peer_update_t * update)
     p->direct_flap_count = 0;
     p->direct_backoff_until = 0;
     p->last_derp_reconnect_ms = 0;
+    p->relay_retry_next_ms = 0;
+    p->relay_retry_count = 0;
   }
 
   char ip_str[16];
@@ -1436,13 +1450,21 @@ static void disco_send_ping_to_peer(microlink_t * ml, int peer_idx, bool force)
   if (pkt_len == 0) return;
 
   bool direct_sent = false;
+  bool best_sent = false;
 
   /* If we have a known working direct path, send there FIRST.
      * This is critical for heartbeat pings to renew trust_until_ms.
-     * A DERP pong would arrive with via_derp=true and NOT renew trust. */
-  if (p->has_direct_path && p->best_ip != 0 && p->best_port != 0) {
+     * A DERP pong would arrive with via_derp=true and NOT renew trust.
+     *
+     * Deliberately NOT gated on has_direct_path: after a demotion best_ip
+     * still holds the last endpoint that PROVED bidirectionally reachable,
+     * and it may no longer appear in endpoints[] (netmap patches replace the
+     * candidate list). Keep probing it — a pong from it is exactly how the
+     * direct path re-establishes. One bounded extra UDP send per ping. */
+  if (p->best_ip != 0 && p->best_port != 0) {
     disco_udp_sendto(ml, pkt, pkt_len, p->best_ip, p->best_port);
-    direct_sent = true;
+    direct_sent = p->has_direct_path; /* demoted: still fall through to DERP */
+    best_sent = true;
   }
 
   /* Also try direct UDP to all known endpoints from MapResponse */
@@ -1451,8 +1473,15 @@ static void disco_send_ping_to_peer(microlink_t * ml, int peer_idx, bool force)
     if (has_udp) {
       for (int i = 0; i < p->endpoint_count; i++) {
         if (!p->endpoints[i].is_ipv6 && p->endpoints[i].ip != 0) {
-          /* Skip if same as best_ip (already sent) */
-          if (p->endpoints[i].ip == p->best_ip && p->endpoints[i].port == p->best_port) continue;
+          /* Skip if same as best_ip — but ONLY when the best-path branch above
+           * actually sent there. After a demotion has_direct_path is false, so
+           * that branch is skipped, yet best_ip/best_port still hold the
+           * previously-proven endpoint. The unconditional skip here excluded
+           * exactly that endpoint — for a NAT'd remote it is typically the ONLY
+           * reachable candidate (the others need hairpin), so every re-probe
+           * went DERP-only and the peer stayed relay-bound until reboot (which
+           * clears best_ip). Root cause of the 2026-08 "stuck on DERP" bug. */
+          if (best_sent && p->endpoints[i].ip == p->best_ip && p->endpoints[i].port == p->best_port) continue;
           int ret = disco_udp_sendto(ml, pkt, pkt_len, p->endpoints[i].ip, p->endpoints[i].port);
           if (!direct_sent) { /* Log only first direct send per peer */
             ESP_LOGI(
@@ -1693,6 +1722,11 @@ static void process_disco_pong(
        * a long-stable peer that later legitimately fails isn't penalized. */
       if (!had_direct) {
         p->direct_promoted_ms = now;
+        /* Direct regained — disarm the relay-bound retry and reset its backoff
+         * so the NEXT outage starts the CMM/sweep cycle from 30 s again. */
+        p->relay_retry_next_ms = 0;
+        p->relay_retry_count = 0;
+        s_diag_direct_regains++;
       } else if (now - p->direct_promoted_ms > 15000) {
         p->direct_flap_count = 0;
       }
@@ -2546,6 +2580,7 @@ static void disco_periodic_probes(microlink_t * ml)
   uint64_t now = ml_get_time_ms();
   int upgrade_probes_sent = 0;
   int hb_pings_sent = 0;
+  bool relay_retry_fired = false; /* at most one CMM+sweep round per tick */
 
   /* Rotate start index so we don't always process peers in the same order */
   int start = disco_probe_start_idx;
@@ -2600,6 +2635,14 @@ static void disco_periodic_probes(microlink_t * ml)
         p->direct_backoff_until = now + backoff;
       }
 
+      /* Arm the relay-bound retry (safety peers only): if the fast 5 s reprobe
+       * hasn't regained direct within ML_DISCO_RELAY_RETRY_MIN_MS, start the
+       * heavier CMM + candidate-sweep rounds. Fresh outage = fresh backoff. */
+      if (is_priority) {
+        p->relay_retry_next_ms = now + ML_DISCO_RELAY_RETRY_MIN_MS;
+        p->relay_retry_count = 0;
+      }
+
       /* Only do DERP fallback + re-probe for allowed peers.
              * Non-allowed peers just get their state cleaned above. */
       if (peer_allowed) {
@@ -2635,6 +2678,40 @@ static void disco_periodic_probes(microlink_t * ml)
         disco_send_ping_to_peer(ml, i, false);
         p->last_upgrade_ms = now;
         upgrade_probes_sent++;
+      }
+    }
+
+    /* Relay-bound direct-path re-establishment (safety peers only). The 5 s
+         * reprobe above re-pings candidates WE hold; it cannot recover when the
+         * far side's knowledge of US went stale (its NAT mapping to us died, an
+         * endpoint patch got lost server-side). Re-run the candidate EXCHANGE:
+         * a CallMeMaybe re-advertising our current LAN + STUN endpoints (so the
+         * peer probes back, re-opening the reverse path) plus a forced sweep of
+         * everything we hold, incl. the last-proven best endpoint. Slow
+         * exponential backoff per peer (30 s -> 300 s cap), at most one round
+         * per 1 s tick fleet-wide, honours the hard-NAT flap backoff, and stops
+         * the moment direct is regained (state cleared on promotion). Pure
+         * disco side-channel: the DERP-carried heartbeat path is untouched. */
+    if (is_priority && !p->has_direct_path) {
+      if (p->relay_retry_next_ms == 0) {
+        /* Cold relay-bound peer (never promoted since boot): arm the cycle. */
+        p->relay_retry_next_ms = now + ML_DISCO_RELAY_RETRY_MIN_MS;
+      } else if (!relay_retry_fired && now >= p->relay_retry_next_ms && now > p->direct_backoff_until) {
+        relay_retry_fired = true; /* bounded: one NaCl seal + one sweep per tick */
+        disco_send_call_me_maybe(ml, i);
+        disco_send_ping_to_peer(ml, i, true);
+        if (p->relay_retry_count < 4u) {
+          p->relay_retry_count++;
+        }
+        uint64_t iv = (uint64_t)ML_DISCO_RELAY_RETRY_MIN_MS << p->relay_retry_count;
+        if (iv > ML_DISCO_RELAY_RETRY_MAX_MS) {
+          iv = ML_DISCO_RELAY_RETRY_MAX_MS;
+        }
+        p->relay_retry_next_ms = now + iv;
+        s_diag_relay_retries++;
+        ESP_LOGI(
+          TAG, "relay-bound retry #%u for %s (next in %llu s)", (unsigned)p->relay_retry_count, p->hostname,
+          (unsigned long long)(iv / 1000u));
       }
     }
 

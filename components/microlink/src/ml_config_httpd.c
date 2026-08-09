@@ -959,6 +959,15 @@ static esp_err_t handler_monitor(httpd_req_t * req)
       cJSON_AddNumberToObject(json, "rehome_body", rd[4]);
       cJSON_AddNumberToObject(json, "rehome_applied", rd[5]);
 
+      /* Relay-bound direct-path retry: rounds fired + direct regains. A unit
+       * stuck on DERP with direct_retry_rounds climbing but direct_regains
+       * flat means the retry runs and the path is genuinely unreachable;
+       * both flat means the peer never demoted (or is not safety-tracked). */
+      uint32_t drd[2] = {0};
+      ml_wg_get_direct_retry_diag(drd);
+      cJSON_AddNumberToObject(json, "direct_retry_rounds", drd[0]);
+      cJSON_AddNumberToObject(json, "direct_regains", drd[1]);
+
       /* Same-LAN direct-path diagnostics for the priority peer (the machine):
        * what LAN endpoint we advertise, which candidate endpoints we hold for
        * the machine, and which one (if any) we selected as the direct path.
