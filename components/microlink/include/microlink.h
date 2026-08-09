@@ -328,6 +328,19 @@ extern "C"
   void microlink_untrack_peer_health(microlink_t * ml, uint32_t vpn_ip);
 
   /**
+ * @brief Ask the coord task to re-announce this node to the control plane
+ * (a Stream=false endpoint-update MapRequest on the existing connection).
+ *
+ * Use when the app suspects the FAR side no longer knows us — e.g. a
+ * machine that rebooted and never received its netmap silently ignores our
+ * WG handshakes (sustained ENOTCONN sends, 2026-08-08 incident); the
+ * re-announce nudges the control plane to push us to that peer's map
+ * stream. Non-blocking and bounded: safe to call from a safety loop, but
+ * rate-limit escalations at the call site.
+ */
+  esp_err_t microlink_request_announce(microlink_t * ml);
+
+  /**
  * @brief Disco-layer path RTT to a peer (txid-matched ping->pong).
  * @return RTT in ms, 0 if unknown/never measured. age_ms_out = staleness
  * of the sample; direct_out = whether it was measured over the direct path.

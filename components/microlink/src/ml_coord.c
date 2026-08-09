@@ -1000,6 +1000,9 @@ static int do_register(microlink_t * ml, ml_noise_state_t * noise)
           char ip_str[16];
           microlink_ip_to_str(ml->vpn_ip, ip_str);
           ESP_LOGI(TAG, "Our VPN IP: %s", ip_str);
+          /* Persist for next boot's pre-registration WG bring-up
+                     * (cold-bond far-side recovery, 2026-08-08). */
+          ml_ident_persist_vpn_ip(ml);
         }
       }
     }
@@ -1800,6 +1803,9 @@ static int do_fetch_peers(microlink_t * ml, ml_noise_state_t * noise)
               char ip_str[16];
               microlink_ip_to_str(ml->vpn_ip, ip_str);
               ESP_LOGI(TAG, "Our VPN IP: %s", ip_str);
+              /* Persist for next boot's pre-registration WG bring-up
+                             * (cold-bond far-side recovery, 2026-08-08). */
+              ml_ident_persist_vpn_ip(ml);
             }
           }
         }
@@ -2413,6 +2419,9 @@ static int poll_map_update(microlink_t * ml, ml_noise_state_t * noise)
             if (new_ip != ml->vpn_ip) {
               ml->vpn_ip = new_ip;
               ESP_LOGI(TAG, "VPN IP updated via long-poll");
+              /* Persist for next boot's pre-registration WG bring-up
+                             * (cold-bond far-side recovery, 2026-08-08). */
+              ml_ident_persist_vpn_ip(ml);
             }
           }
         }
@@ -2441,6 +2450,7 @@ void ml_coord_task(void * arg)
   ml_coord_cmd_t cmd;
   uint64_t last_activity_ms = ml_get_time_ms();
   int reconnect_attempts = 0;
+  bool announce_req = false; /* app-requested re-announce (ML_CMD_UPDATE_ENDPOINTS) */
 
   /* Noise protocol state - owned exclusively by this task */
   ml_noise_state_t noise = {0};
@@ -2479,7 +2489,15 @@ void ml_coord_task(void * arg)
           state = COORD_RECONNECTING;
           break;
         case ML_CMD_UPDATE_ENDPOINTS:
-          /* TODO: Send endpoint update on existing H2 connection */
+          /* App-requested re-announce (microlink_request_announce): a peer
+                     * that rebooted without receiving its netmap doesn't know our
+                     * key and silently ignores our WG handshakes (sustained
+                     * ENOTCONN on the pstop path, 2026-08-08 incident). Re-sending
+                     * our endpoints nudges the control plane to (re)push this node
+                     * to that peer's map stream. Serviced below in COORD_LONG_POLL
+                     * where the noise session is live; a no-op when disconnected
+                     * (reconnect re-registers, which re-announces anyway). */
+          announce_req = true;
           break;
       }
     }
@@ -2649,6 +2667,15 @@ void ml_coord_task(void * arg)
           ESP_LOGW(TAG, "Control plane watchdog timeout");
           state = COORD_RECONNECTING;
           break;
+        }
+
+        /* Service an app-requested re-announce (see ML_CMD_UPDATE_ENDPOINTS
+                 * above). do_send_endpoint_update itself no-ops without STUN
+                 * results, so don't clear the request until they exist. */
+        if (announce_req && (ml->stun_public_ip != 0 || ml->stun_has_ipv6)) {
+          announce_req = false;
+          ESP_LOGI(TAG, "Re-announcing endpoints to control plane (app request)");
+          do_send_endpoint_update(ml, &noise);
         }
 
         /* Check for STUN response in queue (IPv4 or IPv6) */

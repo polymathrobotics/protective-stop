@@ -919,6 +919,144 @@ static int find_peer_by_disco_key(microlink_t * ml, const uint8_t * disco_key)
   return -1;
 }
 
+/* Install ml->peers[idx] into wireguard-lwip so inbound handshake
+ * initiations from this peer's static key get answered.
+ *
+ * Shared by the netmap ingest path (add_peer) and the boot-time NVS peer
+ * preseed (ml_wg_mgr_task). The preseed exists because of the cold-bond
+ * far-side gap (bench 2026-08-08/09): after a machine (machn) reboot, its
+ * coordination netmap can be slow — or entirely blocked — to re-arrive, and
+ * until each operator remote's key is installed here the WG layer SILENTLY
+ * ignores that remote's handshake initiations. The remote then sits at
+ * peer-present-but-no-keypair: sess_sendto ERR_CONN -> errno ENOTCONN,
+ * sent=0, for 27 min on the bench; restarting the REMOTE did not help, only
+ * a machn restart (fresh netmap) did. Installing the NVS-cached peers at
+ * boot lets those inbound handshakes succeed immediately, netmap or not. */
+static void wg_install_iface_peer(microlink_t * ml, int idx)
+{
+  ml_peer_t * p = &ml->peers[idx];
+  if (!ml->wg_netif || p->wg_peer_index >= 0) {
+    return; /* no WG interface yet, or already installed */
+  }
+  struct netif * netif = (struct netif *)ml->wg_netif;
+
+  /* Convert peer public key to base64 */
+  char peer_b64[64];
+  key_to_base64(p->public_key, peer_b64, sizeof(peer_b64));
+
+  struct wireguardif_peer wg_peer;
+  wireguardif_peer_init(&wg_peer);
+
+  wg_peer.public_key = peer_b64;
+  wg_peer.preshared_key = NULL;
+
+  /* Allowed IP: PEER's VPN IP
+     * wireguard-lwip uses allowed_ip for TWO purposes:
+     * 1. Outbound routing: peer_lookup_by_allowed_ip() matches DESTINATION
+     *    IP to find which peer to route to (wireguardif.c:338)
+     * 2. Inbound validation: checks decrypted packet SOURCE IP matches
+     *    peer's allowed_source_ips (wireguardif.c:507)
+     * Must be set to the PEER's VPN IP for both to work correctly. */
+  uint8_t ip_a = (p->vpn_ip >> 24) & 0xFF;
+  uint8_t ip_b = (p->vpn_ip >> 16) & 0xFF;
+  uint8_t ip_c = (p->vpn_ip >> 8) & 0xFF;
+  uint8_t ip_d = p->vpn_ip & 0xFF;
+  IP4_ADDR(&wg_peer.allowed_ip.u_addr.ip4, ip_a, ip_b, ip_c, ip_d);
+  IP4_ADDR(&wg_peer.allowed_mask.u_addr.ip4, 255, 255, 255, 255);
+
+  /* Start every peer DERP-only — NEVER install a netmap-advertised endpoint
+   * as the live WG endpoint.
+   *
+   * Root cause of the DERP-only-unreachable bug (2026-08-02): the
+   * netmap/STUN endpoints a peer advertises are UNVALIDATED candidates. We
+   * keep them in p->endpoints[] purely for DISCO probing. But
+   * wireguardif_add_peer() copies wg_peer.endpoint_ip straight into
+   * peer->ip (wireguardif.c:1084-1087), and wireguardif_peer_output()
+   * (wireguardif.c:158) then routes ALL WireGuard traffic — including the
+   * handshake RESPONSE — to peer->ip via direct UDP, bypassing DERP
+   * entirely whenever peer->ip is non-any.
+   *
+   * Behind a hard / endpoint-dependent NAT that advertised endpoint is
+   * unreachable in the peer->chip direction, so every reply the chip sends
+   * blackholes and the WG session never forms — while relayed DISCO pongs
+   * (which process_disco_ping sends *explicitly* over DERP) still return,
+   * producing the pathognomonic "tailscale ping OK / TCP+HTTP data dead"
+   * asymmetry (relay rx stuck at a few hundred bytes).
+   *
+   * Fix: leave the live endpoint blank so the peer is DERP-homed. The live
+   * direct endpoint is installed only after PROOF of bidirectional
+   * reachability — a txid-matched DISCO direct pong (process_disco_pong ->
+   * wireguardif_update_endpoint + wireguardif_connect) or a genuinely
+   * received direct WG packet (update_peer_addr roaming). This mirrors
+   * tailscaled/magicsock: DERP-home first, upgrade to a direct path only
+   * once it is validated both ways. DISCO probing of p->endpoints[]
+   * continues to run, so genuinely reachable direct paths still upgrade
+   * within one probe interval. */
+  ip_addr_set_any(false, &wg_peer.endpoint_ip);
+  wg_peer.endport_port = 0;
+
+  wg_peer.keep_alive = 25;
+
+  u8_t wg_peer_idx = WIREGUARDIF_INVALID_INDEX;
+  err_t wg_err = wireguardif_add_peer(netif, &wg_peer, &wg_peer_idx);
+
+  if (wg_err == ERR_OK && wg_peer_idx != WIREGUARDIF_INVALID_INDEX) {
+    p->wg_peer_index = wg_peer_idx;
+
+    /* Verify the WG internal peer key matches what we passed */
+    struct wireguard_device * dev = (struct wireguard_device *)netif->state;
+    if (dev && wg_peer_idx < WIREGUARD_MAX_PEERS) {
+      struct wireguard_peer * wp = &dev->peers[wg_peer_idx];
+      bool key_match = (memcmp(wp->public_key, p->public_key, 32) == 0);
+      ESP_LOGI(
+        TAG,
+        "WG peer added: wg_idx=%d internal_key=%02x%02x%02x%02x %s",
+        wg_peer_idx,
+        wp->public_key[0],
+        wp->public_key[1],
+        wp->public_key[2],
+        wp->public_key[3],
+        key_match ? "KEY_OK" : "KEY_MISMATCH!");
+    }
+
+    /* DON'T initiate handshakes to all peers on add — Tailscale's lazy
+         * peer config means our INIT to an idle peer gets dropped on their
+         * end. EXCEPT for the priority peer (set via priority_peer_ip): for
+         * that one we actively send WG INIT via DERP. The peer's
+         * magicsock receiveIPv4() will see the DERP-delivered INIT, call
+         * noteRecvActivity() → maybeReconfigWireguardLocked() to add us
+         * to wireguard-go, then complete the handshake. This is how we
+         * get a working WG session WITHOUT enabling DISCO (DISCO load
+         * still wedges the chip on a busy tailnet even with allowlist
+         * filtering of incoming probes — see v15.7.1 attempt). */
+    if (ml->config.priority_peer_ip != 0 && p->vpn_ip == ml->config.priority_peer_ip) {
+      wireguardif_connect_derp(netif, (u8_t)wg_peer_idx);
+      /* Wake the remote's magicsock so it lazily adds us to
+                 * wireguard-go. A bare WG-init relayed over DERP does NOT
+                 * drive the peer's lazy reconfig — only an inbound DISCO
+                 * ping does (that is why a normal peer otherwise has to
+                 * `tailscale ping` us first). Fire one now, unconditionally
+                 * (bypasses the enable_disco gate on the paths below); it is
+                 * DERP-carried and embeds our node key, so a peer with a
+                 * stale/rotated disco key can still map us. The sustained
+                 * retry lives in disco_periodic_probes. */
+      disco_send_ping_to_peer(ml, idx, true);
+      /* Near-zero failover: mirror this peer's encrypted data over
+                 * BOTH direct and DERP once a direct path forms. Set here and
+                 * persisted in the WG peer struct (survives P7 re-ingests); it
+                 * only takes effect while a direct endpoint exists, so it's a
+                 * no-op until DISCO upgrades the path. */
+      wireguardif_set_dual_path(netif, (u8_t)wg_peer_idx, true);
+      ESP_LOGI(TAG, "WG: triggered DERP handshake to priority peer %s (dual-path)", p->hostname);
+    } else {
+      ESP_LOGI(TAG, "WG peer ready (passive), waiting for peer-initiated handshake");
+    }
+  } else {
+    ESP_LOGW(TAG, "wireguardif_add_peer failed: %d", wg_err);
+    p->wg_peer_index = -1;
+  }
+}
+
 static int add_peer(microlink_t * ml, const ml_peer_update_t * update)
 {
   /* Peer allowlist filter: don't waste WG slots on non-allowed peers.
@@ -944,6 +1082,21 @@ static int add_peer(microlink_t * ml, const ml_peer_update_t * update)
     uint8_t cfg_mp = ml_config_get_max_peers(ml->config_httpd);
     if (cfg_mp > 0u && (int)cfg_mp < eff_max) {
       eff_max = (int)cfg_mp;
+    }
+
+    /* Key-rotated peer: the update's key is unknown but its VPN IP may
+         * already be occupied by a STALE entry (e.g. an NVS-cached peer
+         * preseeded at boot whose far end has since re-keyed). Two live
+         * entries with one allowed_ip would make wireguard-lwip's
+         * routing-by-IP ambiguous and find_peer_by_ip() would keep returning
+         * the dead one — so retire the stale entry and reuse its slot. */
+    idx = find_peer_by_ip(ml, update->vpn_ip);
+    if (idx >= 0) {
+      ESP_LOGW(TAG, "Peer %s re-keyed — retiring stale entry (idx=%d)", update->hostname, idx);
+      if (ml->peers[idx].wg_peer_index >= 0 && ml->wg_netif) {
+        wireguardif_remove_peer((struct netif *)ml->wg_netif, (u8_t)ml->peers[idx].wg_peer_index);
+      }
+      ml->peers[idx].active = false;
     }
 
     /* Find free slot */
@@ -1103,127 +1256,23 @@ static int add_peer(microlink_t * ml, const ml_peer_update_t * update)
      * previous WG add failed (wg_peer_index < 0). An existing peer with a
      * live WG slot is left in place so its session/endpoint survives this
      * re-ingest (P7 — see the DISCO-state note above). */
-  if (ml->wg_netif && (!existing || p->wg_peer_index < 0)) {
-    struct netif * netif = (struct netif *)ml->wg_netif;
-
-    /* Convert peer public key to base64 */
-    char peer_b64[64];
-    key_to_base64(p->public_key, peer_b64, sizeof(peer_b64));
-
-    struct wireguardif_peer wg_peer;
-    wireguardif_peer_init(&wg_peer);
-
-    wg_peer.public_key = peer_b64;
-    wg_peer.preshared_key = NULL;
-
-    /* Allowed IP: PEER's VPN IP
-         * wireguard-lwip uses allowed_ip for TWO purposes:
-         * 1. Outbound routing: peer_lookup_by_allowed_ip() matches DESTINATION
-         *    IP to find which peer to route to (wireguardif.c:338)
-         * 2. Inbound validation: checks decrypted packet SOURCE IP matches
-         *    peer's allowed_source_ips (wireguardif.c:507)
-         * Must be set to the PEER's VPN IP for both to work correctly. */
-    uint8_t ip_a = (p->vpn_ip >> 24) & 0xFF;
-    uint8_t ip_b = (p->vpn_ip >> 16) & 0xFF;
-    uint8_t ip_c = (p->vpn_ip >> 8) & 0xFF;
-    uint8_t ip_d = p->vpn_ip & 0xFF;
-    IP4_ADDR(&wg_peer.allowed_ip.u_addr.ip4, ip_a, ip_b, ip_c, ip_d);
-    IP4_ADDR(&wg_peer.allowed_mask.u_addr.ip4, 255, 255, 255, 255);
-
-    /* Start every peer DERP-only — NEVER install a netmap-advertised endpoint
-     * as the live WG endpoint.
-     *
-     * Root cause of the DERP-only-unreachable bug (2026-08-02): the
-     * netmap/STUN endpoints a peer advertises are UNVALIDATED candidates. We
-     * keep them in p->endpoints[] purely for DISCO probing. But
-     * wireguardif_add_peer() copies wg_peer.endpoint_ip straight into
-     * peer->ip (wireguardif.c:1084-1087), and wireguardif_peer_output()
-     * (wireguardif.c:158) then routes ALL WireGuard traffic — including the
-     * handshake RESPONSE — to peer->ip via direct UDP, bypassing DERP
-     * entirely whenever peer->ip is non-any.
-     *
-     * Behind a hard / endpoint-dependent NAT that advertised endpoint is
-     * unreachable in the peer->chip direction, so every reply the chip sends
-     * blackholes and the WG session never forms — while relayed DISCO pongs
-     * (which process_disco_ping sends *explicitly* over DERP) still return,
-     * producing the pathognomonic "tailscale ping OK / TCP+HTTP data dead"
-     * asymmetry (relay rx stuck at a few hundred bytes).
-     *
-     * Fix: leave the live endpoint blank so the peer is DERP-homed. The live
-     * direct endpoint is installed only after PROOF of bidirectional
-     * reachability — a txid-matched DISCO direct pong (process_disco_pong ->
-     * wireguardif_update_endpoint + wireguardif_connect) or a genuinely
-     * received direct WG packet (update_peer_addr roaming). This mirrors
-     * tailscaled/magicsock: DERP-home first, upgrade to a direct path only
-     * once it is validated both ways. DISCO probing of p->endpoints[]
-     * continues to run, so genuinely reachable direct paths still upgrade
-     * within one probe interval. */
-    ip_addr_set_any(false, &wg_peer.endpoint_ip);
-    wg_peer.endport_port = 0;
-
-    wg_peer.keep_alive = 25;
-
-    u8_t wg_peer_idx = WIREGUARDIF_INVALID_INDEX;
-    err_t wg_err = wireguardif_add_peer(netif, &wg_peer, &wg_peer_idx);
-
-    if (wg_err == ERR_OK && wg_peer_idx != WIREGUARDIF_INVALID_INDEX) {
-      p->wg_peer_index = wg_peer_idx;
-
-      /* Verify the WG internal peer key matches what we passed */
-      struct wireguard_device * dev = (struct wireguard_device *)netif->state;
-      if (dev && wg_peer_idx < WIREGUARD_MAX_PEERS) {
-        struct wireguard_peer * wp = &dev->peers[wg_peer_idx];
-        bool key_match = (memcmp(wp->public_key, p->public_key, 32) == 0);
-        ESP_LOGI(
-          TAG,
-          "WG peer added: wg_idx=%d internal_key=%02x%02x%02x%02x %s",
-          wg_peer_idx,
-          wp->public_key[0],
-          wp->public_key[1],
-          wp->public_key[2],
-          wp->public_key[3],
-          key_match ? "KEY_OK" : "KEY_MISMATCH!");
-      }
-
-      /* DON'T initiate handshakes to all peers on add — Tailscale's lazy
-             * peer config means our INIT to an idle peer gets dropped on their
-             * end. EXCEPT for the priority peer (set via priority_peer_ip): for
-             * that one we actively send WG INIT via DERP. The peer's
-             * magicsock receiveIPv4() will see the DERP-delivered INIT, call
-             * noteRecvActivity() → maybeReconfigWireguardLocked() to add us
-             * to wireguard-go, then complete the handshake. This is how we
-             * get a working WG session WITHOUT enabling DISCO (DISCO load
-             * still wedges the chip on a busy tailnet even with allowlist
-             * filtering of incoming probes — see v15.7.1 attempt). */
-      if (ml->config.priority_peer_ip != 0 && update->vpn_ip == ml->config.priority_peer_ip) {
-        wireguardif_connect_derp(netif, (u8_t)wg_peer_idx);
-        /* Wake the remote's magicsock so it lazily adds us to
-                 * wireguard-go. A bare WG-init relayed over DERP does NOT
-                 * drive the peer's lazy reconfig — only an inbound DISCO
-                 * ping does (that is why a normal peer otherwise has to
-                 * `tailscale ping` us first). Fire one now, unconditionally
-                 * (bypasses the enable_disco gate on the paths below); it is
-                 * DERP-carried and embeds our node key, so a peer with a
-                 * stale/rotated disco key can still map us. The sustained
-                 * retry lives in disco_periodic_probes. */
-        disco_send_ping_to_peer(ml, idx, true);
-        /* Near-zero failover: mirror this peer's encrypted data over
-                 * BOTH direct and DERP once a direct path forms. Set here and
-                 * persisted in the WG peer struct (survives P7 re-ingests); it
-                 * only takes effect while a direct endpoint exists, so it's a
-                 * no-op until DISCO upgrades the path. */
-        wireguardif_set_dual_path(netif, (u8_t)wg_peer_idx, true);
-        ESP_LOGI(TAG, "WG: triggered DERP handshake to priority peer %s (dual-path)", update->hostname);
-      } else {
-        ESP_LOGI(TAG, "WG peer ready (passive), waiting for peer-initiated handshake");
-      }
-    } else {
-      ESP_LOGW(TAG, "wireguardif_add_peer failed: %d", wg_err);
-      p->wg_peer_index = -1;
-    }
+  if (!existing || p->wg_peer_index < 0) {
+    wg_install_iface_peer(ml, idx);
   }
 
-  /* Persist to NVS for fast boot next time */
+  /* Persist to NVS for fast boot next time. Bond-critical peers — the
+     * priority/fleet pins AND any peer the app wants kept (machn's operator
+     * allowlist via peer_wanted_cb; all bounded sets) — are marked protected
+     * so the peer cache's LRU eviction can never drop the very keys the
+     * boot-time preseed needs (cold-bond far-side gap, 2026-08-08). Note the
+     * pin path above only fires when the RAM table is FULL; the cb is asked
+     * again here so operator keys are protected on small tailnets too. */
+  if (
+    is_pinned_peer(ml, p->vpn_ip) ||
+    (ml->peer_wanted_cb != NULL && ml->peer_wanted_cb(ml->peer_wanted_ctx, p->hostname, p->vpn_ip)))
+  {
+    ml_peer_nvs_set_protected(p->vpn_ip);
+  }
   ml_peer_nvs_save(p);
 
   /* Send CallMeMaybe to trigger peer-initiated handshake (NAT traversal). */
@@ -2936,25 +2985,77 @@ void ml_wg_mgr_task(void * arg)
     ESP_LOGI(TAG, "Pre-loaded %d cached peers from NVS", cached);
   }
 
-  /* Wait for registration OR shutdown before proceeding */
-  EventBits_t wait_bits =
-    xEventGroupWaitBits(ml->events, ML_EVT_COORD_REGISTERED | ML_EVT_SHUTDOWN_REQUEST, pdFALSE, pdFALSE, portMAX_DELAY);
+  /* Cold-bond far-side recovery (bench 2026-08-08): a rebooted machine whose
+     * coordination netmap hasn't re-arrived used to SILENTLY ignore WG
+     * handshake initiations from its operator remotes (their static keys were
+     * only installed on netmap ingest) — the remote wedged at
+     * peer-present-but-no-keypair (ENOTCONN, sent=0) for 27 min and only a
+     * machine restart recovered it. If our VPN IP is known from NVS (persisted
+     * on every registration), bring the WG interface up NOW and preseed the
+     * cached peers into wireguard-lwip so those inbound handshakes succeed
+     * immediately — before, or entirely without, coordination connectivity. */
+  bool wg_up_early = false;
+  if (ml->vpn_ip != 0 && cached > 0) {
+    if (wg_init_interface(ml) == ESP_OK) {
+      wg_up_early = true;
+      xEventGroupSetBits(ml->events, ML_EVT_WG_READY);
+      int installed = 0;
+      for (int i = 0; i < ml->peer_count; i++) {
+        if (!ml->peers[i].active) continue;
+        /* Same allowlist gate as add_peer — the allowlist may have changed
+                 * since these entries were cached. */
+        if (!ml_config_peer_is_allowed(ml->config_httpd, ml->peers[i].vpn_ip)) continue;
+        wg_install_iface_peer(ml, i);
+        if (ml->peers[i].wg_peer_index >= 0) installed++;
+      }
+      ESP_LOGI(TAG, "WG preseeded from NVS: %d/%d cached peers installed (pre-registration)", installed, cached);
+    }
+  }
 
-  if (wait_bits & ML_EVT_SHUTDOWN_REQUEST) {
-    ESP_LOGI(TAG, "Shutdown requested before registration, exiting");
-    vTaskDelete(NULL);
-    return; /* Not reached */
+  /* Wait for registration OR shutdown before entering the full loop — but
+     * when WG came up early, keep draining inbound WG packets while waiting:
+     * a same-LAN operator remote can complete its handshake and run pstop
+     * heartbeats against us during this window even with the coordination
+     * plane unreachable (the exact post-reboot wedge scenario above). */
+  for (;;) {
+    EventBits_t wait_bits = xEventGroupWaitBits(
+      ml->events,
+      ML_EVT_COORD_REGISTERED | ML_EVT_SHUTDOWN_REQUEST,
+      pdFALSE,
+      pdFALSE,
+      wg_up_early ? pdMS_TO_TICKS(20) : portMAX_DELAY);
+
+    if (wait_bits & ML_EVT_SHUTDOWN_REQUEST) {
+      ESP_LOGI(TAG, "Shutdown requested before registration, exiting");
+      vTaskDelete(NULL);
+      return; /* Not reached */
+    }
+    if (wait_bits & ML_EVT_COORD_REGISTERED) {
+      break;
+    }
+    if (wg_up_early) {
+      ml_rx_packet_t pre_pkt;
+      while (xQueueReceive(ml->wg_rx_queue, &pre_pkt, 0) == pdTRUE) {
+        process_wg_packet(ml, &pre_pkt);
+      }
+    }
   }
 
   ESP_LOGI(TAG, "Coord registered, initializing WireGuard...");
 
-  /* Initialize WireGuard interface (magicsock mode) */
-  if (wg_init_interface(ml) != ESP_OK) {
-    ESP_LOGE(TAG, "Failed to init WireGuard, continuing without tunneling");
+  if (!wg_up_early) {
+    /* Initialize WireGuard interface (magicsock mode) */
+    if (wg_init_interface(ml) != ESP_OK) {
+      ESP_LOGE(TAG, "Failed to init WireGuard, continuing without tunneling");
+    } else {
+      /* Update VPN IP if coord already set it */
+      wg_update_vpn_ip(ml);
+      xEventGroupSetBits(ml->events, ML_EVT_WG_READY);
+    }
   } else {
-    /* Update VPN IP if coord already set it */
+    /* Registration may have (re)assigned our VPN IP — sync the netif so a
+         * stale persisted address can't linger past this point. */
     wg_update_vpn_ip(ml);
-    xEventGroupSetBits(ml->events, ML_EVT_WG_READY);
   }
 
   ESP_LOGI(TAG, "Accepting peer updates");

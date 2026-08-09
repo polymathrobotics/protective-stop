@@ -35,6 +35,7 @@ static const char * TAG = "microlink";
 #define NVS_KEY_WG_PUB "wg_public"
 #define NVS_KEY_DISCO_PRI "disco_pri"
 #define NVS_KEY_DISCO_PUB "disco_pub"
+#define NVS_KEY_VPN_IP "vpn_ip"
 
 /* X25519 from x25519.h */
 #include "x25519.h"
@@ -99,6 +100,22 @@ static esp_err_t load_or_generate_keys(microlink_t * ml)
     nvs_get_blob(nvs, NVS_KEY_DISCO_PUB, ml->disco_public_key, &key_len);
   }
 
+  /* Last-known VPN IP (best effort). Persisted on every registration so a
+     * reboot can bring the WG interface up + preseed cached peers BEFORE (or
+     * without) coordination connectivity — the cold-bond far-side recovery
+     * (2026-08-08 bench: rebooted machine ignored operator handshakes for
+     * 27 min while its netmap never re-arrived). A stale value is harmless:
+     * registration overwrites it and ml_wg_mgr re-syncs the netif address. */
+  {
+    uint32_t stored_ip = 0;
+    if (nvs_get_u32(nvs, NVS_KEY_VPN_IP, &stored_ip) == ESP_OK && stored_ip != 0) {
+      ml->vpn_ip = stored_ip;
+      char ip_str[16];
+      microlink_ip_to_str(stored_ip, ip_str);
+      ESP_LOGI(TAG, "VPN IP restored from NVS: %s (pre-registration)", ip_str);
+    }
+  }
+
   if (need_save) {
     nvs_set_blob(nvs, NVS_KEY_MACHINE_PRI, ml->machine_private_key, 32);
     nvs_set_blob(nvs, NVS_KEY_MACHINE_PUB, ml->machine_public_key, 32);
@@ -114,6 +131,30 @@ static esp_err_t load_or_generate_keys(microlink_t * ml)
 
   nvs_close(nvs);
   return ESP_OK;
+}
+
+/* Persist the current VPN IP (see the load note in load_or_generate_keys).
+ * Called from the coord task whenever registration/map assigns the IP —
+ * never from the safety tick. Write-on-change only: re-registrations with
+ * the same address (the common case) cost zero flash wear. */
+void ml_ident_persist_vpn_ip(microlink_t * ml)
+{
+  if (!ml || ml->vpn_ip == 0) {
+    return;
+  }
+  nvs_handle_t nvs;
+  if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs) != ESP_OK) {
+    return;
+  }
+  uint32_t stored_ip = 0;
+  (void)nvs_get_u32(nvs, NVS_KEY_VPN_IP, &stored_ip);
+  if (stored_ip != ml->vpn_ip) {
+    if (nvs_set_u32(nvs, NVS_KEY_VPN_IP, ml->vpn_ip) == ESP_OK) {
+      nvs_commit(nvs);
+      ESP_LOGI(TAG, "VPN IP persisted to NVS");
+    }
+  }
+  nvs_close(nvs);
 }
 
 /* ============================================================================
@@ -453,6 +494,18 @@ skip_bsd_socket:;
 
   ESP_LOGI(TAG, "All tasks started");
   return ESP_OK;
+}
+
+esp_err_t microlink_request_announce(microlink_t * ml)
+{
+  if (!ml || !ml->coord_cmd_queue) {
+    return ESP_ERR_INVALID_STATE;
+  }
+  /* Non-blocking (callable from the app's safety loop): the coord task sends
+     * the Stream=false endpoint-update MapRequest on its own H2 connection.
+     * Queue full = an announce is already pending; that one suffices. */
+  ml_coord_cmd_t cmd = ML_CMD_UPDATE_ENDPOINTS;
+  return (xQueueSend(ml->coord_cmd_queue, &cmd, 0) == pdTRUE) ? ESP_OK : ESP_ERR_NO_MEM;
 }
 
 esp_err_t microlink_rebind(microlink_t * ml)

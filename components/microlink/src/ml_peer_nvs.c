@@ -66,7 +66,16 @@ static bool s_initialized = false;
 static peer_nvs_table_t * s_table = NULL; /* PSRAM-allocated working copy */
 static bool s_dirty = false; /* working copy ahead of flash */
 static uint64_t s_last_flush_ms = 0;
-static uint32_t s_protected_vpn_ip = 0; /* never LRU-evicted (the priority peer) */
+/* Never-LRU-evicted VPN IPs: the priority/safety peer, the fleet server and
+ * (via ml_wg_mgr's save path) app-pinned operator remotes. These are exactly
+ * the keys the boot-time WG preseed needs to answer inbound handshakes after
+ * a reboot with the netmap still absent (cold-bond far-side gap, 2026-08-08)
+ * — losing one to cache pressure would silently re-open that hole. RAM-only:
+ * eviction only ever happens inside runtime saves, when the pin sources are
+ * live to re-mark them. Bounded; sized to ML_EXTRA_PINS + priority + fleet. */
+#define ML_NVS_MAX_PROTECTED 18
+static uint32_t s_protected_ips[ML_NVS_MAX_PROTECTED];
+static int s_protected_count = 0;
 #define PEER_NVS_FLUSH_INTERVAL_MS 5000u
 
 static void load_table(void)
@@ -177,13 +186,21 @@ esp_err_t ml_peer_nvs_save(const ml_peer_t * peer)
     s_table->entries[slot] = entry;
     s_table->count++;
   } else {
-    /* LRU eviction: lowest lru_counter, but never the protected
-         * (priority/safety) peer — its cached endpoint is what makes the
-         * pstop direct path re-form fast after a reboot. */
+    /* LRU eviction: lowest lru_counter, but never a protected peer —
+         * priority/fleet/operator keys are what the boot-time WG preseed
+         * answers cold handshakes with, and the priority peer's cached
+         * endpoint is what makes the pstop direct path re-form fast. */
     int lru_idx = -1;
     uint16_t min_lru = 0;
     for (int i = 0; i < s_table->count; i++) {
-      if (s_protected_vpn_ip != 0 && s_table->entries[i].vpn_ip == s_protected_vpn_ip) {
+      bool prot = false;
+      for (int k = 0; k < s_protected_count; k++) {
+        if (s_table->entries[i].vpn_ip == s_protected_ips[k]) {
+          prot = true;
+          break;
+        }
+      }
+      if (prot) {
         continue;
       }
       if (lru_idx < 0 || s_table->entries[i].lru_counter < min_lru) {
@@ -211,7 +228,21 @@ esp_err_t ml_peer_nvs_save(const ml_peer_t * peer)
 
 void ml_peer_nvs_set_protected(uint32_t vpn_ip)
 {
-  s_protected_vpn_ip = vpn_ip;
+  if (vpn_ip == 0) {
+    return;
+  }
+  for (int i = 0; i < s_protected_count; i++) {
+    if (s_protected_ips[i] == vpn_ip) {
+      return; /* already protected */
+    }
+  }
+  if (s_protected_count >= ML_NVS_MAX_PROTECTED) {
+    /* Bounded set full — drop, don't wrap: wrongly UNprotecting an earlier
+         * safety peer would be worse than best-efforting this one. */
+    ESP_LOGW(TAG, "protected-peer set full (%d), not protecting new IP", ML_NVS_MAX_PROTECTED);
+    return;
+  }
+  s_protected_ips[s_protected_count++] = vpn_ip;
 }
 
 esp_err_t ml_peer_nvs_flush_if_due(uint64_t now_ms)

@@ -827,10 +827,17 @@ extern "C"
   /* Deferred flash flush of the peer cache (writes are debounced: saves only
  * update the PSRAM working copy; call this ~once per wg_mgr pass). */
   esp_err_t ml_peer_nvs_flush_if_due(uint64_t now_ms);
-  /* Mark a peer (by VPN IP, host order) as never-LRU-evicted from the cache —
- * used to pin the priority/safety peer so its endpoint survives reboots. */
+  /* Mark a peer (by VPN IP, host order) as never-LRU-evicted from the cache.
+ * Bounded set (priority peer, fleet server, app-pinned operator remotes):
+ * these keys feed the boot-time WG preseed that answers cold inbound
+ * handshakes before the netmap re-arrives (cold-bond gap, 2026-08-08). */
   void ml_peer_nvs_set_protected(uint32_t vpn_ip);
   esp_err_t ml_peer_nvs_clear(void);
+
+  /* microlink.c — persist ml->vpn_ip to NVS (write-on-change; coord task
+ * context only, never the safety tick). Enables pre-registration WG
+ * bring-up on the next boot. */
+  void ml_ident_persist_vpn_ip(microlink_t * ml);
 
 #ifdef CONFIG_ML_ZERO_COPY_WG
   /* ml_zerocopy.c */
