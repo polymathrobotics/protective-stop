@@ -158,7 +158,18 @@ extern "C"
  * (30 s -> 60 -> 120 -> 240 -> 300 cap) bounds the added load to one NaCl
  * seal + a few UDP sends per due peer, at most one peer per 1 s probe tick;
  * state resets the moment a direct path is regained. Safety peers only —
- * bulk peers keep the peer-scaling armor. */
+ * bulk peers keep the peer-scaling armor.
+ *
+ * Bench falsification of the first cut (2026-08-09, DUT pstop-01d7f344):
+ * a 30 s FLOOR before the first CMM round left the safety peer visibly
+ * relay-bound for the entire observation window. When the outage also
+ * killed the chip's outbound NAT mapping (hostile bench NAT), fix-1's
+ * probes to the proven endpoint die in flight — only a CMM (far side
+ * probes back, re-punching the hole while our sweep re-punches ours) can
+ * recover, so the FIRST round must come fast. First round 5 s after
+ * demotion, then 30 s -> 60 -> 120 -> 240 -> 300 cap. The demotion path
+ * additionally fires one immediate CMM (see disco_periodic_probes). */
+#define ML_DISCO_RELAY_RETRY_FIRST_MS 5000
 #define ML_DISCO_RELAY_RETRY_MIN_MS 30000
 #define ML_DISCO_RELAY_RETRY_MAX_MS 300000
 
@@ -766,8 +777,12 @@ extern "C"
   /* ml_wg_mgr.c — relay-bound direct-path retry counters (log-less bench
    * visibility, same pattern as ml_wg_get_rehome_diag):
    * out[0] = retry rounds fired (CallMeMaybe + forced candidate sweep)
-   * out[1] = direct-path regains (has_direct_path false -> true edges) */
-  void ml_wg_get_direct_retry_diag(uint32_t out[2]);
+   * out[1] = direct-path regains (has_direct_path false -> true edges)
+   * out[2] = safety peers currently relay-bound (active, no direct path)
+   * out[3] = ms until the earliest armed retry round (0 = none armed / due
+   *          now). Cross-task read of wg_mgr-owned words — worst case a
+   *          transiently stale value, same contract as ml_wg_get_direct_diag. */
+  void ml_wg_get_direct_retry_diag(microlink_t * ml, uint32_t out[4]);
 
   /* ml_peer_nvs.c */
   esp_err_t ml_peer_nvs_init(void);

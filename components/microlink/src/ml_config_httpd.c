@@ -962,11 +962,15 @@ static esp_err_t handler_monitor(httpd_req_t * req)
       /* Relay-bound direct-path retry: rounds fired + direct regains. A unit
        * stuck on DERP with direct_retry_rounds climbing but direct_regains
        * flat means the retry runs and the path is genuinely unreachable;
-       * both flat means the peer never demoted (or is not safety-tracked). */
-      uint32_t drd[2] = {0};
-      ml_wg_get_direct_retry_diag(drd);
+       * both flat means the peer never demoted (or is not safety-tracked).
+       * direct_relay_bound / direct_retry_due_ms distinguish "retry never
+       * armed" from "first round not due yet" without waiting out backoff. */
+      uint32_t drd[4] = {0};
+      ml_wg_get_direct_retry_diag(ml, drd);
       cJSON_AddNumberToObject(json, "direct_retry_rounds", drd[0]);
       cJSON_AddNumberToObject(json, "direct_regains", drd[1]);
+      cJSON_AddNumberToObject(json, "direct_relay_bound", drd[2]);
+      cJSON_AddNumberToObject(json, "direct_retry_due_ms", drd[3]);
 
       /* Same-LAN direct-path diagnostics for the priority peer (the machine):
        * what LAN endpoint we advertise, which candidate endpoints we hold for

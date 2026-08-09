@@ -828,10 +828,33 @@ void ml_wg_get_rehome_diag(uint32_t out[6])
 static uint32_t s_diag_relay_retries; /* CMM + forced-sweep rounds fired      */
 static uint32_t s_diag_direct_regains; /* has_direct_path false -> true edges */
 
-void ml_wg_get_direct_retry_diag(uint32_t out[2])
+void ml_wg_get_direct_retry_diag(microlink_t * ml, uint32_t out[4])
 {
   out[0] = s_diag_relay_retries;
   out[1] = s_diag_direct_regains;
+  out[2] = 0;
+  out[3] = 0;
+  if (ml == NULL) return;
+  /* Report the relay-bound safety peers and the earliest armed retry due
+   * time, so a bench run can verify the retry ARMED without waiting out the
+   * backoff (2026-08-09 falsification: rounds==0 alone cannot distinguish
+   * "retry never armed" from "first round simply not due yet"). */
+  uint64_t now = ml_get_time_ms();
+  uint64_t soonest = 0;
+  for (int i = 0; i < ml->peer_count; i++) {
+    ml_peer_t * p = &ml->peers[i];
+    if (!p->active || p->has_direct_path) continue;
+    bool safety = (ml->config.priority_peer_ip != 0 && p->vpn_ip == ml->config.priority_peer_ip) ||
+                  is_health_tracked(p->vpn_ip);
+    if (!safety) continue;
+    out[2]++;
+    if (p->relay_retry_next_ms != 0 && (soonest == 0 || p->relay_retry_next_ms < soonest)) {
+      soonest = p->relay_retry_next_ms;
+    }
+  }
+  if (soonest > now) {
+    out[3] = (uint32_t)(soonest - now);
+  }
 }
 
 /* Home our single DERP connection on a pinned peer's region.
@@ -1676,6 +1699,7 @@ static void process_disco_pong(
 
   /* Match transaction ID */
   bool matched = false;
+  bool consumed = false;
   for (int i = 0; i < MAX_PENDING_PROBES; i++) {
     if (!pending_probes[i].active) continue;
     if (memcmp(pending_probes[i].txid, txid, DISCO_TXID_LEN) != 0) continue;
@@ -1762,9 +1786,11 @@ static void process_disco_pong(
           (int)((pkt->src_ip >> 8) & 0xFF),
           (int)(pkt->src_ip & 0xFF),
           (int)pkt->src_port);
-        /* Consume this probe exactly like the normal matched-pong exit below. */
+        /* Consume this probe exactly like the normal matched-pong exit below
+         * (direct pong -> consuming is correct; see the via_derp note there). */
         pending_probes[i].active = false;
         matched = true;
+        consumed = true;
         break;
       }
 
@@ -1870,17 +1896,29 @@ static void process_disco_pong(
       }
     }
 
-    pending_probes[i].active = false;
+    /* Consume the probe ONLY for a direct pong. While demoted, every probe is
+     * dual-sent (direct + DERP fallback) under ONE txid, and the peer answers
+     * BOTH. Consuming on the via-DERP pong (which always arrives) burned the
+     * txid, so the direct pong that followed hit the "unmatched" branch below
+     * and was DROPPED — the direct path could then never re-promote when DERP
+     * won the race (2026-08-09 bench falsification of the stuck-on-DERP fix).
+     * A via-DERP match keeps the probe active for the remaining
+     * ML_DISCO_PING_TIMEOUT_MS window so a slower direct pong still promotes;
+     * the expiry sweep in disco_periodic_probes reclaims the slot. */
+    if (!pkt->via_derp) {
+      pending_probes[i].active = false;
+      consumed = true;
+    }
     matched = true;
     break;
   }
 
-  if (matched) {
+  if (matched && consumed) {
     /* Remember this txid so the machine's DUPLICATE answer on the other transport
-     * (direct answered here -> DERP copy arrives next, or vice-versa) is logged as
+     * (direct answered here -> DERP copy arrives next) is logged as
      * a benign duplicate below instead of a scary "unmatched" WARN. */
     remember_consumed_txid(txid);
-  } else {
+  } else if (!matched) {
     /* Find peer by disco key for logging */
     int peer_idx = find_peer_by_disco_key(ml, sender_disco_key);
     const char * name = peer_idx >= 0 ? ml->peers[peer_idx].hostname : "?";
@@ -2635,11 +2673,14 @@ static void disco_periodic_probes(microlink_t * ml)
         p->direct_backoff_until = now + backoff;
       }
 
-      /* Arm the relay-bound retry (safety peers only): if the fast 5 s reprobe
-       * hasn't regained direct within ML_DISCO_RELAY_RETRY_MIN_MS, start the
-       * heavier CMM + candidate-sweep rounds. Fresh outage = fresh backoff. */
+      /* Arm the relay-bound retry (safety peers only). First round FAST
+       * (ML_DISCO_RELAY_RETRY_FIRST_MS): when the outage also killed our
+       * outbound NAT mapping, the reprobe pings below die in flight and only
+       * a CMM round (far side probes back) recovers — a 30 s floor here left
+       * the peer visibly relay-bound through the whole bench observation
+       * window (2026-08-09). Fresh outage = fresh backoff. */
       if (is_priority) {
-        p->relay_retry_next_ms = now + ML_DISCO_RELAY_RETRY_MIN_MS;
+        p->relay_retry_next_ms = now + ML_DISCO_RELAY_RETRY_FIRST_MS;
         p->relay_retry_count = 0;
       }
 
@@ -2662,6 +2703,16 @@ static void disco_periodic_probes(microlink_t * ml)
 
         /* Force-ping to try re-establishing the direct path */
         disco_send_ping_to_peer(ml, i, true);
+
+        /* Safety peers: ALSO fire one immediate CallMeMaybe. If the outage
+         * that caused this demotion killed our outbound NAT mapping, the
+         * force-ping above never reaches the peer — the far side must probe
+         * US to re-punch the hole, and it only does that on a CMM. One NaCl
+         * seal per demotion EVENT (rare); bulk peers are excluded so the
+         * peer-scaling armor is untouched. */
+        if (is_priority) {
+          disco_send_call_me_maybe(ml, i);
+        }
       }
     }
 
@@ -2695,15 +2746,17 @@ static void disco_periodic_probes(microlink_t * ml)
     if (is_priority && !p->has_direct_path) {
       if (p->relay_retry_next_ms == 0) {
         /* Cold relay-bound peer (never promoted since boot): arm the cycle. */
-        p->relay_retry_next_ms = now + ML_DISCO_RELAY_RETRY_MIN_MS;
+        p->relay_retry_next_ms = now + ML_DISCO_RELAY_RETRY_FIRST_MS;
       } else if (!relay_retry_fired && now >= p->relay_retry_next_ms && now > p->direct_backoff_until) {
         relay_retry_fired = true; /* bounded: one NaCl seal + one sweep per tick */
         disco_send_call_me_maybe(ml, i);
         disco_send_ping_to_peer(ml, i, true);
-        if (p->relay_retry_count < 4u) {
+        /* Backoff after round N: 30 s << (N-1), capped at 300 s. With the
+         * 5 s first round that gives 5 -> 30 -> 60 -> 120 -> 240 -> 300 cap. */
+        if (p->relay_retry_count < 5u) {
           p->relay_retry_count++;
         }
-        uint64_t iv = (uint64_t)ML_DISCO_RELAY_RETRY_MIN_MS << p->relay_retry_count;
+        uint64_t iv = (uint64_t)ML_DISCO_RELAY_RETRY_MIN_MS << (p->relay_retry_count - 1u);
         if (iv > ML_DISCO_RELAY_RETRY_MAX_MS) {
           iv = ML_DISCO_RELAY_RETRY_MAX_MS;
         }
