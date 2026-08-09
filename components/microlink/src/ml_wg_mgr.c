@@ -144,6 +144,13 @@ typedef struct
   uint32_t dest_ip;
   uint16_t dest_port;
   uint64_t sent_ms;
+  /* ms of the FIRST via-DERP pong match (0 = none yet). A via-DERP match no
+   * longer consumes the slot (pong-race fix: the direct pong to the same
+   * dual-sent ping must still be able to promote), but the slot may then live
+   * only ML_DISCO_DERP_MATCH_GRACE_MS more — an unbounded (full 5 s) lifetime
+   * is what exhausted this table on the 2026-08-09 bench and demoted healthy
+   * paths (see ML_DISCO_DERP_MATCH_GRACE_MS). */
+  uint64_t derp_match_ms;
   int peer_index;
   bool active;
 } disco_probe_t;
@@ -1373,6 +1380,7 @@ static void disco_build_ping(microlink_t * ml, int peer_idx, uint8_t * out, size
       memcpy(pending_probes[i].txid, txid, DISCO_TXID_LEN);
       pending_probes[i].peer_index = peer_idx;
       pending_probes[i].sent_ms = ml_get_time_ms();
+      pending_probes[i].derp_match_ms = 0;
       pending_probes[i].active = true;
       registered = true;
       ESP_LOGI(
@@ -1902,12 +1910,22 @@ static void process_disco_pong(
      * txid, so the direct pong that followed hit the "unmatched" branch below
      * and was DROPPED — the direct path could then never re-promote when DERP
      * won the race (2026-08-09 bench falsification of the stuck-on-DERP fix).
-     * A via-DERP match keeps the probe active for the remaining
-     * ML_DISCO_PING_TIMEOUT_MS window so a slower direct pong still promotes;
-     * the expiry sweep in disco_periodic_probes reclaims the slot. */
+     * A via-DERP match keeps the probe active — but only for a BOUNDED
+     * ML_DISCO_DERP_MATCH_GRACE_MS more (stamped here, reclaimed by the sweep
+     * in disco_periodic_probes). The direct pong being waited for answers the
+     * SAME dual-sent ping, so if the direct path is alive it trails the DERP
+     * pong by at most ~one direct RTT; letting the slot ride out the full 5 s
+     * window instead is what exhausted the 64-slot table under CMM bursts on
+     * the 2026-08-09 bench — pings then went out UNREGISTERED, their pongs
+     * arrived unmatched, last_pong_recv_ms froze, and the 4 s pong watchdog
+     * demoted healthy paths in a runaway (regains oscillation + robot-disarm
+     * waves). Duplicate via-DERP matches keep the FIRST stamp: the window
+     * must not be extendable by more relayed pongs. */
     if (!pkt->via_derp) {
       pending_probes[i].active = false;
       consumed = true;
+    } else if (pending_probes[i].derp_match_ms == 0) {
+      pending_probes[i].derp_match_ms = now;
     }
     matched = true;
     break;
@@ -1922,13 +1940,17 @@ static void process_disco_pong(
     /* Find peer by disco key for logging */
     int peer_idx = find_peer_by_disco_key(ml, sender_disco_key);
     const char * name = peer_idx >= 0 ? ml->peers[peer_idx].hostname : "?";
-    if (pkt->via_derp && txid_recently_consumed(txid)) {
-      /* The direct pong already consumed this probe; this is just the machine's
-       * DERP duplicate. Benign — DEBUG, not WARN. */
+    if (txid_recently_consumed(txid)) {
+      /* Either the machine's DERP duplicate of a probe the direct pong already
+       * consumed, or a straggler direct pong whose slot the post-DERP-match
+       * grace window reclaimed (>1 s slower than the relayed answer to the
+       * same ping — that path was not going to win promotion anyway). Benign —
+       * DEBUG, not WARN. */
       ESP_LOGD(
         TAG,
-        "duplicate via-DERP pong from %s txid=%02x%02x%02x%02x (direct already consumed)",
+        "late duplicate pong from %s (via %s) txid=%02x%02x%02x%02x (probe already retired)",
         name,
+        pkt->via_derp ? "DERP" : "direct",
         txid[0],
         txid[1],
         txid[2],
@@ -2112,55 +2134,51 @@ static void process_disco_packet(microlink_t * ml, const ml_rx_packet_t * pkt)
       /* Reply with our own CallMeMaybe (bidirectional NAT traversal). */
       disco_send_call_me_maybe(ml, peer_idx);
 
-      /* Probe each endpoint with a DISCO ping. */
-      for (int i = 0; i < ep_count && i < ML_MAX_ENDPOINTS; i++) {
-        const uint8_t * entry = ep_data + (i * 18);
-        uint16_t port = (entry[16] << 8) | entry[17];
+      /* Probe the advertised endpoints with ONE DISCO ping (single txid /
+       * single pending_probes[] slot, sent to every candidate — the same
+       * sweep semantics disco_send_ping_to_peer uses: any endpoint's pong
+       * matches the txid). Building a FRESH ping per endpoint burned one
+       * probe slot + one seal EACH (up to 8 per received CMM), which is what
+       * let a CMM burst blow through the 64-slot table on the 2026-08-09
+       * bench. Per received CMM the cost is now exactly one seal + one slot
+       * + <=8 UDP sends. */
+      if (!disco_has_udp_path(ml)) {
+        ESP_LOGW(TAG, "CMM probe skipped: no UDP path (sock4=%d)", ml->disco_sock4);
+      } else {
+        uint8_t ping_pkt[256];
+        size_t ping_len = 0;
+        bool ping_built = false;
 
-        /* Check for IPv4-mapped IPv6: ::ffff:A.B.C.D */
-        bool is_v4_mapped = true;
-        for (int j = 0; j < 10; j++) {
-          if (entry[j] != 0) {
-            is_v4_mapped = false;
-            break;
+        for (int i = 0; i < ep_count && i < ML_MAX_ENDPOINTS; i++) {
+          const uint8_t * entry = ep_data + (i * 18);
+          uint16_t port = (entry[16] << 8) | entry[17];
+
+          /* Check for IPv4-mapped IPv6: ::ffff:A.B.C.D */
+          bool is_v4_mapped = true;
+          for (int j = 0; j < 10; j++) {
+            if (entry[j] != 0) {
+              is_v4_mapped = false;
+              break;
+            }
           }
-        }
-        if (entry[10] != 0xff || entry[11] != 0xff) is_v4_mapped = false;
+          if (entry[10] != 0xff || entry[11] != 0xff) is_v4_mapped = false;
 
-        ESP_LOGI(
-          TAG,
-          "  CMM ep[%d]: v4mapped=%d port=%d bytes=%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x",
-          i,
-          is_v4_mapped,
-          port,
-          entry[0],
-          entry[1],
-          entry[2],
-          entry[3],
-          entry[4],
-          entry[5],
-          entry[6],
-          entry[7],
-          entry[8],
-          entry[9],
-          entry[10],
-          entry[11],
-          entry[12],
-          entry[13],
-          entry[14],
-          entry[15]);
+          /* DEBUG, not INFO: this 16-byte hex dump per endpoint was ~130
+           * blocking UART chars each — real wg_mgr stall time during the CMM
+           * bursts this handler must survive. */
+          ESP_LOGD(
+            TAG, "  CMM ep[%d]: v4mapped=%d port=%d ip=%02x%02x%02x%02x", i, is_v4_mapped, port, entry[12], entry[13],
+            entry[14], entry[15]);
 
-        if (!is_v4_mapped || port == 0) continue;
+          if (!is_v4_mapped || port == 0) continue;
 
-        uint32_t ip =
-          ((uint32_t)entry[12] << 24) | ((uint32_t)entry[13] << 16) | ((uint32_t)entry[14] << 8) | (uint32_t)entry[15];
+          uint32_t ip = ((uint32_t)entry[12] << 24) | ((uint32_t)entry[13] << 16) | ((uint32_t)entry[14] << 8) |
+                        (uint32_t)entry[15];
 
-        /* Send DISCO ping to this endpoint */
-        if (disco_has_udp_path(ml)) {
-          uint8_t ping_pkt[256];
-          size_t ping_len = 0;
-          disco_build_ping(ml, peer_idx, ping_pkt, &ping_len);
-
+          if (!ping_built) {
+            disco_build_ping(ml, peer_idx, ping_pkt, &ping_len);
+            ping_built = true;
+          }
           if (ping_len > 0) {
             int ret = disco_udp_sendto(ml, ping_pkt, ping_len, ip, port);
             ESP_LOGI(
@@ -2174,8 +2192,6 @@ static void process_disco_packet(microlink_t * ml, const ml_rx_packet_t * pkt)
               (int)ping_len,
               ret);
           }
-        } else {
-          ESP_LOGW(TAG, "CMM probe skipped: no UDP path (sock4=%d)", ml->disco_sock4);
         }
       }
 
@@ -2343,6 +2359,26 @@ static void disco_send_call_me_maybe(microlink_t * ml, int peer_idx)
   }
 
   ml_peer_t * p = &ml->peers[peer_idx];
+
+  /* Chip<->chip CMM chain breaker (single choke point — EVERY CMM send path
+   * runs through here). process_disco_packet answers a received CMM with a
+   * CMM of its own; between two microlink chips (remote<->machn) that mutual
+   * reply is a ping-pong chain sustained at DERP RTT until a frame drops.
+   * The demotion-CMM + 5 s relay-retry rounds re-ignite such chains
+   * constantly, and each received CMM costs a reply seal + endpoint probes —
+   * the fuel of the 2026-08-09 probe-table exhaustion runaway. At most one
+   * CMM per peer per ML_DISCO_CMM_MIN_INTERVAL_MS: the FIRST send in a
+   * window (demotion event, >=5 s-spaced retry round, boot broadcast) always
+   * passes, so recovery intent is untouched; only chain re-fires are eaten.
+   * A suppressed reply is harmless — the exchange it would answer already
+   * carried our endpoints to that peer within the last window. */
+  {
+    uint64_t cmm_now = ml_get_time_ms();
+    if (p->last_cmm_sent_ms != 0 && cmm_now - p->last_cmm_sent_ms < ML_DISCO_CMM_MIN_INTERVAL_MS) {
+      return;
+    }
+    p->last_cmm_sent_ms = cmm_now;
+  }
 
   /* Build plaintext: [type(1)][version(1)][endpoints(N * 18)] */
   uint8_t plaintext[2 + 3 * 18]; /* Up to 3 endpoints */
@@ -2829,8 +2865,21 @@ static void disco_periodic_probes(microlink_t * ml)
      * which is always > PING_TIMEOUT_MS, causing immediate false expiry. */
   now = ml_get_time_ms();
   for (int i = 0; i < MAX_PENDING_PROBES; i++) {
-    if (pending_probes[i].active && now - pending_probes[i].sent_ms > ML_DISCO_PING_TIMEOUT_MS) {
+    if (!pending_probes[i].active) continue;
+    bool timed_out = now - pending_probes[i].sent_ms > ML_DISCO_PING_TIMEOUT_MS;
+    /* Bounded post-DERP-match window (see disco_probe_t.derp_match_ms): a
+     * via-DERP-answered probe waits only ML_DISCO_DERP_MATCH_GRACE_MS for its
+     * slower direct twin, not the full 5 s timeout — unbounded lifetimes here
+     * exhausted the table and demoted healthy paths (2026-08-09 bench). */
+    bool grace_over = pending_probes[i].derp_match_ms != 0 &&
+                      now - pending_probes[i].derp_match_ms > ML_DISCO_DERP_MATCH_GRACE_MS;
+    if (timed_out || grace_over) {
       pending_probes[i].active = false;
+      if (grace_over) {
+        /* A direct pong may still straggle in; let it log as a benign
+         * duplicate instead of a scary "unmatched" WARN. */
+        remember_consumed_txid(pending_probes[i].txid);
+      }
     }
   }
 }

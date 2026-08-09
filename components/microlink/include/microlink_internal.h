@@ -173,6 +173,35 @@ extern "C"
 #define ML_DISCO_RELAY_RETRY_MIN_MS 30000
 #define ML_DISCO_RELAY_RETRY_MAX_MS 300000
 
+/* Bench regression of the second cut (2026-08-09, all 3 devices on the fix
+ * build): direct_regains oscillated in bursts (machn 131+ over 90 min) and
+ * machn's wg_mgr task stalled >2.5 s, disarming the robot. Two compounding
+ * causes, both bounded here:
+ *
+ * 1. The pong-race fix let a via-DERP-answered probe hold its
+ *    pending_probes[] slot for the FULL 5 s ping timeout (so a slower direct
+ *    pong could still promote). Under a CMM burst that multiplied
+ *    steady-state slot demand past the 64-slot table; once full, new pings
+ *    were sent UNREGISTERED, their pongs arrived "unmatched", so
+ *    last_pong_recv_ms froze and the 4 s pong watchdog demoted perfectly
+ *    healthy paths — each demotion firing another CMM: a runaway.
+ *    Bound: after a via-DERP match the slot stays alive only
+ *    ML_DISCO_DERP_MATCH_GRACE_MS more. The direct pong it is waiting for is
+ *    the answer to the SAME dual-sent ping; if the direct path is alive that
+ *    pong trails the DERP one by at most ~one direct RTT (<<1 s), so 1 s of
+ *    grace preserves the pong-race fix while restoring a bounded lifetime.
+ *
+ * 2. process_disco_packet answers every received CallMeMaybe with a CMM of
+ *    its own (bidirectional NAT traversal). Between TWO microlink chips that
+ *    reply rule is a ping-pong chain sustained at DERP RTT until a frame
+ *    drops; the demotion-CMM + 5 s retry round re-ignited chains constantly.
+ *    Bound: at most one CMM per peer per ML_DISCO_CMM_MIN_INTERVAL_MS at the
+ *    single send choke point (disco_send_call_me_maybe). The first CMM in
+ *    any window always passes, so demotion CMMs and the >=5 s-spaced retry
+ *    rounds are effectively unthrottled; only chain re-fires are eaten. */
+#define ML_DISCO_DERP_MATCH_GRACE_MS 1000
+#define ML_DISCO_CMM_MIN_INTERVAL_MS 3000
+
 /* 100+ peer scaling bounds (2026-07-21): pace CPU-heavy per-peer work so a
  * large tailnet can never monopolize the wg_mgr loop that also drains the
  * pstop heartbeat queue. The priority peer is exempt from every one of
@@ -401,6 +430,10 @@ extern "C"
      * cleared on every genuine direct promotion. */
     uint64_t relay_retry_next_ms;
     uint8_t relay_retry_count;
+
+    /* Chip<->chip CMM chain breaker (see ML_DISCO_CMM_MIN_INTERVAL_MS): ms of
+     * the last CallMeMaybe SENT to this peer. 0 = never sent. */
+    uint64_t last_cmm_sent_ms;
 
     /* WireGuard peer index in wireguard-lwip */
     int wg_peer_index;
