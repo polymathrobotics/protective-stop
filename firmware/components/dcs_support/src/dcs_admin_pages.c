@@ -12,7 +12,7 @@
  *                                 configured lock: 0 = auto else pinned region)
  *   GET  /api/last_log            Last boot's tail-of-log (from RTC_NOINIT)
  *   POST /api/derp                Toggle DERP TX worker (microlink_pause_derp)
- *   POST /api/wg                  Toggle ml_wg_mgr task suspend/resume
+ *   POST /api/wg                  REMOVED — 410 Gone (see api_wg_toggle)
  *   POST /api/derp_delay?ms=N     Set DERP loop yield
  *   POST /api/wifi_tx_power?q=N   Set WiFi max TX power
  *   POST /api/iface/eth|wifi|usb  Select the active uplink
@@ -491,26 +491,38 @@ static esp_err_t api_derp_toggle(httpd_req_t * req)
   return httpd_resp_send(req, buf, n);
 }
 
-/* === POST /api/wg ======================================================== */
+/* === POST /api/wg — REMOVED (410 Gone) ==================================== *
+ * The runtime suspend/resume toggle did a bare vTaskSuspend on ml_wg_mgr from
+ * the httpd task. ml_wg_mgr takes LOCK_TCPIP_CORE (wireguardif_periodic, the
+ * netif shutdown path) and the peer-NVS flash mutex mid-loop; a suspend landing
+ * inside such a window parks the task WITH the lock held, wedging every lwIP
+ * user (httpd, DERP TLS, pstop UDP) until the task WDT panics the chip —
+ * bench-proven 2026-08-09.
+ *
+ * Removed rather than rebuilt as a loop-top quiesce flag: the toggle was a
+ * bench isolation hook with no production use, and equivalent SAFE controls
+ * already exist — /api/ts_boot (persistent pause, applied at boot through
+ * dcs_support_finalize's sequenced pause: DERP off first, 500 ms drain, THEN
+ * suspend, when the task is provably idle at its loop top) and /api/derp (live
+ * DERP TX pause). A quiesce flag would add a new cross-component API surface to
+ * keep a hook the no-test-hooks-in-prod policy says shouldn't ship. The
+ * remaining vTaskSuspend call sites are deliberate and stay: boot
+ * (dcs_support_finalize, sequenced as above) and the pre-restart quiesce paths
+ * (api_usb_enable_toggle + the esp_restart shutdown handler), where the chip is
+ * about to reset regardless.
+ *
+ * The route stays registered so callers get an explicit 410 + pointer, not a
+ * 404. The /state.json wg_paused field keeps working — it reports the
+ * boot-path suspend state, which is all it could truthfully report before. */
 static esp_err_t api_wg_toggle(httpd_req_t * req)
 {
-  if (!g_dcs_wg_handle) {
-    (void)httpd_resp_set_status(req, "503 Service Unavailable");
-    (void)httpd_resp_set_type(req, "application/json");
-    return httpd_resp_sendstr(req, "{\"ok\":false,\"error\":\"no ml_wg_mgr handle\"}");
-  }
-  int paused = atomic_load(&g_dcs_wg_paused);
-  if (paused != 0) {
-    vTaskResume(g_dcs_wg_handle);
-    atomic_store(&g_dcs_wg_paused, 0);
-  } else {
-    vTaskSuspend(g_dcs_wg_handle);
-    atomic_store(&g_dcs_wg_paused, 1);
-  }
-  char buf[48];
-  int n = snprintf(buf, sizeof(buf), "{\"ok\":true,\"paused\":%d}", atomic_load(&g_dcs_wg_paused));
+  (void)httpd_resp_set_status(req, "410 Gone");
   (void)httpd_resp_set_type(req, "application/json");
-  return httpd_resp_send(req, buf, n);
+  return httpd_resp_sendstr(
+    req,
+    "{\"ok\":false,\"error\":\"runtime WG suspend removed (task-WDT wedge risk: "
+    "suspend could land while ml_wg_mgr held LOCK_TCPIP_CORE); use /api/ts_boot "
+    "(persistent, safe boot-path pause) or /api/derp\"}");
 }
 
 /* === POST /api/wifi_tx_power?q=N ========================================= */

@@ -18,7 +18,7 @@ Query parameters are shown where required. Unless noted, POST bodies are empty.
 | GET  | `/api/last_log` | Tail of the previous boot's log (RTC ring) |
 | POST | `/api/derp` | Toggle the DERP TX worker |
 | POST | `/api/derp_delay?ms=N` | Set the DERP loop yield (ms) |
-| POST | `/api/wg` | Suspend / resume the WireGuard task |
+| POST | `/api/wg` | **Removed** — returns `410 Gone`. The runtime suspend could park `ml_wg_mgr` while it held the lwIP core lock, wedging all networking until a task-WDT panic (bench-proven 2026-08-09). Use `/api/ts_boot` (persistent, safe boot-path pause) or `/api/derp` instead. The `/state.json` `wg_paused` field still reports the boot-path suspend state |
 | POST | `/api/wifi_tx_power?q=N` | Set WiFi max TX power (quarter-dBm) |
 | POST | `/api/iface/eth` | Select the Ethernet uplink |
 | POST | `/api/iface/wifi` | Select the WiFi uplink |
