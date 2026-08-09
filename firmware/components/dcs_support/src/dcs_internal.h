@@ -141,6 +141,12 @@ extern "C"
   extern atomic_uint_fast32_t g_dcs_pstop_sf_txdrv; /* lwip ERR_IF: uplink driver TX refused */
   extern atomic_uint_fast32_t g_dcs_pstop_sf_txdrv_recovered; /* transient ERR_IF absorbed by same-tick retry */
   extern atomic_uint_fast32_t g_dcs_pstop_sf_other;
+  /* ENOTCONN split out of "other": WG peer-present-but-no-keypair — the far
+   * side doesn't know our key (rebooted machine, netmap absent; 2026-08-08
+   * incident). kicks = how many times the sustained-ENOTCONN escalation
+   * (re-handshake + coord re-announce) fired. */
+  extern atomic_uint_fast32_t g_dcs_pstop_sf_enotconn;
+  extern atomic_uint_fast32_t g_dcs_pstop_sf_enotconn_kicks;
   extern atomic_int g_dcs_pstop_sf_last_errno;
   extern atomic_uint_fast32_t g_dcs_pstop_rebonds; /* link re-syncs after reply loss */
   /* Machine-role relay supervision (always 0 on remotes): consecutive

@@ -202,11 +202,38 @@ extern "C"
  * @brief Publish the aggregate send-failure cause split (errno buckets from
  * the failing sendto): nomem = ENOMEM (TX-queue/pbuf pressure, typically the
  * DERP relay path under load), route = EHOSTUNREACH/ENETUNREACH/
- * EADDRNOTAVAIL (no path), other = the rest. Exposed in /state.json as
- * pstop_sf_nomem / pstop_sf_route / pstop_sf_other / pstop_sf_errno.
+ * EADDRNOTAVAIL (no path), enotconn = ENOTCONN (WG peer known but no
+ * keypair — the far side doesn't know our key; cold-bond gap 2026-08-08),
+ * other = the rest. enotconn_kicks counts sustained-ENOTCONN escalations
+ * (forced re-handshake + coord re-announce). Exposed in /state.json as
+ * pstop_sf_nomem / pstop_sf_route / pstop_sf_other / pstop_sf_enotconn /
+ * pstop_sf_enotconn_kicks / pstop_sf_errno.
  */
   void dcs_publish_pstop_sf_causes(
-    uint32_t nomem, uint32_t route, uint32_t txdrv, uint32_t txdrv_recovered, uint32_t other, int last_errno);
+    uint32_t nomem,
+    uint32_t route,
+    uint32_t txdrv,
+    uint32_t txdrv_recovered,
+    uint32_t other,
+    uint32_t enotconn,
+    uint32_t enotconn_kicks,
+    int last_errno);
+
+  /**
+ * @brief True while the tailnet control plane is CONNECTED (registered,
+ * long-poll live). Gate for escalations that only make sense with a
+ * working coordination path.
+ */
+  bool dcs_tailnet_connected(void);
+
+  /**
+ * @brief Ask microlink to re-announce this node to the control plane (see
+ * microlink_request_announce): nudges the server to re-push us into a
+ * far peer's netmap when that peer has forgotten our WG key (sustained
+ * ENOTCONN sends after the peer rebooted without its netmap, 2026-08-08).
+ * Non-blocking; rate-limit at the call site.
+ */
+  void dcs_request_announce(void);
 
   /**
  * @brief Publish machine-role relay supervision (consecutive contradiction

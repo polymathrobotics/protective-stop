@@ -99,6 +99,8 @@ atomic_uint_fast32_t g_dcs_pstop_sf_route;
 atomic_uint_fast32_t g_dcs_pstop_sf_txdrv;
 atomic_uint_fast32_t g_dcs_pstop_sf_txdrv_recovered;
 atomic_uint_fast32_t g_dcs_pstop_sf_other;
+atomic_uint_fast32_t g_dcs_pstop_sf_enotconn;
+atomic_uint_fast32_t g_dcs_pstop_sf_enotconn_kicks;
 atomic_int g_dcs_pstop_sf_last_errno;
 atomic_uint_fast32_t g_dcs_pstop_rtt_ms;
 atomic_uint_fast64_t g_dcs_pstop_last_reply_ms;
@@ -543,14 +545,35 @@ void dcs_publish_machn_remote(
 }
 
 void dcs_publish_pstop_sf_causes(
-  uint32_t nomem, uint32_t route, uint32_t txdrv, uint32_t txdrv_recovered, uint32_t other, int last_errno)
+  uint32_t nomem,
+  uint32_t route,
+  uint32_t txdrv,
+  uint32_t txdrv_recovered,
+  uint32_t other,
+  uint32_t enotconn,
+  uint32_t enotconn_kicks,
+  int last_errno)
 {
   atomic_store(&g_dcs_pstop_sf_nomem, nomem);
   atomic_store(&g_dcs_pstop_sf_route, route);
   atomic_store(&g_dcs_pstop_sf_txdrv, txdrv);
   atomic_store(&g_dcs_pstop_sf_txdrv_recovered, txdrv_recovered);
   atomic_store(&g_dcs_pstop_sf_other, other);
+  atomic_store(&g_dcs_pstop_sf_enotconn, enotconn);
+  atomic_store(&g_dcs_pstop_sf_enotconn_kicks, enotconn_kicks);
   atomic_store(&g_dcs_pstop_sf_last_errno, last_errno);
+}
+
+bool dcs_tailnet_connected(void)
+{
+  return (g_dcs.ml_handle != NULL) && (microlink_get_state(g_dcs.ml_handle) == ML_STATE_CONNECTED);
+}
+
+void dcs_request_announce(void)
+{
+  if (g_dcs.ml_handle != NULL) {
+    (void)microlink_request_announce(g_dcs.ml_handle);
+  }
 }
 
 void dcs_publish_pstop_peer(uint32_t peer_ip, uint16_t peer_port)
