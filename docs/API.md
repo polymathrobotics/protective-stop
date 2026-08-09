@@ -137,6 +137,31 @@ boolean — `true` = accepted, stop-capable, heartbeat-monitored, re-arm-**IN**c
 `false` = full operator (stop **and** re-arm). A remote absent from `operators`
 reads `stop_only=true`.
 
+### Machine arming/restart telemetry (`/state.json`)
+
+Published once per comparator tick from the pstop_c library state (core 0's
+lockstep instance; both fields read `0` on remotes):
+
+- `remote_stop_id` — pstop_c `robot_state.remote_stop_id`: the remote device
+  ID that stopped the robot, or that owns the in-progress stop/OK arming
+  cycle. `0` = none (fresh boot, or robot running with no cycle open). This is
+  the **arming owner**: cross-check it against `operators` to see whether the
+  arming gesture is coming from an authorized remote.
+- `restart_state` — pstop_c `ROBOT_RESTART_STATE_*`:
+  `0` = OK (an OK message may complete re-arming), `1` = NEED_STOP (the
+  machine refuses OK until a STOP gesture arrives first — e.g. after a
+  heartbeat loss or boot), `2` = STOP_RECEIVED (stop half of the gesture seen;
+  awaiting the OK half after `min_stop_ms`).
+- `bonded_remotes[].state` — pstop_c `pstop_remote_state_t` for that remote:
+  `0` INITING (bond handshake in progress), `1` BONDED (bonded, no verdict
+  yet), `2` OK (commanding RUN), `3` STOPPED (commanding STOP),
+  `255` UNKNOWN.
+
+A robot that is actually disarmed but shown "green" by fleet tooling, or an
+arming gesture that never completes, is diagnosable from these three fields
+alone: who owns the cycle, what the machine is waiting for, and what each
+bonded remote is commanding.
+
 ## Source of truth
 
 - Diagnostic/config routes: `firmware/components/dcs_support/src/dcs_admin_pages.c`

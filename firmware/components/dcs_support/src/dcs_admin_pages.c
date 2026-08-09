@@ -212,7 +212,9 @@ static esp_err_t page_state(httpd_req_t * req)
   enum
   {
     JSON_CAP = 3776 /* eth-watchdog fields + bonded-remote stop_only + operator list
-                       + instantaneous internal-heap fields (heap_free_int/heap_lfb_int) */
+                       + instantaneous internal-heap fields (heap_free_int/heap_lfb_int).
+                       remote_stop_id + restart_state add <= 47 B worst case against
+                       ~940 B live headroom (measured 2026-08-09) — no bump needed. */
   };
 
   char * buf = heap_caps_malloc(JSON_CAP, MALLOC_CAP_SPIRAM);
@@ -257,6 +259,7 @@ static esp_err_t page_state(httpd_req_t * req)
     "\"inet_down\":%d,\"inet_silent_ms\":%lu,"
     "\"rst_hist\":%s,\"ota_state\":%d,\"pstop_num\":%d,"
     "\"relay_fault_a\":%lu,\"relay_fault_b\":%lu,\"relay_stop\":%lu,"
+    "\"remote_stop_id\":%lu,\"restart_state\":%lu,"
     "\"ring_offset\":%d,\"ring_led1\":%d,\"pstop_machines\":",
     (unsigned long)atomic_load(&g_dcs_core_tick[0]),
     (unsigned long)atomic_load(&g_dcs_core_tick[1]),
@@ -349,6 +352,8 @@ static esp_err_t page_state(httpd_req_t * req)
     (unsigned long)atomic_load(&g_dcs_relay_fault_a),
     (unsigned long)atomic_load(&g_dcs_relay_fault_b),
     (unsigned long)atomic_load(&g_dcs_relay_stop),
+    (unsigned long)atomic_load(&g_dcs_machn_arm_owner),
+    (unsigned long)atomic_load(&g_dcs_machn_restart_state),
     (int)dcs_pstop_ring_get_offset(),
     dcs_pstop_ring_locate_active() ? 1 : 0);
 

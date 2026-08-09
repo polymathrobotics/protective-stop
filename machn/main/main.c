@@ -575,6 +575,20 @@ static void comparator_task(void * arg)
     seen_publish(now_ms()); /* REAL clock: entries are stamped with now_ms() in seen_note; mixing in
                                   * the tick-latched clock made age negative -> u64 wrap -> instant ageout */
 
+    /* Arming/restart telemetry for /state.json (remote_stop_id +
+         * restart_state). Read from CORE 0's instance, like the g_seen view
+         * above, and in the same comparator-only phase (both cores idle
+         * between windows, so nothing races the read). Core 0 is
+         * representative because the instances run in RX lockstep on
+         * identical inputs and an identical latched clock: on any tick that
+         * produced agreement their robot_state blocks are equal, and on a
+         * divergent tick the comparator has already withheld the reply and
+         * each core's relay enforces its own verdict — this read-only
+         * diagnostic can lag truth by at most one 100 ms tick and feeds
+         * nothing back into the safety path. */
+    dcs_publish_machn_arm(
+      g_core[0].machine.robot_state.remote_stop_id, (uint32_t)g_core[0].machine.robot_state.restart_state);
+
     relay_note_commands();
     relay_feedback_check();
 

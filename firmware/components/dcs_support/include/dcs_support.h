@@ -252,6 +252,19 @@ extern "C"
   void dcs_publish_machn_remote(
     int slot, uint32_t remote_id, uint32_t ip, uint32_t state, uint32_t age_ms, uint32_t rtt_ms, bool stop_only);
 
+  /**
+ * @brief Publish the machine-role arming/restart state (comparator, once per
+ * tick; never called on remotes, where both fields read 0). Shown in
+ * /state.json as remote_stop_id / restart_state.
+ * @param remote_stop_id pstop_c robot_state.remote_stop_id — the remote id
+ *        that stopped the robot, or that owns the in-progress stop/OK arming
+ *        cycle; 0 = none (fresh boot, or robot running with no cycle open).
+ * @param restart_state  pstop_c ROBOT_RESTART_STATE_*: 0 = OK (an OK message
+ *        may re-arm), 1 = NEED_STOP (a STOP gesture must come first),
+ *        2 = STOP_RECEIVED (stop seen, awaiting the OK half of the gesture).
+ */
+  void dcs_publish_machn_arm(uint32_t remote_stop_id, uint32_t restart_state);
+
   /* ============================================================================
  * Operator allowlist (machine-role authorization).
  *
