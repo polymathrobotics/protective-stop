@@ -182,8 +182,17 @@ extern "C"
  *  Behind NAT this is the site's egress — useful for rough management-side geolocation. */
   uint32_t microlink_get_public_ip(const microlink_t * ml);
 
-  /** DERP home region the single relay connection is on (0 = unset). Coarse locality hint. */
+  /** Effective DERP home region the single relay connection is actually on
+   *  (0 = unset). The runtime lock wins, else the learned/rehomed home. Coarse
+   *  locality hint AND the region the UI shows as live. */
   uint16_t microlink_get_derp_region(const microlink_t * ml);
+
+  /** Configured DERP-region LOCK: 0 = auto, else the region the chip is pinned
+   *  to home on (the persisted override). Distinct from
+   *  microlink_get_derp_region() (the region in use) — the two differ only
+   *  transiently while a fresh lock re-homes. Lets a UI show AUTO vs LOCKED-to-N
+   *  without guessing. Guards against a repeat of the region-9 (dfw) misroute. */
+  uint16_t microlink_get_derp_region_locked(const microlink_t * ml);
 
   /**
  * @brief Report application-level health of the priority-peer link.

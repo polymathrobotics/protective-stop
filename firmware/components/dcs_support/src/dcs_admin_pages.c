@@ -7,7 +7,9 @@
  *
  * Routes registered here (unauthenticated diagnostic/config server):
  *   GET  /                        Static HTML (k_index_html)
- *   GET  /state.json              Telemetry JSON
+ *   GET  /state.json              Telemetry JSON (incl. derp_region = effective
+ *                                 home region in use, derp_region_locked =
+ *                                 configured lock: 0 = auto else pinned region)
  *   GET  /api/last_log            Last boot's tail-of-log (from RTC_NOINIT)
  *   POST /api/derp                Toggle DERP TX worker (microlink_pause_derp)
  *   POST /api/wg                  Toggle ml_wg_mgr task suspend/resume
@@ -123,7 +125,11 @@ static esp_err_t page_state(httpd_req_t * req)
   uint32_t ml_reconnects = 0; /* control-plane reconnects since boot (soak flap tracking) */
   uint32_t vpn_ip = 0;
   uint32_t public_ip = 0; /* STUN egress IP — for rough management-side geolocation */
-  int derp_region = 0; /* DERP home region — coarse locality hint */
+  int derp_region = 0; /* effective DERP home region in use — coarse locality hint */
+  /* Configured lock (0 = auto, else pinned region). Emitted alongside the
+   * effective region so the UI shows AUTO vs LOCKED without guessing — the
+   * region-9 (dfw) misroute guard. */
+  int derp_region_locked = 0;
   if (g_dcs.ml_handle != NULL) {
     ml_state = (int)microlink_get_state(g_dcs.ml_handle);
     uint32_t cc = microlink_get_connect_count(g_dcs.ml_handle);
@@ -131,6 +137,7 @@ static esp_err_t page_state(httpd_req_t * req)
     vpn_ip = microlink_get_vpn_ip(g_dcs.ml_handle);
     public_ip = microlink_get_public_ip(g_dcs.ml_handle);
     derp_region = (int)microlink_get_derp_region(g_dcs.ml_handle);
+    derp_region_locked = (int)microlink_get_derp_region_locked(g_dcs.ml_handle);
   }
 
   uint32_t heap_min_internal = atomic_load(&g_dcs_heap_min_internal);
@@ -228,6 +235,7 @@ static esp_err_t page_state(httpd_req_t * req)
     "\"boot_count\":%u,\"reset_reason\":%u,"
     "\"fw_ver\":\"%s\",\"fw_sha\":\"%s\","
     "\"ml_state\":%d,\"ml_reconnects\":%lu,\"vpn_ip\":%lu,\"public_ip\":%lu,\"derp_region\":%d,"
+    "\"derp_region_locked\":%d,"
     "\"pstop_peer_ip\":%lu,\"pstop_peer_port\":%lu,"
     "\"pstop_sent\":%lu,\"pstop_replies\":%lu,\"pstop_last_msg\":%lu,\"pstop_mismatch\":%lu,"
     "\"pstop_send_fail\":%lu,\"pstop_sf_nomem\":%lu,\"pstop_sf_route\":%lu,"
@@ -293,6 +301,7 @@ static esp_err_t page_state(httpd_req_t * req)
     (unsigned long)vpn_ip,
     (unsigned long)public_ip,
     derp_region,
+    derp_region_locked,
     (unsigned long)atomic_load(&g_dcs_pstop_peer_ip),
     (unsigned long)atomic_load(&g_dcs_pstop_peer_port),
     (unsigned long)atomic_load(&g_dcs_pstop_sent),
