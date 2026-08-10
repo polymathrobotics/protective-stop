@@ -716,10 +716,24 @@ uint32_t microlink_get_public_ip(const microlink_t * ml)
 }
 
 /* The DERP region our single relay connection is homed on (0 = not yet set).
- * A coarse locality hint (nearest Tailscale datacenter metro). */
+ * Returns the EFFECTIVE home: the runtime lock (derp_region_override) wins,
+ * else the learned/rehomed region — i.e. the region slot-0 connect and the
+ * PreferredDERP advert actually use. A coarse locality hint (nearest Tailscale
+ * datacenter metro). */
 uint16_t microlink_get_derp_region(const microlink_t * ml)
 {
-  return ml ? ml->derp_home_region : 0;
+  return ml ? ml_effective_home_region(ml) : 0;
+}
+
+/* The configured DERP-region LOCK (0 = auto, else the pinned region). This is
+ * the persisted override, NOT necessarily the region in use — the two differ
+ * only transiently while a fresh lock re-homes. Exposed so /state.json can show
+ * AUTO vs LOCKED-to-N. Locking is the guard against a repeat of the region-9
+ * (dfw) misroute, where the chip silently drifted region and only a pin
+ * restored the priority path. */
+uint16_t microlink_get_derp_region_locked(const microlink_t * ml)
+{
+  return ml ? ml->derp_region_override : 0;
 }
 
 void microlink_notify_priority_health(microlink_t * ml, bool healthy)

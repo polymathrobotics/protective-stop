@@ -259,6 +259,18 @@ static const char CONFIG_PAGE_HTML[] =
   "<input type='text' id='ctrl_host' placeholder='Tailscale (default)' onchange='saveSettings()'>"
   "<div class='hint'>For Headscale/Ionscale. Empty = Tailscale</div></div>"
 
+  /* DERP region lock. Pinning the home region guards the priority path against
+     the region-9 (dfw) misroute where the chip drifted region and only a pin
+     restored reachability. Applied live (persist + slot-0 re-home) via the
+     existing /api/settings derp_region field. */
+  "<div class='form-group'><label>DERP Region Lock</label>"
+  "<div style='display:flex;gap:6px;align-items:center'>"
+  "<input type='number' id='derp_region' min='0' max='4095' placeholder='auto' style='flex:1'>"
+  "<button class='btn-outline btn-sm' type='button' onclick='lockDerp()'>Lock</button>"
+  "<button class='btn-outline btn-sm' type='button' onclick='clearDerp()'>Clear / Auto</button>"
+  "</div>"
+  "<div class='hint' id='derpLockHint'>0 / empty = auto. Pin a region (e.g. 2 sfo, 9 dfw) to lock the home relay.</div></div>"
+
   /* Debug */
   "<div class='form-group full' style='margin-top:8px'>"
   "<label style='color:#58a6ff;font-size:.85em;font-weight:600'>Debug Logging</label></div>"
@@ -434,6 +446,10 @@ static const char CONFIG_PAGE_HTML[] =
   "document.getElementById('disco_heartbeat_ms').value=hb>0?hb:'';"
   "document.getElementById('priority_peer_ip').value=d.priority_peer_ip||'';"
   "document.getElementById('ctrl_host').value=d.ctrl_host||'';"
+  /* derp_region here is the configured LOCK (0 = auto). Show it explicitly. */
+  "var dl=d.derp_region||0;"
+  "document.getElementById('derp_region').value=dl>0?dl:'';"
+  "document.getElementById('derpLockHint').textContent=dl>0?('LOCKED to #'+dl):'AUTO (0 / empty = auto)';"
   "var f=d.debug_flags||0;"
   "document.getElementById('dbg_disco').checked=!!(f&1);"
   "document.getElementById('dbg_wg').checked=!!(f&2);"
@@ -467,6 +483,21 @@ static const char CONFIG_PAGE_HTML[] =
   "loadVerbose();"
   "}catch(e){showMsg('settingsMsg','Save failed: '+e,false);}"
   "}"
+
+  /* DERP region lock: reuse POST /api/settings (persists to NVS + live re-homes
+     slot 0). n=0 clears to auto. Kept separate from saveSettings so a lock/clear
+     doesn't depend on the rest of the form being valid. */
+  "async function postDerp(n){"
+  "try{"
+  "const r=await fetch(API_BASE+'/api/settings',{method:'POST',"
+  "headers:{'Content-Type':'application/json'},body:JSON.stringify({derp_region:n})});"
+  "await r.json();"
+  "showMsg('settingsMsg',n>0?('DERP locked to #'+n):'DERP region cleared (auto)',true);"
+  "loadSettings();"
+  "}catch(e){showMsg('settingsMsg','DERP lock failed: '+e,false);}"
+  "}"
+  "function lockDerp(){postDerp(parseInt(document.getElementById('derp_region').value)||0);}"
+  "function clearDerp(){document.getElementById('derp_region').value='';postDerp(0);}"
 
   /* ---- WiFi Networks ---- */
   "async function loadWifi(){"

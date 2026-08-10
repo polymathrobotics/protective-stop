@@ -104,7 +104,8 @@ static const char k_index_html[] =
   "<div class='hsub'><span class='chip off' id='mlchip'>-</span>"
   "<span>LAN <span id='localip' class='mono'>-</span></span>"
   "<span>public <span id='publicip' class='mono'>-</span></span>"
-  "<span>DERP region <span id='derpreg' class='mono'>-</span></span></div></div>"
+  "<span>DERP region <span id='derpreg' class='mono'>-</span> "
+  "<span id='derplock' class='chip'></span></span></div></div>"
 #ifdef DCS_PAGE_MACHINE
   /* Machine-role: operator allowlist is the add/remove-peer equivalent —
    * which remotes may re-arm this machine (empty => every remote stop-only). */
@@ -358,12 +359,21 @@ static const char k_index_html[] =
   "['+(RS[q.state]||q.state)+']</span>'"
   "+'<span>loop≤ '+q.rtt_ms+' ms'+pathrtt(q)+' · heard '+(q.age_ms/1000).toFixed(1)+'s ago</span></div>';}"
   "el.innerHTML=h||'<div class=\"row dim\"><span>none</span><span></span></div>';}"
+  /* Known DERP metros we actually home on; number-only for the rest. The two
+     we've hit in the field are sfo(2) and dfw(9) — dfw is the region-9 misroute. */
+  "function drName(n){var M={2:' sfo',9:' dfw'};return M[n]||'';}"
   "function renderHero(j){"
   "const vi=document.getElementById('vpnip');"
   "vi.textContent=j.vpn_ip?ip4(j.vpn_ip):'not connected';"
   "document.getElementById('localip').textContent=j.local_ip?ip4n(j.local_ip):'-';"
   "document.getElementById('publicip').textContent=j.public_ip?ip4(j.public_ip):'-';"
-  "document.getElementById('derpreg').textContent=j.derp_region||'-';"
+  "var dr=j.derp_region||0;"
+  "document.getElementById('derpreg').textContent=dr?('#'+dr+drName(dr)):'-';"
+  /* AUTO vs LOCKED badge straight from derp_region_locked (0 = auto). */
+  "var lk=j.derp_region_locked||0;"
+  "var dl=document.getElementById('derplock');"
+  "dl.textContent=lk?('LOCKED '+lk):'AUTO';"
+  "dl.className='chip '+(lk?'warn':'idle');"
   "const mc=document.getElementById('mlchip');"
   "mc.textContent=MLN[j.ml_state]||('state '+j.ml_state);"
   "mc.className='chip '+(j.ml_state===4?'idle':(j.ml_state===6?'red':'warn'));"
