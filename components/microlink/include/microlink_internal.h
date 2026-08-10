@@ -151,37 +151,41 @@ extern "C"
 #define ML_MBB_PROVE_PING_INTERVAL_MS 5000 /* DERP server PING cadence for the weak proof (Q3) */
 
 /* §8 anti-thrash damping */
-#define ML_NEG_STABILITY_MS 60000 /* target stable this long before MBB starts; absorbs netmap
+#define ML_NEG_STABILITY_MS \
+  60000 /* target stable this long before MBB starts; absorbs netmap
                                    * patch bursts and coordination lag (> long-poll turnaround) */
-#define ML_NEG_MIN_DWELL_MS 600000 /* 10 min between committed switches: a switch costs a TLS
+#define ML_NEG_MIN_DWELL_MS \
+  600000 /* 10 min between committed switches: a switch costs a TLS
                                     * handshake + control-plane propagation; ping-pong at shorter
                                     * periods is the documented §2.6 reconnect storm */
 #define ML_NEG_MAX_SWITCHES_PER_HOUR 3 /* circuit breaker: on trip hold current home + log loudly */
-#define ML_NEG_REGION_BAN_MS 900000 /* 15 min ban after a ROLLBACK: no retry-hammering an
+#define ML_NEG_REGION_BAN_MS \
+  900000 /* 15 min ban after a ROLLBACK: no retry-hammering an
                                      * unprovable region */
-#define ML_NEG_ADVICE_MIN_INTERVAL_MS 1800000 /* fleet advice honored at most every 30 min,
+#define ML_NEG_ADVICE_MIN_INTERVAL_MS \
+  1800000 /* fleet advice honored at most every 30 min,
                                                * chip-side, so even a flapping/buggy fleet cannot
                                                * exceed it (I3) */
 #define ML_NEG_REGION_BANS 4 /* banned-region table size (distinct failed regions) */
 
-/* §7 MBB states (exposed via microlink_region_autoneg_t.mbb_state).
+  /* §7 MBB states (exposed via microlink_region_autoneg_t.mbb_state).
  * SWITCH_ADVERT is instantaneous (the index swap); DRAIN_OLD is passive
  * (want-set reap); ROLLBACK is an action, not a resting state. */
-enum
-{
-  ML_MBB_IDLE = 0,
-  ML_MBB_AUX_OPENING = 1,
-  ML_MBB_PROVING = 2,
-};
+  enum
+  {
+    ML_MBB_IDLE = 0,
+    ML_MBB_AUX_OPENING = 1,
+    ML_MBB_PROVING = 2,
+  };
 
-/* MBB executor -> negotiator outcome codes (mbb_outcome). */
-enum
-{
-  ML_MBB_OUTCOME_NONE = 0,
-  ML_MBB_OUTCOME_COMMITTED = 1,
-  ML_MBB_OUTCOME_ROLLED_BACK = 2,
-  ML_MBB_OUTCOME_ABORTED = 3, /* lock landed / request cancelled — no ban, no commit */
-};
+  /* MBB executor -> negotiator outcome codes (mbb_outcome). */
+  enum
+  {
+    ML_MBB_OUTCOME_NONE = 0,
+    ML_MBB_OUTCOME_COMMITTED = 1,
+    ML_MBB_OUTCOME_ROLLED_BACK = 2,
+    ML_MBB_OUTCOME_ABORTED = 3, /* lock landed / request cancelled — no ban, no commit */
+  };
 
 /* Tailscale control plane */
 #define ML_CTRL_HOST "controlplane.tailscale.com"

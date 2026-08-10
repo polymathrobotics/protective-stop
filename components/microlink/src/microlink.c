@@ -783,8 +783,7 @@ void microlink_get_region_autoneg(microlink_t * ml, microlink_region_autoneg_t *
   if (!out) return;
   memset(out, 0, sizeof(*out));
   if (!ml) return;
-  out->source =
-    (ml->derp_region_override != 0) ? (uint8_t)MICROLINK_REGION_SRC_LOCKED : (uint8_t)ml->derp_region_src;
+  out->source = (ml->derp_region_override != 0) ? (uint8_t)MICROLINK_REGION_SRC_LOCKED : (uint8_t)ml->derp_region_src;
   out->auto_applied_region = ml->derp_region_auto_applied;
   out->auto_apply_count = ml->derp_region_auto_applies;
   out->last_auto_apply_s = ml->derp_region_auto_apply_s;

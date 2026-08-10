@@ -913,11 +913,13 @@ static uint16_t s_neg_candidate; /* §8 stability window: current target candida
 static uint64_t s_neg_candidate_since_ms;
 static uint64_t s_neg_last_commit_ms;
 static bool s_neg_cooldown_logged;
+
 static struct
 {
   uint16_t region;
   uint64_t until_ms;
 } s_neg_ban[ML_NEG_REGION_BANS]; /* §8 bad-region cooldown after ROLLBACK */
+
 static uint8_t s_neg_pending_source; /* MICROLINK_REGION_SRC_* of the pending MBB request */
 static uint32_t s_neg_advice_applied_epoch; /* last fleet-advice epoch actually applied */
 static uint64_t s_neg_last_advice_apply_ms;

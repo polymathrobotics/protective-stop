@@ -938,7 +938,8 @@ static void derp_mbb_tick(microlink_t * ml, uint64_t now)
       proven = (c->rx_pkts > s_mbb.prove_base_rx); /* gate (b), strong */
     } else {
       proven = (c->last_pong_ms >= s_mbb.prove_started_ms); /* gate (b), weak */
-      if (!proven && (s_mbb.last_prove_ping_ms == 0 || (now - s_mbb.last_prove_ping_ms) >= ML_MBB_PROVE_PING_INTERVAL_MS))
+      if (
+        !proven && (s_mbb.last_prove_ping_ms == 0 || (now - s_mbb.last_prove_ping_ms) >= ML_MBB_PROVE_PING_INTERVAL_MS))
       {
         /* Client PING (0x12, 8-byte payload) — server answers PONG on the
          * same conn. Direct write is safe: we ARE the single DERP writer. */
