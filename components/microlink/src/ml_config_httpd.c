@@ -645,8 +645,19 @@ static esp_err_t handler_post_settings(httpd_req_t * req)
 
   if (derp_region_changed && ctx->ml != NULL) {
     ctx->ml->derp_region_override = ctx->settings.derp_region;
+    /* Re-home slot 0 locally so inbound + relay land on the pinned region. */
     xEventGroupSetBits(ctx->ml->events, ML_EVT_DERP_RECONNECT);
-    ESP_LOGI(TAG, "DERP region pin applied live: %u (slot-0 reconnect)", (unsigned)ctx->settings.derp_region);
+    /* CRITICAL: re-home alone only fixes US. Remote peers still hold the STALE
+     * region in their netmap until the coordination server re-populates our
+     * Node.HomeDERP — which it only does when we re-advertise PreferredDERP.
+     * Without this, a locked chip is unreachable from remote peers until reboot
+     * (PS-wedge: PS locked region 2, machn's netmap kept PS@9, no bond until PS
+     * rebooted). Post the endpoint-update re-advertise now (Stream=false
+     * MapRequest carrying the new, override-authoritative PreferredDERP). Queue
+     * post is bounded + non-blocking and off the safety path. */
+    esp_err_t are = microlink_request_announce(ctx->ml);
+    ESP_LOGI(TAG, "DERP region pin applied live: %u (slot-0 reconnect + coord re-advertise %s)",
+             (unsigned)ctx->settings.derp_region, are == ESP_OK ? "queued" : "already-pending");
   }
 
   cJSON * resp = cJSON_CreateObject();

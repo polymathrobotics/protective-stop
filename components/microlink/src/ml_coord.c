@@ -1011,8 +1011,10 @@ static int do_register(microlink_t * ml, ml_noise_state_t * noise)
          * Once we've adopted the priority peer's region as home
          * (maybe_rehome_to_priority), that choice is authoritative: ignore the
          * server's HomeDERP, which lags our PreferredDERP update and would
-         * otherwise ping-pong the home region and storm DERP reconnects. */
-    if (ml->priority_peer_region == 0) {
+         * otherwise ping-pong the home region and storm DERP reconnects. A
+         * runtime region-lock override is even MORE authoritative — never let
+         * the server's HomeDERP overwrite an active lock (PS-wedge fix). */
+    if (ml->priority_peer_region == 0 && ml->derp_region_override == 0) {
       cJSON * home_derp = cJSON_GetObjectItem(node, "HomeDERP");
       if (home_derp && cJSON_IsNumber(home_derp) && home_derp->valueint > 0) {
         ml->derp_home_region = (uint16_t)home_derp->valueint;
@@ -1430,10 +1432,17 @@ static int do_fetch_peers(microlink_t * ml, ml_noise_state_t * noise)
 
   /* NetInfo: tell control plane our preferred DERP region and NAT type.
      * MUST be inside Hostinfo — the control plane reads Hostinfo.NetInfo.PreferredDERP
-     * to populate Node.HomeDERP for other peers. */
+     * to populate Node.HomeDERP for other peers. This site previously hardcoded
+     * ML_DERP_REGION, which clobbered the re-homed/locked region on this fetch
+     * path and made remote peers route to the wrong region. Match the other
+     * advert sites: override (region lock) > learned priority-peer region >
+     * compiled default. */
   cJSON * netinfo = cJSON_CreateObject();
   if (netinfo) {
-    cJSON_AddNumberToObject(netinfo, "PreferredDERP", ML_DERP_REGION);
+    uint16_t pref = ml->derp_region_override
+                      ? ml->derp_region_override
+                      : (ml->priority_peer_region ? ml->priority_peer_region : ML_DERP_REGION);
+    cJSON_AddNumberToObject(netinfo, "PreferredDERP", pref);
     if (ml->stun_nat_checked) {
       cJSON_AddBoolToObject(netinfo, "MappingVariesByDestIP", ml->nat_mapping_varies);
     }
@@ -1813,8 +1822,10 @@ static int do_fetch_peers(microlink_t * ml, ml_noise_state_t * noise)
       /* Parse self-node DERP region — try modern HomeDERP (int) first,
              * then fall back to legacy DERP string (format: "127.3.3.40:REGION").
              * Priority-peer region, once adopted, is authoritative — see the
-             * first MapResponse handler for why we ignore the server here. */
-      if (ml->priority_peer_region == 0) {
+             * first MapResponse handler for why we ignore the server here. A
+             * runtime region-lock override is even more authoritative and is
+             * likewise never overwritten by the server (PS-wedge fix). */
+      if (ml->priority_peer_region == 0 && ml->derp_region_override == 0) {
         cJSON * home_derp = cJSON_GetObjectItem(node, "HomeDERP");
         if (home_derp && cJSON_IsNumber(home_derp) && home_derp->valueint > 0) {
           ml->derp_home_region = (uint16_t)home_derp->valueint;
@@ -2022,7 +2033,14 @@ static int do_start_long_poll(microlink_t * ml, ml_noise_state_t * noise)
      * the wrong region (unreachable). */
   cJSON * netinfo = cJSON_CreateObject();
   if (netinfo) {
-    uint16_t pref = ml->priority_peer_region ? ml->priority_peer_region : ML_DERP_REGION;
+    /* A runtime region-lock override is authoritative and MUST reach remote
+     * peers, else they keep relaying to a stale region (PS-wedge: chip locked
+     * to region 2 but machn's netmap kept it at 9 → no bond until reboot).
+     * Override > learned priority-peer region > compiled default. Non-override
+     * (override==0) behaviour is unchanged. */
+    uint16_t pref = ml->derp_region_override
+                      ? ml->derp_region_override
+                      : (ml->priority_peer_region ? ml->priority_peer_region : ML_DERP_REGION);
     cJSON_AddNumberToObject(netinfo, "PreferredDERP", pref);
     if (ml->stun_nat_checked) {
       cJSON_AddBoolToObject(netinfo, "MappingVariesByDestIP", ml->nat_mapping_varies);
@@ -2152,8 +2170,13 @@ static int do_send_endpoint_update(microlink_t * ml, ml_noise_state_t * noise)
              * maybe_rehome_to_priority). This periodic update previously
              * hardcoded the default, which clobbered the re-homed region on the
              * control plane and made remote peers (the fleet) route to the
-             * wrong region — reachable on-LAN, unreachable from anywhere else. */
-      uint16_t pref = ml->priority_peer_region ? ml->priority_peer_region : ML_DERP_REGION;
+             * wrong region — reachable on-LAN, unreachable from anywhere else.
+             * A runtime region-lock override is authoritative and wins here so
+             * a live lock change (microlink_request_announce) propagates the new
+             * region to remote peers WITHOUT a reboot (PS-wedge fix). */
+      uint16_t pref = ml->derp_region_override
+                        ? ml->derp_region_override
+                        : (ml->priority_peer_region ? ml->priority_peer_region : ML_DERP_REGION);
       cJSON_AddNumberToObject(netinfo, "PreferredDERP", pref);
       if (ml->stun_nat_checked) {
         cJSON_AddBoolToObject(netinfo, "MappingVariesByDestIP", ml->nat_mapping_varies);
