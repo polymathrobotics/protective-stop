@@ -121,6 +121,68 @@ extern "C"
  * fallback. Bounded, so it can never turn into a reconnect storm. */
 #define ML_DERP_HOME_FALLBACK_AFTER 4
 
+/* ============================================================================
+ * DERP region auto-negotiation (design doc §6/§7/§8).
+ *
+ * §7 make-before-break (MBB): a live safety bond must NEVER be interrupted by
+ * a home-region change (I1). The switch first opens an aux conn on the target
+ * region (via the EXISTING derp_manage_aux machinery — want-set union, per-slot
+ * backoff, one-blocking-connect-per-loop cap all inherited), PROVES it, and
+ * only then swaps ml->derp_home_slot. The old home becomes an ordinary aux and
+ * is held/reaped by the existing want-set mechanics (DRAIN_OLD is passive).
+ *
+ * §8 damping is MANDATORY, not defensive garnish: the MapResponse-guard comment
+ * in ml_coord.c documents a real home-region ping-pong that stormed DERP
+ * reconnects, and each DERP (re)connect is a full TLS handshake whose CPU burst
+ * starves lwIP/httpd (400-700 ms latency spikes; an httpd handler-budget
+ * exhaustion took down the admin API during the multi-remote validation). An
+ * undamped negotiator is a reconnect-storm generator by construction — every
+ * trigger below is therefore rate-limited, hysteretic and MBB.
+ *
+ * Constants are compile-time for the bench-validation phase; promoting them to
+ * runtime /api/settings (NVS-persisted) is deliberately deferred until the
+ * defaults survive a soak.
+ * ========================================================================== */
+
+/* §7 MBB state machine bounds */
+#define ML_MBB_AUX_OPEN_TIMEOUT_MS 90000 /* covers 3 aux connect attempts (5s/10s/60s backoff) */
+#define ML_MBB_PROVE_TIMEOUT_MS 30000 /* prove window; >> one 3 s priority disco heartbeat */
+#define ML_MBB_PROVE_STABLE_MS 10000 /* conn must hold `connected` this long (§7 gate a) */
+#define ML_MBB_PROVE_PING_INTERVAL_MS 5000 /* DERP server PING cadence for the weak proof (Q3) */
+
+/* §8 anti-thrash damping */
+#define ML_NEG_STABILITY_MS 60000 /* target stable this long before MBB starts; absorbs netmap
+                                   * patch bursts and coordination lag (> long-poll turnaround) */
+#define ML_NEG_MIN_DWELL_MS 600000 /* 10 min between committed switches: a switch costs a TLS
+                                    * handshake + control-plane propagation; ping-pong at shorter
+                                    * periods is the documented §2.6 reconnect storm */
+#define ML_NEG_MAX_SWITCHES_PER_HOUR 3 /* circuit breaker: on trip hold current home + log loudly */
+#define ML_NEG_REGION_BAN_MS 900000 /* 15 min ban after a ROLLBACK: no retry-hammering an
+                                     * unprovable region */
+#define ML_NEG_ADVICE_MIN_INTERVAL_MS 1800000 /* fleet advice honored at most every 30 min,
+                                               * chip-side, so even a flapping/buggy fleet cannot
+                                               * exceed it (I3) */
+#define ML_NEG_REGION_BANS 4 /* banned-region table size (distinct failed regions) */
+
+/* §7 MBB states (exposed via microlink_region_autoneg_t.mbb_state).
+ * SWITCH_ADVERT is instantaneous (the index swap); DRAIN_OLD is passive
+ * (want-set reap); ROLLBACK is an action, not a resting state. */
+enum
+{
+  ML_MBB_IDLE = 0,
+  ML_MBB_AUX_OPENING = 1,
+  ML_MBB_PROVING = 2,
+};
+
+/* MBB executor -> negotiator outcome codes (mbb_outcome). */
+enum
+{
+  ML_MBB_OUTCOME_NONE = 0,
+  ML_MBB_OUTCOME_COMMITTED = 1,
+  ML_MBB_OUTCOME_ROLLED_BACK = 2,
+  ML_MBB_OUTCOME_ABORTED = 3, /* lock landed / request cancelled — no ban, no commit */
+};
+
 /* Tailscale control plane */
 #define ML_CTRL_HOST "controlplane.tailscale.com"
 #define ML_CTRL_PORT 443
@@ -523,6 +585,19 @@ extern "C"
                                      * = currently wanted). Reap clock decoupled
                                      * from traffic so incidental (non-safety)
                                      * frames can't keep a stale slot pinned. */
+
+    /* §7 PROVING inputs (all written by the DERP I/O task):
+     * connected_at_ms — conn-stability clock (gate a);
+     * rx_pkts         — RecvPacket frames received on THIS conn: advancing
+     *                   during PROVING is the strong end-to-end proof (a safety
+     *                   peer's dual-sent disco/heartbeat leg came back through
+     *                   the target server);
+     * last_pong_ms    — DERP server PONG (reply to our client PING): the weak
+     *                   proof when no bonded peer is on the target region (Q3
+     *                   opportunistic hybrid). */
+    uint64_t connected_at_ms;
+    uint64_t last_pong_ms;
+    uint32_t rx_pkts;
   } ml_derp_conn_t;
 
   /* ============================================================================
@@ -600,11 +675,58 @@ extern "C"
      * so cross-region relay works (magicsock model). See ML_DERP_MAX_CONNS. */
     ml_derp_conn_t derp[ML_DERP_MAX_CONNS];
 
-    /* Region-pin override for slot 0's home region (repro rig + fleet pin).
+    /* Region-pin override for the HOME slot's region (repro rig + fleet pin).
      * 0 = auto (use the learned/rehomed derp_home_region). Non-zero forces the
      * chip to home its inbound DERP + PreferredDERP advert on THIS region.
      * Runtime-settable via /api/settings derp_region; see ml_effective_home_region. */
     volatile uint16_t derp_region_override;
+
+    /* Index of the HOME connection in the derp[] pool. Historically hardcoded
+     * slot 0; the §7 MBB commit swaps THIS INDEX (never conn state — sockets/
+     * TLS contexts stay put, no mid-I/O copy hazard) so the proven aux becomes
+     * home and the old home decays into an ordinary aux (reaped by the
+     * existing want-set mechanics). Written ONLY by the DERP I/O task; other
+     * tasks (coord/httpd) take word-sized reads — a stale index during the
+     * swap instant is benign because both conns are live throughout. */
+    volatile int derp_home_slot;
+
+    /* ---- §7 MBB cross-task command/status (negotiator on wg_mgr <-> executor
+     * on the DERP I/O task). Command: wg_mgr writes mbb_target_region then
+     * bumps mbb_generation; the executor restarts from IDLE whenever the
+     * (generation,target) pair changes (§7 preemption: a newer target aborts
+     * the in-flight switch). Status/outcome: executor-owned. All word-sized
+     * volatiles — a torn intermediate read costs one extra executor restart,
+     * never a wrong commit. */
+    volatile uint16_t mbb_target_region; /* 0 = no switch pending */
+    volatile uint32_t mbb_generation;
+    volatile uint8_t mbb_state; /* ML_MBB_* (executor-owned) */
+    volatile uint8_t mbb_outcome; /* ML_MBB_OUTCOME_* (executor sets, negotiator clears) */
+    volatile uint16_t mbb_outcome_region; /* region the outcome refers to */
+
+    /* ---- Phase-3 fleet region advice (§6, I3-gated). Written by the fleet
+     * check-in task via microlink_offer_region_advice (which enforces the
+     * strictly-increasing epoch), consumed by the wg_mgr negotiator. Expiry is
+     * uptime SECONDS (uint32: no 64-bit tearing on cross-task reads, wraps
+     * after 136 years). advice_region==0 or expiry passed => no advice. */
+    volatile uint16_t advice_region;
+    volatile uint32_t advice_epoch;
+    volatile uint32_t advice_expires_s;
+
+    /* ---- Q2 auto-apply surfacing (written by the wg_mgr negotiator, read by
+     * /state.json + UI + check-in). derp_region_src is the AUTO-mode source
+     * (MICROLINK_REGION_SRC_AUTO*); the getter reports LOCKED when the
+     * override is set regardless of this field. NOTHING here is NVS-persisted
+     * — the lock stays the only persisted region control (§7). */
+    volatile uint8_t derp_region_src;
+    volatile uint16_t derp_region_auto_applied;
+    volatile uint32_t derp_region_auto_applies;
+    volatile uint32_t derp_region_auto_apply_s; /* uptime seconds, 0 = never */
+
+    /* ---- §4.2 primary-machine feed (registered by the app; NULL = legacy
+     * single-priority behavior). ctx written before cb so a cross-task reader
+     * never sees cb without its ctx. */
+    microlink_primary_machine_cb_t primary_cb;
+    void * primary_cb_ctx;
 
     /* Sockets for net_io select() loop */
     int disco_sock4; /* UDP socket for DISCO + direct WG */
@@ -716,6 +838,11 @@ extern "C"
    * unit. Read from any task (word-sized read of a task-owned counter). */
   uint32_t ml_derp_get_home_fallback_count(void);
 
+  /* §16 MBB executor telemetry: out[0]=commits, out[1]=rollbacks,
+   * out[2]=proofs_ok, out[3]=proofs_failed. Counters owned by the DERP I/O
+   * task; word-sized cross-task reads (same contract as the diag getters). */
+  void ml_derp_get_mbb_diag(uint32_t out[4]);
+
   /* Effective home DERP region for slot 0: the runtime override wins, else the
    * learned/rehomed home region. 0 = neither known (caller falls back to
    * ML_DERP_REGION). Shared by ml_derp.c (slot-0 connect), ml_coord.c
@@ -749,6 +876,15 @@ extern "C"
   /* Diagnostic predicates: does this peer feed collect_safety_regions? */
   bool ml_wg_is_pinned_peer(microlink_t * ml, uint32_t vpn_ip);
   bool ml_wg_is_health_tracked(uint32_t vpn_ip);
+  /* §6 live_bond_active(): true while ANY health-tracked safety peer is
+   * currently healthy (heartbeat replies flowing). Both roles feed this today:
+   * the remote comparator reports per-machine-slot health each tick, and machn
+   * reports per-remote health — so it is a faithful "a live safety bond
+   * exists" signal on both. Decides legacy-immediate-rehome vs MBB (I1). */
+  bool ml_wg_live_bond_active(void);
+  /* §16 negotiator damping telemetry: out[0]=damping_suppressed,
+   * out[1]=cooldown_trips, out[2]=switches in the rolling hour. */
+  void ml_wg_get_neg_diag(uint32_t out[3]);
   void ml_wg_mgr_send_cmm(microlink_t * ml, uint32_t peer_vpn_ip);
   esp_err_t ml_wg_mgr_trigger_handshake(microlink_t * ml, uint32_t dest_vpn_ip);
   bool ml_wg_mgr_peer_is_up(microlink_t * ml, uint32_t vpn_ip);

@@ -2629,7 +2629,7 @@ void ml_coord_task(void * arg)
              * tiny per-socket RX mailbox (default 6) overflowed and the
              * DERP HTTP-upgrade response was silently dropped (2026-05-25
              * diagnosis). */
-        if (!ml->derp[0].connected) {
+        if (!ml->derp[ml->derp_home_slot].connected) { /* home slot: an index since the §7 MBB refactor */
           ESP_LOGI(TAG, "Staggering DERP connect by 2s for peer-ingest drain");
           vTaskDelay(pdMS_TO_TICKS(2000));
           xEventGroupSetBits(ml->events, ML_EVT_DERP_CONNECT_REQ);
@@ -2829,7 +2829,10 @@ void ml_coord_task(void * arg)
 
         /* Periodic DERP NotePreferred keepalive (every 60s) */
         static uint64_t last_derp_keepalive_ms = 0;
-        if (ml->derp[0].connected && now - last_derp_keepalive_ms > 60000) {
+        /* Home slot is an index since the §7 MBB refactor; the queued frame
+         * itself routes region-0 -> current home inside the DERP task, so it
+         * always lands on the right conn even across a swap. */
+        if (ml->derp[ml->derp_home_slot].connected && now - last_derp_keepalive_ms > 60000) {
           uint8_t preferred = 0x01;
           uint8_t * ka_data = malloc(1);
           if (ka_data) {

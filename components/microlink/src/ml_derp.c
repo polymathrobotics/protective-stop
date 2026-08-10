@@ -325,6 +325,10 @@ static void dispatch_derp_frame(
   switch (frame_type) {
     case DERP_FRAME_RECV_PACKET:
       if (payload) {
+        /* §7 PROVING strong-proof evidence: a peer's frame arrived THROUGH
+         * this server. Only RecvPacket counts — keepalives/pongs prove the
+         * server link, not end-to-end peer reachability. */
+        c->rx_pkts++;
         ESP_LOGI(
           TAG,
           "DERP RecvPacket: %d bytes from %02x%02x%02x%02x, hdr=%02x",
@@ -352,6 +356,9 @@ static void dispatch_derp_frame(
       break;
 
     case DERP_FRAME_PONG:
+      /* §7 PROVING weak-proof evidence (Q3): the server answered our client
+       * PING — a live application-level round-trip on THIS conn. */
+      c->last_pong_ms = ml_get_time_ms();
       ESP_LOGD(TAG, "DERP PONG received");
       break;
 
@@ -542,16 +549,20 @@ esp_err_t ml_derp_queue_send(microlink_t * ml, const uint8_t * dest_key, const u
  * ========================================================================== */
 
 /* Pick the pool connection to egress a frame bound for `region_id`.
- * region_id 0 or == the effective home region -> the HOME conn (slot 0).
- * Otherwise the connected aux conn homed on that region; if none is up yet we
- * fall back to the HOME conn so a safety peer's frame is NEVER silently dropped
- * (the caller logs the fallback). Returns NULL only when the chosen conn is
- * down (nothing can carry it this pass). */
+ * region_id 0 or == the effective home region -> the HOME conn
+ * (ml->derp[derp_home_slot] — an index since the §7 MBB refactor; slot 0 at
+ * boot, swapped by a committed home switch). Otherwise the connected aux conn
+ * homed on that region; if none is up yet we fall back to the HOME conn so a
+ * safety peer's frame is NEVER silently dropped (the caller logs the
+ * fallback). Returns NULL only when the chosen conn is down (nothing can
+ * carry it this pass). */
 static ml_derp_conn_t * derp_route_conn(microlink_t * ml, uint16_t region_id, uint16_t eff_home)
 {
-  ml_derp_conn_t * home = &ml->derp[0];
+  int hs = ml->derp_home_slot;
+  ml_derp_conn_t * home = &ml->derp[hs];
   if (region_id != 0 && region_id != eff_home) {
-    for (int s = 1; s < ML_DERP_MAX_CONNS; s++) {
+    for (int s = 0; s < ML_DERP_MAX_CONNS; s++) {
+      if (s == hs) continue;
       if (ml->derp[s].connected && ml->derp[s].region_id == region_id) {
         return &ml->derp[s];
       }
@@ -560,16 +571,19 @@ static ml_derp_conn_t * derp_route_conn(microlink_t * ml, uint16_t region_id, ui
   return home->connected ? home : NULL;
 }
 
-/* Maintain the auxiliary slots [1..N] against the CURRENT set of distinct
+/* Maintain the auxiliary slots against the CURRENT set of distinct
  * safety-peer regions (pinned/priority/health-tracked, queried from wg_mgr).
- * Opens a conn per needed region (excluding the home region, served by slot 0),
- * reaps aux conns whose region is no longer needed AND idle > threshold, and
- * applies a per-slot connect backoff. Runs at the TAIL of the I/O loop so slot 0
- * is always serviced first — a blocking aux TLS handshake can't starve the home
- * (safety) path. `aux_burst` is task-local per-slot backoff state. NEVER reaps
- * slot 0. */
+ * Opens a conn per needed region (excluding the home region, served by the
+ * HOME slot), reaps aux conns whose region is no longer needed AND idle >
+ * threshold, and applies a per-slot connect backoff. Runs at the TAIL of the
+ * I/O loop so the home slot is always serviced first — a blocking aux TLS
+ * handshake can't starve the home (safety) path. `aux_burst` is task-local
+ * per-slot backoff state. NEVER reaps the HOME slot (any index since the §7
+ * MBB refactor — a committed switch turns the OLD home slot into an ordinary
+ * aux that IS managed here; that decay is the §7 DRAIN_OLD phase). */
 static void derp_manage_aux(microlink_t * ml, uint16_t eff_home, int aux_burst[], uint64_t now)
 {
+  int hs = ml->derp_home_slot;
   uint16_t regs[ML_DERP_MAX_CONNS];
   int nregs = ml_wg_collect_safety_regions(ml, regs, ML_DERP_MAX_CONNS);
 
@@ -580,6 +594,24 @@ static void derp_manage_aux(microlink_t * ml, uint16_t eff_home, int aux_burst[]
     if (regs[i] != 0 && regs[i] != eff_home) want[nwant++] = regs[i];
   }
 
+  /* §7 AUX_OPENING: a pending MBB target region joins the want-set, so the
+   * EXISTING open/backoff/one-blocking-connect-cap machinery below opens and
+   * maintains its conn — MBB inherits every starvation protection for free
+   * instead of duplicating connect logic. */
+  {
+    uint16_t mbb_tgt = ml->mbb_target_region;
+    if (mbb_tgt != 0 && mbb_tgt != eff_home && nwant < ML_DERP_MAX_CONNS) {
+      bool dup = false;
+      for (int i = 0; i < nwant; i++) {
+        if (want[i] == mbb_tgt) {
+          dup = true;
+          break;
+        }
+      }
+      if (!dup) want[nwant++] = mbb_tgt;
+    }
+  }
+
   /* 1) Reap aux slots whose region is no longer a safety region. The clock is
    *    time-since-UNWANTED, not idle time. Incidental (non-safety) tailnet
    *    traffic to peers on that region routes through the aux and refreshes
@@ -588,7 +620,8 @@ static void derp_manage_aux(microlink_t * ml, uint16_t eff_home, int aux_burst[]
    *    a region == the not-yet-settled home) could persist for hours pinning a
    *    pool slot — the "phantom region-9 aux" seen in soak. Reaping on
    *    time-since-unwanted is immune to that incidental traffic. */
-  for (int s = 1; s < ML_DERP_MAX_CONNS; s++) {
+  for (int s = 0; s < ML_DERP_MAX_CONNS; s++) {
+    if (s == hs) continue; /* NEVER reap the home slot */
     ml_derp_conn_t * c = &ml->derp[s];
     if (c->region_id == 0 && !c->tls_inited && !c->connected) {
       c->aux_unwanted_since_ms = 0;
@@ -625,7 +658,8 @@ static void derp_manage_aux(microlink_t * ml, uint16_t eff_home, int aux_burst[]
   for (int w = 0; w < nwant; w++) {
     uint16_t rid = want[w];
     bool served = false;
-    for (int s = 1; s < ML_DERP_MAX_CONNS; s++) {
+    for (int s = 0; s < ML_DERP_MAX_CONNS; s++) {
+      if (s == hs) continue;
       if (ml->derp[s].connected && ml->derp[s].region_id == rid) {
         served = true;
         break;
@@ -636,14 +670,16 @@ static void derp_manage_aux(microlink_t * ml, uint16_t eff_home, int aux_burst[]
     /* Reuse a slot already assigned this region (a prior drop/failed attempt),
      * else grab a free slot. */
     int slot = -1;
-    for (int s = 1; s < ML_DERP_MAX_CONNS; s++) {
+    for (int s = 0; s < ML_DERP_MAX_CONNS; s++) {
+      if (s == hs) continue;
       if (ml->derp[s].region_id == rid) {
         slot = s;
         break;
       }
     }
     if (slot < 0) {
-      for (int s = 1; s < ML_DERP_MAX_CONNS; s++) {
+      for (int s = 0; s < ML_DERP_MAX_CONNS; s++) {
+        if (s == hs) continue;
         if (!ml->derp[s].connected && !ml->derp[s].tls_inited && ml->derp[s].region_id == 0) {
           slot = s;
           break;
@@ -698,7 +734,9 @@ uint32_t ml_derp_get_home_fallback_count(void)
 static uint16_t derp_pick_fallback_region(microlink_t * ml, uint16_t avoid)
 {
   /* 1) a live aux conn — reachability is a fact, not a guess. */
-  for (int s = 1; s < ML_DERP_MAX_CONNS; s++) {
+  int hs = ml->derp_home_slot;
+  for (int s = 0; s < ML_DERP_MAX_CONNS; s++) {
+    if (s == hs) continue;
     if (ml->derp[s].connected && ml->derp[s].region_id != 0 && ml->derp[s].region_id != avoid) {
       return ml->derp[s].region_id;
     }
@@ -714,15 +752,240 @@ static uint16_t derp_pick_fallback_region(microlink_t * ml, uint16_t avoid)
   return 0;
 }
 
-/* Find a free aux slot [1..N-1] (region 0, no TLS, not connected). -1 if none. */
+/* Find a free non-HOME aux slot (region 0, no TLS, not connected). -1 if none. */
 static int derp_free_aux_slot(microlink_t * ml)
 {
-  for (int s = 1; s < ML_DERP_MAX_CONNS; s++) {
+  int hs = ml->derp_home_slot;
+  for (int s = 0; s < ML_DERP_MAX_CONNS; s++) {
+    if (s == hs) continue;
     if (!ml->derp[s].connected && !ml->derp[s].tls_inited && ml->derp[s].region_id == 0) {
       return s;
     }
   }
   return -1;
+}
+
+/* ============================================================================
+ * §7 Make-before-break home-switch executor (design doc, Q3 = opportunistic
+ * hybrid proving).
+ *
+ * Runs ONLY on this task (the pool owner). The wg_mgr negotiator requests a
+ * switch by writing ml->mbb_target_region + bumping ml->mbb_generation; this
+ * executor opens/proves the target and, only on proof, swaps
+ * ml->derp_home_slot — the INDEX, never conn state, so sockets/TLS contexts
+ * never move (§7 SWITCH_ADVERT). The old home decays into an ordinary aux and
+ * is held exactly as long as any safety peer still homes there (the existing
+ * want-set reap IS the §7 DRAIN_OLD grace period). The safety bond is never
+ * touched: both regions hold live conns across the whole switch (I1/I5), and
+ * rollback is a no-op on the bond because home was never moved.
+ *
+ * WHAT THIS REPLACES: for a bond-live region change, the old path was
+ * ML_EVT_DERP_RECONNECT — tear down the home conn, then a 2-40 s TLS
+ * handshake gap on the relay path (break-before-make). That path still exists
+ * and is still used for the no-bond/lock cases (§6), unchanged.
+ * ========================================================================== */
+
+/* §16 telemetry (single-writer: this task; cross-task word reads via getter). */
+static uint32_t s_mbb_commits;
+static uint32_t s_mbb_rollbacks;
+static uint32_t s_mbb_proofs_ok;
+static uint32_t s_mbb_proofs_failed;
+
+void ml_derp_get_mbb_diag(uint32_t out[4])
+{
+  out[0] = s_mbb_commits;
+  out[1] = s_mbb_rollbacks;
+  out[2] = s_mbb_proofs_ok;
+  out[3] = s_mbb_proofs_failed;
+}
+
+/* Executor-local state (RAM-only by design §7: a reboot mid-MBB lands in the
+ * proven boot path; NVS is written by nothing in this machine). */
+typedef struct
+{
+  uint32_t gen; /* generation this run serves */
+  uint16_t target;
+  uint8_t state; /* ML_MBB_* */
+  uint64_t entered_ms; /* AUX_OPENING deadline base */
+  uint64_t prove_started_ms;
+  uint64_t last_prove_ping_ms;
+  int prove_slot;
+  uint32_t prove_base_rx; /* rx_pkts snapshot at prove start */
+  bool prove_peer_on_target; /* Q3: strong proof possible? */
+} derp_mbb_t;
+
+static derp_mbb_t s_mbb;
+
+static void derp_mbb_post_outcome(microlink_t * ml, uint8_t outcome, uint16_t region)
+{
+  /* Region before outcome: the negotiator keys on outcome != NONE. */
+  ml->mbb_outcome_region = region;
+  ml->mbb_outcome = outcome;
+  s_mbb.state = ML_MBB_IDLE;
+  ml->mbb_state = ML_MBB_IDLE;
+}
+
+static void derp_mbb_rollback(microlink_t * ml, const char * why)
+{
+  s_mbb_rollbacks++;
+  ESP_LOGW(
+    TAG,
+    "MBB ROLLBACK (region %u): %s — home untouched, bond unaffected; negotiator will ban the region",
+    (unsigned)s_mbb.target,
+    why);
+  /* The target leaves the aux want-set once the negotiator clears the pending
+   * request; the existing unwanted-reap then closes the conn (unless a safety
+   * peer legitimately needs that region). No teardown here. */
+  derp_mbb_post_outcome(ml, ML_MBB_OUTCOME_ROLLED_BACK, s_mbb.target);
+}
+
+static void derp_mbb_tick(microlink_t * ml, uint64_t now)
+{
+  uint16_t tgt = ml->mbb_target_region;
+  uint32_t gen = ml->mbb_generation;
+
+  /* New request, preemption or cancel: restart from IDLE (§7 — a newer target
+   * preempts by restarting; a cleared target aborts). A torn (gen,target)
+   * read costs one extra restart next tick, never a wrong commit. */
+  if (gen != s_mbb.gen || tgt != s_mbb.target) {
+    s_mbb.gen = gen;
+    s_mbb.target = tgt;
+    s_mbb.state = (tgt != 0) ? ML_MBB_AUX_OPENING : ML_MBB_IDLE;
+    s_mbb.entered_ms = now;
+    ml->mbb_state = s_mbb.state;
+    if (tgt != 0) {
+      ESP_LOGI(TAG, "MBB AUX_OPENING: target region %u (aux via existing want-set machinery)", (unsigned)tgt);
+    }
+  }
+  if (s_mbb.state == ML_MBB_IDLE) {
+    return;
+  }
+
+  /* I2: a lock landing mid-switch wins instantly — abort, no ban (nothing was
+   * proven bad; the operator simply took over). */
+  if (ml->derp_region_override != 0) {
+    ESP_LOGW(TAG, "MBB ABORT: region lock %u applied mid-switch", (unsigned)ml->derp_region_override);
+    derp_mbb_post_outcome(ml, ML_MBB_OUTCOME_ABORTED, s_mbb.target);
+    return;
+  }
+  /* Target became the effective home some other way (e.g. legacy rehome after
+   * the bond dropped): nothing left to do. */
+  if (s_mbb.target == ml_effective_home_region(ml)) {
+    derp_mbb_post_outcome(ml, ML_MBB_OUTCOME_ABORTED, s_mbb.target);
+    return;
+  }
+
+  if (s_mbb.state == ML_MBB_AUX_OPENING) {
+    /* derp_manage_aux (want-set union) owns the actual connect + backoff +
+     * one-blocking-connect-per-loop cap; we only watch for the conn. */
+    int slot = -1;
+    int hs = ml->derp_home_slot;
+    for (int s = 0; s < ML_DERP_MAX_CONNS; s++) {
+      if (s == hs) continue;
+      if (ml->derp[s].connected && ml->derp[s].region_id == s_mbb.target) {
+        slot = s;
+        break;
+      }
+    }
+    if (slot >= 0) {
+      s_mbb.prove_slot = slot;
+      s_mbb.prove_started_ms = now;
+      s_mbb.last_prove_ping_ms = 0;
+      s_mbb.prove_base_rx = ml->derp[slot].rx_pkts;
+      /* Q3 opportunistic hybrid: if any SAFETY peer is homed on the target,
+       * end-to-end proof is available for free — its dual-sent disco/heartbeat
+       * DERP leg egresses via this conn (derp_route_conn routes by region) and
+       * the reply comes back through the target server as a RecvPacket. Demand
+       * that. Otherwise (fleet-advice on a machine/idle chip: no peer there to
+       * echo) fall back to conn-stable + a DERP server PING/PONG round-trip —
+       * weaker, acceptable because such switches are rare and damped, and
+       * rollback is free. */
+      uint16_t regs[ML_DERP_MAX_CONNS];
+      int nregs = ml_wg_collect_safety_regions(ml, regs, ML_DERP_MAX_CONNS);
+      s_mbb.prove_peer_on_target = false;
+      for (int i = 0; i < nregs; i++) {
+        if (regs[i] == s_mbb.target) {
+          s_mbb.prove_peer_on_target = true;
+          break;
+        }
+      }
+      s_mbb.state = ML_MBB_PROVING;
+      ml->mbb_state = ML_MBB_PROVING;
+      ESP_LOGI(
+        TAG,
+        "MBB PROVING: region %u on slot %d (%s proof)",
+        (unsigned)s_mbb.target,
+        slot,
+        s_mbb.prove_peer_on_target ? "end-to-end peer" : "conn-stable + server pong");
+    } else if (now - s_mbb.entered_ms > ML_MBB_AUX_OPEN_TIMEOUT_MS) {
+      derp_mbb_rollback(ml, "target aux failed to connect within the open window");
+    }
+    return;
+  }
+
+  /* ML_MBB_PROVING */
+  {
+    ml_derp_conn_t * c = &ml->derp[s_mbb.prove_slot];
+    if (!c->connected || c->region_id != s_mbb.target) {
+      /* The conn we were proving died — that IS a failed proof (§7). */
+      s_mbb_proofs_failed++;
+      derp_mbb_rollback(ml, "target conn dropped mid-prove");
+      return;
+    }
+    bool stable = (now - c->connected_at_ms) >= ML_MBB_PROVE_STABLE_MS; /* gate (a) */
+    bool proven;
+    if (s_mbb.prove_peer_on_target) {
+      proven = (c->rx_pkts > s_mbb.prove_base_rx); /* gate (b), strong */
+    } else {
+      proven = (c->last_pong_ms >= s_mbb.prove_started_ms); /* gate (b), weak */
+      if (!proven && (s_mbb.last_prove_ping_ms == 0 || (now - s_mbb.last_prove_ping_ms) >= ML_MBB_PROVE_PING_INTERVAL_MS))
+      {
+        /* Client PING (0x12, 8-byte payload) — server answers PONG on the
+         * same conn. Direct write is safe: we ARE the single DERP writer. */
+        uint8_t ping[8];
+        esp_fill_random(ping, sizeof(ping));
+        (void)derp_write_frame(ml, c, DERP_FRAME_PING, ping, sizeof(ping));
+        s_mbb.last_prove_ping_ms = now;
+      }
+    }
+
+    if (stable && proven) {
+      /* ---- SWITCH_ADVERT: the commit point (§7). Swap the home INDEX. ---- */
+      int old_slot = ml->derp_home_slot;
+      ml_derp_conn_t * oldc = &ml->derp[old_slot];
+      uint8_t pref0 = 0x00;
+      uint8_t pref1 = 0x01;
+      /* Tell both servers which conn is our home now (mirrors magicsock's
+       * NotePreferred). Best-effort: a failed frame is harmless — the coord
+       * task's 60 s NotePreferred keepalive re-asserts it on the new home. */
+      if (oldc->connected) {
+        (void)derp_write_frame(ml, oldc, DERP_FRAME_NOTE_PREFERRED, &pref0, 1);
+      }
+      (void)derp_write_frame(ml, c, DERP_FRAME_NOTE_PREFERRED, &pref1, 1);
+      ml->derp_home_slot = s_mbb.prove_slot; /* THE swap — index only, no conn state moves */
+      ml->derp_home_region = s_mbb.target; /* routing + eff-home follow immediately */
+      oldc->aux_unwanted_since_ms = 0; /* old home starts life as a WANTED-until-proven-otherwise aux */
+      s_mbb_proofs_ok++;
+      s_mbb_commits++;
+      ESP_LOGW(
+        TAG,
+        "MBB COMMIT: home slot %d -> %d, region %u (old region %u drains via want-set; no teardown, bond gapless)",
+        old_slot,
+        s_mbb.prove_slot,
+        (unsigned)s_mbb.target,
+        (unsigned)oldc->region_id);
+      /* The advert side (priority_peer_region + PreferredDERP re-announce) is
+       * finished by the wg_mgr negotiator on consuming this outcome — it owns
+       * those fields today and stays their single writer. */
+      derp_mbb_post_outcome(ml, ML_MBB_OUTCOME_COMMITTED, s_mbb.target);
+      return;
+    }
+
+    if (now - s_mbb.prove_started_ms > ML_MBB_PROVE_TIMEOUT_MS) {
+      s_mbb_proofs_failed++;
+      derp_mbb_rollback(ml, "proof window expired (no end-to-end/pong evidence)");
+    }
+  }
 }
 
 /* ============================================================================
@@ -743,8 +1006,6 @@ void ml_derp_tx_task(void * arg)
   bool verbose_phase = false; /* verbose logging for first 15s after connect */
   int aux_burst[ML_DERP_MAX_CONNS] = {0}; /* per-slot aux connect backoff state */
 
-  ml_derp_conn_t * home = &ml->derp[0]; /* slot 0 = HOME connection */
-
   while (!(xEventGroupGetBits(ml->events) & ML_EVT_SHUTDOWN_REQUEST)) {
     /* Runtime pause: skip the whole loop body, just yield. Mutexes /
          * sockets stay in their current state — caller can resume cleanly. */
@@ -755,6 +1016,13 @@ void ml_derp_tx_task(void * arg)
 
     loop_count++;
     uint64_t loop_start = ml_get_time_ms();
+
+    /* HOME connection = derp[derp_home_slot]. Re-resolved EVERY iteration
+         * (it used to be a loop-invariant &derp[0]): a committed §7 MBB home
+         * switch swaps the index mid-run, and every home-specific action below
+         * (connect/reconnect/keepalive/fallback) must follow it immediately.
+         * Only this task writes the index, so the read is race-free here. */
+    ml_derp_conn_t * home = &ml->derp[ml->derp_home_slot];
 
     /* Unconditional heartbeat - proves task is alive */
     if (loop_start - last_heartbeat_ms > 5000) {
@@ -962,6 +1230,9 @@ void ml_derp_tx_task(void * arg)
       }
       if (!any_connected) {
         derp_manage_aux(ml, ml_effective_home_region(ml), aux_burst, loop_start);
+        /* Keep the §7 MBB machine responsive to cancels/locks even with the
+             * whole pool dark (it cannot progress, but it must stay abortable). */
+        derp_mbb_tick(ml, loop_start);
         vTaskDelay(pdMS_TO_TICKS(100));
         continue;
       }
@@ -1039,9 +1310,11 @@ void ml_derp_tx_task(void * arg)
     }
 
     /* ---- Phase 2: Poll for incoming DERP frames from ALL connected conns,
-         *      HOME first/most so the safety path stays prompt. Sockets are
-         *      O_NONBLOCK so each idle poll returns immediately. ---- */
-    for (int s = 0; s < ML_DERP_MAX_CONNS; s++) {
+         *      HOME first/most so the safety path stays prompt. Iteration starts
+         *      at the home INDEX (not slot 0) since the MBB refactor. Sockets
+         *      are O_NONBLOCK so each idle poll returns immediately. ---- */
+    for (int k = 0; k < ML_DERP_MAX_CONNS; k++) {
+      int s = (ml->derp_home_slot + k) % ML_DERP_MAX_CONNS;
       ml_derp_conn_t * c = &ml->derp[s];
       if (!c->connected) continue;
       for (int burst = 0; burst < 4; burst++) {
@@ -1071,8 +1344,13 @@ void ml_derp_tx_task(void * arg)
 
     /* ---- Aux pool management at the TAIL: home is already serviced this
          *      iteration, so a (potentially blocking) aux TLS handshake here can't
-         *      starve slot 0 / the safety path. ---- */
+         *      starve the home slot / the safety path. ---- */
     derp_manage_aux(ml, ml_effective_home_region(ml), aux_burst, ml_get_time_ms());
+
+    /* ---- §7 MBB home-switch machine, after manage_aux so a just-connected
+         *      target aux is observed the same iteration. O(1) state checks —
+         *      every blocking connect above is already capped, MBB adds none. ---- */
+    derp_mbb_tick(ml, ml_get_time_ms());
 
     /* Yield briefly (runtime-tunable via microlink_set_derp_loop_delay_ms). */
     vTaskDelay(pdMS_TO_TICKS(atomic_load(&s_derp_loop_delay_ms)));
@@ -1145,7 +1423,7 @@ esp_err_t ml_derp_connect(microlink_t * ml, ml_derp_conn_t * c, uint16_t region_
     }
   }
 
-  bool is_home = (c == &ml->derp[0]);
+  bool is_home = (c == &ml->derp[ml->derp_home_slot]);
   int64_t t_derp_start = esp_timer_get_time();
 
   ESP_LOGI(
@@ -1547,6 +1825,11 @@ esp_err_t ml_derp_connect(microlink_t * ml, ml_derp_conn_t * c, uint16_t region_
   c->region_id = region_id;
   c->last_recv_ms = ml_get_time_ms();
   c->last_used_ms = c->last_recv_ms;
+  /* §7 PROVING inputs: fresh stability clock + zeroed proof evidence for this
+   * connection instance (a reconnect must never inherit stale proof). */
+  c->connected_at_ms = c->last_recv_ms;
+  c->last_pong_ms = 0;
+  c->rx_pkts = 0;
   /* ML_EVT_DERP_CONNECTED means "the chip has its HOME relay up" (inbound
      * reachable). Only slot 0 owns that bit; aux connections don't touch it. */
   if (is_home) {
@@ -1568,7 +1851,7 @@ esp_err_t ml_derp_connect(microlink_t * ml, ml_derp_conn_t * c, uint16_t region_
 
 void ml_derp_disconnect(microlink_t * ml, ml_derp_conn_t * c)
 {
-  bool is_home = (c == &ml->derp[0]);
+  bool is_home = (c == &ml->derp[ml->derp_home_slot]);
   c->connected = false;
   if (is_home) {
     /* Only the home connection owns the global "DERP up" bit. */

@@ -882,16 +882,410 @@ void ml_wg_get_direct_retry_diag(microlink_t * ml, uint32_t out[4])
   }
 }
 
-/* Home our single DERP connection on a pinned peer's region.
- * microlink keeps ONE DERP connection, and a Tailscale DERP server only
- * delivers to peers connected to that same server — so if the chip homes on a
- * different region than a peer it must reach, its relayed DISCO/WG-init never
- * arrives and the link only forms after a `tailscale ping` FROM that peer.
- * Home on the priority (safety) peer's region when known; otherwise fall back
- * to the management server's region (the always-on anchor) so the chip can still be
- * managed/updated when no machine is online. The chosen region is reported as
- * PreferredDERP in the next MapRequest (ml_coord) so peers find us there too.
- * Called wherever a pinned peer's derp_region is (re)learned. */
+/* ============================================================================
+ * DERP region auto-negotiation — decision side (design §4.2/§6/§8).
+ *
+ * WHAT CHANGED vs the pre-autoneg code: maybe_rehome_to_priority() used to key
+ * the target on the single static config.priority_peer_ip and apply EVERY
+ * change break-before-make (derp_home_region write + ML_EVT_DERP_RECONNECT,
+ * gapping the relay path for a full TLS handshake). It now (a) derives the
+ * target from the app's machine-slot table via the §4.2 primary rule when a
+ * callback is registered (Q1: lowest bonded+ARMED slot — deterministic across
+ * reboots, unlike arming history), (b) consults TTL/epoch-gated fleet advice
+ * ONLY when no machine is configured (§6 — machines and idle remotes), and
+ * (c) routes a change through the §7 make-before-break machine whenever a live
+ * safety bond exists, under mandatory §8 damping.
+ *
+ * WHAT STAYED: the pinned-peer guard + diag counters; the management-server
+ * anchor fallback ("manageable when no machine online", §4.2); the LOCK path
+ * (derp_region_override != 0 preserves today's behavior verbatim — I2); and
+ * the no-bond legacy immediate rehome (§6 legacy_rehome — cold-bond must stay
+ * fast). All state below is RAM-only: the lock remains the only NVS-persisted
+ * region control.
+ * ========================================================================== */
+
+/* §8 damping + Phase-3 advice bookkeeping. Owned by the wg_mgr task (the only
+ * negotiator writer); exposed cross-task via ml_wg_get_neg_diag (word reads). */
+static uint32_t s_neg_damping_suppressed; /* §16: passes suppressed by any §8 guard */
+static uint32_t s_neg_cooldown_trips; /* §16: hourly circuit-breaker trips */
+static uint64_t s_neg_commit_ring[ML_NEG_MAX_SWITCHES_PER_HOUR]; /* commit timestamps */
+static uint16_t s_neg_candidate; /* §8 stability window: current target candidate */
+static uint64_t s_neg_candidate_since_ms;
+static uint64_t s_neg_last_commit_ms;
+static bool s_neg_cooldown_logged;
+static struct
+{
+  uint16_t region;
+  uint64_t until_ms;
+} s_neg_ban[ML_NEG_REGION_BANS]; /* §8 bad-region cooldown after ROLLBACK */
+static uint8_t s_neg_pending_source; /* MICROLINK_REGION_SRC_* of the pending MBB request */
+static uint32_t s_neg_advice_applied_epoch; /* last fleet-advice epoch actually applied */
+static uint64_t s_neg_last_advice_apply_ms;
+
+static bool neg_region_banned(uint16_t region, uint64_t now)
+{
+  for (int i = 0; i < ML_NEG_REGION_BANS; i++) {
+    if (s_neg_ban[i].region == region && now < s_neg_ban[i].until_ms) return true;
+  }
+  return false;
+}
+
+static void neg_ban_region(uint16_t region, uint64_t now)
+{
+  int slot = 0;
+  for (int i = 0; i < ML_NEG_REGION_BANS; i++) {
+    if (s_neg_ban[i].region == region || now >= s_neg_ban[i].until_ms) {
+      slot = i;
+      break;
+    }
+  }
+  s_neg_ban[slot].region = region;
+  s_neg_ban[slot].until_ms = now + ML_NEG_REGION_BAN_MS;
+}
+
+static uint32_t neg_switches_last_hour(uint64_t now)
+{
+  uint32_t n = 0;
+  for (int i = 0; i < ML_NEG_MAX_SWITCHES_PER_HOUR; i++) {
+    if (s_neg_commit_ring[i] != 0 && (now - s_neg_commit_ring[i]) < 3600000ull) n++;
+  }
+  return n;
+}
+
+static void neg_note_commit(uint64_t now)
+{
+  /* Overwrite the OLDEST entry — with a ring sized == the hourly cap, the cap
+   * check above guarantees a free (aged-out) slot exists whenever we commit. */
+  int oldest = 0;
+  for (int i = 1; i < ML_NEG_MAX_SWITCHES_PER_HOUR; i++) {
+    if (s_neg_commit_ring[i] < s_neg_commit_ring[oldest]) oldest = i;
+  }
+  s_neg_commit_ring[oldest] = now;
+  s_neg_last_commit_ms = now;
+}
+
+void ml_wg_get_neg_diag(uint32_t out[3])
+{
+  out[0] = s_neg_damping_suppressed;
+  out[1] = s_neg_cooldown_trips;
+  out[2] = neg_switches_last_hour(ml_get_time_ms());
+}
+
+/* §6 live_bond_active(): any health-tracked safety peer currently healthy.
+ * The remote comparator feeds per-machine-slot health every tick and machn
+ * feeds per-remote health, so this is a faithful bond signal on both roles.
+ * Builds that never health-track (no pstop app) read false => they keep the
+ * legacy immediate-rehome path exactly as today. */
+bool ml_wg_live_bond_active(void)
+{
+  for (int i = 0; i < ML_EXTRA_PINS; i++) {
+    if (s_health_peers[i].ip != 0 && s_health_peers[i].healthy) return true;
+  }
+  return false;
+}
+
+/* §4.2 primary-machine selection. Returns the VPN IP whose region the chip
+ * should home on, 0 = none known. Rules (Q1 decided 2026-08-10):
+ *   1/2. the lowest-index bonded+ARMED machine slot (the callback reports it —
+ *        dcs owns slots + arming; slot order is NVS config, identical after
+ *        power loss, unlike first-armed order);
+ *   3.   none armed -> lowest CONFIGURED slot whose region we already learned
+ *        (checked here — the app can't know regions);
+ *   4.   legacy static priority_peer_ip config (unchanged when no callback is
+ *        registered, i.e. machines and non-dcs builds behave as today). */
+static uint32_t neg_primary_ip(microlink_t * ml)
+{
+  microlink_primary_machine_cb_t cb = ml->primary_cb;
+  if (cb != NULL) {
+    microlink_primary_machine_info_t info;
+    memset(&info, 0, sizeof(info));
+    cb(ml->primary_cb_ctx, &info);
+    if (info.armed_primary_ip != 0) {
+      return info.armed_primary_ip;
+    }
+    for (int i = 0; i < info.configured_count && i < MICROLINK_PRIMARY_MAX_MACHINES; i++) {
+      uint32_t ip = info.configured_ips[i];
+      int idx = (ip != 0) ? find_peer_by_ip(ml, ip) : -1;
+      if (idx >= 0 && ml->peers[idx].derp_region != 0) {
+        return ip;
+      }
+    }
+    if (info.configured_count > 0) {
+      /* Machines are configured but none armed and no region learned yet:
+       * HOLD (self-heal retries in 3 s once the netmap delivers a region)
+       * rather than hopping onto some other peer's region meanwhile. */
+      return 0;
+    }
+  }
+  return ml->config.priority_peer_ip;
+}
+
+/* True when the chip has ANY machine configured — such a chip must ignore
+ * fleet advice entirely (§6: the netmap is fresher and machine-authoritative). */
+static bool neg_machine_configured(microlink_t * ml)
+{
+  microlink_primary_machine_cb_t cb = ml->primary_cb;
+  if (cb != NULL) {
+    microlink_primary_machine_info_t info;
+    memset(&info, 0, sizeof(info));
+    cb(ml->primary_cb_ctx, &info);
+    return info.configured_count > 0 || info.armed_primary_ip != 0;
+  }
+  return ml->config.priority_peer_ip != 0;
+}
+
+/* Fleet advice region if it may drive the target right now, else 0. An
+ * ALREADY-APPLIED epoch keeps supplying its region until TTL expiry (so the
+ * management-anchor fallback can't fight a committed advice); a NEW epoch is
+ * additionally rate-limited to one apply per ML_NEG_ADVICE_MIN_INTERVAL_MS —
+ * chip-side, so even a flapping fleet cannot exceed it (I3/§8). */
+static uint16_t neg_advice_target(microlink_t * ml, uint64_t now)
+{
+  uint16_t region = ml->advice_region;
+  uint32_t expires_s = ml->advice_expires_s;
+  if (region == 0 || expires_s == 0) return 0;
+  if ((uint32_t)(now / 1000u) >= expires_s) return 0; /* TTL expired (I3) */
+  if (
+    ml->advice_epoch != s_neg_advice_applied_epoch && s_neg_last_advice_apply_ms != 0 &&
+    (now - s_neg_last_advice_apply_ms) < ML_NEG_ADVICE_MIN_INTERVAL_MS)
+  {
+    return 0; /* new advice, honored at most every 30 min */
+  }
+  return region;
+}
+
+/* §6 target selection (normative pseudocode in the design):
+ *   target = region(primary_machine())            — §4.2
+ *   if 0:  fleet advice, ONLY with no machine configured (machines/idle chips)
+ *   if 0:  management-server anchor when the invoking peer IS the fleet server
+ *          (kept verbatim from the pre-autoneg fallback chain, §4.2)
+ *   if 0:  no local choice — today's server-HomeDERP default path stays. */
+static uint16_t neg_target_region(microlink_t * ml, const ml_peer_t * p, uint8_t * src_out)
+{
+  uint64_t now = ml_get_time_ms();
+  uint32_t prim = neg_primary_ip(ml);
+  if (prim != 0) {
+    int idx = find_peer_by_ip(ml, prim);
+    if (idx >= 0 && ml->peers[idx].derp_region != 0) {
+      *src_out = MICROLINK_REGION_SRC_AUTO_PRIMARY;
+      return ml->peers[idx].derp_region;
+    }
+    /* Primary known but its region not learned yet: fall through to the
+     * anchor/advice chain (matches the old fallback shape) — the self-heal
+     * cadence re-evaluates once the region arrives. */
+  }
+  if (!neg_machine_configured(ml)) {
+    uint16_t a = neg_advice_target(ml, now);
+    if (a != 0) {
+      *src_out = MICROLINK_REGION_SRC_AUTO_FLEET;
+      return a;
+    }
+  }
+  if (p != NULL) {
+    uint32_t fip = fleet_server_ip_cached();
+    if (fip != 0 && p->vpn_ip == fip && p->derp_region != 0) {
+      /* Management anchor: keeps the chip manageable when no machine is
+       * online. Reported as plain "auto" — no machine/advice selection. */
+      *src_out = MICROLINK_REGION_SRC_AUTO;
+      return p->derp_region;
+    }
+  }
+  return 0;
+}
+
+/* Cancel any pending MBB request (lock landed, bond died, target changed).
+ * The executor observes the generation bump and aborts to IDLE (§7). */
+static void neg_cancel_mbb(microlink_t * ml)
+{
+  if (ml->mbb_target_region != 0) {
+    ml->mbb_target_region = 0;
+    ml->mbb_generation++;
+  }
+}
+
+/* Q2 surfacing: record an auto-applied region change (legacy rehome or MBB
+ * commit) for /state.json, the UI badge and the fleet check-in. */
+static void neg_note_auto_apply(microlink_t * ml, uint16_t region, uint8_t src, uint64_t now)
+{
+  ml->derp_region_src = src;
+  ml->derp_region_auto_applied = region;
+  ml->derp_region_auto_applies++;
+  ml->derp_region_auto_apply_s = (uint32_t)(now / 1000u);
+}
+
+/* Apply a computed target region (§6 tail). Three paths:
+ *   LOCK      — preserve today's behavior verbatim (I2): assert the advert
+ *               owner + reconnect; connect/advert use the override anyway.
+ *   no bond   — legacy immediate rehome (§6 legacy_rehome): correct and FASTER
+ *               than MBB for boot/cold recovery; behavior identical to today.
+ *   live bond — §7 MBB only (I1: the bond is never dropped by a switch),
+ *               gated by every §8 damping guard. */
+static void neg_apply_target(microlink_t * ml, uint16_t target, uint8_t src)
+{
+  uint64_t now = ml_get_time_ms();
+
+  if (ml->derp_region_override != 0) {
+    ml->priority_peer_region = target; /* advertised as PreferredDERP (override still wins) */
+    neg_cancel_mbb(ml);
+    if (ml->derp_home_region != target) {
+      s_diag_rehome_applied++;
+      ESP_LOGW(
+        TAG,
+        "Re-homing DERP region %u -> %u (locked: override %u wins on connect/advert)",
+        (unsigned)ml->derp_home_region,
+        (unsigned)target,
+        (unsigned)ml->derp_region_override);
+      ml->derp_home_region = target;
+      xEventGroupSetBits(ml->events, ML_EVT_DERP_RECONNECT);
+    }
+    return;
+  }
+
+  if (ml->derp_home_region == target) {
+    /* Fixed point: keep asserting the advert owner (as the old code did) and
+     * make sure no stale MBB request lingers. The Q2 surfacing fields track
+     * the CURRENT auto-selected region/owner (no counter bump — nothing was
+     * applied), so /state.json + the badge stay truthful in steady state. */
+    ml->priority_peer_region = target;
+    if (src != MICROLINK_REGION_SRC_AUTO) {
+      ml->derp_region_src = src; /* ownership label follows the current driver */
+      ml->derp_region_auto_applied = target;
+    }
+    s_neg_candidate = 0;
+    neg_cancel_mbb(ml);
+    return;
+  }
+
+  if (!ml_wg_live_bond_active()) {
+    neg_cancel_mbb(ml); /* the immediate rehome supersedes any in-flight MBB */
+    ml->priority_peer_region = target;
+    s_diag_rehome_applied++;
+    ESP_LOGW(
+      TAG,
+      "Re-homing DERP region %u -> %u (%s; no live bond: legacy immediate reconnect)",
+      (unsigned)ml->derp_home_region,
+      (unsigned)target,
+      microlink_region_source_str(src));
+    ml->derp_home_region = target;
+    xEventGroupSetBits(ml->events, ML_EVT_DERP_RECONNECT);
+    neg_note_auto_apply(ml, target, src, now);
+    if (src == MICROLINK_REGION_SRC_AUTO_FLEET) {
+      s_neg_advice_applied_epoch = ml->advice_epoch;
+      s_neg_last_advice_apply_ms = now;
+      /* Q2: an advice apply must be visible to peers + operator immediately —
+       * push the new PreferredDERP now instead of waiting for the next
+       * periodic MapRequest. */
+      (void)microlink_request_announce(ml);
+    }
+    return;
+  }
+
+  /* ---- live bond: §8 damping gates, then request the §7 MBB switch ---- */
+  if (neg_region_banned(target, now)) {
+    s_neg_damping_suppressed++;
+    return;
+  }
+  if (s_neg_last_commit_ms != 0 && (now - s_neg_last_commit_ms) < ML_NEG_MIN_DWELL_MS) {
+    s_neg_damping_suppressed++;
+    return;
+  }
+  if (s_neg_candidate != target) {
+    /* New candidate: (re)start the stability window and preempt any MBB
+     * toward a stale target (§7: newer target restarts from IDLE via ABORT). */
+    s_neg_candidate = target;
+    s_neg_candidate_since_ms = now;
+    if (ml->mbb_target_region != 0 && ml->mbb_target_region != target) {
+      neg_cancel_mbb(ml);
+    }
+    return;
+  }
+  if ((now - s_neg_candidate_since_ms) < ML_NEG_STABILITY_MS) {
+    return; /* §8: absorbs netmap patch bursts / region flap without churn */
+  }
+  if (neg_switches_last_hour(now) >= ML_NEG_MAX_SWITCHES_PER_HOUR) {
+    if (!s_neg_cooldown_logged) {
+      s_neg_cooldown_trips++;
+      s_neg_cooldown_logged = true;
+      ESP_LOGE(
+        TAG,
+        "DERP region switch circuit-breaker TRIPPED (%d switches/h): holding home region %u, wanted %u",
+        ML_NEG_MAX_SWITCHES_PER_HOUR,
+        (unsigned)ml->derp_home_region,
+        (unsigned)target);
+    }
+    s_neg_damping_suppressed++;
+    return;
+  }
+  s_neg_cooldown_logged = false;
+  if (ml->mbb_target_region == target) {
+    return; /* already requested; the executor is working on it */
+  }
+  s_neg_pending_source = src;
+  ml->mbb_target_region = target;
+  ml->mbb_generation++;
+  ESP_LOGW(
+    TAG,
+    "MBB home switch requested: region %u -> %u (%s; bond live, make-before-break)",
+    (unsigned)ml->derp_home_region,
+    (unsigned)target,
+    microlink_region_source_str(src));
+}
+
+/* Consume the MBB executor's outcome (posted by the DERP I/O task). Runs on
+ * the wg_mgr 3 s self-heal cadence — the advert/announce stays single-writer
+ * (this task), off the 10 Hz safety send path. */
+static void neg_consume_mbb_outcome(microlink_t * ml)
+{
+  uint8_t oc = ml->mbb_outcome;
+  if (oc == ML_MBB_OUTCOME_NONE) return;
+  uint16_t region = ml->mbb_outcome_region;
+  ml->mbb_outcome = ML_MBB_OUTCOME_NONE;
+  neg_cancel_mbb(ml); /* command served either way; executor is back at IDLE */
+  uint64_t now = ml_get_time_ms();
+
+  if (oc == ML_MBB_OUTCOME_COMMITTED) {
+    neg_note_commit(now);
+    /* §6/§7 SWITCH_ADVERT tail: an MBB-committed region is treated exactly
+     * like priority_peer_region — it owns the PreferredDERP advert and arms
+     * the MapResponse authoritative guard so the server can't revert it. */
+    ml->priority_peer_region = region;
+    s_diag_rehome_applied++;
+    neg_note_auto_apply(ml, region, s_neg_pending_source, now);
+    if (s_neg_pending_source == MICROLINK_REGION_SRC_AUTO_FLEET) {
+      s_neg_advice_applied_epoch = ml->advice_epoch;
+      s_neg_last_advice_apply_ms = now;
+    }
+    /* Live PreferredDERP re-advert — the shipped lock plumbing propagates it;
+     * peers migrate to the new region while the OLD conn is still up (§7
+     * DRAIN_OLD holds it via the want-set until they do). */
+    (void)microlink_request_announce(ml);
+    ESP_LOGW(
+      TAG,
+      "MBB COMMIT: DERP home region now %u (%s); PreferredDERP re-advert queued, old region drains via want-set",
+      (unsigned)region,
+      microlink_region_source_str(s_neg_pending_source));
+  } else if (oc == ML_MBB_OUTCOME_ROLLED_BACK) {
+    neg_ban_region(region, now); /* §8: 15-min cooldown before retrying an unprovable region */
+    s_neg_candidate = 0; /* restart the stability window from scratch */
+    ESP_LOGW(
+      TAG,
+      "MBB ROLLBACK: region %u failed proving — banned %d min, home untouched (bond never at risk)",
+      (unsigned)region,
+      (int)(ML_NEG_REGION_BAN_MS / 60000));
+  } else {
+    /* ABORTED (lock landed / preemption): no ban — nothing was proven bad. */
+    s_neg_candidate = 0;
+  }
+}
+
+/* Home our DERP connection on a pinned peer's region.
+ * microlink's HOME DERP connection is where peers reach us, and a Tailscale
+ * DERP server only delivers to peers connected to that same server — so if the
+ * chip homes on a different region than a peer it must reach, its relayed
+ * DISCO/WG-init never arrives and the link only forms after a `tailscale ping`
+ * FROM that peer. Target selection is §4.2/§6 (neg_target_region above); the
+ * apply path is lock/legacy/MBB (neg_apply_target). Called wherever a pinned
+ * peer's derp_region is (re)learned, plus the 3 s self-heal cadence. */
 static void maybe_rehome_to_priority(microlink_t * ml, const ml_peer_t * p)
 {
   s_diag_rehome_calls++;
@@ -904,27 +1298,12 @@ static void maybe_rehome_to_priority(microlink_t * ml, const ml_peer_t * p)
     return;
   }
   s_diag_rehome_body++;
-  bool is_prio = (ml->config.priority_peer_ip != 0 && p->vpn_ip == ml->config.priority_peer_ip);
-  uint16_t target = p->derp_region;
-  if (!is_prio && ml->config.priority_peer_ip != 0) {
-    /* Management peer: prefer the priority peer's region if we know it. */
-    int pidx = find_peer_by_ip(ml, ml->config.priority_peer_ip);
-    if (pidx >= 0 && ml->peers[pidx].derp_region != 0) {
-      target = ml->peers[pidx].derp_region;
-    }
+  uint8_t src = MICROLINK_REGION_SRC_AUTO;
+  uint16_t target = neg_target_region(ml, p, &src);
+  if (target == 0) {
+    return; /* no local choice — today's server-HomeDERP default stands (§6) */
   }
-  ml->priority_peer_region = target; /* advertised as PreferredDERP */
-  if (ml->derp_home_region != target) {
-    s_diag_rehome_applied++;
-    ESP_LOGW(
-      TAG,
-      "Re-homing DERP region %u -> %u (%s)",
-      (unsigned)ml->derp_home_region,
-      (unsigned)target,
-      is_prio ? "priority peer" : "management server");
-    ml->derp_home_region = target;
-    xEventGroupSetBits(ml->events, ML_EVT_DERP_RECONNECT);
-  }
+  neg_apply_target(ml, target, src);
 }
 
 static int find_peer_by_disco_key(microlink_t * ml, const uint8_t * disco_key)
@@ -3011,14 +3390,31 @@ static void disco_periodic_probes(microlink_t * ml)
 static void self_heal_rehome(microlink_t * ml)
 {
   s_diag_selfheal_calls++;
-  if (ml->config.priority_peer_ip != 0) {
-    int i = find_peer_by_ip(ml, ml->config.priority_peer_ip);
+  /* §7: consume any MBB outcome first — commit => advert owner + announce;
+   * rollback => region ban. Runs here (3 s cadence, wg_mgr task) so the
+   * negotiator stays single-writer and off the 10 Hz safety send path. */
+  neg_consume_mbb_outcome(ml);
+  /* Heal against the DERIVED §4.2 primary (falls back to the legacy static
+   * priority_peer_ip when no callback is registered — machn/plain builds). */
+  uint32_t prim = neg_primary_ip(ml);
+  if (prim != 0) {
+    int i = find_peer_by_ip(ml, prim);
     if (i >= 0) maybe_rehome_to_priority(ml, &ml->peers[i]);
   }
   uint32_t fip = fleet_server_ip_cached();
-  if (fip != 0) {
+  if (fip != 0 && fip != prim) {
     int i = find_peer_by_ip(ml, fip);
     if (i >= 0) maybe_rehome_to_priority(ml, &ml->peers[i]);
+  }
+  /* Phase-3 advice with an EMPTY peer table (idle chip, fleet peer not yet
+   * ingested): neither invocation above fires, so evaluate advice directly.
+   * Same gates as everywhere else (§6: no machine configured; TTL/epoch/
+   * interval inside neg_advice_target; lock/damping inside neg_apply_target). */
+  if (prim == 0 && !neg_machine_configured(ml)) {
+    uint16_t a = neg_advice_target(ml, ml_get_time_ms());
+    if (a != 0) {
+      neg_apply_target(ml, a, MICROLINK_REGION_SRC_AUTO_FLEET);
+    }
   }
 }
 

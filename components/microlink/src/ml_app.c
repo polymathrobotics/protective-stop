@@ -455,6 +455,26 @@ static bool fleet_ota_checkin(
   cJSON_AddStringToObject(body, "state", app->tailscale_connected ? "CONNECTED" : (app->ml ? "CONNECTING" : "IDLE"));
   cJSON_AddBoolToObject(body, "rollback_occurred", invalid != NULL);
 
+  /* DERP region observability (design §5 slice + §16): repackaged chip truth
+   * the fleet registry/advice computation needs — home + lock + who chose it
+   * (Q2 auto-apply visibility) + MBB/damping counters. Cheap to serialize;
+   * older backends ignore unknown fields. */
+  if (app->ml) {
+    cJSON * derp = cJSON_AddObjectToObject(body, "derp");
+    if (derp) {
+      microlink_region_autoneg_t an;
+      microlink_get_region_autoneg(app->ml, &an);
+      cJSON_AddNumberToObject(derp, "home_region", microlink_get_derp_region(app->ml));
+      cJSON_AddNumberToObject(derp, "override", microlink_get_derp_region_locked(app->ml));
+      cJSON_AddStringToObject(derp, "source", microlink_region_source_str(an.source));
+      cJSON_AddNumberToObject(derp, "auto_applied_region", an.auto_applied_region);
+      cJSON_AddNumberToObject(derp, "auto_applies", an.auto_apply_count);
+      cJSON_AddNumberToObject(derp, "mbb_state", an.mbb_state);
+      cJSON_AddNumberToObject(derp, "switches_1h", an.switches_1h);
+      cJSON_AddNumberToObject(derp, "mbb_rollbacks", an.mbb_rollbacks);
+    }
+  }
+
   char * json_str = cJSON_PrintUnformatted(body);
   cJSON_Delete(body);
   if (!json_str) return false;
@@ -508,6 +528,27 @@ static bool fleet_ota_checkin(
     if (backend_val != app->auto_update) {
       app->auto_update = backend_val;
       ESP_LOGI(TAG, "OTA: auto_update synced from backend: %s", backend_val ? "ON" : "OFF");
+    }
+  }
+
+  /* Phase-3 region advice intake (design §6/§13.1, Q2 decision: build it).
+   * The response MAY carry a region_advice object; hand it to microlink,
+   * which enforces every gate chip-side (strictly-increasing epoch, TTL,
+   * lock wins, machine-configured chips ignore advice entirely, 30-min
+   * apply interval, §8 damping, §7 proving). Absent = the common case; the
+   * fleet-side computation is spec-only for now (§13) so this path is a
+   * consumption stub until the backend emits it. MUST parse before the
+   * update_available early-return below. */
+  if (app->ml) {
+    cJSON * ra = cJSON_GetObjectItem(resp, "region_advice");
+    if (ra && cJSON_IsObject(ra)) {
+      cJSON * rr = cJSON_GetObjectItem(ra, "suggested_region");
+      cJSON * re = cJSON_GetObjectItem(ra, "epoch");
+      cJSON * rt = cJSON_GetObjectItem(ra, "ttl_s");
+      if (rr && cJSON_IsNumber(rr) && re && cJSON_IsNumber(re) && rt && cJSON_IsNumber(rt)) {
+        microlink_offer_region_advice(
+          app->ml, (uint16_t)rr->valuedouble, (uint32_t)re->valuedouble, (uint32_t)rt->valuedouble);
+      }
     }
   }
 
