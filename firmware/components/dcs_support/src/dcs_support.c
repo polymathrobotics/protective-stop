@@ -18,6 +18,7 @@
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_system.h"
+#include "esp_timer.h" /* primary-machine freshness clock (same domain as main.c) */
 #include "freertos/FreeRTOS.h"
 #include "freertos/idf_additions.h" /* xTaskCreatePinnedToCoreWithCaps */
 #include "freertos/semphr.h" /* operator-allowlist writer mutex */
@@ -27,6 +28,7 @@
 #include "ml_dev_tether.h"
 #include "nvs_flash.h"
 #include "panic_log.h"
+#include "pstop/pstop_msg.h" /* PSTOP_MESSAGE_OK = machine armed/running (primary rule) */
 
 static const char * TAG = "dcs_support";
 
@@ -268,6 +270,62 @@ esp_err_t dcs_operator_del(uint32_t remote_id)
   return r;
 }
 
+/* === DERP region auto-negotiation: §4.2 primary-machine feed ===============
+ *
+ * microlink derives the chip's DERP home region from the machine-slot table +
+ * per-slot session state, both of which live HERE (the lock-free telemetry
+ * atomics the comparator publishes every tick). Q1 decision (2026-08-10):
+ * primary = the LOWEST-index bonded+ARMED slot — slot order is NVS
+ * configuration, identical after power loss, whereas arming ORDER is history
+ * that cannot be reconstructed across a reboot.
+ *
+ * "Armed" proxy per slot: session BONDED (state==2) AND the machine's last
+ * reply message is PSTOP_MESSAGE_OK (a machn replies OK only while its safety
+ * chain is closed/armed; STOP/BOND replies mean not armed) AND the reply is
+ * FRESH (within the machine's own bond-drop window, hb×5, floor 3 s — the
+ * same invariant sess_rebond_after_ms mirrors in main.c).
+ *
+ * Runs on the wg_mgr task at its 3 s self-heal cadence: atomics only, no
+ * NVS/flash, no locks. On machn the slot table is empty, so this returns
+ * nothing and microlink keeps the machine's legacy (fleet-anchor) behavior —
+ * machines are region-authoritative and never follow a remote (design §4). */
+static void dcs_primary_machine_info(void * ctx, microlink_primary_machine_info_t * out)
+{
+  (void)ctx;
+  out->armed_primary_ip = 0u;
+  out->configured_count = 0;
+  const uint64_t now = (uint64_t)(esp_timer_get_time() / 1000);
+  for (int i = 0; i < DCS_PSTOP_MAX_MACHINES; i++) {
+    uint64_t ep = (uint64_t)atomic_load(&g_dcs_pstop_slot_ep[i]);
+    if ((ep & PSTOP_EP_CONFIGURED) == 0ULL) {
+      continue;
+    }
+    uint32_t ip = (uint32_t)((ep >> 16) & 0xFFFFFFFFULL);
+    if (ip == 0u) {
+      continue;
+    }
+    if (out->configured_count < MICROLINK_PRIMARY_MAX_MACHINES) {
+      out->configured_ips[out->configured_count++] = ip; /* slot order preserved */
+    }
+    if (out->armed_primary_ip == 0u) { /* first (lowest) armed slot wins — Q1 */
+      uint32_t st = (uint32_t)atomic_load(&g_dcs_pstop_m_state[i]);
+      uint32_t lm = (uint32_t)atomic_load(&g_dcs_pstop_m_last_msg[i]);
+      uint64_t lr = (uint64_t)atomic_load(&g_dcs_pstop_m_last_reply_ms[i]);
+      uint32_t hb = (uint32_t)atomic_load(&g_dcs_pstop_m_hb_ms[i]);
+      uint64_t fresh_ms = (hb != 0u) ? ((uint64_t)hb * 5u) : 3000u;
+      if (fresh_ms < 3000u) {
+        fresh_ms = 3000u;
+      }
+      bool bonded = (st == 2u); /* SESS_BONDED */
+      bool armed = (lm == (uint32_t)PSTOP_MESSAGE_OK);
+      bool fresh = (lr != 0u) && (now >= lr) && ((now - lr) <= fresh_ms);
+      if (bonded && armed && fresh) {
+        out->armed_primary_ip = ip;
+      }
+    }
+  }
+}
+
 /* === Public API ============================================================ */
 
 dcs_boot_state_t dcs_support_init(void)
@@ -415,6 +473,15 @@ dcs_boot_state_t dcs_support_init(void)
   /* Pin every configured machine target in the WG peer table so the cap
      * trim can never orphan a safety link (see pstop_slot_pins_sync). */
   pstop_slot_pins_sync();
+
+  /* DERP region auto-negotiation (§4.2): feed microlink the machine-slot
+     * table + arming state so it can home on the PRIMARY machine's region
+     * (lowest bonded+armed slot — Q1) and MBB-switch when the primary moves.
+     * Registered on both roles: on machn the table is empty, so this is a
+     * no-op feed and the machine keeps its legacy region behavior. */
+  if (g_dcs.ml_handle != NULL) {
+    microlink_set_primary_machine_cb(g_dcs.ml_handle, dcs_primary_machine_info, NULL);
+  }
 
   /* Operator allowlist (machine-role authorization): create the writer mutex
      * and load the persisted ids into the lock-free RAM cache BEFORE main.c

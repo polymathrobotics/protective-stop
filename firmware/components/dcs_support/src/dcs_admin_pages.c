@@ -130,6 +130,13 @@ static esp_err_t page_state(httpd_req_t * req)
    * effective region so the UI shows AUTO vs LOCKED without guessing — the
    * region-9 (dfw) misroute guard. */
   int derp_region_locked = 0;
+  /* Q2 auto-apply surfacing (region auto-negotiation): who chose the current
+   * region ("auto"|"locked"|"auto-primary"|"auto-fleet"), the region the
+   * negotiator last applied, an apply counter + uptime-seconds stamp so an
+   * operator/monitor can see THAT an auto-apply occurred, when, and from
+   * which source — plus the live MBB state + rolling-hour switch count. */
+  microlink_region_autoneg_t an;
+  (void)memset(&an, 0, sizeof(an));
   if (g_dcs.ml_handle != NULL) {
     ml_state = (int)microlink_get_state(g_dcs.ml_handle);
     uint32_t cc = microlink_get_connect_count(g_dcs.ml_handle);
@@ -138,6 +145,7 @@ static esp_err_t page_state(httpd_req_t * req)
     public_ip = microlink_get_public_ip(g_dcs.ml_handle);
     derp_region = (int)microlink_get_derp_region(g_dcs.ml_handle);
     derp_region_locked = (int)microlink_get_derp_region_locked(g_dcs.ml_handle);
+    microlink_get_region_autoneg(g_dcs.ml_handle, &an);
   }
 
   uint32_t heap_min_internal = atomic_load(&g_dcs_heap_min_internal);
@@ -211,10 +219,14 @@ static esp_err_t page_state(httpd_req_t * req)
      * internal heap which runs tight on this build). */
   enum
   {
-    JSON_CAP = 3776 /* eth-watchdog fields + bonded-remote stop_only + operator list
+    JSON_CAP = 4096 /* eth-watchdog fields + bonded-remote stop_only + operator list
                        + instantaneous internal-heap fields (heap_free_int/heap_lfb_int).
                        remote_stop_id + restart_state add <= 47 B worst case against
-                       ~940 B live headroom (measured 2026-08-09) — no bump needed. */
+                       ~940 B live headroom (measured 2026-08-09). derp_region_locked
+                       adds <= 27 B. Region auto-negotiation surfacing (source string
+                       + auto_applied + counters + mbb_state + switches_1h) adds
+                       <= ~160 B worst case — bumped 3776 -> 4096 to keep comfortable
+                       headroom rather than shave the measured margin. */
   };
 
   char * buf = heap_caps_malloc(JSON_CAP, MALLOC_CAP_SPIRAM);
@@ -245,6 +257,9 @@ static esp_err_t page_state(httpd_req_t * req)
     "\"fw_ver\":\"%s\",\"fw_sha\":\"%s\","
     "\"ml_state\":%d,\"ml_reconnects\":%lu,\"vpn_ip\":%lu,\"public_ip\":%lu,\"derp_region\":%d,"
     "\"derp_region_locked\":%d,"
+    "\"derp_region_source\":\"%s\",\"derp_region_auto_applied\":%d,"
+    "\"derp_auto_applies\":%lu,\"derp_auto_apply_s\":%lu,"
+    "\"derp_mbb_state\":%d,\"derp_switches_1h\":%lu,"
     "\"pstop_peer_ip\":%lu,\"pstop_peer_port\":%lu,"
     "\"pstop_sent\":%lu,\"pstop_replies\":%lu,\"pstop_last_msg\":%lu,\"pstop_mismatch\":%lu,"
     "\"pstop_send_fail\":%lu,\"pstop_sf_nomem\":%lu,\"pstop_sf_route\":%lu,"
@@ -313,6 +328,12 @@ static esp_err_t page_state(httpd_req_t * req)
     (unsigned long)public_ip,
     derp_region,
     derp_region_locked,
+    microlink_region_source_str(an.source),
+    (int)an.auto_applied_region,
+    (unsigned long)an.auto_apply_count,
+    (unsigned long)an.last_auto_apply_s,
+    (int)an.mbb_state,
+    (unsigned long)an.switches_1h,
     (unsigned long)atomic_load(&g_dcs_pstop_peer_ip),
     (unsigned long)atomic_load(&g_dcs_pstop_peer_port),
     (unsigned long)atomic_load(&g_dcs_pstop_sent),

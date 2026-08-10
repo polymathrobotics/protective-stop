@@ -371,11 +371,18 @@ static const char k_index_html[] =
   "document.getElementById('publicip').textContent=j.public_ip?ip4(j.public_ip):'-';"
   "var dr=j.derp_region||0;"
   "document.getElementById('derpreg').textContent=dr?('#'+dr+drName(dr)):'-';"
-  /* AUTO vs LOCKED badge straight from derp_region_locked (0 = auto). */
+  /* Region-ownership badge (Q2, region auto-negotiation): LOCKED N (operator
+     lock, amber) vs AUTO->N (fleet)/(primary) (auto-applied by the negotiator,
+     blue — visibly distinct from both plain AUTO and LOCKED) vs plain AUTO
+     (green: server default, no auto-selection applied). */
   "var lk=j.derp_region_locked||0;"
+  "var src=j.derp_region_source||'auto';"
+  "var aa=j.derp_region_auto_applied||0;"
   "var dl=document.getElementById('derplock');"
-  "dl.textContent=lk?('LOCKED '+lk):'AUTO';"
-  "dl.className='chip '+(lk?'warn':'idle');"
+  "if(lk){dl.textContent='LOCKED '+lk;dl.className='chip warn';}"
+  "else if(src=='auto-fleet'&&aa){dl.textContent='AUTO\\u2192'+aa+' (fleet)';dl.className='chip blue';}"
+  "else if(src=='auto-primary'&&aa){dl.textContent='AUTO\\u2192'+aa+' (primary)';dl.className='chip blue';}"
+  "else{dl.textContent='AUTO';dl.className='chip idle';}"
   "const mc=document.getElementById('mlchip');"
   "mc.textContent=MLN[j.ml_state]||('state '+j.ml_state);"
   "mc.className='chip '+(j.ml_state===4?'idle':(j.ml_state===6?'red':'warn'));"
