@@ -209,14 +209,18 @@ Any disagreement, stale proof, or missing proof → send nothing → STOP.
 > Common-cause coverage is **not quantified** — it requires FMEDA **and** the
 > §10 row-9 fault-injection proof (HARA §6; FMEA DU-3/DU-5).
 
-### 5.5 Supporting hardware diagnostics (raise DC) — **NOT IMPLEMENTED**
-> **[Reconciled 2026-08-02]** **None of the §5.5 diagnostics are in the code.**
-> In particular the GPIO config-integrity check below is **NOT IMPLEMENTED —
-> open gap (FMEA DU-1, the highest-priority DU row).** Pad direction/mux/pulldown
-> are configured **once** at `estop_init` (`main.c:229-247`) and **never
-> re-verified at runtime**. A dropped pulldown → an open loop floats and can read
-> as closed → **false OK with no on-line detection**. Do not cite §5.5 as an
-> existing control anywhere in the safety case.
+### 5.5 Supporting hardware diagnostics (raise DC) — **PARTIALLY IMPLEMENTED**
+> **[Reconciled 2026-08-07]** The **GPIO config-integrity check is now
+> IMPLEMENTED** (SR-R-09 / FMEA **DU-1 CLOSED**, commit `1cfbd9a`): the remote
+> periodically re-reads each channel's pad direction/mux/pulldown
+> (`gpio_ll_get_io_config`) plus a drive-low self-test and forces a controlled
+> reset on mismatch (`gpio_cfg_fault`) — closing the dropped-pulldown → false-OK
+> path. See `docs/safety/CLOCK_GUARD_AND_GPIO_REVERIFY.md`. Residual: on-bench
+> corruption of a *live* pad config is bench-blocked (logic host-reasoned).
+>
+> **[Reconciled 2026-08-02, superseded above for GPIO config-integrity]** The
+> other §5.5 diagnostics below (output read-back, cross-channel read) are still
+> **NOT IMPLEMENTED** — do not cite them as existing controls.
 - GPIO config integrity: periodically re-read/verify pin direction, mux,
   and the input pulldown (a dropped pulldown is a classic
   dangerous-undetected fault: an open loop would float, not read 0).
