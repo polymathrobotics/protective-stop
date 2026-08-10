@@ -851,8 +851,8 @@ void ml_wg_get_direct_retry_diag(microlink_t * ml, uint32_t out[4])
   for (int i = 0; i < ml->peer_count; i++) {
     ml_peer_t * p = &ml->peers[i];
     if (!p->active || p->has_direct_path) continue;
-    bool safety = (ml->config.priority_peer_ip != 0 && p->vpn_ip == ml->config.priority_peer_ip) ||
-                  is_health_tracked(p->vpn_ip);
+    bool safety =
+      (ml->config.priority_peer_ip != 0 && p->vpn_ip == ml->config.priority_peer_ip) || is_health_tracked(p->vpn_ip);
     if (!safety) continue;
     out[2]++;
     if (p->relay_retry_next_ms != 0 && (soonest == 0 || p->relay_retry_next_ms < soonest)) {
@@ -2219,8 +2219,15 @@ static void process_disco_packet(microlink_t * ml, const ml_rx_packet_t * pkt)
            * blocking UART chars each — real wg_mgr stall time during the CMM
            * bursts this handler must survive. */
           ESP_LOGD(
-            TAG, "  CMM ep[%d]: v4mapped=%d port=%d ip=%02x%02x%02x%02x", i, is_v4_mapped, port, entry[12], entry[13],
-            entry[14], entry[15]);
+            TAG,
+            "  CMM ep[%d]: v4mapped=%d port=%d ip=%02x%02x%02x%02x",
+            i,
+            is_v4_mapped,
+            port,
+            entry[12],
+            entry[13],
+            entry[14],
+            entry[15]);
 
           if (!is_v4_mapped || port == 0) continue;
 
@@ -2858,7 +2865,10 @@ static void disco_periodic_probes(microlink_t * ml)
         p->relay_retry_next_ms = now + iv;
         s_diag_relay_retries++;
         ESP_LOGI(
-          TAG, "relay-bound retry #%u for %s (next in %llu s)", (unsigned)p->relay_retry_count, p->hostname,
+          TAG,
+          "relay-bound retry #%u for %s (next in %llu s)",
+          (unsigned)p->relay_retry_count,
+          p->hostname,
           (unsigned long long)(iv / 1000u));
       }
     }
@@ -2930,8 +2940,8 @@ static void disco_periodic_probes(microlink_t * ml)
      * via-DERP-answered probe waits only ML_DISCO_DERP_MATCH_GRACE_MS for its
      * slower direct twin, not the full 5 s timeout — unbounded lifetimes here
      * exhausted the table and demoted healthy paths (2026-08-09 bench). */
-    bool grace_over = pending_probes[i].derp_match_ms != 0 &&
-                      now - pending_probes[i].derp_match_ms > ML_DISCO_DERP_MATCH_GRACE_MS;
+    bool grace_over =
+      pending_probes[i].derp_match_ms != 0 && now - pending_probes[i].derp_match_ms > ML_DISCO_DERP_MATCH_GRACE_MS;
     if (timed_out || grace_over) {
       pending_probes[i].active = false;
       if (grace_over) {
