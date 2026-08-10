@@ -113,3 +113,6 @@ No unsafe behavior. All STOP/timeout/reject paths are fail-safe. Observations
 - httpd user-handler budget (`dcs_support.c max_user_uri_handlers=16`) was at
   its limit; adding one more handler (the stub) silently failed to register
   until bumped. Worth watching if more `/api` routes are ever added in prod.
+  **[Reconciled 2026-08-07]** Raised to `max_user_uri_handlers=30` (46 total
+  slots for microlink's ~20 + dcs's 21); comment in `dcs_support.c` documents
+  the arithmetic to re-check on any new route. No longer at the limit.

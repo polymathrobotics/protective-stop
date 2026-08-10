@@ -125,11 +125,13 @@ curl -X POST "http://<chip>/api/pstop_peer?ip=<machine-ip>&port=8890"
 ```
 
 To use a unit over its USB cable, the host needs a one-time tether
-setup first (an interface-naming rule plus a shared-mode NetworkManager
-profile — the chip does not serve DHCP, so without this the USB link
-sits in "connecting…" forever and the unit falls back to WiFi). See
-["USB tether — one-time host setup"](host/README.md#usb-tether--one-time-host-setup-read-this-first)
-in `host/README.md`.
+setup first — the chip serves no DHCP, so without it the USB link sits
+in "connecting…" forever and the unit falls back to WiFi. The full
+procedure is in the **USB-NCM setup guide,
+[`docs/USB_NCM_SETUP.md`](docs/USB_NCM_SETUP.md)**: verified Linux
+(NetworkManager) steps, plus notes on the equivalent Windows and macOS
+setup and the subnet gotcha that keeps the default machine bond from
+forming on those hosts.
 
 Arm by pressing and holding the switch for at least 0.5 s, then
 releasing. The runner logs `ARMED` and the ring turns green.
@@ -220,7 +222,7 @@ including the 128-peer cap rule that governs whether a cross-site remote can
 reach a machine — is documented in
 [`docs/MULTI_REMOTE_MULTI_MACHINE.md`](docs/MULTI_REMOTE_MULTI_MACHINE.md).**
 
-## Current status and open items (2026-07-22)
+## Current status and open items (2026-08-07)
 
 Units self-provision (per-unit ID, auto-join Tailscale) and check in on
 boot and at least every 5 minutes. The check-in and OTA tooling is
@@ -229,6 +231,21 @@ system of your own; none is included in this project. Inbound
 reachability from such a backend required a DERP-home fix so a NAT'd or
 tethered unit homes on the backend's region (`docs/TROUBLESHOOTING.md`).
 Bulk USB provisioning goes through `tools/flash_pstop.sh`.
+
+Recently closed (post-2026-07-22 hardening, deployed and bench-verified):
+
+- Outbound cold-bond region routing — a remote now homes DERP on the
+  machine's region and self-initiates, so a cross-region unit bonds
+  without a manual `tailscale ping` from the robot side.
+- Half-open / black-holed direct path — a wedged direct WireGuard path
+  is detected and demoted to DERP with no lasting bond loss.
+- OTA lineage safety — an HTTP-upload OTA of a wrong-project image is
+  rejected at the first chunk (no needless reboot/rollback), symmetric
+  on remote and machine builds.
+- USB-NCM tether stability verified under a running safety bond
+  (`docs/USB_NCM_STABILITY.md`; host setup in `docs/USB_NCM_SETUP.md`).
+- `max_missed_heartbeats` default raised 3 → 5 (about 2.0 s stop-on-
+  silence) consistently across firmware, machine, and the ROS 2 node.
 
 Open items:
 
@@ -241,9 +258,10 @@ Open items:
 - Tailscale subnet-route caveat: a subnet router advertising the
   robot's LAN hijacks operator-laptop traffic to the chip's LAN IP.
   There is an `ip rule` workaround that needs documenting.
-- USB-tether units behind symmetric NAT are relay-only (no direct
-  path) and depend on the DERP re-home. Reachable in testing after
-  recovery, but worth a dedicated soak.
+- Under a heavy synthetic DISCO storm on a full 128-peer tailnet the
+  safety bond holds (zero stops), but a small reply-deficit and rebond
+  churn appears at load transitions — a peer-scaling budget tuning
+  follow-up (`docs/safety/OPEN_ITEMS.md`), not a safety failure.
 - Long-duration (24 h+) per-transport soaks before certification runs.
 
 ## Certification and licensing
@@ -252,8 +270,17 @@ Open items:
 this repo. Every policy the shell adds (arming veto, status latch,
 transport binding, loop debounce) uses only public library API and is
 designed so a shell bug can cost availability but never cause a
-spurious arm. The SIL2 design record is `docs/PSTOP_SAFETY_DESIGN.md`;
-the option of moving the arming policy into the library is analyzed in
+spurious arm.
+
+The integrity target is **SIL 3 (IEC 61508)** with an equivalent
+**PL e (ISO 13849)** track — the project is pursuing both standards. The
+safety case lives in [`docs/safety/`](docs/safety/): system definition,
+HARA, safety requirements, FMEA/FMEDA, the diagnostic-coverage and
+common-cause arguments, and the traceability matrix, with residual gaps
+toward a full quantified claim tracked in
+[`docs/safety/OPEN_ITEMS.md`](docs/safety/OPEN_ITEMS.md). The earlier
+design record is `docs/PSTOP_SAFETY_DESIGN.md`, and the option of moving
+the arming policy into the library is analyzed in
 `docs/PSTOP_C_MIN_STOP_OPTION.md`. Deployment rule: a `pstop_c` bump
 that changes the CRC is a wire break, so update chip and machine
 together.

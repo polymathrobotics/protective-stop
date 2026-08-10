@@ -1,0 +1,19 @@
+#!/bin/sh
+# SPDX-FileCopyrightText: 2026 Polymath Robotics
+# SPDX-License-Identifier: Apache-2.0
+#
+# networkd-dispatcher port of 90-esp-pstop-flush (the NetworkManager version):
+# clear the stale ARP/neighbor cache when the pstop tether changes state, so the
+# host doesn't sit on an INCOMPLETE neighbor from a previous boot (one half of
+# the "needs a power cycle" symptom).
+#
+# networkd-dispatcher runs per-state hooks and passes the interface in $IFACE
+# (not $1/$2 like the NM dispatcher). Install this SAME script into BOTH
+# /etc/networkd-dispatcher/routable.d/ and .../degraded.d/ so it fires on the
+# tether coming up and on the chip's re-enumeration.
+#
+# GOTCHA: the networkd-dispatcher package can be installed but its service
+# DISABLED — then a correctly-placed hook never fires. install.sh runs
+# `systemctl enable --now networkd-dispatcher`; verify it is active.
+[ "$IFACE" = "esp-pstop0" ] && ip neigh flush dev esp-pstop0
+exit 0

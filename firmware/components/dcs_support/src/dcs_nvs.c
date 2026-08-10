@@ -14,6 +14,8 @@
  *   ring_off  u8   LED-ring rotation: physical pixel index of LED 1 (default 0)
  *   ps_peers  blob multi-machine peer table: version byte + per-slot records
  *                  (absent -> migrate legacy ps_ip/ps_port into slot 0)
+ *   operators blob operator allowlist: count byte + u32 ids
+ *   wifi_txp  u8   WiFi max TX power, quarter-dBm (8..84); 0/absent = config default
  */
 
 #include <string.h>
@@ -190,6 +192,33 @@ esp_err_t dcs_nvs_write_ring_offset(uint8_t off)
   esp_err_t r = nvs_open(DCS_NVS_NS, NVS_READWRITE, &h);
   if (r != ESP_OK) return r;
   r = nvs_set_u8(h, DCS_NVS_KEY_RING_OFF, (uint8_t)(off & 0x0Fu));
+  if (r == ESP_OK) {
+    r = nvs_commit(h);
+  }
+  nvs_close(h);
+  return r;
+}
+
+uint8_t dcs_nvs_read_wifi_tx_power(void)
+{
+  nvs_handle_t h;
+  if (nvs_open(DCS_NVS_NS, NVS_READONLY, &h) != ESP_OK) return 0;
+  uint8_t v = 0; /* absent -> 0 = "use config default" */
+  (void)nvs_get_u8(h, DCS_NVS_KEY_WIFI_TXP, &v);
+  nvs_close(h);
+  /* Reject out-of-range persisted values (corruption / older schema) rather
+   * than pushing an invalid level into esp_wifi_set_max_tx_power. */
+  if ((v < 8u) || (v > 84u)) return 0;
+  return v;
+}
+
+esp_err_t dcs_nvs_write_wifi_tx_power(uint8_t quarter_dbm)
+{
+  if ((quarter_dbm < 8u) || (quarter_dbm > 84u)) return ESP_ERR_INVALID_ARG;
+  nvs_handle_t h;
+  esp_err_t r = nvs_open(DCS_NVS_NS, NVS_READWRITE, &h);
+  if (r != ESP_OK) return r;
+  r = nvs_set_u8(h, DCS_NVS_KEY_WIFI_TXP, quarter_dbm);
   if (r == ESP_OK) {
     r = nvs_commit(h);
   }
