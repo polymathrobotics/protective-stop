@@ -918,6 +918,11 @@ static esp_err_t handler_monitor(httpd_req_t * req)
     cJSON_AddNumberToObject(json, "derp_home_region", ml->derp_home_region);
     cJSON_AddNumberToObject(json, "derp_region_override", ml->derp_region_override);
     cJSON_AddNumberToObject(json, "derp_effective_home_region", ml_effective_home_region(ml));
+    /* Home-region-unreachable fallback telemetry (DERP design-review finding):
+     * how many times slot 0 fell back off an unreachable home region, or opened
+     * a rescue aux for a locked/re-homed dead region. Stays 0 in normal
+     * operation; a climbing value flags a genuinely unreachable home. */
+    cJSON_AddNumberToObject(json, "derp_home_unreachable_fallbacks", ml_derp_get_home_fallback_count());
     /* Multi-region pool: per-slot region + connected, so the cross-region relay
      * fix is verifiable (slot 0 = home, 1..N = aux for safety-peer regions). */
     {

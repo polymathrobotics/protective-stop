@@ -111,6 +111,16 @@ extern "C"
                                             * longer a safety region after 30 s,
                                             * regardless of traffic through it */
 
+/* Consecutive failed periodic HOME-region connect attempts before slot 0 is
+ * allowed to fall back to a proven-reachable region. DERP design-review finding
+ * (2026-08): a chip whose home region's DERP server is TCP-unreachable retried
+ * the SAME region forever with no fallback, leaving it offline on the relay
+ * path. The periodic-retry cadence for a priority build is 5s,5s,10s,then 60s,
+ * so N=4 spends ~80 s honouring the intended home (giving a transient outage or
+ * an event-driven re-home a fair chance to recover it) before engaging the
+ * fallback. Bounded, so it can never turn into a reconnect storm. */
+#define ML_DERP_HOME_FALLBACK_AFTER 4
+
 /* Tailscale control plane */
 #define ML_CTRL_HOST "controlplane.tailscale.com"
 #define ML_CTRL_PORT 443
@@ -699,6 +709,12 @@ extern "C"
   /* Tear down a specific pool connection (frees its mbedTLS contexts + socket). */
   void ml_derp_disconnect(microlink_t * ml, ml_derp_conn_t * c);
   esp_err_t ml_derp_queue_send(microlink_t * ml, const uint8_t * dest_key, const uint8_t * data, size_t len);
+  /* Telemetry: number of times the DERP I/O task fell back off an unreachable
+   * home region (or opened a rescue aux for a locked/re-homed dead region).
+   * Exposed as derp_home_unreachable_fallbacks via /admin/api/monitor so the
+   * design-review home-unreachable-fallback path is observable on a log-less
+   * unit. Read from any task (word-sized read of a task-owned counter). */
+  uint32_t ml_derp_get_home_fallback_count(void);
 
   /* Effective home DERP region for slot 0: the runtime override wins, else the
    * learned/rehomed home region. 0 = neither known (caller falls back to
