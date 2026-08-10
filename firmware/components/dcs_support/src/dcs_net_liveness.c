@@ -234,6 +234,17 @@ static void retarget_ping(uint32_t gw)
   /* IDF default (~2 KiB) overflowed at ~33 min uptime because the ping task
      * does sockets + our LOG callback. 4 KiB has headroom. */
   cfg.task_stack_size = 4096;
+  /* IDF's default ping-task priority is 2 — starveable for >timeout_ms by
+     * this firmware's prio 5-7 network tasks, so "timeouts" were recorded
+     * while the echo reply sat undelivered in the socket: the wire measured
+     * 0.0% loss during a window where this counter self-reported ~20%
+     * (2026-08-09, archived wire_ping_1632.log), and that phantom loss once
+     * mis-attributed a firmware storm to "bench LAN degradation". Prio 5
+     * puts reply delivery above the bulk networking tasks it competes with
+     * (still below the safety comparator). Loss that remains AFTER this fix
+     * is genuine device-side ICMP drop (e.g. W5500 RX contention) — a
+     * diagnostic signal, never wire evidence. */
+  cfg.task_prio = 5;
   esp_ping_callbacks_t cbs = {
     .on_ping_success = on_ping_success,
     .on_ping_timeout = on_ping_timeout,

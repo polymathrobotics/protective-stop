@@ -835,6 +835,24 @@ void ml_wg_get_rehome_diag(uint32_t out[6])
 static uint32_t s_diag_relay_retries; /* CMM + forced-sweep rounds fired      */
 static uint32_t s_diag_direct_regains; /* has_direct_path false -> true edges */
 
+/* DISCO observability counters — the 2026-08-09 regains-oscillation root cause
+ * rested on CALCULATED probe-table/CMM dynamics; these measure them instead.
+ * Same counters-not-logs pattern as the diag blocks above; read via
+ * /admin/api/monitor. */
+static uint32_t s_diag_probe_tbl_hw; /* pending_probes active-slot high water since boot */
+static uint32_t s_diag_cmm_rx; /* CallMeMaybe messages received since boot        */
+static uint32_t s_diag_regains_safety; /* direct regains on SAFETY peers only (priority
+                                        * or health-tracked) — s_diag_direct_regains
+                                        * also counts bulk tailnet peers, which masked
+                                        * whether the SAFETY path was the one flapping */
+
+void ml_wg_get_disco_obs_diag(uint32_t out[3])
+{
+  out[0] = s_diag_probe_tbl_hw;
+  out[1] = s_diag_cmm_rx;
+  out[2] = s_diag_regains_safety;
+}
+
 void ml_wg_get_direct_retry_diag(microlink_t * ml, uint32_t out[4])
 {
   out[0] = s_diag_relay_retries;
@@ -1435,6 +1453,18 @@ static void disco_build_ping(microlink_t * ml, int peer_idx, uint8_t * out, size
       pending_probes[i].derp_match_ms = 0;
       pending_probes[i].active = true;
       registered = true;
+      /* Track the table's occupancy high water (probe_tbl_hw). Registration is
+       * the only place occupancy grows, so sampling here catches every peak; a
+       * drift-free full scan (64 flag reads) beats a live counter that would
+       * need decrements at every retire/expire site. Slots 0..i-1 were all
+       * occupied (first-free allocation), slots above i are scanned. */
+      {
+        uint32_t occupied = (uint32_t)i + 1u;
+        for (int k = i + 1; k < MAX_PENDING_PROBES; k++) {
+          if (pending_probes[k].active) occupied++;
+        }
+        if (occupied > s_diag_probe_tbl_hw) s_diag_probe_tbl_hw = occupied;
+      }
       ESP_LOGI(
         TAG,
         "Probe registered slot=%d peer=%s txid=%02x%02x%02x%02x",
@@ -1448,6 +1478,9 @@ static void disco_build_ping(microlink_t * ml, int peer_idx, uint8_t * out, size
     }
   }
   if (!registered) {
+    /* No free slot = occupancy is the table size — record the saturation
+     * (the exhaustion case the 2026-08-09 oscillation hinged on). */
+    s_diag_probe_tbl_hw = MAX_PENDING_PROBES;
     ESP_LOGW(TAG, "DISCO probe table full (%d slots), pong will be unmatched", MAX_PENDING_PROBES);
   }
 }
@@ -1811,6 +1844,13 @@ static void process_disco_pong(
         p->relay_retry_next_ms = 0;
         p->relay_retry_count = 0;
         s_diag_direct_regains++;
+        if (is_prio) {
+          /* SAFETY-peer regains only (priority peer or health-tracked pstop
+           * counterpart). The global counter above includes bulk tailnet
+           * peers, so an oscillation on the safety path was indistinguishable
+           * from ordinary churn elsewhere. */
+          s_diag_regains_safety++;
+        }
       } else if (now - p->direct_promoted_ms > 15000) {
         p->direct_flap_count = 0;
       }
@@ -2166,6 +2206,8 @@ static void process_disco_packet(microlink_t * ml, const ml_rx_packet_t * pkt)
     case DISCO_MSG_CALL_ME_MAYBE: {
       /* CallMeMaybe: after type(1)+version(1), payload is N x 18-byte entries
              * Each entry: 16-byte IP (IPv6 or IPv4-mapped) + 2-byte port (big-endian) */
+      s_diag_cmm_rx++; /* every received CMM, even unknown-peer: the burst RATE
+                        * is the observable (each one cost a box-open already) */
       int peer_idx = find_peer_by_disco_key(ml, sender_disco_key);
       if (peer_idx < 0) {
         ESP_LOGW(TAG, "CallMeMaybe from unknown peer");

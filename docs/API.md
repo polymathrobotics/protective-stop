@@ -18,7 +18,7 @@ Query parameters are shown where required. Unless noted, POST bodies are empty.
 | GET  | `/api/last_log` | Tail of the previous boot's log (RTC ring) |
 | POST | `/api/derp` | Toggle the DERP TX worker |
 | POST | `/api/derp_delay?ms=N` | Set the DERP loop yield (ms) |
-| POST | `/api/wg` | Suspend / resume the WireGuard task |
+| POST | `/api/wg` | **Removed** — returns `410 Gone`. The runtime suspend could park `ml_wg_mgr` while it held the lwIP core lock, wedging all networking until a task-WDT panic (bench-proven 2026-08-09). Use `/api/ts_boot` (persistent, safe boot-path pause) or `/api/derp` instead. The `/state.json` `wg_paused` field still reports the boot-path suspend state |
 | POST | `/api/wifi_tx_power?q=N` | Set WiFi max TX power (quarter-dBm) |
 | POST | `/api/iface/eth` | Select the Ethernet uplink |
 | POST | `/api/iface/wifi` | Select the WiFi uplink |
@@ -84,7 +84,7 @@ per-device setting. To calibrate from your provisioning tooling:
 | GET    | `/admin/api/status` | Node status |
 | GET    | `/admin/api/settings` | Read settings |
 | POST   | `/admin/api/settings` | Update settings. The `derp_region` field (`0`..`4095`, `0` = auto) locks the DERP home region: it persists to NVS **and** applies live (updates the runtime override + kicks a slot-0 re-home, no reboot). Locking guards the priority path against a region misroute (e.g. region-9/dfw). Example: `{"derp_region":2}` locks to sfo; `{"derp_region":0}` clears to auto |
-| GET    | `/admin/api/monitor` | Heap / DERP / per-task monitor + DERP re-home diagnostics (`derp_home_region`, `fleet_peer_region`, `rehome_*` counters) + same-LAN direct-path diagnostics (`advert_lan_ip`, `pp_has_direct`, `pp_best_ip`/`pp_best_port`, `pp_endpoints`) |
+| GET    | `/admin/api/monitor` | Heap / DERP / per-task monitor + DERP re-home diagnostics (`derp_home_region`, `fleet_peer_region`, `rehome_*` counters) + same-LAN direct-path diagnostics (`advert_lan_ip`, `pp_has_direct`, `pp_best_ip`/`pp_best_port`, `pp_endpoints`) + DISCO observability (`probe_tbl_hw` = pending-probe table occupancy high water since boot, 64 = saturated; `cmm_rx_count` = CallMeMaybe messages received; `regains_safety` = direct-path regains on SAFETY peers only — `direct_regains` also counts bulk tailnet peers) |
 | GET    | `/admin/api/peers` | Active WireGuard peer table |
 | GET    | `/admin/api/peers/allowed` | Read the peer allowlist |
 | POST   | `/admin/api/peers/allowed` | Add an allowed peer (the configured management server, if any, is non-removable) |
@@ -136,6 +136,31 @@ array (the configured operator device IDs) and, per bonded remote, a `stop_only`
 boolean — `true` = accepted, stop-capable, heartbeat-monitored, re-arm-**IN**capable;
 `false` = full operator (stop **and** re-arm). A remote absent from `operators`
 reads `stop_only=true`.
+
+### Machine arming/restart telemetry (`/state.json`)
+
+Published once per comparator tick from the pstop_c library state (core 0's
+lockstep instance; both fields read `0` on remotes):
+
+- `remote_stop_id` — pstop_c `robot_state.remote_stop_id`: the remote device
+  ID that stopped the robot, or that owns the in-progress stop/OK arming
+  cycle. `0` = none (fresh boot, or robot running with no cycle open). This is
+  the **arming owner**: cross-check it against `operators` to see whether the
+  arming gesture is coming from an authorized remote.
+- `restart_state` — pstop_c `ROBOT_RESTART_STATE_*`:
+  `0` = OK (an OK message may complete re-arming), `1` = NEED_STOP (the
+  machine refuses OK until a STOP gesture arrives first — e.g. after a
+  heartbeat loss or boot), `2` = STOP_RECEIVED (stop half of the gesture seen;
+  awaiting the OK half after `min_stop_ms`).
+- `bonded_remotes[].state` — pstop_c `pstop_remote_state_t` for that remote:
+  `0` INITING (bond handshake in progress), `1` BONDED (bonded, no verdict
+  yet), `2` OK (commanding RUN), `3` STOPPED (commanding STOP),
+  `255` UNKNOWN.
+
+A robot that is actually disarmed but shown "green" by fleet tooling, or an
+arming gesture that never completes, is diagnosable from these three fields
+alone: who owns the cycle, what the machine is waiting for, and what each
+bonded remote is commanding.
 
 ## Source of truth
 

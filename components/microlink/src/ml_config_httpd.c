@@ -991,6 +991,26 @@ static esp_err_t handler_monitor(httpd_req_t * req)
       cJSON_AddNumberToObject(json, "direct_relay_bound", drd[2]);
       cJSON_AddNumberToObject(json, "direct_retry_due_ms", drd[3]);
 
+      /* DISCO observability (2026-08-09 oscillation post-mortem: these
+       * dynamics were previously calculated, not measured):
+       *   probe_tbl_hw   — pending-probe table occupancy high water since
+       *                    boot (== 64 means the table saturated at least
+       *                    once: pings go out unregistered, pongs unmatch,
+       *                    healthy paths get demoted);
+       *   cmm_rx_count   — CallMeMaybe messages received (burst rate is
+       *                    what drives probe-table pressure);
+       *   regains_safety — direct-path regains on SAFETY peers only
+       *                    (priority/health-tracked). direct_regains above
+       *                    includes bulk peers; a climbing regains_safety
+       *                    with flat direct_relay_bound = the safety path
+       *                    itself is oscillating. */
+      extern void ml_wg_get_disco_obs_diag(uint32_t[3]);
+      uint32_t od[3] = {0};
+      ml_wg_get_disco_obs_diag(od);
+      cJSON_AddNumberToObject(json, "probe_tbl_hw", od[0]);
+      cJSON_AddNumberToObject(json, "cmm_rx_count", od[1]);
+      cJSON_AddNumberToObject(json, "regains_safety", od[2]);
+
       /* Same-LAN direct-path diagnostics for the priority peer (the machine):
        * what LAN endpoint we advertise, which candidate endpoints we hold for
        * the machine, and which one (if any) we selected as the direct path.

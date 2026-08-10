@@ -145,6 +145,8 @@ atomic_uint_fast32_t g_dcs_pstop_rebonds;
 atomic_uint_fast32_t g_dcs_relay_fault_a;
 atomic_uint_fast32_t g_dcs_relay_fault_b;
 atomic_uint_fast32_t g_dcs_relay_stop;
+atomic_uint_fast32_t g_dcs_machn_arm_owner;
+atomic_uint_fast32_t g_dcs_machn_restart_state;
 atomic_uint_fast32_t g_dcs_machn_r_id[DCS_MACHN_MAX_REMOTES];
 atomic_uint_fast32_t g_dcs_machn_r_state[DCS_MACHN_MAX_REMOTES];
 atomic_uint_fast32_t g_dcs_machn_r_age_ms[DCS_MACHN_MAX_REMOTES];
@@ -542,6 +544,12 @@ void dcs_publish_machn_remote(
   atomic_store(&g_dcs_machn_r_age_ms[slot], age_ms);
   atomic_store(&g_dcs_machn_r_rtt_ms[slot], rtt_ms);
   atomic_store(&g_dcs_machn_r_stop_only[slot], stop_only ? 1u : 0u);
+}
+
+void dcs_publish_machn_arm(uint32_t remote_stop_id, uint32_t restart_state)
+{
+  atomic_store(&g_dcs_machn_arm_owner, remote_stop_id);
+  atomic_store(&g_dcs_machn_restart_state, restart_state);
 }
 
 void dcs_publish_pstop_sf_causes(

@@ -155,8 +155,10 @@ static const char k_index_html[] =
   " &nbsp;|&nbsp; agreement: <span id='agree'>-</span></p>"
   "<p>DERP TX task: <span id='dst'>-</span>"
   " &nbsp;<button class='btn' id='dbtn' type='button'>toggle</button></p>"
-  "<p>WG manager (DISCO probes): <span id='wgst'>-</span>"
-  " &nbsp;<button class='btn' id='wgbtn' type='button'>toggle</button></p>"
+  /* Runtime WG suspend toggle removed with POST /api/wg (410 — see
+   * api_wg_toggle in dcs_admin_pages.c): a bare vTaskSuspend could park
+   * ml_wg_mgr holding the lwIP core lock. Status stays (boot-path pause). */
+  "<p>WG manager (DISCO probes): <span id='wgst'>-</span></p>"
   "<p>USB tether: <span id='usbst'>-</span>"
   " &nbsp;<button class='btn' id='usbbtn' type='button'>toggle (reboots)</button></p>"
   "<p style='margin-top:1em'><b>Network interfaces</b> &nbsp; active: <span id='actif' class='ok'>-</span></p>"
@@ -465,9 +467,6 @@ static const char k_index_html[] =
 #endif
   "document.getElementById('dbtn').addEventListener('click',async()=>{"
   "try{await fetch('/api/derp',{method:'POST'});poll();}catch(e){}"
-  "});"
-  "document.getElementById('wgbtn').addEventListener('click',async()=>{"
-  "try{await fetch('/api/wg',{method:'POST'});poll();}catch(e){}"
   "});"
   "document.getElementById('usbbtn').addEventListener('click',async()=>{"
   "if(!confirm('Toggle USB tether and reboot?'))return;"

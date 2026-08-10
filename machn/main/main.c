@@ -575,6 +575,36 @@ static void comparator_task(void * arg)
     seen_publish(now_ms()); /* REAL clock: entries are stamped with now_ms() in seen_note; mixing in
                                   * the tick-latched clock made age negative -> u64 wrap -> instant ageout */
 
+    /* Arming/restart telemetry for /state.json (remote_stop_id +
+         * restart_state). Read from CORE 0's instance, like the g_seen view
+         * above, and in the same comparator-only phase (both cores idle
+         * between windows, so nothing races the read). Core 0 is
+         * representative because the instances run in RX lockstep on
+         * identical inputs and an identical latched clock: on any tick that
+         * produced agreement their robot_state blocks are equal, and on a
+         * divergent tick the comparator has already withheld the reply and
+         * each core's relay enforces its own verdict — this read-only
+         * diagnostic can lag truth by at most one 100 ms tick and feeds
+         * nothing back into the safety path. */
+    /* robot_state.remote_stop_id is pstop_c's LOCAL slot handle
+         * (client->local_remote_id — a per-bond monotonic counter), NOT the
+         * wire device id. Publishing it raw surfaced meaningless values like
+         * "17" (2026-08-09). Translate to the WIRE id (same domain as
+         * bonded_remotes[].id) by scanning the remotes table; 0 = no owner
+         * or owner slot no longer present (both mean "no arming owner"). */
+    uint32_t owner_wire_id = 0u;
+    uint32_t owner_local = g_core[0].machine.robot_state.remote_stop_id;
+    if (owner_local != 0u) {
+      for (uint16_t ri = 0u; ri < g_core[0].machine.remotes.max_remotes; ++ri) {
+        const pstop_remote_data_t * rc = &g_core[0].machine.remotes.remotes[ri];
+        if ((rc->remote_state != PSTOP_REMOTE_UNKNOWN) && (rc->local_remote_id == owner_local)) {
+          owner_wire_id = rc->remote_data.remote_id.data;
+          break;
+        }
+      }
+    }
+    dcs_publish_machn_arm(owner_wire_id, (uint32_t)g_core[0].machine.robot_state.restart_state);
+
     relay_note_commands();
     relay_feedback_check();
 

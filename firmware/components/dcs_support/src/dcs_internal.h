@@ -160,6 +160,18 @@ extern "C"
    * remote's device id (0 = empty), pstop_remote_state_t, ms since last
    * accepted message, and stamp-echo RTT (includes the remote's hold time
    * between our reply and its next send — an upper bound, not a path RTT). */
+  /* Machine-role arming/restart state (always 0 on remotes), published once
+   * per comparator tick from core 0's pstop_c instance (lockstep — see the
+   * publish site in machn/main/main.c for the diagnostics-safety argument):
+   * arm_owner = robot_state.remote_stop_id (the remote id that owns the
+   * current stop/arm cycle, 0 = none); restart_state =
+   * ROBOT_RESTART_STATE_* (0 OK/arming allowed, 1 NEED_STOP, 2 STOP_RECEIVED).
+   * Together these answer "who armed/stopped it, and will it accept an OK" —
+   * the two facts missing during the 2026-08 disarmed-but-reported-green and
+   * misdiagnosed-arming-failure incidents. */
+  extern atomic_uint_fast32_t g_dcs_machn_arm_owner;
+  extern atomic_uint_fast32_t g_dcs_machn_restart_state;
+
   extern atomic_uint_fast32_t g_dcs_machn_r_id[DCS_MACHN_MAX_REMOTES];
   extern atomic_uint_fast32_t g_dcs_machn_r_state[DCS_MACHN_MAX_REMOTES];
   extern atomic_uint_fast32_t g_dcs_machn_r_age_ms[DCS_MACHN_MAX_REMOTES];
