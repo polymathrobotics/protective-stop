@@ -155,7 +155,7 @@ TEST_F(NodeRuntime, SoftwarePublishesStampedStopHeartbeat)
   bool stop_asserted = false;
   int64_t stamp_nanoseconds = 0;
   auto heartbeat_sub = subscriber_node->create_subscription<ProtectiveStopHeartbeat>(
-    "/machine_bridge/pstop_hb", rclcpp::QoS(10),
+    "/pstop_hb", rclcpp::QoS(10),
     [&](ProtectiveStopHeartbeat::SharedPtr heartbeat) {
       heartbeat_received = true;
       stop_asserted = heartbeat->stop;
@@ -188,7 +188,7 @@ TEST_F(NodeRuntime, HeartbeatClearsWhileRunningAndStopsOnDeactivate)
   bool heartbeat_received = false;
   bool stop_asserted = true;
   auto heartbeat_sub = subscriber_node->create_subscription<ProtectiveStopHeartbeat>(
-    "/machine_bridge/pstop_hb", rclcpp::QoS(10),
+    "/pstop_hb", rclcpp::QoS(10),
     [&](ProtectiveStopHeartbeat::SharedPtr heartbeat) {
       heartbeat_received = true;
       stop_asserted = heartbeat->stop;
