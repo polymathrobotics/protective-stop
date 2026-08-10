@@ -675,6 +675,56 @@ static void derp_manage_aux(microlink_t * ml, uint16_t eff_home, int aux_burst[]
   }
 }
 
+/* Telemetry: home-region-unreachable fallbacks (see design-review finding in
+ * the periodic-retry block below). Owned by the DERP I/O task; read cross-task
+ * by /admin/api/monitor via ml_derp_get_home_fallback_count(). */
+static uint32_t s_derp_home_unreachable_fallbacks;
+
+uint32_t ml_derp_get_home_fallback_count(void)
+{
+  return s_derp_home_unreachable_fallbacks;
+}
+
+/* Pick a DERP region that is PROVEN reachable right now, to fall back onto when
+ * the home region's DERP server is TCP-unreachable. Order (task guidance):
+ *   1. the region of any currently-CONNECTED aux slot — reachability just
+ *      demonstrated by a live TLS session, so the fallback connect will almost
+ *      certainly succeed on the first try (no retry storm);
+ *   2. else the compiled default ML_DERP_REGION (Tailscale's most-available
+ *      region), which also matches the PreferredDERP advertised when no
+ *      priority region is learned;
+ *   3. else any DISTINCT safety-peer want-set region (ml_wg_collect_safety_regions).
+ * Never returns `avoid` (the dead region) or 0-unless-no-candidate. */
+static uint16_t derp_pick_fallback_region(microlink_t * ml, uint16_t avoid)
+{
+  /* 1) a live aux conn — reachability is a fact, not a guess. */
+  for (int s = 1; s < ML_DERP_MAX_CONNS; s++) {
+    if (ml->derp[s].connected && ml->derp[s].region_id != 0 && ml->derp[s].region_id != avoid) {
+      return ml->derp[s].region_id;
+    }
+  }
+  /* 2) compiled default. */
+  if (ML_DERP_REGION != avoid) return ML_DERP_REGION;
+  /* 3) any safety want-set region that isn't the dead home. */
+  uint16_t regs[ML_DERP_MAX_CONNS];
+  int nregs = ml_wg_collect_safety_regions(ml, regs, ML_DERP_MAX_CONNS);
+  for (int i = 0; i < nregs; i++) {
+    if (regs[i] != 0 && regs[i] != avoid) return regs[i];
+  }
+  return 0;
+}
+
+/* Find a free aux slot [1..N-1] (region 0, no TLS, not connected). -1 if none. */
+static int derp_free_aux_slot(microlink_t * ml)
+{
+  for (int s = 1; s < ML_DERP_MAX_CONNS; s++) {
+    if (!ml->derp[s].connected && !ml->derp[s].tls_inited && ml->derp[s].region_id == 0) {
+      return s;
+    }
+  }
+  return -1;
+}
+
 /* ============================================================================
  * Unified DERP I/O Task
  * ========================================================================== */
@@ -797,11 +847,79 @@ void ml_derp_tx_task(void * arg)
           if (s_derp_retry_burst < 100) {
             s_derp_retry_burst++;
           }
-          ESP_LOGI(TAG, "DERP periodic retry (disconnected, burst=%d)", s_derp_retry_burst);
-          if (ml_derp_connect(ml, home, ml_effective_home_region(ml)) == ESP_OK) {
-            connected_since_ms = ml_get_time_ms();
-            verbose_phase = true;
-            s_derp_retry_burst = 0; /* reset fast-retry on success */
+
+          /* ---- DERP design-review finding (2026-08): home-region unreachable ----
+           * Historically this block retried ml_effective_home_region() FOREVER.
+           * If that region's DERP server is genuinely TCP-unreachable (a transient
+           * regional outage, or a bad advised/locked region) slot 0 — the chip's
+           * inbound-reachability + relay conn — stayed down permanently. On a
+           * remote it is masked (the safety peer's region drives an event-driven
+           * re-home onto a reachable region), but a chip with no re-home driver
+           * (priority_peer_region==0) had NO recovery path. Fix: after N
+           * consecutive failed home attempts, fall back to a PROVEN-reachable
+           * region. The multi-region aux pool already holds live conns to other
+           * regions, so we lean on that as the reachability oracle. Bounded work,
+           * no reconnect storm; a LOCK is never silently abandoned. */
+          uint16_t home_region = ml_effective_home_region(ml);
+          bool locked = (ml->derp_region_override != 0);
+          bool try_fallback = (s_derp_retry_burst >= ML_DERP_HOME_FALLBACK_AFTER);
+          uint16_t fb = try_fallback ? derp_pick_fallback_region(ml, home_region) : 0;
+
+          /* AUTO + no active re-home owner + a reachable alternative => actually
+           * move the home. Writing derp_home_region is safe here precisely
+           * BECAUSE priority_peer_region==0: nothing else (re-home) owns it, so
+           * there is no cross-task ping-pong. eff_home + relay routing follow the
+           * new region immediately; inbound PreferredDERP advert (default region)
+           * is unaffected. */
+          if (try_fallback && !locked && ml->priority_peer_region == 0 && fb != 0) {
+            ESP_LOGW(
+              TAG,
+              "DERP home region %u unreachable after %d tries; falling back to reachable region %u",
+              (unsigned)home_region,
+              s_derp_retry_burst,
+              (unsigned)fb);
+            if (ml_derp_connect(ml, home, fb) == ESP_OK) {
+              ml->derp_home_region = fb; /* eff_home + routing follow (no re-home owner to fight) */
+              connected_since_ms = ml_get_time_ms();
+              verbose_phase = true;
+              s_derp_retry_burst = 0;
+              s_derp_home_unreachable_fallbacks++;
+            }
+          } else {
+            /* Default path: (re)try the INTENDED home. This is what honours an
+             * operator LOCK and an active re-home owner — we never abandon
+             * either. */
+            ESP_LOGI(TAG, "DERP periodic retry (disconnected, burst=%d)", s_derp_retry_burst);
+            if (ml_derp_connect(ml, home, home_region) == ESP_OK) {
+              connected_since_ms = ml_get_time_ms();
+              verbose_phase = true;
+              s_derp_retry_burst = 0; /* reset fast-retry on success */
+            } else if (try_fallback && fb != 0) {
+              /* Home still down, and we deliberately did NOT move it (locked, or a
+               * re-home owns the region). Keep retrying the intended home above,
+               * but if the ENTIRE pool is dark the chip has no relay path at all —
+               * open ONE rescue aux on the reachable region so it is not fully
+               * offline. The lock/advert is untouched; derp_manage_aux reaps this
+               * aux once home recovers or a real safety region needs the slot. */
+              bool any_up = false;
+              for (int s = 0; s < ML_DERP_MAX_CONNS; s++) {
+                if (ml->derp[s].connected) {
+                  any_up = true;
+                  break;
+                }
+              }
+              int slot = any_up ? -1 : derp_free_aux_slot(ml);
+              if (slot > 0 && ml_derp_connect(ml, &ml->derp[slot], fb) == ESP_OK) {
+                ml->derp[slot].region_id = fb;
+                s_derp_home_unreachable_fallbacks++;
+                ESP_LOGW(
+                  TAG,
+                  "DERP home %u unreachable + pool dark; opened rescue aux slot %d region %u (home retry retained)",
+                  (unsigned)home_region,
+                  slot,
+                  (unsigned)fb);
+              }
+            }
           }
         }
       }

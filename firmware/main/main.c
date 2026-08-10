@@ -619,6 +619,16 @@ typedef struct
   uint64_t last_reply_ms;
   uint64_t tx_stamp_history[16];
 
+  /* Sustained-ENOTCONN escalation state (cold-bond far-side gap,
+     * 2026-08-08 bench): the machine rebooted without its netmap, forgot our
+     * WG key, and silently ignored our handshake initiations — every send hit
+     * peer-present-but-no-keypair (lwip ERR_CONN -> errno ENOTCONN) for
+     * 27 min; restarting THIS remote did not help. See step 8b in the
+     * comparator loop for the bounded escalation these fields drive. */
+  uint64_t enotconn_since_ms; /* 0 = not in an ENOTCONN streak */
+  uint64_t enotconn_next_kick_ms; /* earliest next escalation */
+  uint32_t enotconn_backoff_ms; /* current backoff period (0 = at initial) */
+
   /* Telemetry. */
   uint32_t sent;
   uint32_t replies;
@@ -823,6 +833,11 @@ static bool sess_sendto(pstop_sess_t * s, const uint8_t * bytes)
       if (attempt > 0) {
         g_sf_txdrv_recovered++; /* a transient ERR_IF absorbed without a gap */
       }
+      /* A send got through the WG session — keypair exists again, so the
+             * sustained-ENOTCONN escalation (step 8b) stands down. */
+      s->enotconn_since_ms = 0u;
+      s->enotconn_next_kick_ms = 0u;
+      s->enotconn_backoff_ms = 0u;
       return true;
     }
     if (errno != -1) {
@@ -845,7 +860,19 @@ static uint32_t g_sf_txdrv; /* errno -1 = lwip ERR_IF: the uplink DRIVER refused
                              * frame (e.g. USB-NCM transmit busy) — path is up,
                              * one send slot lost, retried next tick */
 static uint32_t g_sf_other;
+static uint32_t g_sf_enotconn; /* ENOTCONN = WG peer known but NO keypair: the far
+                                * side doesn't know our key and ignores our
+                                * handshakes (cold-bond gap, 2026-08-08) */
+static uint32_t g_sf_enotconn_kicks; /* sustained-ENOTCONN escalations fired */
 static int g_sf_last_errno;
+
+/* Sustained-ENOTCONN escalation tuning (comparator step 8b). 30 s before the
+ * first kick: long enough that microlink's own per-peer health wake (3 s
+ * cadence re-handshakes, already driven by dcs_notify_peer_health above) got
+ * a fair chance — if ENOTCONN persists past that, the far side genuinely
+ * does not know our key and only a coordination re-announce can fix it. */
+#define PSTOP_ENOTCONN_ESCALATE_MS 30000u
+#define PSTOP_ENOTCONN_BACKOFF_CAP_MS 300000u
 
 static void sess_count_send_fail(pstop_sess_t * s)
 {
@@ -858,8 +885,20 @@ static void sess_count_send_fail(pstop_sess_t * s)
     g_sf_route++;
   } else if (e == -1) {
     g_sf_txdrv++; /* lwip ERR_IF maps to errno -1 (err.c table) */
+  } else if (e == ENOTCONN) {
+    g_sf_enotconn++;
+    if (s->enotconn_since_ms == 0u) {
+      /* Streak start — the escalation clock (step 8b) runs from here. */
+      s->enotconn_since_ms = (uint64_t)(esp_timer_get_time() / 1000);
+    }
   } else {
     g_sf_other++;
+  }
+  if (e != ENOTCONN) {
+    /* Different failure mode: not a keypair problem — restart the streak. */
+    s->enotconn_since_ms = 0u;
+    s->enotconn_next_kick_ms = 0u;
+    s->enotconn_backoff_ms = 0u;
   }
 }
 
@@ -1259,6 +1298,60 @@ static void comparator_task(void * arg)
       }
     }
 
+    /* 8b. Sustained-ENOTCONN escalation (cold-bond far-side gap, bench
+         *     2026-08-08): every send to a machine failing with ENOTCONN for
+         *     30+ s while the tailnet is otherwise CONNECTED means the FAR
+         *     side has a WG entry for us but no keypair and is silently
+         *     ignoring our handshake initiations — classically a machine that
+         *     rebooted before its netmap re-arrived, so it no longer knows our
+         *     static key. Restarting this remote cannot fix that (observed:
+         *     27 min wedge). Kick two levers, once per backoff period
+         *     (30 s first, then doubling to a 300 s cap):
+         *       - dcs_notify_peer_health(ip,false): forces WG re-handshakes
+         *         toward that peer (covers the transient side);
+         *       - dcs_request_announce(): a coordination re-announce so the
+         *         control plane re-pushes US into the machine's map stream —
+         *         the only remote-side action that can restore the far side's
+         *         knowledge of our key.
+         *     Everything here is non-blocking (queue post + RAM flag) and
+         *     bounded per tick; counters land in /state.json
+         *     (pstop_sf_enotconn / pstop_sf_enotconn_kicks) so a bench can
+         *     watch it fire. */
+    for (int i = 0; i < PSTOP_MAX_MACHINES; i++) {
+      pstop_sess_t * s = &g_sess[i];
+      if (!s->configured || (s->enotconn_since_ms == 0u)) {
+        continue;
+      }
+      if ((drain_now - s->enotconn_since_ms) < (uint64_t)PSTOP_ENOTCONN_ESCALATE_MS) {
+        continue;
+      }
+      if (drain_now < s->enotconn_next_kick_ms) {
+        continue;
+      }
+      if (!dcs_tailnet_connected()) {
+        continue; /* no control plane: the announce can't help; WG wake already runs */
+      }
+      if (s->enotconn_backoff_ms == 0u) {
+        s->enotconn_backoff_ms = PSTOP_ENOTCONN_ESCALATE_MS;
+      }
+      /* Schedule the next kick, then double toward the cap. */
+      s->enotconn_next_kick_ms = drain_now + (uint64_t)s->enotconn_backoff_ms;
+      s->enotconn_backoff_ms = (s->enotconn_backoff_ms >= (PSTOP_ENOTCONN_BACKOFF_CAP_MS / 2u))
+                                 ? PSTOP_ENOTCONN_BACKOFF_CAP_MS
+                                 : (s->enotconn_backoff_ms * 2u);
+      dcs_notify_peer_health(s->ip, false);
+      dcs_request_announce();
+      g_sf_enotconn_kicks++;
+      ESP_LOGW(
+        TAG,
+        "m%d ENOTCONN for %llu ms — far side may not know our key; "
+        "forcing re-handshake + coord re-announce (kick %lu, next in %lu ms)",
+        i,
+        (unsigned long long)(drain_now - s->enotconn_since_ms),
+        (unsigned long)g_sf_enotconn_kicks,
+        (unsigned long)(s->enotconn_next_kick_ms - drain_now));
+    }
+
     /* 9. Telemetry: per-machine + legacy aggregates. Aggregate health for
          *    the transport: the priority link is "healthy" while ANY machine
          *    is replying; only when every configured session is silent do we
@@ -1327,7 +1420,15 @@ static void comparator_task(void * arg)
     } else {
       /* all OK: agg_msg stays OK */
     }
-    dcs_publish_pstop_sf_causes(g_sf_nomem, g_sf_route, g_sf_txdrv, g_sf_txdrv_recovered, g_sf_other, g_sf_last_errno);
+    dcs_publish_pstop_sf_causes(
+      g_sf_nomem,
+      g_sf_route,
+      g_sf_txdrv,
+      g_sf_txdrv_recovered,
+      g_sf_other,
+      g_sf_enotconn,
+      g_sf_enotconn_kicks,
+      g_sf_last_errno);
     /* Dual-core cross-check liveness: publish the per-core heartbeats every
          * tick (healthy or not) so /state.json shows them advancing — positive
          * evidence the cross-check is running, not just a fault indicator. */

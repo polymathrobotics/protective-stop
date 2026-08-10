@@ -144,6 +144,13 @@ typedef struct
   uint32_t dest_ip;
   uint16_t dest_port;
   uint64_t sent_ms;
+  /* ms of the FIRST via-DERP pong match (0 = none yet). A via-DERP match no
+   * longer consumes the slot (pong-race fix: the direct pong to the same
+   * dual-sent ping must still be able to promote), but the slot may then live
+   * only ML_DISCO_DERP_MATCH_GRACE_MS more — an unbounded (full 5 s) lifetime
+   * is what exhausted this table on the 2026-08-09 bench and demoted healthy
+   * paths (see ML_DISCO_DERP_MATCH_GRACE_MS). */
+  uint64_t derp_match_ms;
   int peer_index;
   bool active;
 } disco_probe_t;
@@ -822,6 +829,41 @@ void ml_wg_get_rehome_diag(uint32_t out[6])
   out[5] = s_diag_rehome_applied;
 }
 
+/* Relay-bound direct-path retry counters — counters (not logs) so the retry
+ * loop is verifiable on units with no live-log access, mirroring the re-home
+ * diag pattern above. Read via /admin/api/monitor. */
+static uint32_t s_diag_relay_retries; /* CMM + forced-sweep rounds fired      */
+static uint32_t s_diag_direct_regains; /* has_direct_path false -> true edges */
+
+void ml_wg_get_direct_retry_diag(microlink_t * ml, uint32_t out[4])
+{
+  out[0] = s_diag_relay_retries;
+  out[1] = s_diag_direct_regains;
+  out[2] = 0;
+  out[3] = 0;
+  if (ml == NULL) return;
+  /* Report the relay-bound safety peers and the earliest armed retry due
+   * time, so a bench run can verify the retry ARMED without waiting out the
+   * backoff (2026-08-09 falsification: rounds==0 alone cannot distinguish
+   * "retry never armed" from "first round simply not due yet"). */
+  uint64_t now = ml_get_time_ms();
+  uint64_t soonest = 0;
+  for (int i = 0; i < ml->peer_count; i++) {
+    ml_peer_t * p = &ml->peers[i];
+    if (!p->active || p->has_direct_path) continue;
+    bool safety =
+      (ml->config.priority_peer_ip != 0 && p->vpn_ip == ml->config.priority_peer_ip) || is_health_tracked(p->vpn_ip);
+    if (!safety) continue;
+    out[2]++;
+    if (p->relay_retry_next_ms != 0 && (soonest == 0 || p->relay_retry_next_ms < soonest)) {
+      soonest = p->relay_retry_next_ms;
+    }
+  }
+  if (soonest > now) {
+    out[3] = (uint32_t)(soonest - now);
+  }
+}
+
 /* Home our single DERP connection on a pinned peer's region.
  * microlink keeps ONE DERP connection, and a Tailscale DERP server only
  * delivers to peers connected to that same server — so if the chip homes on a
@@ -877,6 +919,144 @@ static int find_peer_by_disco_key(microlink_t * ml, const uint8_t * disco_key)
   return -1;
 }
 
+/* Install ml->peers[idx] into wireguard-lwip so inbound handshake
+ * initiations from this peer's static key get answered.
+ *
+ * Shared by the netmap ingest path (add_peer) and the boot-time NVS peer
+ * preseed (ml_wg_mgr_task). The preseed exists because of the cold-bond
+ * far-side gap (bench 2026-08-08/09): after a machine (machn) reboot, its
+ * coordination netmap can be slow — or entirely blocked — to re-arrive, and
+ * until each operator remote's key is installed here the WG layer SILENTLY
+ * ignores that remote's handshake initiations. The remote then sits at
+ * peer-present-but-no-keypair: sess_sendto ERR_CONN -> errno ENOTCONN,
+ * sent=0, for 27 min on the bench; restarting the REMOTE did not help, only
+ * a machn restart (fresh netmap) did. Installing the NVS-cached peers at
+ * boot lets those inbound handshakes succeed immediately, netmap or not. */
+static void wg_install_iface_peer(microlink_t * ml, int idx)
+{
+  ml_peer_t * p = &ml->peers[idx];
+  if (!ml->wg_netif || p->wg_peer_index >= 0) {
+    return; /* no WG interface yet, or already installed */
+  }
+  struct netif * netif = (struct netif *)ml->wg_netif;
+
+  /* Convert peer public key to base64 */
+  char peer_b64[64];
+  key_to_base64(p->public_key, peer_b64, sizeof(peer_b64));
+
+  struct wireguardif_peer wg_peer;
+  wireguardif_peer_init(&wg_peer);
+
+  wg_peer.public_key = peer_b64;
+  wg_peer.preshared_key = NULL;
+
+  /* Allowed IP: PEER's VPN IP
+     * wireguard-lwip uses allowed_ip for TWO purposes:
+     * 1. Outbound routing: peer_lookup_by_allowed_ip() matches DESTINATION
+     *    IP to find which peer to route to (wireguardif.c:338)
+     * 2. Inbound validation: checks decrypted packet SOURCE IP matches
+     *    peer's allowed_source_ips (wireguardif.c:507)
+     * Must be set to the PEER's VPN IP for both to work correctly. */
+  uint8_t ip_a = (p->vpn_ip >> 24) & 0xFF;
+  uint8_t ip_b = (p->vpn_ip >> 16) & 0xFF;
+  uint8_t ip_c = (p->vpn_ip >> 8) & 0xFF;
+  uint8_t ip_d = p->vpn_ip & 0xFF;
+  IP4_ADDR(&wg_peer.allowed_ip.u_addr.ip4, ip_a, ip_b, ip_c, ip_d);
+  IP4_ADDR(&wg_peer.allowed_mask.u_addr.ip4, 255, 255, 255, 255);
+
+  /* Start every peer DERP-only — NEVER install a netmap-advertised endpoint
+   * as the live WG endpoint.
+   *
+   * Root cause of the DERP-only-unreachable bug (2026-08-02): the
+   * netmap/STUN endpoints a peer advertises are UNVALIDATED candidates. We
+   * keep them in p->endpoints[] purely for DISCO probing. But
+   * wireguardif_add_peer() copies wg_peer.endpoint_ip straight into
+   * peer->ip (wireguardif.c:1084-1087), and wireguardif_peer_output()
+   * (wireguardif.c:158) then routes ALL WireGuard traffic — including the
+   * handshake RESPONSE — to peer->ip via direct UDP, bypassing DERP
+   * entirely whenever peer->ip is non-any.
+   *
+   * Behind a hard / endpoint-dependent NAT that advertised endpoint is
+   * unreachable in the peer->chip direction, so every reply the chip sends
+   * blackholes and the WG session never forms — while relayed DISCO pongs
+   * (which process_disco_ping sends *explicitly* over DERP) still return,
+   * producing the pathognomonic "tailscale ping OK / TCP+HTTP data dead"
+   * asymmetry (relay rx stuck at a few hundred bytes).
+   *
+   * Fix: leave the live endpoint blank so the peer is DERP-homed. The live
+   * direct endpoint is installed only after PROOF of bidirectional
+   * reachability — a txid-matched DISCO direct pong (process_disco_pong ->
+   * wireguardif_update_endpoint + wireguardif_connect) or a genuinely
+   * received direct WG packet (update_peer_addr roaming). This mirrors
+   * tailscaled/magicsock: DERP-home first, upgrade to a direct path only
+   * once it is validated both ways. DISCO probing of p->endpoints[]
+   * continues to run, so genuinely reachable direct paths still upgrade
+   * within one probe interval. */
+  ip_addr_set_any(false, &wg_peer.endpoint_ip);
+  wg_peer.endport_port = 0;
+
+  wg_peer.keep_alive = 25;
+
+  u8_t wg_peer_idx = WIREGUARDIF_INVALID_INDEX;
+  err_t wg_err = wireguardif_add_peer(netif, &wg_peer, &wg_peer_idx);
+
+  if (wg_err == ERR_OK && wg_peer_idx != WIREGUARDIF_INVALID_INDEX) {
+    p->wg_peer_index = wg_peer_idx;
+
+    /* Verify the WG internal peer key matches what we passed */
+    struct wireguard_device * dev = (struct wireguard_device *)netif->state;
+    if (dev && wg_peer_idx < WIREGUARD_MAX_PEERS) {
+      struct wireguard_peer * wp = &dev->peers[wg_peer_idx];
+      bool key_match = (memcmp(wp->public_key, p->public_key, 32) == 0);
+      ESP_LOGI(
+        TAG,
+        "WG peer added: wg_idx=%d internal_key=%02x%02x%02x%02x %s",
+        wg_peer_idx,
+        wp->public_key[0],
+        wp->public_key[1],
+        wp->public_key[2],
+        wp->public_key[3],
+        key_match ? "KEY_OK" : "KEY_MISMATCH!");
+    }
+
+    /* DON'T initiate handshakes to all peers on add — Tailscale's lazy
+         * peer config means our INIT to an idle peer gets dropped on their
+         * end. EXCEPT for the priority peer (set via priority_peer_ip): for
+         * that one we actively send WG INIT via DERP. The peer's
+         * magicsock receiveIPv4() will see the DERP-delivered INIT, call
+         * noteRecvActivity() → maybeReconfigWireguardLocked() to add us
+         * to wireguard-go, then complete the handshake. This is how we
+         * get a working WG session WITHOUT enabling DISCO (DISCO load
+         * still wedges the chip on a busy tailnet even with allowlist
+         * filtering of incoming probes — see v15.7.1 attempt). */
+    if (ml->config.priority_peer_ip != 0 && p->vpn_ip == ml->config.priority_peer_ip) {
+      wireguardif_connect_derp(netif, (u8_t)wg_peer_idx);
+      /* Wake the remote's magicsock so it lazily adds us to
+                 * wireguard-go. A bare WG-init relayed over DERP does NOT
+                 * drive the peer's lazy reconfig — only an inbound DISCO
+                 * ping does (that is why a normal peer otherwise has to
+                 * `tailscale ping` us first). Fire one now, unconditionally
+                 * (bypasses the enable_disco gate on the paths below); it is
+                 * DERP-carried and embeds our node key, so a peer with a
+                 * stale/rotated disco key can still map us. The sustained
+                 * retry lives in disco_periodic_probes. */
+      disco_send_ping_to_peer(ml, idx, true);
+      /* Near-zero failover: mirror this peer's encrypted data over
+                 * BOTH direct and DERP once a direct path forms. Set here and
+                 * persisted in the WG peer struct (survives P7 re-ingests); it
+                 * only takes effect while a direct endpoint exists, so it's a
+                 * no-op until DISCO upgrades the path. */
+      wireguardif_set_dual_path(netif, (u8_t)wg_peer_idx, true);
+      ESP_LOGI(TAG, "WG: triggered DERP handshake to priority peer %s (dual-path)", p->hostname);
+    } else {
+      ESP_LOGI(TAG, "WG peer ready (passive), waiting for peer-initiated handshake");
+    }
+  } else {
+    ESP_LOGW(TAG, "wireguardif_add_peer failed: %d", wg_err);
+    p->wg_peer_index = -1;
+  }
+}
+
 static int add_peer(microlink_t * ml, const ml_peer_update_t * update)
 {
   /* Peer allowlist filter: don't waste WG slots on non-allowed peers.
@@ -902,6 +1082,21 @@ static int add_peer(microlink_t * ml, const ml_peer_update_t * update)
     uint8_t cfg_mp = ml_config_get_max_peers(ml->config_httpd);
     if (cfg_mp > 0u && (int)cfg_mp < eff_max) {
       eff_max = (int)cfg_mp;
+    }
+
+    /* Key-rotated peer: the update's key is unknown but its VPN IP may
+         * already be occupied by a STALE entry (e.g. an NVS-cached peer
+         * preseeded at boot whose far end has since re-keyed). Two live
+         * entries with one allowed_ip would make wireguard-lwip's
+         * routing-by-IP ambiguous and find_peer_by_ip() would keep returning
+         * the dead one — so retire the stale entry and reuse its slot. */
+    idx = find_peer_by_ip(ml, update->vpn_ip);
+    if (idx >= 0) {
+      ESP_LOGW(TAG, "Peer %s re-keyed — retiring stale entry (idx=%d)", update->hostname, idx);
+      if (ml->peers[idx].wg_peer_index >= 0 && ml->wg_netif) {
+        wireguardif_remove_peer((struct netif *)ml->wg_netif, (u8_t)ml->peers[idx].wg_peer_index);
+      }
+      ml->peers[idx].active = false;
     }
 
     /* Find free slot */
@@ -1031,6 +1226,11 @@ static int add_peer(microlink_t * ml, const ml_peer_update_t * update)
     p->direct_flap_count = 0;
     p->direct_backoff_until = 0;
     p->last_derp_reconnect_ms = 0;
+    p->relay_retry_next_ms = 0;
+    p->relay_retry_count = 0;
+    /* CMM chain-breaker throttle: an evicted slot's stale stamp would eat the
+     * fresh peer's first CallMeMaybe for up to ML_DISCO_CMM_MIN_INTERVAL_MS. */
+    p->last_cmm_sent_ms = 0;
   }
 
   char ip_str[16];
@@ -1056,127 +1256,23 @@ static int add_peer(microlink_t * ml, const ml_peer_update_t * update)
      * previous WG add failed (wg_peer_index < 0). An existing peer with a
      * live WG slot is left in place so its session/endpoint survives this
      * re-ingest (P7 — see the DISCO-state note above). */
-  if (ml->wg_netif && (!existing || p->wg_peer_index < 0)) {
-    struct netif * netif = (struct netif *)ml->wg_netif;
-
-    /* Convert peer public key to base64 */
-    char peer_b64[64];
-    key_to_base64(p->public_key, peer_b64, sizeof(peer_b64));
-
-    struct wireguardif_peer wg_peer;
-    wireguardif_peer_init(&wg_peer);
-
-    wg_peer.public_key = peer_b64;
-    wg_peer.preshared_key = NULL;
-
-    /* Allowed IP: PEER's VPN IP
-         * wireguard-lwip uses allowed_ip for TWO purposes:
-         * 1. Outbound routing: peer_lookup_by_allowed_ip() matches DESTINATION
-         *    IP to find which peer to route to (wireguardif.c:338)
-         * 2. Inbound validation: checks decrypted packet SOURCE IP matches
-         *    peer's allowed_source_ips (wireguardif.c:507)
-         * Must be set to the PEER's VPN IP for both to work correctly. */
-    uint8_t ip_a = (p->vpn_ip >> 24) & 0xFF;
-    uint8_t ip_b = (p->vpn_ip >> 16) & 0xFF;
-    uint8_t ip_c = (p->vpn_ip >> 8) & 0xFF;
-    uint8_t ip_d = p->vpn_ip & 0xFF;
-    IP4_ADDR(&wg_peer.allowed_ip.u_addr.ip4, ip_a, ip_b, ip_c, ip_d);
-    IP4_ADDR(&wg_peer.allowed_mask.u_addr.ip4, 255, 255, 255, 255);
-
-    /* Start every peer DERP-only — NEVER install a netmap-advertised endpoint
-     * as the live WG endpoint.
-     *
-     * Root cause of the DERP-only-unreachable bug (2026-08-02): the
-     * netmap/STUN endpoints a peer advertises are UNVALIDATED candidates. We
-     * keep them in p->endpoints[] purely for DISCO probing. But
-     * wireguardif_add_peer() copies wg_peer.endpoint_ip straight into
-     * peer->ip (wireguardif.c:1084-1087), and wireguardif_peer_output()
-     * (wireguardif.c:158) then routes ALL WireGuard traffic — including the
-     * handshake RESPONSE — to peer->ip via direct UDP, bypassing DERP
-     * entirely whenever peer->ip is non-any.
-     *
-     * Behind a hard / endpoint-dependent NAT that advertised endpoint is
-     * unreachable in the peer->chip direction, so every reply the chip sends
-     * blackholes and the WG session never forms — while relayed DISCO pongs
-     * (which process_disco_ping sends *explicitly* over DERP) still return,
-     * producing the pathognomonic "tailscale ping OK / TCP+HTTP data dead"
-     * asymmetry (relay rx stuck at a few hundred bytes).
-     *
-     * Fix: leave the live endpoint blank so the peer is DERP-homed. The live
-     * direct endpoint is installed only after PROOF of bidirectional
-     * reachability — a txid-matched DISCO direct pong (process_disco_pong ->
-     * wireguardif_update_endpoint + wireguardif_connect) or a genuinely
-     * received direct WG packet (update_peer_addr roaming). This mirrors
-     * tailscaled/magicsock: DERP-home first, upgrade to a direct path only
-     * once it is validated both ways. DISCO probing of p->endpoints[]
-     * continues to run, so genuinely reachable direct paths still upgrade
-     * within one probe interval. */
-    ip_addr_set_any(false, &wg_peer.endpoint_ip);
-    wg_peer.endport_port = 0;
-
-    wg_peer.keep_alive = 25;
-
-    u8_t wg_peer_idx = WIREGUARDIF_INVALID_INDEX;
-    err_t wg_err = wireguardif_add_peer(netif, &wg_peer, &wg_peer_idx);
-
-    if (wg_err == ERR_OK && wg_peer_idx != WIREGUARDIF_INVALID_INDEX) {
-      p->wg_peer_index = wg_peer_idx;
-
-      /* Verify the WG internal peer key matches what we passed */
-      struct wireguard_device * dev = (struct wireguard_device *)netif->state;
-      if (dev && wg_peer_idx < WIREGUARD_MAX_PEERS) {
-        struct wireguard_peer * wp = &dev->peers[wg_peer_idx];
-        bool key_match = (memcmp(wp->public_key, p->public_key, 32) == 0);
-        ESP_LOGI(
-          TAG,
-          "WG peer added: wg_idx=%d internal_key=%02x%02x%02x%02x %s",
-          wg_peer_idx,
-          wp->public_key[0],
-          wp->public_key[1],
-          wp->public_key[2],
-          wp->public_key[3],
-          key_match ? "KEY_OK" : "KEY_MISMATCH!");
-      }
-
-      /* DON'T initiate handshakes to all peers on add — Tailscale's lazy
-             * peer config means our INIT to an idle peer gets dropped on their
-             * end. EXCEPT for the priority peer (set via priority_peer_ip): for
-             * that one we actively send WG INIT via DERP. The peer's
-             * magicsock receiveIPv4() will see the DERP-delivered INIT, call
-             * noteRecvActivity() → maybeReconfigWireguardLocked() to add us
-             * to wireguard-go, then complete the handshake. This is how we
-             * get a working WG session WITHOUT enabling DISCO (DISCO load
-             * still wedges the chip on a busy tailnet even with allowlist
-             * filtering of incoming probes — see v15.7.1 attempt). */
-      if (ml->config.priority_peer_ip != 0 && update->vpn_ip == ml->config.priority_peer_ip) {
-        wireguardif_connect_derp(netif, (u8_t)wg_peer_idx);
-        /* Wake the remote's magicsock so it lazily adds us to
-                 * wireguard-go. A bare WG-init relayed over DERP does NOT
-                 * drive the peer's lazy reconfig — only an inbound DISCO
-                 * ping does (that is why a normal peer otherwise has to
-                 * `tailscale ping` us first). Fire one now, unconditionally
-                 * (bypasses the enable_disco gate on the paths below); it is
-                 * DERP-carried and embeds our node key, so a peer with a
-                 * stale/rotated disco key can still map us. The sustained
-                 * retry lives in disco_periodic_probes. */
-        disco_send_ping_to_peer(ml, idx, true);
-        /* Near-zero failover: mirror this peer's encrypted data over
-                 * BOTH direct and DERP once a direct path forms. Set here and
-                 * persisted in the WG peer struct (survives P7 re-ingests); it
-                 * only takes effect while a direct endpoint exists, so it's a
-                 * no-op until DISCO upgrades the path. */
-        wireguardif_set_dual_path(netif, (u8_t)wg_peer_idx, true);
-        ESP_LOGI(TAG, "WG: triggered DERP handshake to priority peer %s (dual-path)", update->hostname);
-      } else {
-        ESP_LOGI(TAG, "WG peer ready (passive), waiting for peer-initiated handshake");
-      }
-    } else {
-      ESP_LOGW(TAG, "wireguardif_add_peer failed: %d", wg_err);
-      p->wg_peer_index = -1;
-    }
+  if (!existing || p->wg_peer_index < 0) {
+    wg_install_iface_peer(ml, idx);
   }
 
-  /* Persist to NVS for fast boot next time */
+  /* Persist to NVS for fast boot next time. Bond-critical peers — the
+     * priority/fleet pins AND any peer the app wants kept (machn's operator
+     * allowlist via peer_wanted_cb; all bounded sets) — are marked protected
+     * so the peer cache's LRU eviction can never drop the very keys the
+     * boot-time preseed needs (cold-bond far-side gap, 2026-08-08). Note the
+     * pin path above only fires when the RAM table is FULL; the cb is asked
+     * again here so operator keys are protected on small tailnets too. */
+  if (
+    is_pinned_peer(ml, p->vpn_ip) ||
+    (ml->peer_wanted_cb != NULL && ml->peer_wanted_cb(ml->peer_wanted_ctx, p->hostname, p->vpn_ip)))
+  {
+    ml_peer_nvs_set_protected(p->vpn_ip);
+  }
   ml_peer_nvs_save(p);
 
   /* Send CallMeMaybe to trigger peer-initiated handshake (NAT traversal). */
@@ -1336,6 +1432,7 @@ static void disco_build_ping(microlink_t * ml, int peer_idx, uint8_t * out, size
       memcpy(pending_probes[i].txid, txid, DISCO_TXID_LEN);
       pending_probes[i].peer_index = peer_idx;
       pending_probes[i].sent_ms = ml_get_time_ms();
+      pending_probes[i].derp_match_ms = 0;
       pending_probes[i].active = true;
       registered = true;
       ESP_LOGI(
@@ -1436,13 +1533,21 @@ static void disco_send_ping_to_peer(microlink_t * ml, int peer_idx, bool force)
   if (pkt_len == 0) return;
 
   bool direct_sent = false;
+  bool best_sent = false;
 
   /* If we have a known working direct path, send there FIRST.
      * This is critical for heartbeat pings to renew trust_until_ms.
-     * A DERP pong would arrive with via_derp=true and NOT renew trust. */
-  if (p->has_direct_path && p->best_ip != 0 && p->best_port != 0) {
+     * A DERP pong would arrive with via_derp=true and NOT renew trust.
+     *
+     * Deliberately NOT gated on has_direct_path: after a demotion best_ip
+     * still holds the last endpoint that PROVED bidirectionally reachable,
+     * and it may no longer appear in endpoints[] (netmap patches replace the
+     * candidate list). Keep probing it — a pong from it is exactly how the
+     * direct path re-establishes. One bounded extra UDP send per ping. */
+  if (p->best_ip != 0 && p->best_port != 0) {
     disco_udp_sendto(ml, pkt, pkt_len, p->best_ip, p->best_port);
-    direct_sent = true;
+    direct_sent = p->has_direct_path; /* demoted: still fall through to DERP */
+    best_sent = true;
   }
 
   /* Also try direct UDP to all known endpoints from MapResponse */
@@ -1451,8 +1556,15 @@ static void disco_send_ping_to_peer(microlink_t * ml, int peer_idx, bool force)
     if (has_udp) {
       for (int i = 0; i < p->endpoint_count; i++) {
         if (!p->endpoints[i].is_ipv6 && p->endpoints[i].ip != 0) {
-          /* Skip if same as best_ip (already sent) */
-          if (p->endpoints[i].ip == p->best_ip && p->endpoints[i].port == p->best_port) continue;
+          /* Skip if same as best_ip — but ONLY when the best-path branch above
+           * actually sent there. After a demotion has_direct_path is false, so
+           * that branch is skipped, yet best_ip/best_port still hold the
+           * previously-proven endpoint. The unconditional skip here excluded
+           * exactly that endpoint — for a NAT'd remote it is typically the ONLY
+           * reachable candidate (the others need hairpin), so every re-probe
+           * went DERP-only and the peer stayed relay-bound until reboot (which
+           * clears best_ip). Root cause of the 2026-08 "stuck on DERP" bug. */
+          if (best_sent && p->endpoints[i].ip == p->best_ip && p->endpoints[i].port == p->best_port) continue;
           int ret = disco_udp_sendto(ml, pkt, pkt_len, p->endpoints[i].ip, p->endpoints[i].port);
           if (!direct_sent) { /* Log only first direct send per peer */
             ESP_LOGI(
@@ -1647,6 +1759,7 @@ static void process_disco_pong(
 
   /* Match transaction ID */
   bool matched = false;
+  bool consumed = false;
   for (int i = 0; i < MAX_PENDING_PROBES; i++) {
     if (!pending_probes[i].active) continue;
     if (memcmp(pending_probes[i].txid, txid, DISCO_TXID_LEN) != 0) continue;
@@ -1693,6 +1806,11 @@ static void process_disco_pong(
        * a long-stable peer that later legitimately fails isn't penalized. */
       if (!had_direct) {
         p->direct_promoted_ms = now;
+        /* Direct regained — disarm the relay-bound retry and reset its backoff
+         * so the NEXT outage starts the CMM/sweep cycle from 30 s again. */
+        p->relay_retry_next_ms = 0;
+        p->relay_retry_count = 0;
+        s_diag_direct_regains++;
       } else if (now - p->direct_promoted_ms > 15000) {
         p->direct_flap_count = 0;
       }
@@ -1728,9 +1846,11 @@ static void process_disco_pong(
           (int)((pkt->src_ip >> 8) & 0xFF),
           (int)(pkt->src_ip & 0xFF),
           (int)pkt->src_port);
-        /* Consume this probe exactly like the normal matched-pong exit below. */
+        /* Consume this probe exactly like the normal matched-pong exit below
+         * (direct pong -> consuming is correct; see the via_derp note there). */
         pending_probes[i].active = false;
         matched = true;
+        consumed = true;
         break;
       }
 
@@ -1836,27 +1956,53 @@ static void process_disco_pong(
       }
     }
 
-    pending_probes[i].active = false;
+    /* Consume the probe ONLY for a direct pong. While demoted, every probe is
+     * dual-sent (direct + DERP fallback) under ONE txid, and the peer answers
+     * BOTH. Consuming on the via-DERP pong (which always arrives) burned the
+     * txid, so the direct pong that followed hit the "unmatched" branch below
+     * and was DROPPED — the direct path could then never re-promote when DERP
+     * won the race (2026-08-09 bench falsification of the stuck-on-DERP fix).
+     * A via-DERP match keeps the probe active — but only for a BOUNDED
+     * ML_DISCO_DERP_MATCH_GRACE_MS more (stamped here, reclaimed by the sweep
+     * in disco_periodic_probes). The direct pong being waited for answers the
+     * SAME dual-sent ping, so if the direct path is alive it trails the DERP
+     * pong by at most ~one direct RTT; letting the slot ride out the full 5 s
+     * window instead is what exhausted the 64-slot table under CMM bursts on
+     * the 2026-08-09 bench — pings then went out UNREGISTERED, their pongs
+     * arrived unmatched, last_pong_recv_ms froze, and the 4 s pong watchdog
+     * demoted healthy paths in a runaway (regains oscillation + robot-disarm
+     * waves). Duplicate via-DERP matches keep the FIRST stamp: the window
+     * must not be extendable by more relayed pongs. */
+    if (!pkt->via_derp) {
+      pending_probes[i].active = false;
+      consumed = true;
+    } else if (pending_probes[i].derp_match_ms == 0) {
+      pending_probes[i].derp_match_ms = now;
+    }
     matched = true;
     break;
   }
 
-  if (matched) {
+  if (matched && consumed) {
     /* Remember this txid so the machine's DUPLICATE answer on the other transport
-     * (direct answered here -> DERP copy arrives next, or vice-versa) is logged as
+     * (direct answered here -> DERP copy arrives next) is logged as
      * a benign duplicate below instead of a scary "unmatched" WARN. */
     remember_consumed_txid(txid);
-  } else {
+  } else if (!matched) {
     /* Find peer by disco key for logging */
     int peer_idx = find_peer_by_disco_key(ml, sender_disco_key);
     const char * name = peer_idx >= 0 ? ml->peers[peer_idx].hostname : "?";
-    if (pkt->via_derp && txid_recently_consumed(txid)) {
-      /* The direct pong already consumed this probe; this is just the machine's
-       * DERP duplicate. Benign — DEBUG, not WARN. */
+    if (txid_recently_consumed(txid)) {
+      /* Either the machine's DERP duplicate of a probe the direct pong already
+       * consumed, or a straggler direct pong whose slot the post-DERP-match
+       * grace window reclaimed (>1 s slower than the relayed answer to the
+       * same ping — that path was not going to win promotion anyway). Benign —
+       * DEBUG, not WARN. */
       ESP_LOGD(
         TAG,
-        "duplicate via-DERP pong from %s txid=%02x%02x%02x%02x (direct already consumed)",
+        "late duplicate pong from %s (via %s) txid=%02x%02x%02x%02x (probe already retired)",
         name,
+        pkt->via_derp ? "DERP" : "direct",
         txid[0],
         txid[1],
         txid[2],
@@ -2040,55 +2186,58 @@ static void process_disco_packet(microlink_t * ml, const ml_rx_packet_t * pkt)
       /* Reply with our own CallMeMaybe (bidirectional NAT traversal). */
       disco_send_call_me_maybe(ml, peer_idx);
 
-      /* Probe each endpoint with a DISCO ping. */
-      for (int i = 0; i < ep_count && i < ML_MAX_ENDPOINTS; i++) {
-        const uint8_t * entry = ep_data + (i * 18);
-        uint16_t port = (entry[16] << 8) | entry[17];
+      /* Probe the advertised endpoints with ONE DISCO ping (single txid /
+       * single pending_probes[] slot, sent to every candidate — the same
+       * sweep semantics disco_send_ping_to_peer uses: any endpoint's pong
+       * matches the txid). Building a FRESH ping per endpoint burned one
+       * probe slot + one seal EACH (up to 8 per received CMM), which is what
+       * let a CMM burst blow through the 64-slot table on the 2026-08-09
+       * bench. Per received CMM the cost is now exactly one seal + one slot
+       * + <=8 UDP sends. */
+      if (!disco_has_udp_path(ml)) {
+        ESP_LOGW(TAG, "CMM probe skipped: no UDP path (sock4=%d)", ml->disco_sock4);
+      } else {
+        uint8_t ping_pkt[256];
+        size_t ping_len = 0;
+        bool ping_built = false;
 
-        /* Check for IPv4-mapped IPv6: ::ffff:A.B.C.D */
-        bool is_v4_mapped = true;
-        for (int j = 0; j < 10; j++) {
-          if (entry[j] != 0) {
-            is_v4_mapped = false;
-            break;
+        for (int i = 0; i < ep_count && i < ML_MAX_ENDPOINTS; i++) {
+          const uint8_t * entry = ep_data + (i * 18);
+          uint16_t port = (entry[16] << 8) | entry[17];
+
+          /* Check for IPv4-mapped IPv6: ::ffff:A.B.C.D */
+          bool is_v4_mapped = true;
+          for (int j = 0; j < 10; j++) {
+            if (entry[j] != 0) {
+              is_v4_mapped = false;
+              break;
+            }
           }
-        }
-        if (entry[10] != 0xff || entry[11] != 0xff) is_v4_mapped = false;
+          if (entry[10] != 0xff || entry[11] != 0xff) is_v4_mapped = false;
 
-        ESP_LOGI(
-          TAG,
-          "  CMM ep[%d]: v4mapped=%d port=%d bytes=%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x",
-          i,
-          is_v4_mapped,
-          port,
-          entry[0],
-          entry[1],
-          entry[2],
-          entry[3],
-          entry[4],
-          entry[5],
-          entry[6],
-          entry[7],
-          entry[8],
-          entry[9],
-          entry[10],
-          entry[11],
-          entry[12],
-          entry[13],
-          entry[14],
-          entry[15]);
+          /* DEBUG, not INFO: this 16-byte hex dump per endpoint was ~130
+           * blocking UART chars each — real wg_mgr stall time during the CMM
+           * bursts this handler must survive. */
+          ESP_LOGD(
+            TAG,
+            "  CMM ep[%d]: v4mapped=%d port=%d ip=%02x%02x%02x%02x",
+            i,
+            is_v4_mapped,
+            port,
+            entry[12],
+            entry[13],
+            entry[14],
+            entry[15]);
 
-        if (!is_v4_mapped || port == 0) continue;
+          if (!is_v4_mapped || port == 0) continue;
 
-        uint32_t ip =
-          ((uint32_t)entry[12] << 24) | ((uint32_t)entry[13] << 16) | ((uint32_t)entry[14] << 8) | (uint32_t)entry[15];
+          uint32_t ip = ((uint32_t)entry[12] << 24) | ((uint32_t)entry[13] << 16) | ((uint32_t)entry[14] << 8) |
+                        (uint32_t)entry[15];
 
-        /* Send DISCO ping to this endpoint */
-        if (disco_has_udp_path(ml)) {
-          uint8_t ping_pkt[256];
-          size_t ping_len = 0;
-          disco_build_ping(ml, peer_idx, ping_pkt, &ping_len);
-
+          if (!ping_built) {
+            disco_build_ping(ml, peer_idx, ping_pkt, &ping_len);
+            ping_built = true;
+          }
           if (ping_len > 0) {
             int ret = disco_udp_sendto(ml, ping_pkt, ping_len, ip, port);
             ESP_LOGI(
@@ -2102,8 +2251,6 @@ static void process_disco_packet(microlink_t * ml, const ml_rx_packet_t * pkt)
               (int)ping_len,
               ret);
           }
-        } else {
-          ESP_LOGW(TAG, "CMM probe skipped: no UDP path (sock4=%d)", ml->disco_sock4);
         }
       }
 
@@ -2272,6 +2419,29 @@ static void disco_send_call_me_maybe(microlink_t * ml, int peer_idx)
 
   ml_peer_t * p = &ml->peers[peer_idx];
 
+  /* Chip<->chip CMM chain breaker (single choke point — EVERY CMM send path
+   * runs through here). process_disco_packet answers a received CMM with a
+   * CMM of its own; between two microlink chips (remote<->machn) that mutual
+   * reply is a ping-pong chain sustained at DERP RTT until a frame drops.
+   * The demotion-CMM + 5 s relay-retry rounds re-ignite such chains
+   * constantly, and each received CMM costs a reply seal + endpoint probes —
+   * the fuel of the 2026-08-09 probe-table exhaustion runaway. At most one
+   * CMM per peer per ML_DISCO_CMM_MIN_INTERVAL_MS. Invariant: the FIRST CMM
+   * in any window passes (demotion event, >=5 s-spaced retry round, boot
+   * broadcast). A re-demotion within the same window IS throttled (rapid
+   * flap); its recovery falls to the next relay-retry round — worst case
+   * +5 s, still bounded. A suppressed chain reply is harmless — the exchange
+   * it would answer already carried our endpoints to that peer within the
+   * last window. The stamp is written on the actual-send path below (after
+   * the endpoint check), so a no-endpoint attempt — e.g. pre-STUN cold boot —
+   * does not burn the window while sending nothing. */
+  {
+    uint64_t cmm_now = ml_get_time_ms();
+    if (p->last_cmm_sent_ms != 0 && cmm_now - p->last_cmm_sent_ms < ML_DISCO_CMM_MIN_INTERVAL_MS) {
+      return;
+    }
+  }
+
   /* Build plaintext: [type(1)][version(1)][endpoints(N * 18)] */
   uint8_t plaintext[2 + 3 * 18]; /* Up to 3 endpoints */
   int pt_len = 0;
@@ -2339,6 +2509,10 @@ static void disco_send_call_me_maybe(microlink_t * ml, int peer_idx)
     ESP_LOGW(TAG, "CMM: no endpoints available for %s", p->hostname);
     return;
   }
+
+  /* Endpoints exist — this attempt really sends, so it may burn the throttle
+   * window (see chain-breaker comment above). */
+  p->last_cmm_sent_ms = ml_get_time_ms();
 
   /* Encrypt with NaCl box */
   uint8_t nonce[DISCO_NONCE_LEN];
@@ -2546,6 +2720,7 @@ static void disco_periodic_probes(microlink_t * ml)
   uint64_t now = ml_get_time_ms();
   int upgrade_probes_sent = 0;
   int hb_pings_sent = 0;
+  bool relay_retry_fired = false; /* at most one CMM+sweep round per tick */
 
   /* Rotate start index so we don't always process peers in the same order */
   int start = disco_probe_start_idx;
@@ -2600,6 +2775,17 @@ static void disco_periodic_probes(microlink_t * ml)
         p->direct_backoff_until = now + backoff;
       }
 
+      /* Arm the relay-bound retry (safety peers only). First round FAST
+       * (ML_DISCO_RELAY_RETRY_FIRST_MS): when the outage also killed our
+       * outbound NAT mapping, the reprobe pings below die in flight and only
+       * a CMM round (far side probes back) recovers — a 30 s floor here left
+       * the peer visibly relay-bound through the whole bench observation
+       * window (2026-08-09). Fresh outage = fresh backoff. */
+      if (is_priority) {
+        p->relay_retry_next_ms = now + ML_DISCO_RELAY_RETRY_FIRST_MS;
+        p->relay_retry_count = 0;
+      }
+
       /* Only do DERP fallback + re-probe for allowed peers.
              * Non-allowed peers just get their state cleaned above. */
       if (peer_allowed) {
@@ -2619,6 +2805,16 @@ static void disco_periodic_probes(microlink_t * ml)
 
         /* Force-ping to try re-establishing the direct path */
         disco_send_ping_to_peer(ml, i, true);
+
+        /* Safety peers: ALSO fire one immediate CallMeMaybe. If the outage
+         * that caused this demotion killed our outbound NAT mapping, the
+         * force-ping above never reaches the peer — the far side must probe
+         * US to re-punch the hole, and it only does that on a CMM. One NaCl
+         * seal per demotion EVENT (rare); bulk peers are excluded so the
+         * peer-scaling armor is untouched. */
+        if (is_priority) {
+          disco_send_call_me_maybe(ml, i);
+        }
       }
     }
 
@@ -2635,6 +2831,45 @@ static void disco_periodic_probes(microlink_t * ml)
         disco_send_ping_to_peer(ml, i, false);
         p->last_upgrade_ms = now;
         upgrade_probes_sent++;
+      }
+    }
+
+    /* Relay-bound direct-path re-establishment (safety peers only). The 5 s
+         * reprobe above re-pings candidates WE hold; it cannot recover when the
+         * far side's knowledge of US went stale (its NAT mapping to us died, an
+         * endpoint patch got lost server-side). Re-run the candidate EXCHANGE:
+         * a CallMeMaybe re-advertising our current LAN + STUN endpoints (so the
+         * peer probes back, re-opening the reverse path) plus a forced sweep of
+         * everything we hold, incl. the last-proven best endpoint. Slow
+         * exponential backoff per peer (30 s -> 300 s cap), at most one round
+         * per 1 s tick fleet-wide, honours the hard-NAT flap backoff, and stops
+         * the moment direct is regained (state cleared on promotion). Pure
+         * disco side-channel: the DERP-carried heartbeat path is untouched. */
+    if (is_priority && !p->has_direct_path) {
+      if (p->relay_retry_next_ms == 0) {
+        /* Cold relay-bound peer (never promoted since boot): arm the cycle. */
+        p->relay_retry_next_ms = now + ML_DISCO_RELAY_RETRY_FIRST_MS;
+      } else if (!relay_retry_fired && now >= p->relay_retry_next_ms && now > p->direct_backoff_until) {
+        relay_retry_fired = true; /* bounded: one NaCl seal + one sweep per tick */
+        disco_send_call_me_maybe(ml, i);
+        disco_send_ping_to_peer(ml, i, true);
+        /* Backoff after round N: 30 s << (N-1), capped at 300 s. With the
+         * 5 s first round that gives 5 -> 30 -> 60 -> 120 -> 240 -> 300 cap. */
+        if (p->relay_retry_count < 5u) {
+          p->relay_retry_count++;
+        }
+        uint64_t iv = (uint64_t)ML_DISCO_RELAY_RETRY_MIN_MS << (p->relay_retry_count - 1u);
+        if (iv > ML_DISCO_RELAY_RETRY_MAX_MS) {
+          iv = ML_DISCO_RELAY_RETRY_MAX_MS;
+        }
+        p->relay_retry_next_ms = now + iv;
+        s_diag_relay_retries++;
+        ESP_LOGI(
+          TAG,
+          "relay-bound retry #%u for %s (next in %llu s)",
+          (unsigned)p->relay_retry_count,
+          p->hostname,
+          (unsigned long long)(iv / 1000u));
       }
     }
 
@@ -2699,8 +2934,21 @@ static void disco_periodic_probes(microlink_t * ml)
      * which is always > PING_TIMEOUT_MS, causing immediate false expiry. */
   now = ml_get_time_ms();
   for (int i = 0; i < MAX_PENDING_PROBES; i++) {
-    if (pending_probes[i].active && now - pending_probes[i].sent_ms > ML_DISCO_PING_TIMEOUT_MS) {
+    if (!pending_probes[i].active) continue;
+    bool timed_out = now - pending_probes[i].sent_ms > ML_DISCO_PING_TIMEOUT_MS;
+    /* Bounded post-DERP-match window (see disco_probe_t.derp_match_ms): a
+     * via-DERP-answered probe waits only ML_DISCO_DERP_MATCH_GRACE_MS for its
+     * slower direct twin, not the full 5 s timeout — unbounded lifetimes here
+     * exhausted the table and demoted healthy paths (2026-08-09 bench). */
+    bool grace_over =
+      pending_probes[i].derp_match_ms != 0 && now - pending_probes[i].derp_match_ms > ML_DISCO_DERP_MATCH_GRACE_MS;
+    if (timed_out || grace_over) {
       pending_probes[i].active = false;
+      if (grace_over) {
+        /* A direct pong may still straggle in; let it log as a benign
+         * duplicate instead of a scary "unmatched" WARN. */
+        remember_consumed_txid(pending_probes[i].txid);
+      }
     }
   }
 }
@@ -2747,25 +2995,77 @@ void ml_wg_mgr_task(void * arg)
     ESP_LOGI(TAG, "Pre-loaded %d cached peers from NVS", cached);
   }
 
-  /* Wait for registration OR shutdown before proceeding */
-  EventBits_t wait_bits =
-    xEventGroupWaitBits(ml->events, ML_EVT_COORD_REGISTERED | ML_EVT_SHUTDOWN_REQUEST, pdFALSE, pdFALSE, portMAX_DELAY);
+  /* Cold-bond far-side recovery (bench 2026-08-08): a rebooted machine whose
+     * coordination netmap hasn't re-arrived used to SILENTLY ignore WG
+     * handshake initiations from its operator remotes (their static keys were
+     * only installed on netmap ingest) — the remote wedged at
+     * peer-present-but-no-keypair (ENOTCONN, sent=0) for 27 min and only a
+     * machine restart recovered it. If our VPN IP is known from NVS (persisted
+     * on every registration), bring the WG interface up NOW and preseed the
+     * cached peers into wireguard-lwip so those inbound handshakes succeed
+     * immediately — before, or entirely without, coordination connectivity. */
+  bool wg_up_early = false;
+  if (ml->vpn_ip != 0 && cached > 0) {
+    if (wg_init_interface(ml) == ESP_OK) {
+      wg_up_early = true;
+      xEventGroupSetBits(ml->events, ML_EVT_WG_READY);
+      int installed = 0;
+      for (int i = 0; i < ml->peer_count; i++) {
+        if (!ml->peers[i].active) continue;
+        /* Same allowlist gate as add_peer — the allowlist may have changed
+                 * since these entries were cached. */
+        if (!ml_config_peer_is_allowed(ml->config_httpd, ml->peers[i].vpn_ip)) continue;
+        wg_install_iface_peer(ml, i);
+        if (ml->peers[i].wg_peer_index >= 0) installed++;
+      }
+      ESP_LOGI(TAG, "WG preseeded from NVS: %d/%d cached peers installed (pre-registration)", installed, cached);
+    }
+  }
 
-  if (wait_bits & ML_EVT_SHUTDOWN_REQUEST) {
-    ESP_LOGI(TAG, "Shutdown requested before registration, exiting");
-    vTaskDelete(NULL);
-    return; /* Not reached */
+  /* Wait for registration OR shutdown before entering the full loop — but
+     * when WG came up early, keep draining inbound WG packets while waiting:
+     * a same-LAN operator remote can complete its handshake and run pstop
+     * heartbeats against us during this window even with the coordination
+     * plane unreachable (the exact post-reboot wedge scenario above). */
+  for (;;) {
+    EventBits_t wait_bits = xEventGroupWaitBits(
+      ml->events,
+      ML_EVT_COORD_REGISTERED | ML_EVT_SHUTDOWN_REQUEST,
+      pdFALSE,
+      pdFALSE,
+      wg_up_early ? pdMS_TO_TICKS(20) : portMAX_DELAY);
+
+    if (wait_bits & ML_EVT_SHUTDOWN_REQUEST) {
+      ESP_LOGI(TAG, "Shutdown requested before registration, exiting");
+      vTaskDelete(NULL);
+      return; /* Not reached */
+    }
+    if (wait_bits & ML_EVT_COORD_REGISTERED) {
+      break;
+    }
+    if (wg_up_early) {
+      ml_rx_packet_t pre_pkt;
+      while (xQueueReceive(ml->wg_rx_queue, &pre_pkt, 0) == pdTRUE) {
+        process_wg_packet(ml, &pre_pkt);
+      }
+    }
   }
 
   ESP_LOGI(TAG, "Coord registered, initializing WireGuard...");
 
-  /* Initialize WireGuard interface (magicsock mode) */
-  if (wg_init_interface(ml) != ESP_OK) {
-    ESP_LOGE(TAG, "Failed to init WireGuard, continuing without tunneling");
+  if (!wg_up_early) {
+    /* Initialize WireGuard interface (magicsock mode) */
+    if (wg_init_interface(ml) != ESP_OK) {
+      ESP_LOGE(TAG, "Failed to init WireGuard, continuing without tunneling");
+    } else {
+      /* Update VPN IP if coord already set it */
+      wg_update_vpn_ip(ml);
+      xEventGroupSetBits(ml->events, ML_EVT_WG_READY);
+    }
   } else {
-    /* Update VPN IP if coord already set it */
+    /* Registration may have (re)assigned our VPN IP — sync the netif so a
+         * stale persisted address can't linger past this point. */
     wg_update_vpn_ip(ml);
-    xEventGroupSetBits(ml->events, ML_EVT_WG_READY);
   }
 
   ESP_LOGI(TAG, "Accepting peer updates");

@@ -111,6 +111,16 @@ extern "C"
                                             * longer a safety region after 30 s,
                                             * regardless of traffic through it */
 
+/* Consecutive failed periodic HOME-region connect attempts before slot 0 is
+ * allowed to fall back to a proven-reachable region. DERP design-review finding
+ * (2026-08): a chip whose home region's DERP server is TCP-unreachable retried
+ * the SAME region forever with no fallback, leaving it offline on the relay
+ * path. The periodic-retry cadence for a priority build is 5s,5s,10s,then 60s,
+ * so N=4 spends ~80 s honouring the intended home (giving a transient outage or
+ * an event-driven re-home a fair chance to recover it) before engaging the
+ * fallback. Bounded, so it can never turn into a reconnect storm. */
+#define ML_DERP_HOME_FALLBACK_AFTER 4
+
 /* Tailscale control plane */
 #define ML_CTRL_HOST "controlplane.tailscale.com"
 #define ML_CTRL_PORT 443
@@ -147,6 +157,62 @@ extern "C"
                                                 * safety impact (dual-path send
                                                 * keeps the uplink gapless anyway). */
 #define ML_DISCO_PRIORITY_REPROBE_MS 5000
+
+/* Relay-bound direct-path re-establishment (net/derp-direct-reestablish):
+ * while a SAFETY peer's session is alive but riding DERP, periodically re-run
+ * the full discovery handshake — CallMeMaybe (so the far side re-learns our
+ * CURRENT endpoints and probes back, re-opening a NAT mapping that died) plus
+ * a forced candidate sweep. The 5 s reprobe above only re-pings candidates we
+ * already hold; it cannot recover when the far side's knowledge of US went
+ * stale (NAT rebind, lost endpoint patch). Slow exponential backoff
+ * (30 s -> 60 -> 120 -> 240 -> 300 cap) bounds the added load to one NaCl
+ * seal + a few UDP sends per due peer, at most one peer per 1 s probe tick;
+ * state resets the moment a direct path is regained. Safety peers only —
+ * bulk peers keep the peer-scaling armor.
+ *
+ * Bench falsification of the first cut (2026-08-09, DUT pstop-01d7f344):
+ * a 30 s FLOOR before the first CMM round left the safety peer visibly
+ * relay-bound for the entire observation window. When the outage also
+ * killed the chip's outbound NAT mapping (hostile bench NAT), fix-1's
+ * probes to the proven endpoint die in flight — only a CMM (far side
+ * probes back, re-punching the hole while our sweep re-punches ours) can
+ * recover, so the FIRST round must come fast. First round 5 s after
+ * demotion, then 30 s -> 60 -> 120 -> 240 -> 300 cap. The demotion path
+ * additionally fires one immediate CMM (see disco_periodic_probes). */
+#define ML_DISCO_RELAY_RETRY_FIRST_MS 5000
+#define ML_DISCO_RELAY_RETRY_MIN_MS 30000
+#define ML_DISCO_RELAY_RETRY_MAX_MS 300000
+
+/* Bench regression of the second cut (2026-08-09, all 3 devices on the fix
+ * build): direct_regains oscillated in bursts (machn 131+ over 90 min) and
+ * machn's wg_mgr task stalled >2.5 s, disarming the robot. Two compounding
+ * causes, both bounded here:
+ *
+ * 1. The pong-race fix let a via-DERP-answered probe hold its
+ *    pending_probes[] slot for the FULL 5 s ping timeout (so a slower direct
+ *    pong could still promote). Under a CMM burst that multiplied
+ *    steady-state slot demand past the 64-slot table; once full, new pings
+ *    were sent UNREGISTERED, their pongs arrived "unmatched", so
+ *    last_pong_recv_ms froze and the 4 s pong watchdog demoted perfectly
+ *    healthy paths — each demotion firing another CMM: a runaway.
+ *    Bound: after a via-DERP match the slot stays alive only
+ *    ML_DISCO_DERP_MATCH_GRACE_MS more. The direct pong it is waiting for is
+ *    the answer to the SAME dual-sent ping; if the direct path is alive that
+ *    pong trails the DERP one by at most ~one direct RTT (<<1 s), so 1 s of
+ *    grace preserves the pong-race fix while restoring a bounded lifetime.
+ *
+ * 2. process_disco_packet answers every received CallMeMaybe with a CMM of
+ *    its own (bidirectional NAT traversal). Between TWO microlink chips that
+ *    reply rule is a ping-pong chain sustained at DERP RTT until a frame
+ *    drops; the demotion-CMM + 5 s retry round re-ignited chains constantly.
+ *    Bound: at most one CMM per peer per ML_DISCO_CMM_MIN_INTERVAL_MS at the
+ *    single send choke point (disco_send_call_me_maybe). Invariant: the
+ *    FIRST CMM in any window passes — >=5 s-spaced retry rounds and isolated
+ *    demotion events are never throttled. A re-demotion within the same
+ *    window (rapid flap) IS throttled; its recovery falls to the next relay-
+ *    retry round — worst case +5 s, still bounded. Chain re-fires are eaten. */
+#define ML_DISCO_DERP_MATCH_GRACE_MS 1000
+#define ML_DISCO_CMM_MIN_INTERVAL_MS 3000
 
 /* 100+ peer scaling bounds (2026-07-21): pace CPU-heavy per-peer work so a
  * large tailnet can never monopolize the wg_mgr loop that also drains the
@@ -369,6 +435,17 @@ extern "C"
      * DERP-only safety peer answering every 3 s ping doesn't drive a connect_derp
      * storm. 0 = never fired. */
     uint64_t last_derp_reconnect_ms;
+
+    /* Relay-bound direct-path retry (safety peers only, see
+     * ML_DISCO_RELAY_RETRY_MIN_MS): next CallMeMaybe+sweep due time (0 = not
+     * armed) and the attempt count driving the exponential backoff. Both are
+     * cleared on every genuine direct promotion. */
+    uint64_t relay_retry_next_ms;
+    uint8_t relay_retry_count;
+
+    /* Chip<->chip CMM chain breaker (see ML_DISCO_CMM_MIN_INTERVAL_MS): ms of
+     * the last CallMeMaybe SENT to this peer. 0 = never sent. */
+    uint64_t last_cmm_sent_ms;
 
     /* WireGuard peer index in wireguard-lwip */
     int wg_peer_index;
@@ -632,6 +709,12 @@ extern "C"
   /* Tear down a specific pool connection (frees its mbedTLS contexts + socket). */
   void ml_derp_disconnect(microlink_t * ml, ml_derp_conn_t * c);
   esp_err_t ml_derp_queue_send(microlink_t * ml, const uint8_t * dest_key, const uint8_t * data, size_t len);
+  /* Telemetry: number of times the DERP I/O task fell back off an unreachable
+   * home region (or opened a rescue aux for a locked/re-homed dead region).
+   * Exposed as derp_home_unreachable_fallbacks via /admin/api/monitor so the
+   * design-review home-unreachable-fallback path is observable on a log-less
+   * unit. Read from any task (word-sized read of a task-owned counter). */
+  uint32_t ml_derp_get_home_fallback_count(void);
 
   /* Effective home DERP region for slot 0: the runtime override wins, else the
    * learned/rehomed home region. 0 = neither known (caller falls back to
@@ -742,6 +825,16 @@ extern "C"
 
   void ml_wg_get_direct_diag(microlink_t * ml, ml_direct_diag_t * out);
 
+  /* ml_wg_mgr.c — relay-bound direct-path retry counters (log-less bench
+   * visibility, same pattern as ml_wg_get_rehome_diag):
+   * out[0] = retry rounds fired (CallMeMaybe + forced candidate sweep)
+   * out[1] = direct-path regains (has_direct_path false -> true edges)
+   * out[2] = safety peers currently relay-bound (active, no direct path)
+   * out[3] = ms until the earliest armed retry round (0 = none armed / due
+   *          now). Cross-task read of wg_mgr-owned words — worst case a
+   *          transiently stale value, same contract as ml_wg_get_direct_diag. */
+  void ml_wg_get_direct_retry_diag(microlink_t * ml, uint32_t out[4]);
+
   /* ml_peer_nvs.c */
   esp_err_t ml_peer_nvs_init(void);
   void ml_peer_nvs_deinit(void);
@@ -750,10 +843,17 @@ extern "C"
   /* Deferred flash flush of the peer cache (writes are debounced: saves only
  * update the PSRAM working copy; call this ~once per wg_mgr pass). */
   esp_err_t ml_peer_nvs_flush_if_due(uint64_t now_ms);
-  /* Mark a peer (by VPN IP, host order) as never-LRU-evicted from the cache —
- * used to pin the priority/safety peer so its endpoint survives reboots. */
+  /* Mark a peer (by VPN IP, host order) as never-LRU-evicted from the cache.
+ * Bounded set (priority peer, fleet server, app-pinned operator remotes):
+ * these keys feed the boot-time WG preseed that answers cold inbound
+ * handshakes before the netmap re-arrives (cold-bond gap, 2026-08-08). */
   void ml_peer_nvs_set_protected(uint32_t vpn_ip);
   esp_err_t ml_peer_nvs_clear(void);
+
+  /* microlink.c — persist ml->vpn_ip to NVS (write-on-change; coord task
+ * context only, never the safety tick). Enables pre-registration WG
+ * bring-up on the next boot. */
+  void ml_ident_persist_vpn_ip(microlink_t * ml);
 
 #ifdef CONFIG_ML_ZERO_COPY_WG
   /* ml_zerocopy.c */

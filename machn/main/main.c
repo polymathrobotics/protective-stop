@@ -634,7 +634,14 @@ static void relay_gpio_init(void)
  * lowercase hex digits after "pstop-" ARE the 32-bit pstop id (e.g.
  * "pstop-01d7f344" -> 0x01d7f344), the exact value dcs_operator_* stores and
  * compares, so parsing the hex as a uint32_t needs no byte-order fixup.
- * Robust to any hostname that doesn't match the pattern (returns false). */
+ * Robust to any hostname that doesn't match the pattern (returns false).
+ *
+ * ALSO consulted by microlink's peer-NVS cache (ml_wg_mgr save path,
+ * cold-bond recovery 2026-08-08): operator remotes returning true here are
+ * protected from LRU eviction in the on-flash peer cache, because those
+ * cached WG keys are what the boot-time preseed uses to answer a remote's
+ * re-bond handshakes BEFORE this machine's netmap re-arrives (previously the
+ * WG layer silently ignored them and the remote wedged ENOTCONN for 27 min). */
 static bool machn_peer_wanted_cb(void * ctx, const char * hostname, uint32_t vpn_ip)
 {
   (void)ctx;
