@@ -144,7 +144,7 @@ MachineBridgeNode::CallbackReturn MachineBridgeNode::on_configure(const rclcpp_l
   relay_pub_ = create_publisher<MachineRelayStatus>("~/relay_status", data);
   remotes_pub_ = create_publisher<BondedRemoteArray>("~/remotes", data);
   heartbeat_pub_ =
-    create_publisher<ProtectiveStopHeartbeat>("~/pstop_hb", rclcpp::QoS(1).reliable());
+    create_publisher<ProtectiveStopHeartbeat>("/pstop_hb", rclcpp::QoS(1).reliable());
 
   param_cb_handle_ =
     add_on_set_parameters_callback(std::bind(&MachineBridgeNode::on_set_parameters, this,
