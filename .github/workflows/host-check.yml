@@ -55,7 +55,7 @@ jobs:
 
       - name: sdkconfig parity (remote vs machine shared keys)
         # Fails the build if any setting shared by firmware/sdkconfig.defaults
-        # and machn/sdkconfig.defaults drifts between the two (David, #84).
+        # and machn/sdkconfig.defaults drifts between the two (David,  # 84).
         run: ./scripts/check_sdkconfig_parity.sh
 
       - name: MISRA check (advisory)
