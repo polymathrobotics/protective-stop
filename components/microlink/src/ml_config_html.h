@@ -269,7 +269,8 @@ static const char CONFIG_PAGE_HTML[] =
   "<button class='btn-outline btn-sm' type='button' onclick='lockDerp()'>Lock</button>"
   "<button class='btn-outline btn-sm' type='button' onclick='clearDerp()'>Clear / Auto</button>"
   "</div>"
-  "<div class='hint' id='derpLockHint'>0 / empty = auto. Pin a region (e.g. 2 sfo, 9 dfw) to lock the home relay.</div></div>"
+  "<div class='hint' id='derpLockHint'>0 / empty = auto. Pin a region (e.g. 2 sfo, 9 dfw) to lock the home "
+  "relay.</div></div>"
 
   /* Debug */
   "<div class='form-group full' style='margin-top:8px'>"

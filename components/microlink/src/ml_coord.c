@@ -1439,9 +1439,8 @@ static int do_fetch_peers(microlink_t * ml, ml_noise_state_t * noise)
      * compiled default. */
   cJSON * netinfo = cJSON_CreateObject();
   if (netinfo) {
-    uint16_t pref = ml->derp_region_override
-                      ? ml->derp_region_override
-                      : (ml->priority_peer_region ? ml->priority_peer_region : ML_DERP_REGION);
+    uint16_t pref = ml->derp_region_override ? ml->derp_region_override
+                                             : (ml->priority_peer_region ? ml->priority_peer_region : ML_DERP_REGION);
     cJSON_AddNumberToObject(netinfo, "PreferredDERP", pref);
     if (ml->stun_nat_checked) {
       cJSON_AddBoolToObject(netinfo, "MappingVariesByDestIP", ml->nat_mapping_varies);
@@ -2038,9 +2037,8 @@ static int do_start_long_poll(microlink_t * ml, ml_noise_state_t * noise)
      * to region 2 but machn's netmap kept it at 9 → no bond until reboot).
      * Override > learned priority-peer region > compiled default. Non-override
      * (override==0) behaviour is unchanged. */
-    uint16_t pref = ml->derp_region_override
-                      ? ml->derp_region_override
-                      : (ml->priority_peer_region ? ml->priority_peer_region : ML_DERP_REGION);
+    uint16_t pref = ml->derp_region_override ? ml->derp_region_override
+                                             : (ml->priority_peer_region ? ml->priority_peer_region : ML_DERP_REGION);
     cJSON_AddNumberToObject(netinfo, "PreferredDERP", pref);
     if (ml->stun_nat_checked) {
       cJSON_AddBoolToObject(netinfo, "MappingVariesByDestIP", ml->nat_mapping_varies);
@@ -2174,9 +2172,8 @@ static int do_send_endpoint_update(microlink_t * ml, ml_noise_state_t * noise)
              * A runtime region-lock override is authoritative and wins here so
              * a live lock change (microlink_request_announce) propagates the new
              * region to remote peers WITHOUT a reboot (PS-wedge fix). */
-      uint16_t pref = ml->derp_region_override
-                        ? ml->derp_region_override
-                        : (ml->priority_peer_region ? ml->priority_peer_region : ML_DERP_REGION);
+      uint16_t pref = ml->derp_region_override ? ml->derp_region_override
+                                               : (ml->priority_peer_region ? ml->priority_peer_region : ML_DERP_REGION);
       cJSON_AddNumberToObject(netinfo, "PreferredDERP", pref);
       if (ml->stun_nat_checked) {
         cJSON_AddBoolToObject(netinfo, "MappingVariesByDestIP", ml->nat_mapping_varies);
