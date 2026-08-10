@@ -101,10 +101,35 @@
 
 /* Reply-loss watchdog, per session. If a machine stops replying for longer
  * than this, that link has desynced and won't recover on its own — re-bond
- * that session to re-sync counters. Must exceed the machine heartbeat
- * timeout (1000 ms) plus normal jitter so healthy single-reply drops never
- * trigger it. Other sessions are untouched. */
-#define REBOND_AFTER_MS 1500u
+ * that session to re-sync counters. Other sessions are untouched.
+ *
+ * MUST exceed the machine's heartbeat timeout + jitter, so the remote only
+ * tears the session AFTER machn would itself have dropped the bond — never on
+ * a sub-timeout reply blip. That timeout is `heartbeat_ms × max_missed`
+ * = 400 × 5 = 2000 ms with today's defaults (max_missed raised 3→5 on
+ * 2026-08-04). The old value (1500 ms) was set against the legacy 1000 ms
+ * timeout and was NOT updated with max_missed, so it dropped BELOW the machine
+ * timeout: a ~1.6 s reply lag (e.g. a peer-join X25519/DISCO crypto burst
+ * time-sharing the wg_mgr decrypt task) forced a nuisance rebond even though
+ * machn still held the bond.
+ *
+ * This constant is only the FLOOR. A hard-coded 2500 ms held the invariant
+ * for the 400 ms default alone; the actual threshold is derived per session
+ * from the machine-adopted heartbeat in sess_rebond_after_ms() so any
+ * configured heartbeat keeps the remote's watchdog above the machine's.
+ * The floor also covers the pre-first-reply state (heartbeat not yet
+ * learned). Safety is unaffected — machn's heartbeat timeout remains the
+ * STOP authority; this only governs connectivity re-sync. */
+#define REBOND_AFTER_MS 2500u
+
+/* Missed-heartbeat multiplier in the machine's bond-drop timeout. max_missed
+ * is NOT advertised on the wire (replies carry only heartbeat_timeout), so
+ * this is a hard-coded coupling to machn's MACHN_MAX_MISSED_HEARTBEATS = 5
+ * (machn/main/main.c) — if that constant changes, this one MUST change with
+ * it. Long-term fix: advertise the machine's absolute timeout in the reply
+ * instead of making the remote reconstruct it. */
+#define REBOND_MACHINE_MAX_MISSED 5u
+#define REBOND_JITTER_MARGIN_MS 500u
 
 /* Bond handshake, per session: one BOND in flight at a time; retry after
  * this long without a reply. Long spacing means we never have more than one
@@ -624,12 +649,18 @@ static uint32_t sess_send_period_ms(const pstop_sess_t * s)
   return p;
 }
 
-/* Reply-loss watchdog threshold: replies arrive once per transmit, so the
- * threshold scales with the adopted send period (4 missed replies), floored
- * at the legacy 1500 ms that the full-rate link was validated with. */
+/* Reply-loss watchdog threshold: the machine's bond-drop timeout is
+ * req_hb_ms × max_missed, so derive from the per-session adopted heartbeat
+ * plus jitter margin. This keeps the invariant (the remote tears a session
+ * only AFTER the machine would have dropped the bond) for ANY configured
+ * heartbeat — the previous hard-coded 2500 ms only exceeded the machine
+ * timeout for the 400 ms / max_missed=5 default. The ×5 multiplier is a
+ * hard-coded mirror of machn's MACHN_MAX_MISSED_HEARTBEATS because
+ * max_missed is not on the wire (see REBOND_MACHINE_MAX_MISSED). Floored at
+ * REBOND_AFTER_MS, which also covers req_hb_ms == 0 (no reply adopted yet). */
 static uint64_t sess_rebond_after_ms(const pstop_sess_t * s)
 {
-  uint64_t t = (uint64_t)sess_send_period_ms(s) * 4u;
+  uint64_t t = ((uint64_t)s->req_hb_ms * (uint64_t)REBOND_MACHINE_MAX_MISSED) + REBOND_JITTER_MARGIN_MS;
   return (t < (uint64_t)REBOND_AFTER_MS) ? (uint64_t)REBOND_AFTER_MS : t;
 }
 
@@ -769,14 +800,19 @@ static void sess_drain(pstop_sess_t * s)
 static uint32_t g_sf_txdrv_recovered;
 
 /* Max immediate retries on a TRANSIENT uplink-driver refusal (ERR_IF, errno -1
- * — e.g. USB-NCM all IN NTBs momentarily in-flight). Each retry yields 1 ms
- * (FreeRTOS HZ=1000) so the lower-priority TinyUSB task can complete a bulk-IN
- * transfer and return an NTB to the free list; the resend then succeeds within
- * the SAME 200 ms send tick, so the machine never sees a heartbeat gap. Bounded
- * at 3 (<= 3 ms << the 200 ms period and << the machine's ~1.2 s timeout), and
- * gated on ERR_IF ONLY — a genuinely dead link (route/ENOMEM) still fails on the
- * first attempt, so dead-link detection latency is UNCHANGED. */
-#define PSTOP_TX_RETRY_MAX 3
+ * — e.g. USB-NCM all IN NTBs momentarily in-flight). Each retry yields so the
+ * lower-priority (prio 5, core 1) TinyUSB task can complete a bulk-IN transfer
+ * and return an NTB to the free list; the resend then succeeds within the SAME
+ * send tick, so the machine never sees a heartbeat gap. Raised 3 -> 6 retries
+ * (7 attempts total; 1 ms→2 ms backoff between attempts, ~9 ms worst case —
+ * no delay after the final failure) after a soak at ~70 % core-1 load showed
+ * bursts outrunning the old ~3 ms window (pstop_sf_txdrv=9): at high load the
+ * prio-5 USB task is slow to drain, so a wider window is needed to absorb the
+ * transient. Still ≪ the 200 ms period and ≪ the machine's ~2.0 s timeout
+ * (400 ms × max_missed 5). Gated on ERR_IF ONLY — a genuinely dead link
+ * (route/ENOMEM) still fails on the first attempt, so dead-link detection
+ * latency is UNCHANGED. */
+#define PSTOP_TX_RETRY_MAX 6
 
 static bool sess_sendto(pstop_sess_t * s, const uint8_t * bytes)
 {
@@ -792,7 +828,9 @@ static bool sess_sendto(pstop_sess_t * s, const uint8_t * bytes)
     if (errno != -1) {
       return false; /* not ERR_IF (route / ENOMEM / other): fail fast, never spin */
     }
-    vTaskDelay(1); /* yield 1 ms so the prio-5 USB task can free an IN NTB */
+    if (attempt < PSTOP_TX_RETRY_MAX) { /* no send follows the last failure — don't burn a pointless delay */
+      vTaskDelay((attempt < 3) ? 1 : 2); /* yield so the prio-5 USB task frees an IN NTB; widen as a burst persists */
+    }
   }
   return false; /* still ERR_IF after the bounded retries -> counted as g_sf_txdrv */
 }

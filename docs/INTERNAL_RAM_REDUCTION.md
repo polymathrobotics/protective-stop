@@ -61,13 +61,27 @@ worth risking the OTA/rollback safety chain. Revisit only if a future feature
 re-pressures internal RAM, and then prefer Phase 3 (WiFi) or a proper mark-valid
 decouple over PSRAM-stacking flash-op tasks.
 
-### Phase 3 — biggest reservoir (design decision, deferred)
+### Phase 3 — WiFi static TX trim (2026-08-08) ✅ done (safe half)
 WiFi driver static buffers ≈ **40–50 KB internal, DMA-locked (cannot go to PSRAM)**.
-Options: don't start WiFi when USB-NCM/Ethernet is the live link (lazy-start only for
-the AP config portal); or trim `ESP_WIFI_STATIC_TX_BUFFER_NUM` 16→4–6,
-`STATIC_RX_BUFFER_NUM` 10→6, `RX_BA_WIN` 16→6, TX→dynamic. **Risk:** MOD — WiFi is a
-live STA transport + AP-fallback config portal; this is a product decision, so it's
-deferred out of this pass.
+**Done:** trimmed `ESP_WIFI_STATIC_TX_BUFFER_NUM` **16 → 6** (`sdkconfig.defaults`),
+returning ~16 KB of internal DMA RAM at WiFi-init time (each static TX buffer ≈
+1.6 KB). This is the direct fix for the WiFi-enable OOM panic (WiFi now needs ~16 KB
+less internal, so at ~73 KB free it leaves ~39 KB instead of the ~23 KB that
+crashed); the `dcs_wifi.c WIFI_MIN_INTERNAL_HEAP` guard was re-tuned 90 → 72 KB to
+match. TX buffers do **not** gate the WPA2 EAPOL 4-way handshake, so this is the
+low-risk half.
+- **TX static→dynamic was NOT possible:** `ESP_WIFI_DYNAMIC_TX_BUFFER`
+  `depends on !SPIRAM_TRY_ALLOCATE_WIFI_LWIP`, and we keep WiFi lwIP in PSRAM
+  (a bigger internal win); IDF forces static TX in that mode, so count-trim is the
+  lever.
+- **NOT done (deliberate):** the RX side (`STATIC_RX_BUFFER_NUM`, `RX_BA_WIN`) is
+  left at stock — an earlier over-trim starved the RX ring and broke the EAPOL
+  handshake even at good signal. Revisit only with a WiFi-AP bench to validate
+  association after each RX reduction.
+- **Validation:** builds with `STATIC_TX_BUFFER_NUM=6`; the ~16 KB is realized at
+  `esp_wifi_init` (not at idle, since static WiFi buffers aren't allocated until
+  WiFi starts). Runtime WiFi-fits demo needs a scenario with ≥72 KB free at
+  WiFi-enable (e.g. TLS idle) — pending a WiFi-AP bench.
 
 ## Explicitly NOT touched (safety / hardware constraints)
 - **ml_wg_mgr stack (16 KB)** — THE pstop heartbeat datapath (full WG

@@ -46,6 +46,37 @@ static const char * TAG = "dcs_wifi";
 #define WIFI_BACKOFF_MIN_MS 2000u
 #define WIFI_BACKOFF_MAX_MS 30000u
 
+/* Pre-flight internal-RAM floor for WiFi bring-up. esp_wifi_init + the stock
+ * RX/TX buffers need ~50 KB of INTERNAL (DMA-capable) heap. When that isn't
+ * free — WiFi enabled while the USB-NCM tether stack is resident, and/or the
+ * mbedTLS dynamic buffers are held during a Tailscale bring-up burst — a WiFi
+ * driver allocation aborts INTERNALLY (not a clean ESP_ERR_NO_MEM return) and
+ * panics/reboots the unit (observed: two PANIC resets when WiFi was enabled at
+ * ~73 KB free internal on an eth+USB-resident unit). Refusing up front below
+ * this floor turns that OOM crash into the same safe, retried deferral the
+ * esp_wifi_init-error path already takes. Conservative + tunable: set above the
+ * ~73 KB panic point; reachable once mbedTLS frees its ~50 KB of dynamic
+ * buffers when TLS is idle. Re-tuned 90 KB -> 72 KB after Internal-RAM Phase 3
+ * (2026-08-08) trimmed the WiFi static TX buffers 16 -> 6 (~16 KB less internal
+ * footprint), so WiFi now fits at a lower free-internal level; 72 KB still
+ * leaves a safe post-init margin (init needs ~34 KB after Phase 3) and stays
+ * above the reduced danger zone. */
+#define WIFI_MIN_INTERNAL_HEAP (72u * 1024u)
+
+/* Second floor: LARGEST contiguous internal block. Total-free alone is not
+ * sufficient — the live fleet runs fragmented (observed: 111 KB free internal
+ * but only a 31 KB largest block), so the 72 KB floor can pass while no single
+ * allocation of even modest size can succeed, and the driver aborts internally
+ * exactly as in the total-free shortfall case. The driver blob is closed
+ * source, so the requirement is bounded empirically: with this project's
+ * config (static RX 10 × ~1.6 KB, static TX 6 × ~1.6 KB, ~6.5 KB driver task
+ * stack, DMA descriptor arrays) the largest single internal allocation
+ * esp_wifi_init makes is the ~16 KB static RX-buffer region; 24 KB gives it
+ * ~50 % headroom while staying BELOW the fleet's observed steady-state 31 KB
+ * largest block, so healthy-but-fragmented units still bring WiFi up instead
+ * of deferring forever. Both floors funnel into the same deferred-retry path. */
+#define WIFI_MIN_INTERNAL_BLOCK (24u * 1024u)
+
 static atomic_bool s_enabled = false; /* driver running (gates on_wifi_evt) */
 static atomic_bool s_want_up = false; /* admin intent — survives a NO_MEM   */
 static bool s_inited = false; /* driver + netif created by us */
@@ -216,13 +247,30 @@ static esp_err_t wifi_set_enabled_locked(bool on)
                  * Only nvs_enable is overridden (we use WIFI_STORAGE_RAM). */
         wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
         cfg.nvs_enable = 0;
-        esp_err_t r = esp_wifi_init(&cfg);
+        /* OOM-panic guard: check BOTH internal-RAM floors (total free AND
+         * largest contiguous block — fragmentation can starve the driver even
+         * with plenty of total free) BEFORE esp_wifi_init so a tight-RAM
+         * bring-up defers instead of aborting inside the driver. On a
+         * shortfall we synthesize ESP_ERR_NO_MEM and fall straight into the
+         * existing cleanup + deferred-retry path below (no separate handling). */
+        size_t free_int = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+        size_t block_int = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL);
+        bool floors_ok = (free_int >= WIFI_MIN_INTERNAL_HEAP) && (block_int >= WIFI_MIN_INTERNAL_BLOCK);
+        esp_err_t r = (!floors_ok) ? ESP_ERR_NO_MEM : esp_wifi_init(&cfg);
         if (r != ESP_OK) {
           ESP_LOGE(
             TAG,
-            "esp_wifi_init: %s — internal RAM tight (likely the "
-            "Tailscale bring-up burst); will retry",
-            esp_err_to_name(r));
+            "esp_wifi_init deferred: %s (%s floor: free internal %u B / min %u, "
+            "largest block %u B / min %u) — RAM tight/fragmented (USB-NCM "
+            "resident / Tailscale bring-up burst); will retry",
+            esp_err_to_name(r),
+            (free_int < WIFI_MIN_INTERNAL_HEAP)     ? "total-free"
+            : (block_int < WIFI_MIN_INTERNAL_BLOCK) ? "largest-block"
+                                                    : "driver", /* floors passed; esp_wifi_init itself failed */
+            (unsigned)free_int,
+            (unsigned)WIFI_MIN_INTERNAL_HEAP,
+            (unsigned)block_int,
+            (unsigned)WIFI_MIN_INTERNAL_BLOCK);
           if (s_sta != NULL) {
             esp_netif_destroy_default_wifi(s_sta);
             s_sta = NULL;

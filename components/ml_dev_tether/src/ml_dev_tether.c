@@ -25,6 +25,7 @@
 #include <string.h>
 
 #include "esp_event.h"
+#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_mac.h"
 #include "esp_netif.h"
@@ -82,8 +83,14 @@ static esp_err_t on_usb_rx(void * buffer, uint16_t len, void * ctx)
   esp_err_t r = ESP_OK;
   if (n) {
     /* lwIP takes ownership; we hand it its own buffer so tinyusb can
-         * recycle the original. */
-    void * copy = malloc(len);
+         * recycle the original. Allocate from PSRAM: this copy is filled by a
+         * plain CPU memcpy on the TinyUSB task (never DMA, never ISR — see the
+         * comment above) and consumed on the TCPIP thread, so the flash-cache-
+         * disable hazard does not apply. Keeping it off internal SRAM removes
+         * per-frame internal-heap alloc/free churn from the tether RX hot path
+         * (the device-side USB-NCM path, where internal RAM is scarcest).
+         * netif_l2_free()'s free() handles a PSRAM pointer unchanged. */
+    void * copy = heap_caps_malloc(len, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (!copy) {
       r = ESP_ERR_NO_MEM;
     } else {
