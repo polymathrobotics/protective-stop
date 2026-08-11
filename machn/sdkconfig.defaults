@@ -223,3 +223,11 @@ CONFIG_COMPILER_OPTIMIZATION_ASSERTIONS_ENABLE=y
 # Trim bootloader chatter (was INFO).
 CONFIG_BOOTLOADER_LOG_LEVEL_WARN=y
 CONFIG_LWIP_DHCP_RESTORE_LAST_IP=y
+
+# === machn: relay-feedback (read-back) monitoring gate ===
+# DESCOPED by default (n): a new machine-specific hardware revision + wiring
+# diagram makes the divider feedback voltages unreadable. Relays are still
+# DRIVEN; only the read-back/fault path is compiled out. Reversible: set y to
+# restore feedback on hardware that supports it (re-verify SENSE pins / divider
+# ratios / RELAY_FEEDBACK_MS first). See docs/RELAY_FEEDBACK_DESCOPE.md.
+CONFIG_MACHN_RELAY_FEEDBACK=n

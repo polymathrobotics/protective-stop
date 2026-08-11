@@ -1,0 +1,32 @@
+# SPDX-FileCopyrightText: 2026 Polymath Robotics
+# SPDX-License-Identifier: Apache-2.0
+
+menu "machn (machine node) configuration"
+
+    config MACHN_RELAY_FEEDBACK
+        bool "Enable relay feedback (read-back) monitoring"
+        default n
+        help
+            Enable the machine role's relay-feedback (read-back) monitoring:
+            sampling each stop-circuit relay's switched output through a
+            resistor-divider SENSE input, comparing commanded-vs-observed every
+            comparator tick, raising a self-clearing relay fault on a persistent
+            contradiction, and — after RELAY_FAULT_STOP_TICKS (~1 s) — forcing
+            the robot STOPPED.
+
+            DEFAULT n (DESCOPED). A new machine-specific hardware revision +
+            wiring diagram is incoming on which the divider feedback voltages
+            cannot be read sanely, so the read-back path is compiled out by
+            default. The relay DRIVE path (both coils commanded from each core's
+            own verdict) and the series de-energize-to-safe stop are unaffected
+            by this option and are always built.
+
+            Set to y to restore feedback on hardware that supports it. Before
+            doing so, re-verify the RELAY_A_SENSE / RELAY_B_SENSE pin numbers,
+            the divider ratios / logic levels, and RELAY_FEEDBACK_MS against the
+            new wiring.
+
+            Full rationale, reversal steps, and safety-case impact:
+            docs/RELAY_FEEDBACK_DESCOPE.md.
+
+endmenu

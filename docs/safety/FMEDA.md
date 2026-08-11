@@ -181,7 +181,7 @@ and the Annex A technique tables (comparison / dynamic principles).
 | Dang mode (λ_D FIT) | Diagnostic (implemented) | DC % (band + rationale) | λ_DD | λ_DU | DU ref |
 |---|---|---|---|---|---|
 | MC-1 machine core (20) | `machn` dual-core RX lockstep: both decode+decide, comparator agrees or withholds reply (`main.c:445-463`) | **95 %** — comparison, Annex A Table A.4 (capped by shared-silicon β, §6) | 19 | 1 | DU-3(analogue) |
-| MC-2 relay weld (15) | Per-contact resistor-divider feedback → contradiction ≥ `RELAY_FAULT_STOP_TICKS` (~1 s) forces STOP (`main.c:313-357,486-497`); **series** partner still opens the chain | **90 %** (**STALE — [DESCOPED 2026-08]** relay feedback OFF by default pending new machine HW, REVERSIBLE via `MACHN_RELAY_FEEDBACK_ENABLED`; with feedback removed this DC → **0 %** and λ_DU → **15**, a single weld is latent-to-next-demand. Series de-energize-to-safe stop UNCHANGED. Recompute + sign-off pending — see docs/RELAY_FEEDBACK_DESCOPE.md) — was: Medium; output-feedback + 1oo2 series. **Residual = double-weld** (both contacts, commanded-closed) latent to next demand → proof-test governed | 13.5 (stale) | 1.5 (stale) | FMEA §5 latent weld |
+| MC-2 relay weld (15) | Per-contact resistor-divider feedback → contradiction ≥ `RELAY_FAULT_STOP_TICKS` (~1 s) forces STOP (`main.c:313-357,486-497`); **series** partner still opens the chain | **90 %** (**STALE — [DESCOPED 2026-08]** relay feedback OFF by default pending new machine HW, REVERSIBLE via `CONFIG_MACHN_RELAY_FEEDBACK`; with feedback removed this DC → **0 %** and λ_DU → **15**, a single weld is latent-to-next-demand. Series de-energize-to-safe stop UNCHANGED. Recompute + sign-off pending — see docs/RELAY_FEEDBACK_DESCOPE.md) — was: Medium; output-feedback + 1oo2 series. **Residual = double-weld** (both contacts, commanded-closed) latent to next demand → proof-test governed | 13.5 (stale) | 1.5 (stale) | FMEA §5 latent weld |
 | MC-3 feedback divider (1) | Divider fault shows as a persistent contradiction (self-diagnosing) | **90 %** (**STALE — [DESCOPED 2026-08]** the divider is no longer read; this element drops out of the diagnostic, REVERSIBLE — see docs/RELAY_FEEDBACK_DESCOPE.md) — was: Medium | 0.9 (stale) | 0.1 (stale) | — |
 | MC-4 machine clock frozen (3) | ~~**NONE**~~ **[Reconciled 2026-08-07: clock-freeze guard now landed — SR-H-04/SR-H-04b `clock_guard`, DU-2 CLOSED; the 0 %/3.0 below is the stale pre-mitigation value, recompute pending — see §5 banner]** | **0 %** (stale) — was: whole liveness case rests on one clock (FMEA DU-2) | 0 | 3.0 | **DU-2** |
 | **Machine channel** | | **DC ≈ 86 %** | **33.4** | **5.6** | |
@@ -210,7 +210,7 @@ reason coverage cannot be claimed at 99 %.
 >
 > **[DESCOPE 2026-08 — moves the MACHINE channel the OTHER way.]** Relay
 > feedback monitoring is now **descoped by default** (reversible gate
-> `MACHN_RELAY_FEEDBACK_ENABLED`, see docs/RELAY_FEEDBACK_DESCOPE.md) pending a
+> `CONFIG_MACHN_RELAY_FEEDBACK`, see docs/RELAY_FEEDBACK_DESCOPE.md) pending a
 > new machine hardware revision. Unlike DU-1/DU-2 above, this **lowers** the
 > machine-channel integrity until re-enabled: MC-2 relay-weld DC 90 % → **0 %**
 > (λ_DU 1.5 → 15) and MC-3 (feedback divider) drops out of the diagnostic. The

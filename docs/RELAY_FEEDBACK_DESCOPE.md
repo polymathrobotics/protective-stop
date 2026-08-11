@@ -8,8 +8,8 @@ Date: 2026-08. Scope: **machine role (`machn`) only.** The remote role is
 unaffected.
 
 This document is the single source of truth for the change; the in-code gate
-comment (`machn/main/main.c`, `MACHN_RELAY_FEEDBACK_ENABLED`) and the safety-doc
-banners all point here.
+comment (`machn/main/main.c`, the Kconfig option `CONFIG_MACHN_RELAY_FEEDBACK`)
+and the safety-doc banners all point here.
 
 ---
 
@@ -31,13 +31,15 @@ enabled, the sense inputs would return meaningless levels and manufacture
 spurious relay faults (and, via the ~1 s contradiction rule, spurious STOPs).
 Self-monitoring relays are expected to return on the new hardware, so this is a
 **reversible gate, not a deletion** — the entire feedback implementation is
-retained in-tree under `#if MACHN_RELAY_FEEDBACK_ENABLED`.
+retained in-tree under `#if CONFIG_MACHN_RELAY_FEEDBACK` (Kconfig option,
+default `n`, defined in `machn/main/Kconfig.projbuild` and pinned `n` in
+`machn/sdkconfig.defaults`).
 
 ---
 
 ## 2. What changed (and what did NOT)
 
-### Gated OFF (compiled out when `MACHN_RELAY_FEEDBACK_ENABLED == 0`)
+### Gated OFF (compiled out when `CONFIG_MACHN_RELAY_FEEDBACK` is `n`)
 
 - `relay_gpio_init()` — the `RELAY_A_SENSE` / `RELAY_B_SENSE` GPIOs are no
   longer configured (left untouched for the incoming wiring rework).
@@ -103,10 +105,11 @@ n/a. Until then they see fault=0/stop=0 (benign).
 
 ## 4. How to reverse (re-enable on the new hardware)
 
-1. In `machn/main/main.c`, set the gate to **1**:
-   `#define MACHN_RELAY_FEEDBACK_ENABLED 1`
-   (or define it `1` from the build, e.g. a CMake `target_compile_definitions`
-   / Kconfig if that is preferred later — see the open question in §7).
+1. Enable the Kconfig option **`CONFIG_MACHN_RELAY_FEEDBACK`** — either set
+   `CONFIG_MACHN_RELAY_FEEDBACK=y` in `machn/sdkconfig.defaults` (it is pinned
+   `n` there today), or via `idf.py menuconfig` →
+   *"machn (machine node) configuration"* → *"Enable relay feedback (read-back)
+   monitoring"*. The option is defined in `machn/main/Kconfig.projbuild`.
 2. **Re-verify for the new wiring** before trusting it: the `RELAY_A_SENSE` /
    `RELAY_B_SENSE` pin numbers, the divider ratios / logic levels, and
    `RELAY_FEEDBACK_MS` (the commanded→observed settle window) against the new
@@ -190,17 +193,16 @@ than guessed here.
 
 ---
 
-## 7. Open questions for the safety owner (Ilia)
+## 7. Decisions (resolved by the safety owner, Ilia)
 
-1. **Reversibility mechanism** — implemented as a compile-time
-   `#define MACHN_RELAY_FEEDBACK_ENABLED` (recommended: single-file, no
-   build-system surface, `#ifndef`-guarded so a build flag can still override).
-   Confirm, or switch to a Kconfig `CONFIG_MACHN_RELAY_FEEDBACK` if menuconfig
-   discoverability is preferred.
-2. **Telemetry disposition** — implemented as fixed `0`/OK on the legacy fields
-   **plus** a new `relay_feedback_monitored=0` flag (rationale in §3: a sentinel
-   in the legacy fields would spuriously stop the ROS 2 bridge). Confirm, or
-   drop the new flag for plain fixed-0.
-3. **Safety-doc scope** — implemented as descope banners + an open-items entry
-   now, with the numeric FMEDA recompute deferred. Confirm, or request the full
-   reconciliation in this change.
+1. **Reversibility mechanism** — **Kconfig option `CONFIG_MACHN_RELAY_FEEDBACK`**
+   (default `n`), wired through `machn/main/Kconfig.projbuild` +
+   `machn/sdkconfig.defaults`; the gate is `#if CONFIG_MACHN_RELAY_FEEDBACK`.
+   Re-enabling = set the Kconfig to `y`. (Chosen over a bare compile-time
+   `#define` for menuconfig discoverability.)
+2. **Telemetry disposition** — fixed `0`/OK on the legacy fields **plus** the new
+   `relay_feedback_monitored=0` flag (rationale in §3: a sentinel in the legacy
+   fields would spuriously stop the ROS 2 bridge). Kept as implemented.
+3. **Safety-doc scope** — descope banners + an open-items entry now, with the
+   numeric FMEDA recompute deferred to safety-owner sign-off. Kept as
+   implemented.

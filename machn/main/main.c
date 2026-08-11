@@ -26,12 +26,12 @@
  *     fault indication; safety never depends on it — the series partner
  *     carries the stop.
  *     NOTE (2026-08): relay-feedback monitoring is DESCOPED by default via
- *     the compile-time gate MACHN_RELAY_FEEDBACK_ENABLED (see its definition
- *     below). A new machine-specific hardware revision + wiring diagram is
- *     coming in which the divider feedback voltages cannot be read sanely;
- *     the read-back path is therefore gated OFF (relays are still DRIVEN
- *     exactly as before). Rationale, reversal steps, and safety-case impact:
- *     docs/RELAY_FEEDBACK_DESCOPE.md. Flip the gate to 1 to restore it.
+ *     the Kconfig gate CONFIG_MACHN_RELAY_FEEDBACK (default n; see the gate
+ *     comment below). A new machine-specific hardware revision + wiring
+ *     diagram is coming in which the divider feedback voltages cannot be read
+ *     sanely; the read-back path is therefore gated OFF (relays are still
+ *     DRIVEN exactly as before). Rationale, reversal steps, and safety-case
+ *     impact: docs/RELAY_FEEDBACK_DESCOPE.md. Set the Kconfig to y to restore.
  *
  * pstop_c (certification track) is UNMODIFIED — this file is the shell.
  * Design: docs/MACHINE_ESP32_DESIGN.md. Scaffold status: timing config is
@@ -51,6 +51,7 @@
 #include "esp_task_wdt.h" /* TWDT subscribe/feed for the comparator */
 #include "esp_timer.h"
 #include "microlink.h" /* peer-wanted hook: pin operator remotes past the peer cap */
+#include "sdkconfig.h" /* CONFIG_MACHN_RELAY_FEEDBACK — relay-feedback gate */
 // clang-format off
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -81,12 +82,18 @@ static const char * TAG = "machn";
 #define RELAY_B_SENSE 42 /* divider on relay 2's switched output (feedback; gated, see below) */
 
 /* ========================================================================= *
- *  RELAY FEEDBACK MONITORING — COMPILE-TIME GATE (default: DISABLED)         *
+ *  RELAY FEEDBACK MONITORING — Kconfig GATE (default: DISABLED)              *
  * ------------------------------------------------------------------------- *
- *  Set to 1 to RE-ENABLE relay read-back (feedback) monitoring; 0 disables   *
- *  it. The relay DRIVE path is UNAFFECTED either way — both coils are still  *
- *  commanded from each core's own verdict exactly as before, and the         *
- *  de-energize-to-safe series-relay stop is fully intact.                    *
+ *  Gated by CONFIG_MACHN_RELAY_FEEDBACK (machn/main/Kconfig.projbuild,       *
+ *  default n; pinned to n in machn/sdkconfig.defaults). Set it to y          *
+ *  (menuconfig -> "machn (machine node) configuration", or                   *
+ *  CONFIG_MACHN_RELAY_FEEDBACK=y in sdkconfig.defaults) to RE-ENABLE relay   *
+ *  read-back (feedback) monitoring. When n the macro is undefined, so        *
+ *  `#if CONFIG_MACHN_RELAY_FEEDBACK` evaluates to 0.                         *
+ *                                                                            *
+ *  The relay DRIVE path is UNAFFECTED either way — both coils are still      *
+ *  commanded from each core's own verdict exactly as before, and the        *
+ *  de-energize-to-safe series-relay stop is fully intact.                   *
  *                                                                            *
  *  WHY DISABLED (2026-08): a new machine-specific hardware revision + wiring *
  *  diagram is incoming on which the resistor-divider feedback voltages       *
@@ -95,7 +102,7 @@ static const char * TAG = "machn";
  *  on the new hardware, hence this is a REVERSIBLE gate, not a deletion:     *
  *  the entire feedback implementation is retained below under `#if`.         *
  *                                                                            *
- *  WHAT THE GATE CONTROLS when 0 (feedback OFF):                             *
+ *  WHAT THE GATE CONTROLS when disabled (feedback OFF):                      *
  *    - the RELAY_x_SENSE GPIOs are not configured or read;                   *
  *    - no commanded-vs-observed contradiction is computed;                   *
  *    - no relay-feedback fault is raised and the feedback-driven             *
@@ -104,14 +111,12 @@ static const char * TAG = "machn";
  *      relay_feedback_monitored = 0 flag so consumers can tell "no fault"    *
  *      apart from "not monitored" (see dcs_publish_relay_fault).             *
  *                                                                            *
- *  TO RE-ENABLE on the new hardware: set this to 1 (and re-verify the SENSE  *
- *  pin numbers / divider ratios for the new wiring). No other change needed. *
+ *  TO RE-ENABLE on the new hardware: set CONFIG_MACHN_RELAY_FEEDBACK=y (and  *
+ *  re-verify the SENSE pin numbers / divider ratios for the new wiring). No  *
+ *  other change needed.                                                      *
  *                                                                            *
  *  Full rationale + safety-case impact: docs/RELAY_FEEDBACK_DESCOPE.md       *
  * ========================================================================= */
-#ifndef MACHN_RELAY_FEEDBACK_ENABLED
-  #define MACHN_RELAY_FEEDBACK_ENABLED 0
-#endif
 
 #define RELAY_FEEDBACK_MS 100u /* commanded->observed settle allowance (TBD by part) */
 #define RELAY_FAULT_STOP_TICKS \
@@ -166,11 +171,11 @@ static volatile int g_rx_pending; /* 1 = staged datagram this tick */
  * the feedback gate; the fault counters below exist only for feedback. */
 static volatile int g_relay_cmd[2]; /* last commanded level per channel */
 static uint64_t g_relay_cmd_ms[2]; /* when it was commanded (settle window) */
-#if MACHN_RELAY_FEEDBACK_ENABLED
+#if CONFIG_MACHN_RELAY_FEEDBACK
 static uint32_t g_relay_fault[2]; /* consecutive contradiction ticks */
 static uint32_t g_relay_fault_total;
 static volatile int g_relay_fault_stop; /* persistent-fault stop engaged */
-#endif /* MACHN_RELAY_FEEDBACK_ENABLED */
+#endif /* CONFIG_MACHN_RELAY_FEEDBACK */
 
 /* Live bonded-remote view for the landing page (comparator-owned; read
  * against core 0's instance BETWEEN core windows so it never races the
@@ -360,7 +365,7 @@ static void core_task(void * arg)
     /* Native liveness on this core's own instance/clock. */
     (void)machine_validate_heartbeats(&mc->machine);
 
-#if MACHN_RELAY_FEEDBACK_ENABLED
+#if CONFIG_MACHN_RELAY_FEEDBACK
     /* Persistent relay-fault stop: force STOPPED via the library's public
          * API every tick while the contradiction persists. Replies become
          * STOP, arming gestures cannot complete, and this core's relay drive
@@ -374,7 +379,7 @@ static void core_task(void * arg)
     if (g_relay_fault_stop != 0) {
       machine_stop_robot(&mc->machine);
     }
-#endif /* MACHN_RELAY_FEEDBACK_ENABLED */
+#endif /* CONFIG_MACHN_RELAY_FEEDBACK */
 
     /* This core's verdict drives THIS core's relay, independent of the
          * other core: the series wiring makes any single-core STOP a real
@@ -392,7 +397,7 @@ static void core_task(void * arg)
 
 static void relay_feedback_check(void)
 {
-#if !MACHN_RELAY_FEEDBACK_ENABLED
+#if !CONFIG_MACHN_RELAY_FEEDBACK
   /* Feedback DESCOPED (default). No SENSE read, no fault computation. The
    * commanded coil levels are still published (a DRIVE-path signal, not
    * feedback) so operators can see what the firmware commanded; the observed
@@ -445,7 +450,7 @@ static void relay_feedback_check(void)
      * clearly-labeled reuse until machn-specific state fields land. */
   dcs_publish_estop(0, g_relay_cmd[0] != 0, observed[0] != 0);
   dcs_publish_estop(1, g_relay_cmd[1] != 0, observed[1] != 0);
-#endif /* MACHN_RELAY_FEEDBACK_ENABLED */
+#endif /* CONFIG_MACHN_RELAY_FEEDBACK */
 }
 
 /* Track what the cores commanded this tick (for the feedback window). */
@@ -671,7 +676,7 @@ static void comparator_task(void * arg)
     relay_note_commands();
     relay_feedback_check();
 
-#if MACHN_RELAY_FEEDBACK_ENABLED
+#if CONFIG_MACHN_RELAY_FEEDBACK
     bool fault_now = (g_relay_fault[0] >= RELAY_FAULT_STOP_TICKS) || (g_relay_fault[1] >= RELAY_FAULT_STOP_TICKS);
     if (fault_now && (g_relay_fault_stop == 0)) {
       ESP_LOGE(
@@ -694,7 +699,7 @@ static void comparator_task(void * arg)
      * "no fault" is distinguishable from "not monitored". */
     dcs_publish_relay_fault(0u, 0u, false, /*monitored=*/false);
     dcs_publish_comparator(processed, mismatch, 0u, last_rx_ms, 0);
-#endif /* MACHN_RELAY_FEEDBACK_ENABLED */
+#endif /* CONFIG_MACHN_RELAY_FEEDBACK */
   }
 }
 
@@ -713,12 +718,12 @@ static void relay_gpio_init(void)
   (void)gpio_set_level(RELAY_A_DRIVE, 0);
   (void)gpio_set_level(RELAY_B_DRIVE, 0);
 
-#if MACHN_RELAY_FEEDBACK_ENABLED
+#if CONFIG_MACHN_RELAY_FEEDBACK
   /* SENSE inputs are configured ONLY when relay feedback is enabled. With
    * feedback descoped (default) the RELAY_x_SENSE pads are left untouched —
    * the incoming machine hardware revision reworks this wiring, and the pin
    * numbers/divider ratios must be re-verified before the gate is flipped
-   * back on. See the MACHN_RELAY_FEEDBACK_ENABLED comment block. */
+   * back on. See the CONFIG_MACHN_RELAY_FEEDBACK comment block. */
   gpio_config_t in = {
     .pin_bit_mask = (1ULL << RELAY_A_SENSE) | (1ULL << RELAY_B_SENSE),
     .mode = GPIO_MODE_INPUT,
@@ -727,7 +732,7 @@ static void relay_gpio_init(void)
     .intr_type = GPIO_INTR_DISABLE,
   };
   ESP_ERROR_CHECK(gpio_config(&in));
-#endif /* MACHN_RELAY_FEEDBACK_ENABLED */
+#endif /* CONFIG_MACHN_RELAY_FEEDBACK */
 }
 
 /* microlink "keep this peer past the ML_MAX_PEERS cap" hook.
@@ -831,7 +836,7 @@ void app_main(void)
      * age-out, and applies any deferred Tailscale pause. */
   dcs_support_finalize(&bs);
 
-#if MACHN_RELAY_FEEDBACK_ENABLED
+#if CONFIG_MACHN_RELAY_FEEDBACK
   ESP_LOGI(
     TAG,
     "machn up: dual-core RX lockstep, relays A=%d/%d B=%d/%d (feedback ON)",
@@ -845,5 +850,5 @@ void app_main(void)
     "machn up: dual-core RX lockstep, relay drive A=%d B=%d (feedback DESCOPED — see RELAY_FEEDBACK_DESCOPE.md)",
     RELAY_A_DRIVE,
     RELAY_B_DRIVE);
-#endif /* MACHN_RELAY_FEEDBACK_ENABLED */
+#endif /* CONFIG_MACHN_RELAY_FEEDBACK */
 }

@@ -11,7 +11,7 @@ _Last updated: 2026-08-11 (machine relay-feedback DESCOPE, reversible — see be
 
 > **2026-08-11 — Machine relay-feedback monitoring DESCOPED (reversible), pending new machine HW:**
 > The `machn` relay read-back (feedback) path is now compiled out by default via
-> the gate `MACHN_RELAY_FEEDBACK_ENABLED` (default 0). Reason: a new
+> the Kconfig option `CONFIG_MACHN_RELAY_FEEDBACK` (default `n`). Reason: a new
 > machine-specific hardware revision + wiring diagram is incoming on which the
 > divider feedback voltages cannot be read sanely. Relays are still **driven**
 > unchanged; the series de-energize-to-safe stop (HFT=1) and the l0/l1 dual-core
@@ -32,7 +32,7 @@ _Last updated: 2026-08-11 (machine relay-feedback DESCOPE, reversible — see be
 >   stop circuit (T1, FMEDA §1.2) while feedback is descoped. SG-5 / SR-SYS-05
 >   "diagnosable stuck-on" limb now rests on the integrator element or feedback
 >   restoration.
-> - [ ] **Re-enable on new HW.** Set the gate to 1 and **re-verify** the SENSE pin
+> - [ ] **Re-enable on new HW.** Set `CONFIG_MACHN_RELAY_FEEDBACK=y` and **re-verify** the SENSE pin
 >   numbers, divider ratios, and `RELAY_FEEDBACK_MS` against the new wiring; then
 >   revert these descope banners and re-instate the DC credit.
 > - [ ] **Downstream consumers (follow-up).** `ros2/protective_stop_machine`

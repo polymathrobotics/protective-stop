@@ -48,11 +48,11 @@ transmit only on agreement. The machine inverts it:
 
 > **[DESCOPED 2026-08 — feedback OFF by default, REVERSIBLE.]** The relay
 > **feedback / read-back** described in this section is compiled out by default
-> via `MACHN_RELAY_FEEDBACK_ENABLED` (default 0), pending a new machine hardware
-> revision whose wiring makes the divider voltages unreadable. The relay
-> **drive** (below) and the series de-energize-to-safe stop are unchanged. Flip
-> the gate to 1 to restore feedback. Full detail + safety-case impact:
-> docs/RELAY_FEEDBACK_DESCOPE.md.
+> via the Kconfig option `CONFIG_MACHN_RELAY_FEEDBACK` (default `n`), pending a
+> new machine hardware revision whose wiring makes the divider voltages
+> unreadable. The relay **drive** (below) and the series de-energize-to-safe
+> stop are unchanged. Set the Kconfig to `y` to restore feedback. Full detail +
+> safety-case impact: docs/RELAY_FEEDBACK_DESCOPE.md.
 
 Two opto-isolated relays, contacts **wired in series** in the robot's
 stop circuit — either core alone can break the circuit:
