@@ -3303,28 +3303,28 @@ static void disco_periodic_probes(microlink_t * ml)
           (unsigned)p->relay_retry_count,
           p->hostname,
           (unsigned long long)(iv / 1000u));
-        /* Symmetric-NAT recovery: the CMM + ping-sweep above re-probe endpoints
-         * WE hold, but under symmetric NAT our CMM probe-back is dropped by the
-         * far peer's NAT and our stored endpoints for it may be STALE — steady
-         * state coord updates are OmitPeers=true, so we never re-pull the peer's
-         * current endpoints; only a full re-sync does (why a reboot was the only
-         * fix). After a couple failed rounds, ask coord to reconnect (re-register
-         * + full peer re-fetch), refreshing this peer's endpoints so the NEXT
-         * sweep lands and re-hole-punches. Control-plane only (WG heartbeat/green
-         * untouched); only fires when the path is already relay (no healthy path
-         * to disturb); rate-limited so a persistently-relay peer can't storm. */
+        /* Relay-stuck recovery: the CMM + ping-sweep above re-probe the endpoints
+         * WE hold, but they may be STALE — steady-state coord updates are
+         * OmitPeers=true, so we never re-pull the peer's CURRENT endpoints; only a
+         * full re-sync does (why a reboot was the only fix). The peer's NAT
+         * mapping to us may also have rebound. After the first failed round, ask
+         * coord to reconnect (re-register + full peer re-fetch), refreshing this
+         * peer's endpoints so the NEXT sweep lands and re-hole-punches. NOT gated
+         * on nat_mapping_varies: the stale-endpoint hole is real for ANY relay-
+         * bound safety peer (symmetric NAT just makes it terminal), and the chip's
+         * own symmetric-NAT flag isn't reliably set on the far peer's behalf.
+         * Control-plane only (WG heartbeat/green untouched); only fires when the
+         * path is ALREADY relay (no healthy path to disturb); rate-limited so a
+         * persistently-relay peer can't storm reconnects. */
         if (
-          ml->nat_mapping_varies && p->relay_retry_count >= 1u && ml->coord_cmd_queue != NULL &&
+          p->relay_retry_count >= 1u && ml->coord_cmd_queue != NULL &&
           (s_last_relay_refetch_ms == 0 || now - s_last_relay_refetch_ms >= ML_RELAY_REFETCH_MIN_MS))
         {
           s_last_relay_refetch_ms = now;
           s_diag_relay_refetch_reqs++;
           ml_coord_cmd_t rc = ML_CMD_FORCE_RECONNECT;
           (void)xQueueSend(ml->coord_cmd_queue, &rc, 0);
-          ESP_LOGW(
-            TAG,
-            "relay-stuck symmetric-NAT safety peer %s: coord re-fetch (reconnect) for endpoint refresh",
-            p->hostname);
+          ESP_LOGW(TAG, "relay-stuck safety peer %s: coord re-fetch (reconnect) for endpoint refresh", p->hostname);
         }
       }
     }
