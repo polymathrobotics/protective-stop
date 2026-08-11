@@ -834,6 +834,8 @@ void ml_wg_get_rehome_diag(uint32_t out[6])
  * diag pattern above. Read via /admin/api/monitor. */
 static uint32_t s_diag_relay_retries; /* CMM + forced-sweep rounds fired      */
 static uint32_t s_diag_direct_regains; /* has_direct_path false -> true edges */
+static uint64_t s_last_relay_refetch_ms; /* rate-limit coord re-fetch on relay-stuck symmetric-NAT safety peer */
+static uint32_t s_diag_relay_refetch_reqs; /* coord re-fetch (reconnect) requests issued for endpoint refresh */
 
 /* DISCO observability counters — the 2026-08-09 regains-oscillation root cause
  * rested on CALCULATED probe-table/CMM dynamics; these measure them instead.
@@ -1596,6 +1598,14 @@ static int add_peer(microlink_t * ml, const ml_peer_update_t * update)
       p->endpoints[i].ip = update->endpoints[i].ip;
       p->endpoints[i].port = update->endpoints[i].port;
       p->endpoints[i].is_ipv6 = update->endpoints[i].is_ipv6;
+    }
+    /* Fresh endpoints arrived for an EXISTING relay-bound safety peer (e.g. the
+     * coord re-fetch triggered by the symmetric-NAT relay-stuck recovery): re-arm
+     * the relay-retry sweep to fire on the NEXT tick so we ping the NEW endpoint
+     * immediately instead of waiting out the exponential backoff — re-hole-punch
+     * fast, shrinking the relay window. nonzero-and-in-the-past => fires next tick. */
+    if (existing && !p->has_direct_path && (is_pinned_peer(ml, p->vpn_ip) || is_health_tracked(p->vpn_ip))) {
+      p->relay_retry_next_ms = 1;
     }
   }
 
@@ -3293,6 +3303,29 @@ static void disco_periodic_probes(microlink_t * ml)
           (unsigned)p->relay_retry_count,
           p->hostname,
           (unsigned long long)(iv / 1000u));
+        /* Symmetric-NAT recovery: the CMM + ping-sweep above re-probe endpoints
+         * WE hold, but under symmetric NAT our CMM probe-back is dropped by the
+         * far peer's NAT and our stored endpoints for it may be STALE — steady
+         * state coord updates are OmitPeers=true, so we never re-pull the peer's
+         * current endpoints; only a full re-sync does (why a reboot was the only
+         * fix). After a couple failed rounds, ask coord to reconnect (re-register
+         * + full peer re-fetch), refreshing this peer's endpoints so the NEXT
+         * sweep lands and re-hole-punches. Control-plane only (WG heartbeat/green
+         * untouched); only fires when the path is already relay (no healthy path
+         * to disturb); rate-limited so a persistently-relay peer can't storm. */
+        if (
+          ml->nat_mapping_varies && p->relay_retry_count >= 1u && ml->coord_cmd_queue != NULL &&
+          (s_last_relay_refetch_ms == 0 || now - s_last_relay_refetch_ms >= ML_RELAY_REFETCH_MIN_MS))
+        {
+          s_last_relay_refetch_ms = now;
+          s_diag_relay_refetch_reqs++;
+          ml_coord_cmd_t rc = ML_CMD_FORCE_RECONNECT;
+          (void)xQueueSend(ml->coord_cmd_queue, &rc, 0);
+          ESP_LOGW(
+            TAG,
+            "relay-stuck symmetric-NAT safety peer %s: coord re-fetch (reconnect) for endpoint refresh",
+            p->hostname);
+        }
       }
     }
 

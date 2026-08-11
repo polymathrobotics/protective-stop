@@ -149,6 +149,12 @@ extern "C"
 #define ML_MBB_PROVE_TIMEOUT_MS 30000 /* prove window; >> one 3 s priority disco heartbeat */
 #define ML_MBB_PROVE_STABLE_MS 10000 /* conn must hold `connected` this long (§7 gate a) */
 #define ML_MBB_PROVE_PING_INTERVAL_MS 5000 /* DERP server PING cadence for the weak proof (Q3) */
+/* Prove-race grace: when the target peer is homed on the target region but may
+ * have JUST switched there (autoneg follow moves both ends together), prefer its
+ * end-to-end echo for this long, then also accept a DERP server PONG so a slow
+ * peer echo doesn't spuriously roll back + ban the region. < STABLE so the fall-
+ * back can prove before the commit gate. */
+#define ML_MBB_PROVE_PEER_GRACE_MS 8000
 
 /* §8 anti-thrash damping */
 #define ML_NEG_STABILITY_MS \
@@ -248,6 +254,11 @@ extern "C"
 #define ML_DISCO_RELAY_RETRY_FIRST_MS 5000
 #define ML_DISCO_RELAY_RETRY_MIN_MS 30000
 #define ML_DISCO_RELAY_RETRY_MAX_MS 300000
+/* Min interval between coord re-fetch (reconnect) requests for a symmetric-NAT
+ * safety peer that stays relay-bound. The re-fetch pulls the peer's CURRENT
+ * endpoints (steady-state coord updates are OmitPeers=true and never do), so the
+ * relay-retry ping-sweep can then land and re-hole-punch. Control-plane only. */
+#define ML_RELAY_REFETCH_MIN_MS 90000
 
 /* Bench regression of the second cut (2026-08-09, all 3 devices on the fix
  * build): direct_regains oscillated in bursts (machn 131+ over 90 min) and

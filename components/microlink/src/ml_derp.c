@@ -934,20 +934,35 @@ static void derp_mbb_tick(microlink_t * ml, uint64_t now)
     }
     bool stable = (now - c->connected_at_ms) >= ML_MBB_PROVE_STABLE_MS; /* gate (a) */
     bool proven;
+    bool want_server_ping = false;
     if (s_mbb.prove_peer_on_target) {
-      proven = (c->rx_pkts > s_mbb.prove_base_rx); /* gate (b), strong */
+      proven = (c->rx_pkts > s_mbb.prove_base_rx); /* gate (b), strong: peer echo */
+      /* Prove-race fallback (§7): the peer is homed on the target region but may
+       * have JUST switched there (an autoneg follow moves both ends together) and
+       * not be echoing via this region yet — waiting the full 30 s window for its
+       * echo spuriously rolls back and bans the region 15 min, stranding a split.
+       * After a short grace favouring the strong peer echo, ALSO accept a DERP
+       * server PONG (region reachable). Safe: MBB keeps the old home as a draining
+       * aux and the safety heartbeat rides the region-INDEPENDENT direct path, so
+       * committing on region-reachable never gaps the bond. */
+      if (!proven && (now - s_mbb.prove_started_ms) >= ML_MBB_PROVE_PEER_GRACE_MS) {
+        proven = (c->last_pong_ms >= s_mbb.prove_started_ms);
+        want_server_ping = !proven;
+      }
     } else {
       proven = (c->last_pong_ms >= s_mbb.prove_started_ms); /* gate (b), weak */
-      if (
-        !proven && (s_mbb.last_prove_ping_ms == 0 || (now - s_mbb.last_prove_ping_ms) >= ML_MBB_PROVE_PING_INTERVAL_MS))
-      {
-        /* Client PING (0x12, 8-byte payload) — server answers PONG on the
-         * same conn. Direct write is safe: we ARE the single DERP writer. */
-        uint8_t ping[8];
-        esp_fill_random(ping, sizeof(ping));
-        (void)derp_write_frame(ml, c, DERP_FRAME_PING, ping, sizeof(ping));
-        s_mbb.last_prove_ping_ms = now;
-      }
+      want_server_ping = !proven;
+    }
+    if (
+      want_server_ping &&
+      (s_mbb.last_prove_ping_ms == 0 || (now - s_mbb.last_prove_ping_ms) >= ML_MBB_PROVE_PING_INTERVAL_MS))
+    {
+      /* Client PING (0x12, 8-byte payload) — server answers PONG on the same
+       * conn. Direct write is safe: we ARE the single DERP writer. */
+      uint8_t ping[8];
+      esp_fill_random(ping, sizeof(ping));
+      (void)derp_write_frame(ml, c, DERP_FRAME_PING, ping, sizeof(ping));
+      s_mbb.last_prove_ping_ms = now;
     }
 
     if (stable && proven) {
