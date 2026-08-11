@@ -78,6 +78,10 @@ static const char * TAG = "dcs_ring";
 #define RING_LEDS 16
 #define RING_RES_HZ 10000000 /* 0.1 us per RMT tick (same as dcs_rgb) */
 #define RING_BRIGHTNESS 40 /* per channel; 16 LEDs — visible, low current/glare */
+/* White lights all three channels, so at RING_BRIGHTNESS it reads ~3x brighter
+ * than the single-channel state colours (green/red/blue/amber) — glaring in the
+ * IDLE state. Dim the idle white to 50% so it's comfortable. */
+#define RING_WHITE_BRIGHTNESS (RING_BRIGHTNESS / 2)
 
 #define RING_REFRESH_MS 250 /* re-evaluate state + repaint; also the WS2812 reset gap */
 #define LINK_FRESH_MS 2000u /* no machine reply within this -> not connected (re-bond is 1.5s) */
@@ -415,7 +419,8 @@ static void ring_task(void * arg)
 
     ring_state_t worst = RING_IDLE; /* for transition logging only */
     if (ncfg == 0) {
-      ring_fill(B, B, B); /* white: nothing to connect to */
+      ring_fill(
+        RING_WHITE_BRIGHTNESS, RING_WHITE_BRIGHTNESS, RING_WHITE_BRIGHTNESS); /* white (50%): nothing to connect to */
     } else {
       /* Deepest broken network layer -> amber blink count, shared by every
              * unreachable segment (device-level probes). 3 = no Internet,
