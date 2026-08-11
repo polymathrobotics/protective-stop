@@ -927,11 +927,33 @@ static esp_err_t handler_monitor(httpd_req_t * req)
       }
     }
 
-    /* DERP status */
-    cJSON_AddBoolToObject(json, "derp_connected", ml->derp[0].connected); /* home conn */
+    /* DERP status (home slot is an INDEX since the §7 MBB refactor) */
+    cJSON_AddBoolToObject(json, "derp_connected", ml->derp[ml->derp_home_slot].connected); /* home conn */
+    cJSON_AddNumberToObject(json, "derp_home_slot", ml->derp_home_slot);
     cJSON_AddNumberToObject(json, "derp_home_region", ml->derp_home_region);
     cJSON_AddNumberToObject(json, "derp_region_override", ml->derp_region_override);
     cJSON_AddNumberToObject(json, "derp_effective_home_region", ml_effective_home_region(ml));
+    /* §16 region auto-negotiation telemetry: MBB state machine + damping +
+     * Q2 auto-apply surfacing, so a bench run can observe every §7/§8 path
+     * (commits, rollbacks, proof mode results, suppressed passes, breaker
+     * trips) on a log-less unit. */
+    {
+      microlink_region_autoneg_t an;
+      microlink_get_region_autoneg(ml, &an);
+      cJSON_AddStringToObject(json, "derp_region_source", microlink_region_source_str(an.source));
+      cJSON_AddNumberToObject(json, "derp_region_auto_applied", an.auto_applied_region);
+      cJSON_AddNumberToObject(json, "derp_auto_applies", an.auto_apply_count);
+      cJSON_AddNumberToObject(json, "derp_auto_apply_s", an.last_auto_apply_s);
+      cJSON_AddNumberToObject(json, "mbb_state", an.mbb_state);
+      cJSON_AddNumberToObject(json, "mbb_pending_region", an.mbb_pending_region);
+      cJSON_AddNumberToObject(json, "mbb_commits", an.mbb_commits);
+      cJSON_AddNumberToObject(json, "mbb_rollbacks", an.mbb_rollbacks);
+      cJSON_AddNumberToObject(json, "mbb_proofs_ok", an.mbb_proofs_ok);
+      cJSON_AddNumberToObject(json, "mbb_proofs_failed", an.mbb_proofs_failed);
+      cJSON_AddNumberToObject(json, "neg_damping_suppressed", an.damping_suppressed);
+      cJSON_AddNumberToObject(json, "neg_cooldown_trips", an.cooldown_trips);
+      cJSON_AddNumberToObject(json, "switches_1h", an.switches_1h);
+    }
     /* Home-region-unreachable fallback telemetry (DERP design-review finding):
      * how many times slot 0 fell back off an unreachable home region, or opened
      * a rescue aux for a locked/re-homed dead region. Stays 0 in normal
@@ -949,7 +971,7 @@ static esp_err_t handler_monitor(httpd_req_t * req)
           cJSON_AddNumberToObject(e, "slot", s);
           cJSON_AddNumberToObject(e, "region", ml->derp[s].region_id);
           cJSON_AddBoolToObject(e, "connected", ml->derp[s].connected);
-          cJSON_AddBoolToObject(e, "home", s == 0);
+          cJSON_AddBoolToObject(e, "home", s == ml->derp_home_slot);
           cJSON_AddItemToArray(pool, e);
         }
       }

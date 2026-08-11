@@ -736,6 +736,86 @@ uint16_t microlink_get_derp_region_locked(const microlink_t * ml)
   return ml ? ml->derp_region_override : 0;
 }
 
+/* ============================================================================
+ * DERP region auto-negotiation public surface (design §4.2/§6, Q2 surfacing).
+ * The negotiation itself lives in ml_wg_mgr.c (decision, damping) and
+ * ml_derp.c (MBB execution) — these are just the app-facing hooks.
+ * ========================================================================== */
+
+void microlink_set_primary_machine_cb(microlink_t * ml, microlink_primary_machine_cb_t cb, void * ctx)
+{
+  if (!ml) return;
+  /* ctx before cb: a cross-task reader that observes the new cb pointer must
+   * also observe its ctx (word-sized volatile-ish writes on Xtensa). */
+  ml->primary_cb_ctx = ctx;
+  ml->primary_cb = cb;
+}
+
+void microlink_offer_region_advice(microlink_t * ml, uint16_t region, uint32_t epoch, uint32_t ttl_s)
+{
+  if (!ml || region == 0 || region > 4095 || ttl_s == 0) {
+    return;
+  }
+  /* I3: a stale/replayed advice (fleet DB reload, buggy backend re-serving an
+   * old decision) must be inert — only a strictly increasing epoch is stored. */
+  if (ml->advice_epoch != 0 && epoch <= ml->advice_epoch) {
+    return;
+  }
+  if (ttl_s > 86400u) {
+    ttl_s = 86400u; /* cap: advice must re-earn its place at least daily */
+  }
+  uint32_t now_s = (uint32_t)(ml_get_time_ms() / 1000u);
+  /* Order: region + expiry land before the epoch, so a consumer keying on the
+   * new epoch never reads the old region/expiry pair. */
+  ml->advice_region = region;
+  ml->advice_expires_s = now_s + ttl_s;
+  ml->advice_epoch = epoch;
+  ESP_LOGI(
+    TAG,
+    "Fleet region advice stored: region=%u epoch=%lu ttl=%lus (advisory; gated by lock/machines/damping/proving)",
+    (unsigned)region,
+    (unsigned long)epoch,
+    (unsigned long)ttl_s);
+}
+
+void microlink_get_region_autoneg(microlink_t * ml, microlink_region_autoneg_t * out)
+{
+  if (!out) return;
+  memset(out, 0, sizeof(*out));
+  if (!ml) return;
+  out->source = (ml->derp_region_override != 0) ? (uint8_t)MICROLINK_REGION_SRC_LOCKED : (uint8_t)ml->derp_region_src;
+  out->auto_applied_region = ml->derp_region_auto_applied;
+  out->auto_apply_count = ml->derp_region_auto_applies;
+  out->last_auto_apply_s = ml->derp_region_auto_apply_s;
+  out->mbb_state = ml->mbb_state;
+  out->mbb_pending_region = ml->mbb_target_region;
+  uint32_t md[4] = {0};
+  ml_derp_get_mbb_diag(md);
+  out->mbb_commits = md[0];
+  out->mbb_rollbacks = md[1];
+  out->mbb_proofs_ok = md[2];
+  out->mbb_proofs_failed = md[3];
+  uint32_t nd[3] = {0};
+  ml_wg_get_neg_diag(nd);
+  out->damping_suppressed = nd[0];
+  out->cooldown_trips = nd[1];
+  out->switches_1h = nd[2];
+}
+
+const char * microlink_region_source_str(uint8_t source)
+{
+  switch (source) {
+    case MICROLINK_REGION_SRC_LOCKED:
+      return "locked";
+    case MICROLINK_REGION_SRC_AUTO_PRIMARY:
+      return "auto-primary";
+    case MICROLINK_REGION_SRC_AUTO_FLEET:
+      return "auto-fleet";
+    default:
+      return "auto";
+  }
+}
+
 void microlink_notify_priority_health(microlink_t * ml, bool healthy)
 {
   if (ml) {

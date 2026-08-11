@@ -194,6 +194,94 @@ extern "C"
    *  without guessing. Guards against a repeat of the region-9 (dfw) misroute. */
   uint16_t microlink_get_derp_region_locked(const microlink_t * ml);
 
+  /* ==========================================================================
+ * DERP region auto-negotiation (docs/DERP_REGION_AUTONEGOTIATION_DESIGN.md
+ * §4.2/§6/§7/§8). EXTENSION of the existing single-home + multi-region-relay
+ * + lock machinery: the lock (microlink_get_derp_region_locked) always wins
+ * (I2); with no live safety bond the legacy immediate rehome is kept verbatim
+ * (§6); only a live-bond region change goes through the make-before-break
+ * switch (§7), and every switch is damped (§8).
+ * ========================================================================== */
+
+/** Max machine slots the primary-machine callback can report. Sized above
+ *  DCS_PSTOP_MAX_MACHINES (4) so the app-side table can grow without an ABI
+ *  break here. */
+#define MICROLINK_PRIMARY_MAX_MACHINES 8
+
+  /** Snapshot of the app's machine-slot table, filled by the primary-machine
+ *  callback. microlink derives the DERP re-home target from it (§4.2):
+ *  armed_primary_ip (the LOWEST-index bonded+armed slot — Q1 decision:
+ *  deterministic across reboots, unlike arming history) wins; otherwise the
+ *  first configured slot whose DERP region is already learned; otherwise the
+ *  legacy static priority_peer_ip config. All IPs host byte order, 0 = none. */
+  typedef struct
+  {
+    uint32_t armed_primary_ip; /* lowest bonded+ARMED machine slot; 0 = none armed */
+    uint32_t configured_ips[MICROLINK_PRIMARY_MAX_MACHINES]; /* configured slots, slot order */
+    int configured_count;
+  } microlink_primary_machine_info_t;
+
+  typedef void (*microlink_primary_machine_cb_t)(void * ctx, microlink_primary_machine_info_t * out);
+
+  /**
+ * @brief Register the primary-machine feed for DERP region auto-negotiation.
+ *
+ * Optional; remotes with a machine-slot table register it (dcs_support).
+ * Unset (default — machines, plain builds) preserves today's behavior exactly:
+ * the re-home target is the single configured priority_peer_ip with the
+ * management-server fallback. The callback must be cheap and lock-free (it is
+ * invoked from the wg_mgr task's 3 s self-heal cadence — atomics only).
+ */
+  void microlink_set_primary_machine_cb(microlink_t * ml, microlink_primary_machine_cb_t cb, void * ctx);
+
+  /**
+ * @brief Offer a fleet region advisory (Phase 3 auto-apply, design §6/§13.1).
+ *
+ * Called by the fleet check-in path when the backend response carries a
+ * region_advice object. ADVISORY ONLY (I3): the chip gates it on a strictly
+ * increasing epoch (enforced here), a TTL (expired advice is inert), AUTO mode
+ * (a lock fully disables it), a configured-machine check (a remote with any
+ * machine slot ignores advice — the netmap is fresher and machine-
+ * authoritative), a 30-min chip-side min-apply interval and full §8 damping +
+ * §7 proving. A wrong/malicious advice can at worst waste a few damped,
+ * proof-gated aux TLS handshakes. Safe from any task.
+ */
+  void microlink_offer_region_advice(microlink_t * ml, uint16_t region, uint32_t epoch, uint32_t ttl_s);
+
+  /** Who currently owns the chip's DERP home-region choice (Q2 UI/API surfacing). */
+  typedef enum
+  {
+    MICROLINK_REGION_SRC_AUTO = 0, /* server default / management anchor — no auto-selection applied */
+    MICROLINK_REGION_SRC_LOCKED = 1, /* operator lock (derp_region_override) */
+    MICROLINK_REGION_SRC_AUTO_PRIMARY = 2, /* auto: primary machine's region (§4.2) */
+    MICROLINK_REGION_SRC_AUTO_FLEET = 3, /* auto: fleet region_advice applied (Phase 3) */
+  } microlink_region_source_t;
+
+  /** Auto-negotiation status + telemetry (§16), for /state.json, the UI badge
+ *  and /admin/api/monitor. All counters since boot. */
+  typedef struct
+  {
+    uint8_t source; /* microlink_region_source_t */
+    uint16_t auto_applied_region; /* region last applied by the auto-negotiator (0 = never) */
+    uint32_t auto_apply_count; /* auto region applies (legacy rehomes + MBB commits) */
+    uint32_t last_auto_apply_s; /* uptime seconds of the last auto apply (0 = never) */
+    uint8_t mbb_state; /* 0 IDLE, 1 AUX_OPENING, 2 PROVING */
+    uint16_t mbb_pending_region; /* pending MBB target (0 = none) */
+    uint32_t mbb_commits;
+    uint32_t mbb_rollbacks;
+    uint32_t mbb_proofs_ok;
+    uint32_t mbb_proofs_failed;
+    uint32_t damping_suppressed; /* negotiator passes suppressed by §8 damping */
+    uint32_t cooldown_trips; /* hourly circuit-breaker trips */
+    uint32_t switches_1h; /* committed switches in the rolling hour */
+  } microlink_region_autoneg_t;
+
+  void microlink_get_region_autoneg(microlink_t * ml, microlink_region_autoneg_t * out);
+
+  /** Stable string for microlink_region_source_t:
+ *  "auto" | "locked" | "auto-primary" | "auto-fleet". */
+  const char * microlink_region_source_str(uint8_t source);
+
   /**
  * @brief Report application-level health of the priority-peer link.
  *
