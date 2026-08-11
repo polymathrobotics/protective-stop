@@ -273,7 +273,7 @@ static esp_err_t page_state(httpd_req_t * req)
     "\"gw_rtt_ms\":%lu,\"gw_rtt_max_ms\":%lu,\"gw_ok\":%lu,\"gw_loss\":%lu,"
     "\"inet_down\":%d,\"inet_silent_ms\":%lu,"
     "\"rst_hist\":%s,\"ota_state\":%d,\"pstop_num\":%d,"
-    "\"relay_fault_a\":%lu,\"relay_fault_b\":%lu,\"relay_stop\":%lu,"
+    "\"relay_fault_a\":%lu,\"relay_fault_b\":%lu,\"relay_stop\":%lu,\"relay_feedback_monitored\":%lu,"
     "\"remote_stop_id\":%lu,\"restart_state\":%lu,"
     "\"ring_offset\":%d,\"ring_led1\":%d,\"pstop_machines\":",
     (unsigned long)atomic_load(&g_dcs_core_tick[0]),
@@ -373,6 +373,7 @@ static esp_err_t page_state(httpd_req_t * req)
     (unsigned long)atomic_load(&g_dcs_relay_fault_a),
     (unsigned long)atomic_load(&g_dcs_relay_fault_b),
     (unsigned long)atomic_load(&g_dcs_relay_stop),
+    (unsigned long)atomic_load(&g_dcs_relay_feedback_monitored),
     (unsigned long)atomic_load(&g_dcs_machn_arm_owner),
     (unsigned long)atomic_load(&g_dcs_machn_restart_state),
     (int)dcs_pstop_ring_get_offset(),

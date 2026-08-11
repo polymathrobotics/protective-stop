@@ -239,8 +239,15 @@ extern "C"
  * @brief Publish machine-role relay supervision (consecutive contradiction
  * ticks per channel; stop_active = persistent-fault stop engaged). Shown in
  * /state.json as relay_fault_a / relay_fault_b / relay_stop (0 on remotes).
+ *
+ * @param monitored true when relay feedback (read-back) is actually being
+ * sampled; false when it is descoped/compiled out (machn built with
+ * MACHN_RELAY_FEEDBACK_ENABLED=0). Surfaced as relay_feedback_monitored in
+ * /state.json so consumers can tell "monitored, no fault" (fault=0, stop=0,
+ * monitored=1) apart from "not monitored at all" (fault=0, stop=0,
+ * monitored=0). Remotes never call this, so the field is 0 there too.
  */
-  void dcs_publish_relay_fault(uint32_t fault_a_ticks, uint32_t fault_b_ticks, bool stop_active);
+  void dcs_publish_relay_fault(uint32_t fault_a_ticks, uint32_t fault_b_ticks, bool stop_active, bool monitored);
 
   /**
  * @brief Publish one machine-role bonded-remote entry (slot 0..7); id 0

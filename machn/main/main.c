@@ -25,6 +25,13 @@
  *     commanded-vs-observed contradiction raises a (self-clearing) relay
  *     fault indication; safety never depends on it — the series partner
  *     carries the stop.
+ *     NOTE (2026-08): relay-feedback monitoring is DESCOPED by default via
+ *     the compile-time gate MACHN_RELAY_FEEDBACK_ENABLED (see its definition
+ *     below). A new machine-specific hardware revision + wiring diagram is
+ *     coming in which the divider feedback voltages cannot be read sanely;
+ *     the read-back path is therefore gated OFF (relays are still DRIVEN
+ *     exactly as before). Rationale, reversal steps, and safety-case impact:
+ *     docs/RELAY_FEEDBACK_DESCOPE.md. Flip the gate to 1 to restore it.
  *
  * pstop_c (certification track) is UNMODIFIED — this file is the shell.
  * Design: docs/MACHINE_ESP32_DESIGN.md. Scaffold status: timing config is
@@ -69,9 +76,43 @@ static const char * TAG = "machn";
 
 /* === Relay I/O (reuses the remote's E-stop loop pins) ===================== */
 #define RELAY_A_DRIVE 39 /* core 0 -> relay 1 coil driver */
-#define RELAY_A_SENSE 40 /* divider on relay 1's switched output */
+#define RELAY_A_SENSE 40 /* divider on relay 1's switched output (feedback; gated, see below) */
 #define RELAY_B_DRIVE 41 /* core 1 -> relay 2 coil driver */
-#define RELAY_B_SENSE 42 /* divider on relay 2's switched output */
+#define RELAY_B_SENSE 42 /* divider on relay 2's switched output (feedback; gated, see below) */
+
+/* ========================================================================= *
+ *  RELAY FEEDBACK MONITORING — COMPILE-TIME GATE (default: DISABLED)         *
+ * ------------------------------------------------------------------------- *
+ *  Set to 1 to RE-ENABLE relay read-back (feedback) monitoring; 0 disables   *
+ *  it. The relay DRIVE path is UNAFFECTED either way — both coils are still  *
+ *  commanded from each core's own verdict exactly as before, and the         *
+ *  de-energize-to-safe series-relay stop is fully intact.                    *
+ *                                                                            *
+ *  WHY DISABLED (2026-08): a new machine-specific hardware revision + wiring *
+ *  diagram is incoming on which the resistor-divider feedback voltages       *
+ *  cannot be read sanely, so the read-back would produce meaningless levels  *
+ *  and spurious relay faults. Self-monitoring relays are expected to return  *
+ *  on the new hardware, hence this is a REVERSIBLE gate, not a deletion:     *
+ *  the entire feedback implementation is retained below under `#if`.         *
+ *                                                                            *
+ *  WHAT THE GATE CONTROLS when 0 (feedback OFF):                             *
+ *    - the RELAY_x_SENSE GPIOs are not configured or read;                   *
+ *    - no commanded-vs-observed contradiction is computed;                   *
+ *    - no relay-feedback fault is raised and the feedback-driven             *
+ *      STOP-on-contradiction (machine_stop_robot) is NOT armed;              *
+ *    - telemetry reports relay_fault_a/b = 0, relay_stop = 0 and a new       *
+ *      relay_feedback_monitored = 0 flag so consumers can tell "no fault"    *
+ *      apart from "not monitored" (see dcs_publish_relay_fault).             *
+ *                                                                            *
+ *  TO RE-ENABLE on the new hardware: set this to 1 (and re-verify the SENSE  *
+ *  pin numbers / divider ratios for the new wiring). No other change needed. *
+ *                                                                            *
+ *  Full rationale + safety-case impact: docs/RELAY_FEEDBACK_DESCOPE.md       *
+ * ========================================================================= */
+#ifndef MACHN_RELAY_FEEDBACK_ENABLED
+  #define MACHN_RELAY_FEEDBACK_ENABLED 0
+#endif
+
 #define RELAY_FEEDBACK_MS 100u /* commanded->observed settle allowance (TBD by part) */
 #define RELAY_FAULT_STOP_TICKS \
   10u /* persistent-fault stop: this many CONSECUTIVE contradiction ticks \
@@ -120,12 +161,16 @@ static SemaphoreHandle_t g_done[2];
 static uint8_t g_rx_bytes[PSTOP_MESSAGE_SIZE];
 static volatile int g_rx_pending; /* 1 = staged datagram this tick */
 
-/* Relay command/observe state (comparator-owned). */
+/* Relay command/observe state (comparator-owned). g_relay_cmd[] is part of the
+ * DRIVE path (records what each core commanded) and stays live regardless of
+ * the feedback gate; the fault counters below exist only for feedback. */
 static volatile int g_relay_cmd[2]; /* last commanded level per channel */
 static uint64_t g_relay_cmd_ms[2]; /* when it was commanded (settle window) */
+#if MACHN_RELAY_FEEDBACK_ENABLED
 static uint32_t g_relay_fault[2]; /* consecutive contradiction ticks */
 static uint32_t g_relay_fault_total;
 static volatile int g_relay_fault_stop; /* persistent-fault stop engaged */
+#endif /* MACHN_RELAY_FEEDBACK_ENABLED */
 
 /* Live bonded-remote view for the landing page (comparator-owned; read
  * against core 0's instance BETWEEN core windows so it never races the
@@ -315,15 +360,21 @@ static void core_task(void * arg)
     /* Native liveness on this core's own instance/clock. */
     (void)machine_validate_heartbeats(&mc->machine);
 
+#if MACHN_RELAY_FEEDBACK_ENABLED
     /* Persistent relay-fault stop: force STOPPED via the library's public
          * API every tick while the contradiction persists. Replies become
          * STOP, arming gestures cannot complete, and this core's relay drive
          * follows the STOPPED verdict below. Identical flag on both cores =
          * identical verdicts = no comparator divergence. Clears with the
-         * fault (no latch). */
+         * fault (no latch).
+         * GATED: this is the ONLY point at which relay feedback feeds back
+         * into the safety verdict. With feedback descoped it is compiled out,
+         * so a feedback contradiction can no longer force STOP. The l0/l1
+         * lockstep verdict + series-relay drive below are unchanged. */
     if (g_relay_fault_stop != 0) {
       machine_stop_robot(&mc->machine);
     }
+#endif /* MACHN_RELAY_FEEDBACK_ENABLED */
 
     /* This core's verdict drives THIS core's relay, independent of the
          * other core: the series wiring makes any single-core STOP a real
@@ -341,6 +392,17 @@ static void core_task(void * arg)
 
 static void relay_feedback_check(void)
 {
+#if !MACHN_RELAY_FEEDBACK_ENABLED
+  /* Feedback DESCOPED (default). No SENSE read, no fault computation. The
+   * commanded coil levels are still published (a DRIVE-path signal, not
+   * feedback) so operators can see what the firmware commanded; the observed
+   * half is reported false and flagged not-monitored by the comparator's
+   * dcs_publish_relay_fault(monitored=false) call, so nothing mistakes it for
+   * a live divider reading. See the gate comment and
+   * docs/RELAY_FEEDBACK_DESCOPE.md. */
+  dcs_publish_estop(0, g_relay_cmd[0] != 0, false);
+  dcs_publish_estop(1, g_relay_cmd[1] != 0, false);
+#else
   const gpio_num_t sense[2] = {RELAY_A_SENSE, RELAY_B_SENSE};
   uint64_t t = now_ms();
   /* SERIES-CHAIN expectations (supply -> relay A -> relay B -> load):
@@ -383,6 +445,7 @@ static void relay_feedback_check(void)
      * clearly-labeled reuse until machn-specific state fields land. */
   dcs_publish_estop(0, g_relay_cmd[0] != 0, observed[0] != 0);
   dcs_publish_estop(1, g_relay_cmd[1] != 0, observed[1] != 0);
+#endif /* MACHN_RELAY_FEEDBACK_ENABLED */
 }
 
 /* Track what the cores commanded this tick (for the feedback window). */
@@ -608,6 +671,7 @@ static void comparator_task(void * arg)
     relay_note_commands();
     relay_feedback_check();
 
+#if MACHN_RELAY_FEEDBACK_ENABLED
     bool fault_now = (g_relay_fault[0] >= RELAY_FAULT_STOP_TICKS) || (g_relay_fault[1] >= RELAY_FAULT_STOP_TICKS);
     if (fault_now && (g_relay_fault_stop == 0)) {
       ESP_LOGE(
@@ -619,9 +683,18 @@ static void comparator_task(void * arg)
       ESP_LOGW(TAG, "relay fault cleared — STOP force released (re-arm via remote gesture)");
     }
     g_relay_fault_stop = fault_now ? 1 : 0;
-    dcs_publish_relay_fault(g_relay_fault[0], g_relay_fault[1], fault_now);
+    dcs_publish_relay_fault(g_relay_fault[0], g_relay_fault[1], fault_now, /*monitored=*/true);
 
     dcs_publish_comparator(processed, mismatch, g_relay_fault_total, last_rx_ms, 0);
+#else
+    /* Feedback DESCOPED: no fault is computed and none is forced. Report the
+     * fields as deterministically no-fault (relay_fault_a/b = 0, relay_stop =
+     * 0 so no consumer spuriously stops — the ROS 2 machine bridge derives
+     * need_stop from relay_stop) and flag relay_feedback_monitored = 0 so
+     * "no fault" is distinguishable from "not monitored". */
+    dcs_publish_relay_fault(0u, 0u, false, /*monitored=*/false);
+    dcs_publish_comparator(processed, mismatch, 0u, last_rx_ms, 0);
+#endif /* MACHN_RELAY_FEEDBACK_ENABLED */
   }
 }
 
@@ -640,6 +713,12 @@ static void relay_gpio_init(void)
   (void)gpio_set_level(RELAY_A_DRIVE, 0);
   (void)gpio_set_level(RELAY_B_DRIVE, 0);
 
+#if MACHN_RELAY_FEEDBACK_ENABLED
+  /* SENSE inputs are configured ONLY when relay feedback is enabled. With
+   * feedback descoped (default) the RELAY_x_SENSE pads are left untouched —
+   * the incoming machine hardware revision reworks this wiring, and the pin
+   * numbers/divider ratios must be re-verified before the gate is flipped
+   * back on. See the MACHN_RELAY_FEEDBACK_ENABLED comment block. */
   gpio_config_t in = {
     .pin_bit_mask = (1ULL << RELAY_A_SENSE) | (1ULL << RELAY_B_SENSE),
     .mode = GPIO_MODE_INPUT,
@@ -648,6 +727,7 @@ static void relay_gpio_init(void)
     .intr_type = GPIO_INTR_DISABLE,
   };
   ESP_ERROR_CHECK(gpio_config(&in));
+#endif /* MACHN_RELAY_FEEDBACK_ENABLED */
 }
 
 /* microlink "keep this peer past the ML_MAX_PEERS cap" hook.
@@ -751,11 +831,19 @@ void app_main(void)
      * age-out, and applies any deferred Tailscale pause. */
   dcs_support_finalize(&bs);
 
+#if MACHN_RELAY_FEEDBACK_ENABLED
   ESP_LOGI(
     TAG,
-    "machn up: dual-core RX lockstep, relays A=%d/%d B=%d/%d",
+    "machn up: dual-core RX lockstep, relays A=%d/%d B=%d/%d (feedback ON)",
     RELAY_A_DRIVE,
     RELAY_A_SENSE,
     RELAY_B_DRIVE,
     RELAY_B_SENSE);
+#else
+  ESP_LOGI(
+    TAG,
+    "machn up: dual-core RX lockstep, relay drive A=%d B=%d (feedback DESCOPED — see RELAY_FEEDBACK_DESCOPE.md)",
+    RELAY_A_DRIVE,
+    RELAY_B_DRIVE);
+#endif /* MACHN_RELAY_FEEDBACK_ENABLED */
 }
