@@ -836,6 +836,8 @@ static uint32_t s_diag_relay_retries; /* CMM + forced-sweep rounds fired      */
 static uint32_t s_diag_direct_regains; /* has_direct_path false -> true edges */
 static uint64_t s_last_relay_refetch_ms; /* rate-limit coord re-fetch on relay-stuck symmetric-NAT safety peer */
 static uint32_t s_diag_relay_refetch_reqs; /* coord re-fetch (reconnect) requests issued for endpoint refresh */
+static uint64_t s_last_relay_disco_reset_ms; /* rate-limit the per-peer disco-session reset escalation */
+static uint32_t s_diag_relay_disco_resets; /* per-peer from-scratch disco resets on a relay-stuck safety peer */
 
 /* DISCO observability counters — the 2026-08-09 regains-oscillation root cause
  * rested on CALCULATED probe-table/CMM dynamics; these measure them instead.
@@ -3325,6 +3327,34 @@ static void disco_periodic_probes(microlink_t * ml)
           ml_coord_cmd_t rc = ML_CMD_FORCE_RECONNECT;
           (void)xQueueSend(ml->coord_cmd_queue, &rc, 0);
           ESP_LOGW(TAG, "relay-stuck safety peer %s: coord re-fetch (reconnect) for endpoint refresh", p->hostname);
+        }
+        /* Escalation: the coord re-fetch above refreshes the PEER's endpoints,
+         * but a re-fetch re-ingests an EXISTING peer with disco state PRESERVED
+         * (the !existing guard in ml_wg_apply_peer_update), so we keep re-probing
+         * the stale best_ip that no longer reaches a symmetric-NAT peer whose
+         * mapping rebound — which is why only a reboot recovered direct. After a
+         * few failed rounds, do the disco half of a per-peer "reboot": clear THIS
+         * relay-stuck safety peer's disco session so the next sweep re-runs a
+         * from-scratch hole-punch (fresh CMM + unthrottled ping to the just-
+         * refreshed endpoints). The peer then pings the machine from its LIVE
+         * mapping and the machine's !has_direct_path learn-from-ping adopts it.
+         * best_ip/pong timers are disco candidates only — the WG data path and the
+         * DERP-carried heartbeat are untouched. Gated to a relay-bound safety peer
+         * (no direct path to disturb) and rate-limited. */
+        if (
+          p->relay_retry_count >= 3u &&
+          (s_last_relay_disco_reset_ms == 0 || now - s_last_relay_disco_reset_ms >= ML_RELAY_REFETCH_MIN_MS))
+        {
+          s_last_relay_disco_reset_ms = now;
+          s_diag_relay_disco_resets++;
+          p->best_ip = 0;
+          p->best_port = 0;
+          p->last_ping_sent_ms = 0;
+          p->last_pong_recv_ms = 0;
+          p->last_cmm_sent_ms = 0;
+          p->trust_until_ms = 0;
+          p->relay_retry_next_ms = 1; /* fire the fresh CMM + ping next sweep tick */
+          ESP_LOGW(TAG, "relay-stuck safety peer %s: disco-session reset (from-scratch hole-punch)", p->hostname);
         }
       }
     }
