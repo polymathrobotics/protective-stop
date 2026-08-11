@@ -155,6 +155,10 @@ extern "C"
   extern atomic_uint_fast32_t g_dcs_relay_fault_a;
   extern atomic_uint_fast32_t g_dcs_relay_fault_b;
   extern atomic_uint_fast32_t g_dcs_relay_stop;
+  /* 1 = relay feedback is being sampled; 0 = descoped/not monitored (also the
+   * default on remotes, which never publish). Lets consumers distinguish "no
+   * fault" from "not monitored". */
+  extern atomic_uint_fast32_t g_dcs_relay_feedback_monitored;
 
   /* Machine-role bonded-remote table (all 0 on remotes): per entry the
    * remote's device id (0 = empty), pstop_remote_state_t, ms since last

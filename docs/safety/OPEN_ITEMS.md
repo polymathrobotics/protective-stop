@@ -7,7 +7,40 @@
 what is decided, what is open, and what is next across the safety-analysis +
 code-coverage effort. Newest status at the top of each section.
 
-_Last updated: 2026-08-07 (C-hardening pass — OTA-lineage, USB-NCM, cold-recovery, peer-scaling validated on the deployed build)._
+_Last updated: 2026-08-11 (machine relay-feedback DESCOPE, reversible — see below)._
+
+> **2026-08-11 — Machine relay-feedback monitoring DESCOPED (reversible), pending new machine HW:**
+> The `machn` relay read-back (feedback) path is now compiled out by default via
+> the Kconfig option `CONFIG_MACHN_RELAY_FEEDBACK` (default `n`). Reason: a new
+> machine-specific hardware revision + wiring diagram is incoming on which the
+> divider feedback voltages cannot be read sanely. Relays are still **driven**
+> unchanged; the series de-energize-to-safe stop (HFT=1) and the l0/l1 dual-core
+> lockstep/arming path are **unchanged**. Full writeup, reversal steps, and
+> safety-case impact: **docs/RELAY_FEEDBACK_DESCOPE.md**.
+> - [x] **Descope banners added** to FMEA §5, FMEDA §5 + MC-2/MC-3, HARA H-10/SG-5,
+>   SAFETY_REQUIREMENTS SR-SYS-05 (marked descoped / stale / reversible, pointing
+>   to the descope doc).
+> - [ ] **FMEDA numeric recompute (SAFETY-OWNER SIGN-OFF).** Re-run the machine
+>   channel with MC-2 relay-weld DC 90 % → **0 %** (λ_DU 1.5 → 15) and MC-3
+>   (feedback divider) removed from the diagnostic; the current §5 SFF/PFH
+>   **overstate** machine-channel integrity while feedback is descoped. Do it with
+>   the pending real-part-number firm-up so it is done once.
+> - [ ] **RESIDUAL RISK / integrator action.** A single welded/stuck relay contact
+>   is now **latent (dangerous-undetected)** until the next stop demand (the
+>   partner still stops the robot on demand — stop-on-demand is unaffected).
+>   Recommend the integrator run a **periodic commanded-open proof test** of the
+>   stop circuit (T1, FMEDA §1.2) while feedback is descoped. SG-5 / SR-SYS-05
+>   "diagnosable stuck-on" limb now rests on the integrator element or feedback
+>   restoration.
+> - [ ] **Re-enable on new HW.** Set `CONFIG_MACHN_RELAY_FEEDBACK=y` and **re-verify** the SENSE pin
+>   numbers, divider ratios, and `RELAY_FEEDBACK_MS` against the new wiring; then
+>   revert these descope banners and re-instate the DC credit.
+> - [ ] **Downstream consumers (follow-up).** `ros2/protective_stop_machine`
+>   (`MachineRelayStatus`) and `tools/hil/` can adopt the new
+>   `relay_feedback_monitored` /state.json flag to label relay status n/a; benign
+>   (fault=0/stop=0) until then.
+
+_Prior update: 2026-08-07 (C-hardening pass — OTA-lineage, USB-NCM, cold-recovery, peer-scaling validated on the deployed build)._
 
 > **2026-08-07 — C-hardening pass (OTA / USB-NCM / cold-recovery / peer-scaling), validated on `7867d4b`:**
 > - [x] **OTA wrong-lineage rejection at upload (FIX).** The HTTP-upload OTA path

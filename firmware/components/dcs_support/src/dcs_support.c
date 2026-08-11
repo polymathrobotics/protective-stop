@@ -147,6 +147,7 @@ atomic_uint_fast32_t g_dcs_pstop_rebonds;
 atomic_uint_fast32_t g_dcs_relay_fault_a;
 atomic_uint_fast32_t g_dcs_relay_fault_b;
 atomic_uint_fast32_t g_dcs_relay_stop;
+atomic_uint_fast32_t g_dcs_relay_feedback_monitored;
 atomic_uint_fast32_t g_dcs_machn_arm_owner;
 atomic_uint_fast32_t g_dcs_machn_restart_state;
 atomic_uint_fast32_t g_dcs_machn_r_id[DCS_MACHN_MAX_REMOTES];
@@ -592,11 +593,12 @@ void dcs_publish_comparator(
   atomic_store(&g_dcs_pstop_rtt_ms, rtt_ms);
 }
 
-void dcs_publish_relay_fault(uint32_t fault_a_ticks, uint32_t fault_b_ticks, bool stop_active)
+void dcs_publish_relay_fault(uint32_t fault_a_ticks, uint32_t fault_b_ticks, bool stop_active, bool monitored)
 {
   atomic_store(&g_dcs_relay_fault_a, fault_a_ticks);
   atomic_store(&g_dcs_relay_fault_b, fault_b_ticks);
   atomic_store(&g_dcs_relay_stop, stop_active ? 1u : 0u);
+  atomic_store(&g_dcs_relay_feedback_monitored, monitored ? 1u : 0u);
 }
 
 void dcs_publish_machn_remote(

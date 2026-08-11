@@ -237,7 +237,17 @@ achieved by the *series relay chain on the `machn` device*, not by the app.
   base by deliberate design (never anchored to remote stamp — correct, else a
   silent remote would freeze the watchdog). A frozen local clock is **DU-2**
   with no cross-check.
-- **Relay weld (ESP32 `machn`, hardware-backend actuator).** Two relay contacts
+- **Relay weld (ESP32 `machn`, hardware-backend actuator).**
+  **[DESCOPED 2026-08 — relay feedback OFF by default, pending new machine
+  hardware; REVERSIBLE via `CONFIG_MACHN_RELAY_FEEDBACK`. See
+  docs/RELAY_FEEDBACK_DESCOPE.md.** The series two-relay de-energize-to-safe stop
+  (HFT=1, either contact opens the chain) is UNCHANGED and still safe on demand.
+  What is descoped is the resistor-divider **feedback/diagnosis** below: a single
+  weld is now **latent (dangerous-undetected)** until the next stop demand, and
+  the ~1 s stop-on-contradiction no longer fires. FMEDA MC-2 DC credit is stale
+  pending recompute (§FMEDA). Compensating measure: periodic commanded-open
+  proof test (see the double-weld recommendation at the end of this bullet).]**
+  Two relay contacts
   are **wired in series** in the stop circuit and each core drives its own coil
   from its own verdict (`machn/main/main.c:19-25,65-68`). A single welded
   contact still lets the other open the series chain → load de-energizes (safe).
