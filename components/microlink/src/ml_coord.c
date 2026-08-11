@@ -1292,7 +1292,23 @@ check_removed:
             update->public_key[3],
             update->endpoint_count);
 
-          if (xQueueSend(ml->peer_update_queue, &update, pdMS_TO_TICKS(100)) != pdTRUE) {
+          /* A patch carrying DERPRegion is the ONLY steady-state carrier of a
+           * peer's home region (full re-syncs re-add with region=0; see the
+           * preserve-guard in ml_wg_apply_peer_update). Auto-primary region
+           * follow keys off the cached peers[].derp_region, and nothing
+           * re-fetches it in steady state — so if THIS patch is dropped under a
+           * peer-churn burst, a NAT'd remote is stranded on the stale region
+           * indefinitely while green holds (observed: DUT never followed a
+           * machine 2->9 switch). Give region-bearing patches the same
+           * front-of-queue, long-wait treatment as pinned full-adds so the
+           * region update is never the one dropped; log drops (previously
+           * silent). Coord is not the safety path (120 s watchdog), so the
+           * bounded wait is safe. */
+          bool region_patch = (update->derp_region != 0);
+          BaseType_t psent = region_patch ? xQueueSendToFront(ml->peer_update_queue, &update, pdMS_TO_TICKS(2000))
+                                          : xQueueSend(ml->peer_update_queue, &update, pdMS_TO_TICKS(100));
+          if (psent != pdTRUE) {
+            ESP_LOGW(TAG, "Peer patch queue full, dropping patch (derp_region=%u)", (unsigned)update->derp_region);
             free(update);
           }
         }
