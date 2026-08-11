@@ -33,6 +33,7 @@
 #include "mbedtls/base64.h"
 #include "microlink_internal.h"
 #include "ml_config_httpd.h"
+#include "ml_demote_verdict.h"
 #include "nacl_box.h"
 #include "wireguard.h"
 #include "wireguardif.h"
@@ -849,12 +850,18 @@ static uint32_t s_diag_regains_safety; /* direct regains on SAFETY peers only (p
                                         * or health-tracked) — s_diag_direct_regains
                                         * also counts bulk tailnet peers, which masked
                                         * whether the SAFETY path was the one flapping */
+static uint32_t s_diag_demote_vetoes; /* direct demotes vetoed by fresh direct WG data
+                                       * rx (ml_demote_verdict.h) — counts veto-ticks,
+                                       * so it climbs ~1/s for the duration of a
+                                       * disco-silent-but-data-alive episode */
+static uint64_t s_last_demote_veto_log_ms; /* rate-limit the veto log line */
 
-void ml_wg_get_disco_obs_diag(uint32_t out[3])
+void ml_wg_get_disco_obs_diag(uint32_t out[4])
 {
   out[0] = s_diag_probe_tbl_hw;
   out[1] = s_diag_cmm_rx;
   out[2] = s_diag_regains_safety;
+  out[3] = s_diag_demote_vetoes;
 }
 
 void ml_wg_get_direct_retry_diag(microlink_t * ml, uint32_t out[4])
@@ -3185,7 +3192,37 @@ static void disco_periodic_probes(microlink_t * ml)
     bool lease_expired = p->has_direct_path && now > p->trust_until_ms;
     bool pong_dead = p->has_direct_path && is_priority && p->last_pong_recv_ms != 0 &&
                      now - p->last_pong_recv_ms > ML_DISCO_PRIORITY_PATH_DEAD_MS;
-    if (lease_expired || pong_dead) {
+
+    /* Demote-VERIFICATION (ml_demote_verdict.h): both triggers above rest on
+     * the DISCO side-channel, whose pings can go silent on a jittery uplink
+     * while the WG DATA flow (the 5 Hz safety heartbeat) still arrives on the
+     * direct path. Demoting then tears down a WORKING direct path — for a
+     * symmetric-NAT peer possibly terminally (2026-08-11: only a reboot
+     * re-established it, and the relay fallback is too jittery for the 2 s
+     * pstop timeout in ANY region). Authenticated direct data rx within
+     * ML_DEMOTE_DIRECT_RX_FRESH_MS outranks a missing pong: renew the lease
+     * and hold the path. A truly dead path stops producing direct rx within
+     * the window, and demotion proceeds unchanged. Safety peers only. */
+    u32_t direct_rx_age_ms = 0;
+    bool direct_rx_age_valid =
+      (lease_expired || pong_dead) && is_priority && ml->wg_netif && p->wg_peer_index >= 0 &&
+      wireguardif_peer_direct_rx_age((struct netif *)ml->wg_netif, (u8_t)p->wg_peer_index, &direct_rx_age_ms) == ERR_OK;
+    ml_demote_verdict_t demote = ml_demote_verdict(
+      lease_expired, pong_dead, is_priority, direct_rx_age_valid, direct_rx_age_ms, ML_DEMOTE_DIRECT_RX_FRESH_MS);
+    if (demote == ML_DEMOTE_VETO) {
+      p->trust_until_ms = now + ML_DISCO_TRUST_DURATION_MS;
+      s_diag_demote_vetoes++;
+      if (now - s_last_demote_veto_log_ms > 10000) {
+        s_last_demote_veto_log_ms = now;
+        ESP_LOGW(
+          TAG,
+          "direct demote VETOED for %s: WG data rx %ums ago on direct (disco %s)",
+          p->hostname,
+          (unsigned)direct_rx_age_ms,
+          pong_dead ? "pong-dead" : "lease-expired");
+      }
+    }
+    if (demote == ML_DEMOTE_GO) {
       ESP_LOGI(
         TAG,
         "Direct path to %s %s, reverting to DERP",

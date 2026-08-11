@@ -511,6 +511,12 @@ static void wireguardif_process_data_message(struct wireguard_device *device, st
 					now = wireguard_sys_now();
 					keypair->last_rx = now;
 					peer->last_rx = now;
+					// Direct-path liveness: only a packet with a real outer source
+					// refreshes it (DERP injections arrive as 0.0.0.0 — see
+					// update_peer_addr above, which skips those for the same reason).
+					if (!ip_addr_isany(addr)) {
+						peer->last_direct_rx = now;
+					}
 
 					// Might need to shuffle next key --> current keypair
 					keypair_update(peer, keypair);
@@ -1018,6 +1024,23 @@ err_t wireguardif_peer_is_up(struct netif *netif, u8_t peer_index, ip_addr_t *cu
 		}
 		if (current_port) {
 			*current_port = peer->port;
+		}
+	}
+	return result;
+}
+
+// Age (ms) of the last authenticated data packet received from this peer on
+// the DIRECT UDP path. ERR_VAL when no direct data has ever arrived (fresh
+// peer, or all traffic DERP-relayed). Age is computed against the same
+// wireguard_sys_now() base that stamps it, so callers never mix time bases.
+err_t wireguardif_peer_direct_rx_age(struct netif *netif, u8_t peer_index, u32_t *age_ms) {
+	struct wireguard_peer *peer;
+	err_t result = wireguardif_lookup_peer(netif, peer_index, &peer);
+	if (result == ERR_OK) {
+		if (peer->last_direct_rx == 0) {
+			result = ERR_VAL;
+		} else if (age_ms) {
+			*age_ms = wireguard_sys_now() - peer->last_direct_rx;
 		}
 	}
 	return result;

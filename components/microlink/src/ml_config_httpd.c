@@ -1026,12 +1026,17 @@ static esp_err_t handler_monitor(httpd_req_t * req)
        *                    includes bulk peers; a climbing regains_safety
        *                    with flat direct_relay_bound = the safety path
        *                    itself is oscillating. */
-      extern void ml_wg_get_disco_obs_diag(uint32_t[3]);
-      uint32_t od[3] = {0};
+      extern void ml_wg_get_disco_obs_diag(uint32_t[4]);
+      uint32_t od[4] = {0};
       ml_wg_get_disco_obs_diag(od);
       cJSON_AddNumberToObject(json, "probe_tbl_hw", od[0]);
       cJSON_AddNumberToObject(json, "cmm_rx_count", od[1]);
       cJSON_AddNumberToObject(json, "regains_safety", od[2]);
+      /* demote_vetoes: direct demotes vetoed because authenticated WG data was
+       * still arriving on the direct path (disco-silent-but-data-alive). Climbs
+       * ~1/s while such an episode lasts — a nonzero value means the demote-
+       * verification saved a working direct path from a spurious teardown. */
+      cJSON_AddNumberToObject(json, "demote_vetoes", od[3]);
 
       /* Same-LAN direct-path diagnostics for the priority peer (the machine):
        * what LAN endpoint we advertise, which candidate endpoints we hold for

@@ -134,6 +134,11 @@ err_t wireguardif_disconnect(struct netif *netif, u8_t peer_index);
 // Is the given peer "up"? A peer is up if it has a valid session key it can communicate with
 err_t wireguardif_peer_is_up(struct netif *netif, u8_t peer_index, ip_addr_t *current_ip, u16_t *current_port);
 
+// Age (ms) of the last authenticated data packet received from this peer on
+// the DIRECT UDP path (DERP-relayed rx never refreshes it). ERR_VAL when no
+// direct data has ever arrived. Used for direct-path demote-verification.
+err_t wireguardif_peer_direct_rx_age(struct netif *netif, u8_t peer_index, u32_t *age_ms);
+
 // Register a DERP relay output callback for peers without direct endpoints
 // This callback is invoked when a WireGuard packet needs to be sent to a peer
 // that has no direct IP endpoint (ip is 0.0.0.0 or port is 0)

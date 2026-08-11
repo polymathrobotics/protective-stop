@@ -229,6 +229,15 @@ extern "C"
                                                 * safety impact (dual-path send
                                                 * keeps the uplink gapless anyway). */
 #define ML_DISCO_PRIORITY_REPROBE_MS 5000
+/* Demote-verification (see ml_demote_verdict.h): the PATH_DEAD_MS comment
+ * above assumes a spurious demotion is harmless ("re-probe restores direct
+ * in ~5s"). 2026-08-11 falsified that for a symmetric-NAT/USB-NCM safety
+ * peer: demotion tears down a direct path that may never re-establish
+ * without a reboot, onto a relay too jittery for the 2 s pstop timeout. So:
+ * hold the demote while authenticated WG data still arrives DIRECT within
+ * this window. 1000 ms = 5 missed 5 Hz heartbeats — a path that quiet is
+ * genuinely suspect and may demote; a working path refreshes every 200 ms. */
+#define ML_DEMOTE_DIRECT_RX_FRESH_MS 1000
 
 /* Relay-bound direct-path re-establishment (net/derp-direct-reestablish):
  * while a SAFETY peer's session is alive but riding DERP, periodically re-run
