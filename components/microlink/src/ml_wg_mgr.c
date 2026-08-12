@@ -888,8 +888,8 @@ void ml_wg_get_session_diag(microlink_t * ml, uint32_t out[5])
   out[0] = s_diag_ep_learn_evictions;
   out[1] = 0; /* max safety keypair age ms (0xFFFFFFFF = a peer has NO valid key) */
   out[2] = 0; /* max safety handshake-init TX age ms */
-  out[3] = 0; /* max safety RELAY-rx worst gap ms (edge-flush receive-stall metric) */
-  out[4] = 0; /* max safety RELAY-rx age ms (ms since last relayed frame) */
+  out[3] = 0; /* max safety worst any-path rx gap ms (edge-flush receive-stall metric) */
+  out[4] = 0; /* reserved */
   if (ml == NULL || ml->wg_netif == NULL) return;
   for (int i = 0; i < ml->peer_count; i++) {
     ml_peer_t * p = &ml->peers[i];
@@ -905,13 +905,12 @@ void ml_wg_get_session_diag(microlink_t * ml, uint32_t out[5])
       if (kp_age > out[1]) out[1] = kp_age;
       if (init_age != 0xFFFFFFFFu && init_age > out[2]) out[2] = init_age;
     }
-    u32_t relay_age = 0, relay_worst = 0;
+    u32_t rx_worst = 0;
     if (
-      wireguardif_peer_relay_rx_diag((struct netif *)ml->wg_netif, (u8_t)p->wg_peer_index, &relay_age, &relay_worst) ==
-      ERR_OK)
+      wireguardif_peer_worst_rx_gap((struct netif *)ml->wg_netif, (u8_t)p->wg_peer_index, &rx_worst) == ERR_OK &&
+      rx_worst > out[3])
     {
-      if (relay_worst > out[3]) out[3] = relay_worst;
-      if (relay_age > out[4]) out[4] = relay_age;
+      out[3] = rx_worst;
     }
   }
 }

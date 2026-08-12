@@ -1081,12 +1081,10 @@ static esp_err_t handler_monitor(httpd_req_t * req)
       cJSON_AddNumberToObject(json, "ep_learn_evictions", sd[0]);
       cJSON_AddNumberToObject(json, "wg_kp_age_max", sd[1]);
       cJSON_AddNumberToObject(json, "wg_init_age_max", sd[2]);
-      /* Machn receive-stall metric (2026-08-12 edge-flush): worst gap between
-       * relayed heartbeat frames from a safety peer. ~2000 during a flush =
-       * a ~2s inbound relay stall on THIS node = the disarm cause, even with
-       * derp_reconnects=0 (home DERP conn never dropped). */
-      cJSON_AddNumberToObject(json, "relay_rx_worst_gap_ms", sd[3]);
-      cJSON_AddNumberToObject(json, "relay_rx_age_ms", sd[4]);
+      /* Receive-stall metric (2026-08-12 edge-flush): worst any-path inter-frame
+       * rx gap from a safety peer. ~2000 during a flush = a ~2s inbound stall on
+       * THIS node = the disarm cause, even with derp_reconnects=0. */
+      cJSON_AddNumberToObject(json, "rx_worst_gap_ms", sd[3]);
 
       /* Same-LAN direct-path diagnostics for the priority peer (the machine):
        * what LAN endpoint we advertise, which candidate endpoints we hold for

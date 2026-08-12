@@ -144,9 +144,9 @@ err_t wireguardif_peer_direct_rx_age(struct netif *netif, u8_t peer_index, u32_t
 // actively-used safety session (hitless re-ingest).
 err_t wireguardif_peer_rx_age(struct netif *netif, u8_t peer_index, u32_t *age_ms);
 
-// Relay-path rx diagnostics (edge-flush machn receive-stall metric):
-// age since last relayed frame + worst inter-frame relay gap ever seen.
-err_t wireguardif_peer_relay_rx_diag(struct netif *netif, u8_t peer_index, u32_t *age_ms, u32_t *worst_gap_ms);
+// Worst inter-frame rx gap (any path) — the "received nothing" window that
+// maps to a heartbeat-timeout disarm (edge-flush receive-stall metric).
+err_t wireguardif_peer_worst_rx_gap(struct netif *netif, u8_t peer_index, u32_t *worst_gap_ms);
 
 // Session-key freshness: curr-keypair age (0xFFFFFFFF = none valid, sends are
 // failing ENOTCONN) and last handshake-initiation TX age. Diag + the
