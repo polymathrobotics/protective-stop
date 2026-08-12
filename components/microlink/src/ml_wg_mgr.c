@@ -772,6 +772,21 @@ int ml_wg_collect_safety_regions(microlink_t * ml, uint16_t * out, int max)
   return n;
 }
 
+/* True when any safety peer's heartbeat is currently riding a DERP relay
+ * (no direct path). While this holds, a blocking aux-DERP TLS handshake in
+ * the DERP I/O loop would stall the home-rx poll and gap that relayed
+ * heartbeat (2026-08-12 edge-flush disarm) — the caller defers it. */
+bool ml_wg_any_safety_relay_bound(microlink_t * ml)
+{
+  if (ml == NULL) return false;
+  for (int i = 0; i < ml->peer_count; i++) {
+    ml_peer_t * p = &ml->peers[i];
+    if (!p->active || p->has_direct_path) continue;
+    if (is_pinned_peer(ml, p->vpn_ip) || is_health_tracked(p->vpn_ip)) return true;
+  }
+  return false;
+}
+
 /* Diagnostic: report the DERP region the chip has LEARNED for the management and
  * priority peers (0 = not learned yet). Distinguishes "never learned the server's
  * region -> re-home can't fire" from "learned but re-home/DERP-connect stuck".

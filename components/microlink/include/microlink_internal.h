@@ -931,6 +931,7 @@ extern "C"
    * `max` region ids into `out`, returns the count. Used by the DERP task to
    * decide which auxiliary pool connections to open. */
   int ml_wg_collect_safety_regions(microlink_t * ml, uint16_t * out, int max);
+  bool ml_wg_any_safety_relay_bound(microlink_t * ml);
   /* Diagnostic predicates: does this peer feed collect_safety_regions? */
   bool ml_wg_is_pinned_peer(microlink_t * ml, uint32_t vpn_ip);
   bool ml_wg_is_health_tracked(uint32_t vpn_ip);

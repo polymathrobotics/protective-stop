@@ -1066,6 +1066,11 @@ static esp_err_t handler_monitor(httpd_req_t * req)
       cJSON_AddNumberToObject(json, "wg_tx_no_valid_keys", wireguardif_tx_no_valid_keys);
       extern uint32_t ml_derp_get_route_fallbacks(void);
       cJSON_AddNumberToObject(json, "derp_route_fallbacks", ml_derp_get_route_fallbacks());
+      /* aux_deferred: blocking aux-DERP connects skipped while a safety peer was
+       * relay-bound, to keep the ~2s TLS handshake from stalling home-rx (the
+       * edge-flush disarm fix). Climbs during a flush window; green should hold. */
+      extern uint32_t ml_derp_get_aux_deferred(void);
+      cJSON_AddNumberToObject(json, "aux_connect_deferred", ml_derp_get_aux_deferred());
       /* Home-DERP reconnect speed (edge-flush fix): worst < ~1500ms confirms
        * the relay is back inside the 2s pstop timeout so green rides it
        * through a firewall connection-table flush. */

@@ -569,6 +569,16 @@ uint32_t ml_derp_get_route_fallbacks(void)
   return s_diag_route_home_fallbacks;
 }
 
+/* Aux DERP connects deferred to protect home-rx while a safety peer is
+ * relay-bound (2026-08-12 edge-flush fix). Nonzero = the guard is holding the
+ * standby rebuild so a blocking TLS handshake can't gap the relayed heartbeat. */
+static uint32_t s_diag_aux_connect_deferred;
+
+uint32_t ml_derp_get_aux_deferred(void)
+{
+  return s_diag_aux_connect_deferred;
+}
+
 /* Home-DERP reconnect telemetry (2026-08-12 edge-flush fix). reconnects =
  * count of successful RST/EOF-triggered home reconnects; last/worst =
  * wall-clock ms from RST detection to reconnected. worst < ~1500 confirms the
@@ -685,6 +695,21 @@ static void derp_manage_aux(microlink_t * ml, uint16_t eff_home, int aux_burst[]
    *    inbound path) for tens of seconds → nuisance STOP risk. We attempt one
    *    region and return; the rest are picked up on the next task iteration,
    *    AFTER home connect/drain/read have run again. (Adversarial review 2026-08-04.) */
+
+  /* Home-rx protection (2026-08-12 edge-flush disarm): the one-connect-per-call
+   * cap above bounds N back-to-back connects, but a SINGLE ~2s aux TLS handshake
+   * still stalls the loop, delaying the next home-rx poll — so machn stops
+   * PROCESSING a safety peer's relayed heartbeat for the handshake duration and
+   * disarms (home conn never even dropped). So: while any safety peer's
+   * heartbeat is riding a relay (no direct path), DEFER the blocking aux connect
+   * entirely. Home carries the heartbeat; the standby is redundancy we rebuild
+   * once the peer is direct again. Trade-off: no warm standby / delayed MBB
+   * pre-warm while relay-bound — acceptable, safety > standby readiness. Reaping
+   * above already ran (non-blocking). */
+  if (ml_wg_any_safety_relay_bound(ml)) {
+    s_diag_aux_connect_deferred++;
+    return;
+  }
   for (int w = 0; w < nwant; w++) {
     uint16_t rid = want[w];
     bool served = false;
