@@ -187,6 +187,11 @@ struct wireguard_peer {
 	// direct data is first-class liveness evidence for the direct path —
 	// consumed by wireguardif_peer_direct_rx_age() for demote-verification.
 	uint32_t last_direct_rx;
+	// last_rx of a RELAY-path (DERP-injected) data packet + the worst gap
+	// between consecutive relay-rx frames — the machn inbound-relay-stall
+	// metric (2026-08-12 edge-flush investigation).
+	uint32_t last_relay_rx;
+	uint32_t worst_relay_rx_gap;
 
 	// We set this flag on RX/TX of packets if we think that we should initiate a new handshake
 	bool send_handshake;

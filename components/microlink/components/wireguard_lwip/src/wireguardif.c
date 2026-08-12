@@ -528,6 +528,19 @@ static void wireguardif_process_data_message(struct wireguard_device *device, st
 					// update_peer_addr above, which skips those for the same reason).
 					if (!ip_addr_isany(addr)) {
 						peer->last_direct_rx = now;
+					} else {
+						// RELAY-path rx (DERP-injected, source 0.0.0.0). Track the
+						// worst inter-frame gap: this is exactly "how long did we go
+						// without receiving this peer's RELAYED heartbeat" — the
+						// machn receive-stall metric for the edge-flush investigation
+						// (2026-08-12). A ~2s worst gap during a flush localizes the
+						// disarm to machn's inbound relay path, independent of whether
+						// its DERP TCP conn ever tore down (it may not have).
+						if (peer->last_relay_rx != 0) {
+							uint32_t gap = now - peer->last_relay_rx;
+							if (gap > peer->worst_relay_rx_gap) peer->worst_relay_rx_gap = gap;
+						}
+						peer->last_relay_rx = now;
 					}
 
 					// Might need to shuffle next key --> current keypair
@@ -1091,6 +1104,25 @@ err_t wireguardif_peer_direct_rx_age(struct netif *netif, u8_t peer_index, u32_t
 			result = ERR_VAL;
 		} else if (age_ms) {
 			*age_ms = wireguard_sys_now() - peer->last_direct_rx;
+		}
+	}
+	return result;
+}
+
+// Relay-path (DERP-injected) rx diagnostics for the edge-flush machn
+// receive-stall investigation: *age_ms = ms since last relayed frame from
+// this peer, *worst_gap_ms = worst inter-frame gap ever seen. ERR_VAL when no
+// relayed data has arrived. A worst_gap ~2000 during a flush = a ~2s inbound
+// relay stall on THIS node (the disarm cause) even if the DERP conn stayed up.
+err_t wireguardif_peer_relay_rx_diag(struct netif *netif, u8_t peer_index, u32_t *age_ms, u32_t *worst_gap_ms) {
+	struct wireguard_peer *peer;
+	err_t result = wireguardif_lookup_peer(netif, peer_index, &peer);
+	if (result == ERR_OK) {
+		if (worst_gap_ms) *worst_gap_ms = peer->worst_relay_rx_gap;
+		if (peer->last_relay_rx == 0) {
+			result = ERR_VAL;
+		} else if (age_ms) {
+			*age_ms = wireguard_sys_now() - peer->last_relay_rx;
 		}
 	}
 	return result;
