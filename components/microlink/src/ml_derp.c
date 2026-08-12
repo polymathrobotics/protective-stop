@@ -556,6 +556,19 @@ esp_err_t ml_derp_queue_send(microlink_t * ml, const uint8_t * dest_key, const u
  * safety peer's frame is NEVER silently dropped (the caller logs the
  * fallback). Returns NULL only when the chosen conn is down (nothing can
  * carry it this pass). */
+/* Frames stamped for a non-home region that had NO connected aux conn and
+ * fell back to the HOME conn. A DERP server only delivers to clients
+ * connected to IT — so unless the destination peer also sits on our home
+ * region, every one of these frames is silently eaten server-side ("does not
+ * know about peer"). This is the black-hole that starves WG rekeys after a
+ * region switch when a peer-region record is stale (run-20/21 forensics). */
+static uint32_t s_diag_route_home_fallbacks;
+
+uint32_t ml_derp_get_route_fallbacks(void)
+{
+  return s_diag_route_home_fallbacks;
+}
+
 static ml_derp_conn_t * derp_route_conn(microlink_t * ml, uint16_t region_id, uint16_t eff_home)
 {
   int hs = ml->derp_home_slot;
@@ -567,6 +580,7 @@ static ml_derp_conn_t * derp_route_conn(microlink_t * ml, uint16_t region_id, ui
         return &ml->derp[s];
       }
     }
+    s_diag_route_home_fallbacks++;
   }
   return home->connected ? home : NULL;
 }

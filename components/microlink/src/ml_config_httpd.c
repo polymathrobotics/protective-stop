@@ -1053,6 +1053,26 @@ static esp_err_t handler_monitor(httpd_req_t * req)
       cJSON_AddNumberToObject(json, "remove_vetoes", rg[3]);
       cJSON_AddNumberToObject(json, "evict_safety_skips", rg[4]);
 
+      /* WG session health (run-20/21 ENOTCONN forensics). The failure
+       * signature to watch: wg_kp_age_max climbing past 120000 (rekey
+       * starving) -> wg_tx_keypair_expired increments (session died) ->
+       * wg_tx_no_valid_keys climbing (every send now ENOTCONN). Correlate
+       * with derp_route_fallbacks (handshake frames black-holed to a DERP
+       * conn the peer isn't on) and ep_learn_evictions (the symmetric-NAT
+       * table wedge being absorbed instead of going terminal). */
+      extern volatile uint32_t wireguardif_tx_keypair_expired;
+      extern volatile uint32_t wireguardif_tx_no_valid_keys;
+      cJSON_AddNumberToObject(json, "wg_tx_keypair_expired", wireguardif_tx_keypair_expired);
+      cJSON_AddNumberToObject(json, "wg_tx_no_valid_keys", wireguardif_tx_no_valid_keys);
+      extern uint32_t ml_derp_get_route_fallbacks(void);
+      cJSON_AddNumberToObject(json, "derp_route_fallbacks", ml_derp_get_route_fallbacks());
+      extern void ml_wg_get_session_diag(microlink_t *, uint32_t[3]);
+      uint32_t sd[3] = {0};
+      ml_wg_get_session_diag(ml, sd);
+      cJSON_AddNumberToObject(json, "ep_learn_evictions", sd[0]);
+      cJSON_AddNumberToObject(json, "wg_kp_age_max", sd[1]);
+      cJSON_AddNumberToObject(json, "wg_init_age_max", sd[2]);
+
       /* Same-LAN direct-path diagnostics for the priority peer (the machine):
        * what LAN endpoint we advertise, which candidate endpoints we hold for
        * the machine, and which one (if any) we selected as the direct path.

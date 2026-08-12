@@ -837,8 +837,10 @@ static uint32_t s_diag_relay_retries; /* CMM + forced-sweep rounds fired      */
 static uint32_t s_diag_direct_regains; /* has_direct_path false -> true edges */
 static uint64_t s_last_relay_refetch_ms; /* rate-limit coord re-fetch on relay-stuck symmetric-NAT safety peer */
 static uint32_t s_diag_relay_refetch_reqs; /* coord re-fetch (reconnect) requests issued for endpoint refresh */
-static uint64_t s_last_relay_disco_reset_ms; /* rate-limit the per-peer disco-session reset escalation */
-static uint32_t s_diag_relay_disco_resets; /* per-peer from-scratch disco resets on a relay-stuck safety peer */
+static uint32_t s_diag_relay_disco_resets; /* per-peer from-scratch disco resets on a relay-stuck safety peer
+                                            * (v2: rate-limited per-peer via p->disco_reset_next_ms) */
+static uint32_t s_diag_ep_learn_evictions; /* learn-from-ping ring-evictions on a full endpoint table —
+                                            * nonzero = the B-1 wedge trigger occurred and was absorbed */
 
 /* DISCO observability counters — the 2026-08-09 regains-oscillation root cause
  * rested on CALCULATED probe-table/CMM dynamics; these measure them instead.
@@ -875,6 +877,34 @@ void ml_wg_get_reingest_diag(uint32_t out[5])
   out[2] = s_diag_peer_removes;
   out[3] = s_diag_remove_vetoes;
   out[4] = s_diag_evict_safety_skips;
+}
+
+/* WG session-health diag (run-20/21 ENOTCONN forensics): learn-evictions +
+ * the WORST safety-peer keypair/init ages. wg_kp_age_max steadily ~<120000
+ * (rekey cadence) = healthy; climbing past 120000 = a rekey is starving; a
+ * green drop then follows ~60 s later when REJECT_AFTER_TIME kills the key. */
+void ml_wg_get_session_diag(microlink_t * ml, uint32_t out[3])
+{
+  out[0] = s_diag_ep_learn_evictions;
+  out[1] = 0; /* max safety keypair age ms (0xFFFFFFFF = a peer has NO valid key) */
+  out[2] = 0; /* max safety handshake-init TX age ms */
+  if (ml == NULL || ml->wg_netif == NULL) return;
+  for (int i = 0; i < ml->peer_count; i++) {
+    ml_peer_t * p = &ml->peers[i];
+    if (!p->active || p->wg_peer_index < 0) continue;
+    bool safety =
+      (ml->config.priority_peer_ip != 0 && p->vpn_ip == ml->config.priority_peer_ip) || is_health_tracked(p->vpn_ip);
+    if (!safety) continue;
+    u32_t kp_age = 0, init_age = 0;
+    if (
+      wireguardif_peer_handshake_age((struct netif *)ml->wg_netif, (u8_t)p->wg_peer_index, &kp_age, &init_age) !=
+      ERR_OK)
+    {
+      continue;
+    }
+    if (kp_age > out[1]) out[1] = kp_age;
+    if (init_age != 0xFFFFFFFFu && init_age > out[2]) out[2] = init_age;
+  }
 }
 
 /* True when tearing down this peer's WG session must be deferred: it is a
@@ -1170,6 +1200,41 @@ static void neg_note_auto_apply(microlink_t * ml, uint16_t region, uint8_t src, 
  *               than MBB for boot/cold recovery; behavior identical to today.
  *   live bond — §7 MBB only (I1: the bond is never dropped by a switch),
  *               gated by every §8 damping guard. */
+/* True while any safety peer's WG session is missing its keypair or a rekey
+ * is overdue with initiations actively firing. A region switch in that window
+ * re-routes the DERP leg the handshake needs (silent home-conn fallback +
+ * old-home reap, audit §1c) — the second-transition trigger behind both
+ * run-20/21 green drops (dwell expiry at T+10min, keypair death at T+~14min).
+ * Freezing the negotiator here costs only switch latency, never safety. */
+static bool safety_rekey_inflight(microlink_t * ml)
+{
+  if (!ml->wg_netif) return false;
+  for (int i = 0; i < ml->peer_count; i++) {
+    ml_peer_t * p = &ml->peers[i];
+    if (!p->active || p->wg_peer_index < 0) continue;
+    bool safety =
+      (ml->config.priority_peer_ip != 0 && p->vpn_ip == ml->config.priority_peer_ip) || is_health_tracked(p->vpn_ip);
+    if (!safety) continue;
+    u32_t kp_age = 0, init_age = 0;
+    if (
+      wireguardif_peer_handshake_age((struct netif *)ml->wg_netif, (u8_t)p->wg_peer_index, &kp_age, &init_age) !=
+      ERR_OK)
+    {
+      continue;
+    }
+    if (kp_age == 0xFFFFFFFFu) {
+      /* No valid keypair: freeze only if we're actively trying to handshake
+       * (a never-connected passive peer must not pin the negotiator). */
+      if (init_age != 0xFFFFFFFFu && init_age < 30000u) return true;
+      continue;
+    }
+    /* Keypair older than REKEY_AFTER_TIME (120 s, wireguard.h) with a recent
+     * initiation = a rekey is in flight and not completing. */
+    if (kp_age > 120000u && init_age < 30000u) return true;
+  }
+  return false;
+}
+
 static void neg_apply_target(microlink_t * ml, uint16_t target, uint8_t src)
 {
   uint64_t now = ml_get_time_ms();
@@ -1232,6 +1297,13 @@ static void neg_apply_target(microlink_t * ml, uint16_t target, uint8_t src)
 
   /* ---- live bond: §8 damping gates, then request the §7 MBB switch ---- */
   if (neg_region_banned(target, now)) {
+    s_neg_damping_suppressed++;
+    return;
+  }
+  if (safety_rekey_inflight(ml)) {
+    /* Never start a region transition while a safety session's handshake is
+     * struggling — the switch would re-route the very DERP leg the rekey
+     * needs (run-20/21 trigger). Re-evaluated next tick; costs latency only. */
     s_neg_damping_suppressed++;
     return;
   }
@@ -2242,12 +2314,36 @@ static void process_disco_ping(
         break;
       }
     }
-    if (!known && p->endpoint_count < ML_MAX_ENDPOINTS) {
-      p->endpoints[p->endpoint_count].ip = pkt->src_ip;
-      p->endpoints[p->endpoint_count].port = pkt->src_port;
-      p->endpoints[p->endpoint_count].is_ipv6 = false;
-      p->endpoint_count++;
-      ESP_LOGI(TAG, "Learned candidate endpoint for %s from inbound direct ping", p->hostname);
+    if (!known) {
+      if (p->endpoint_count < ML_MAX_ENDPOINTS) {
+        p->endpoints[p->endpoint_count].ip = pkt->src_ip;
+        p->endpoints[p->endpoint_count].port = pkt->src_port;
+        p->endpoints[p->endpoint_count].is_ipv6 = false;
+        p->endpoint_count++;
+        ESP_LOGI(TAG, "Learned candidate endpoint for %s from inbound direct ping", p->hostname);
+      } else {
+        /* Ring-evict (run-20/21 finding B-1): the append-only learn silently
+         * dropped the candidate when the 8-slot table was full — and a
+         * symmetric NAT mints a new dead candidate per rebind, so the table
+         * WILL fill, after which the ONE live mapping a rebooted peer
+         * presents (the source of this very ping) could never be stored.
+         * Terminal, reboot-surviving wedge on the machine side (only a
+         * machine reboot cleared it: NVS persists 2 endpoints). Overwrite
+         * the last two slots round-robin — coord-delivered endpoints live at
+         * the front and are replaced wholesale by coord updates anyway. */
+        int slot = ML_MAX_ENDPOINTS - 2 + (p->learn_evict_next & 1u);
+        p->learn_evict_next++;
+        p->endpoints[slot].ip = pkt->src_ip;
+        p->endpoints[slot].port = pkt->src_port;
+        p->endpoints[slot].is_ipv6 = false;
+        s_diag_ep_learn_evictions++;
+        ESP_LOGW(
+          TAG,
+          "Endpoint table full for %s: ring-evicted slot %d for learned candidate (evictions=%u)",
+          p->hostname,
+          slot,
+          (unsigned)s_diag_ep_learn_evictions);
+      }
     }
     disco_send_ping_to_peer(ml, peer_idx, true);
   }
@@ -3257,6 +3353,16 @@ static void disco_periodic_probes(microlink_t * ml)
                             * safety-peer treatment: 3 s disco heartbeats (which also keep
                             * the path RTT sample fresh on BOTH ends) + pong watchdog. */
 
+    /* EVERY safety peer gets the DERP data+handshake mirror (dual_path) — it
+     * was priority-peer-only, so the MACHINE's TX leg to its remotes (data
+     * replies AND rekey handshakes, wireguardif_peer_output) was direct-only
+     * and could die silently; a starved rekey then surfaces as ENOTCONN
+     * 180 s later (run-20/21 audit §1b). Reconciled here (idempotent flag
+     * write) because health-tracking can register after peer add. */
+    if (is_priority && ml->wg_netif && p->wg_peer_index >= 0) {
+      wireguardif_set_dual_path((struct netif *)ml->wg_netif, (u8_t)p->wg_peer_index, true);
+    }
+
     /* Direct-path health. Two triggers:
          *  - trust-lease expiry (all peers, the original behaviour), and
          *  - pong-recency watchdog (priority peer only): liveness is what
@@ -3284,18 +3390,26 @@ static void disco_periodic_probes(microlink_t * ml)
       wireguardif_peer_direct_rx_age((struct netif *)ml->wg_netif, (u8_t)p->wg_peer_index, &direct_rx_age_ms) == ERR_OK;
     ml_demote_verdict_t demote = ml_demote_verdict(
       lease_expired, pong_dead, is_priority, direct_rx_age_valid, direct_rx_age_ms, ML_DEMOTE_DIRECT_RX_FRESH_MS);
+    /* Veto-streak cap (audited a175361 hazard): the veto's evidence is
+     * RX-only and can pin a TX-dead path. Past the cap, fail over to DERP.
+     * Streak resets whenever the trigger clears or a demote executes. */
+    demote = ml_demote_verdict_capped(demote, p->demote_veto_ticks, ML_DEMOTE_VETO_MAX_TICKS);
     if (demote == ML_DEMOTE_VETO) {
+      p->demote_veto_ticks++;
       p->trust_until_ms = now + ML_DISCO_TRUST_DURATION_MS;
       s_diag_demote_vetoes++;
       if (now - s_last_demote_veto_log_ms > 10000) {
         s_last_demote_veto_log_ms = now;
         ESP_LOGW(
           TAG,
-          "direct demote VETOED for %s: WG data rx %ums ago on direct (disco %s)",
+          "direct demote VETOED for %s: WG data rx %ums ago on direct (disco %s, streak %u)",
           p->hostname,
           (unsigned)direct_rx_age_ms,
-          pong_dead ? "pong-dead" : "lease-expired");
+          pong_dead ? "pong-dead" : "lease-expired",
+          (unsigned)p->demote_veto_ticks);
       }
+    } else {
+      p->demote_veto_ticks = 0;
     }
     if (demote == ML_DEMOTE_GO) {
       ESP_LOGI(
@@ -3453,20 +3567,26 @@ static void disco_periodic_probes(microlink_t * ml)
          * best_ip/pong timers are disco candidates only — the WG data path and the
          * DERP-carried heartbeat are untouched. Gated to a relay-bound safety peer
          * (no direct path to disturb) and rate-limited. */
-        if (
-          p->relay_retry_count >= 3u &&
-          (s_last_relay_disco_reset_ms == 0 || now - s_last_relay_disco_reset_ms >= ML_RELAY_REFETCH_MIN_MS))
-        {
-          s_last_relay_disco_reset_ms = now;
+        /* v2 (audit of 38fca7d): rate limit is PER-PEER (the global stamp let
+         * two stuck peers starve each other), best_ip/best_port are KEPT (the
+         * last-proven endpoint is "typically the ONLY reachable candidate" —
+         * wiping it destroyed a recovery vector when the peer's mapping had
+         * NOT rebound), and the hard-NAT flap backoff is cleared so the
+         * re-punch can actually probe. Ping/pong/CMM timers still reset so
+         * the next sweep runs unthrottled from scratch. */
+        if (p->relay_retry_count >= 3u && (p->disco_reset_next_ms == 0 || now >= p->disco_reset_next_ms)) {
+          p->disco_reset_next_ms = now + ML_RELAY_REFETCH_MIN_MS;
           s_diag_relay_disco_resets++;
-          p->best_ip = 0;
-          p->best_port = 0;
           p->last_ping_sent_ms = 0;
           p->last_pong_recv_ms = 0;
           p->last_cmm_sent_ms = 0;
           p->trust_until_ms = 0;
+          p->direct_backoff_until = 0;
           p->relay_retry_next_ms = 1; /* fire the fresh CMM + ping next sweep tick */
-          ESP_LOGW(TAG, "relay-stuck safety peer %s: disco-session reset (from-scratch hole-punch)", p->hostname);
+          ESP_LOGW(
+            TAG,
+            "relay-stuck safety peer %s: disco-session reset v2 (timers+backoff cleared, best_ip kept)",
+            p->hostname);
         }
       }
     }

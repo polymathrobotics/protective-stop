@@ -45,6 +45,18 @@ static inline ml_demote_verdict_t ml_demote_verdict(
   return ML_DEMOTE_GO;
 }
 
+/* Veto-streak cap (audited a175361 hazard): the veto's evidence is RX-only —
+ * it can pin a path whose TX leg is dead. A veto that persists for max_ticks
+ * consecutive ticks (~1 s apart) means disco has been durably silent while
+ * data flows; past the cap the verdict degrades to GO so the peer fails over
+ * to DERP + re-probe instead of being pinned indefinitely. */
+static inline ml_demote_verdict_t ml_demote_verdict_capped(
+  ml_demote_verdict_t verdict, uint32_t veto_streak_ticks, uint32_t max_ticks)
+{
+  if (verdict == ML_DEMOTE_VETO && veto_streak_ticks >= max_ticks) return ML_DEMOTE_GO;
+  return verdict;
+}
+
 /* Hitless re-ingest (2026-08-11 green drop, run-20): a coord/netmap event
  * (re-sync, re-key retire, REMOVE, cap-evict) must never invalidate a WG
  * session that is actively passing authenticated safety data — an immediate

@@ -144,6 +144,16 @@ err_t wireguardif_peer_direct_rx_age(struct netif *netif, u8_t peer_index, u32_t
 // actively-used safety session (hitless re-ingest).
 err_t wireguardif_peer_rx_age(struct netif *netif, u8_t peer_index, u32_t *age_ms);
 
+// Session-key freshness: curr-keypair age (0xFFFFFFFF = none valid, sends are
+// failing ENOTCONN) and last handshake-initiation TX age. Diag + the
+// negotiator's rekey-in-flight freeze.
+err_t wireguardif_peer_handshake_age(struct netif *netif, u8_t peer_index, u32_t *keypair_age_ms, u32_t *init_tx_age_ms);
+
+// TX failures by cause: keypair expired (rekey starved past REJECT_AFTER_TIME)
+// vs no-valid-keys (every such send surfaces as ENOTCONN/errno 128).
+extern volatile uint32_t wireguardif_tx_keypair_expired;
+extern volatile uint32_t wireguardif_tx_no_valid_keys;
+
 // Register a DERP relay output callback for peers without direct endpoints
 // This callback is invoked when a WireGuard packet needs to be sent to a peer
 // that has no direct IP endpoint (ip is 0.0.0.0 or port is 0)

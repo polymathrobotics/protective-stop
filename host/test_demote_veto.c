@@ -68,6 +68,17 @@ int main(void)
   CHECK(!ml_teardown_veto(true, false, 0, TFRESH), "no rx ever -> teardown proceeds");
   CHECK(!ml_teardown_veto(false, true, 0, TFRESH), "bulk peer -> teardown proceeds");
 
+  /* Veto-streak cap: RX-only evidence must not pin a path indefinitely.
+   * Below the cap the veto stands; at/past the cap it degrades to GO.
+   * NONE and GO verdicts pass through untouched at any streak. */
+  const uint32_t CAP = 10;
+  CHECK(ml_demote_verdict_capped(ML_DEMOTE_VETO, 0, CAP) == ML_DEMOTE_VETO, "streak 0 -> veto stands");
+  CHECK(ml_demote_verdict_capped(ML_DEMOTE_VETO, CAP - 1, CAP) == ML_DEMOTE_VETO, "streak cap-1 -> veto stands");
+  CHECK(ml_demote_verdict_capped(ML_DEMOTE_VETO, CAP, CAP) == ML_DEMOTE_GO, "streak == cap -> GO");
+  CHECK(ml_demote_verdict_capped(ML_DEMOTE_VETO, CAP + 5, CAP) == ML_DEMOTE_GO, "streak past cap -> GO");
+  CHECK(ml_demote_verdict_capped(ML_DEMOTE_NONE, CAP + 5, CAP) == ML_DEMOTE_NONE, "NONE unaffected by streak");
+  CHECK(ml_demote_verdict_capped(ML_DEMOTE_GO, 0, CAP) == ML_DEMOTE_GO, "GO unaffected by streak");
+
   printf("test_demote_veto: %d checks, %d failures\n", g_checks, g_fails);
   return g_fails == 0 ? 0 : 1;
 }

@@ -79,6 +79,11 @@ volatile int wg_verbose_logging = 0;
 // network wedge from userspace. Count failures here so /state.json can surface
 // the symptom instead of leaving it invisible.
 volatile uint32_t wireguardif_pbuf_alloc_fails = 0;
+// TX failures by cause (run-20/21 ENOTCONN forensics — see wireguardif_output_to_peer):
+// keypair_expired = session hit REJECT_AFTER_TIME (rekey starved ~60 s prior);
+// no_valid_keys   = subsequent sends with no session at all (surface as errno 128).
+volatile uint32_t wireguardif_tx_keypair_expired = 0;
+volatile uint32_t wireguardif_tx_no_valid_keys = 0;
 
 #define WIREGUARDIF_TIMER_MSECS 400
 
@@ -348,11 +353,18 @@ static err_t wireguardif_output_to_peer(struct netif *netif, struct pbuf *q, con
 			}
 		} else {
 			// key has expired...
+			// Diag (run-20/21 ENOTCONN forensics): this exit means the session
+			// aged past REJECT_AFTER_TIME with no successful rekey — i.e. the
+			// handshake leg has been failing for ~REJECT-REKEY = 60 s already.
+			wireguardif_tx_keypair_expired++;
 			keypair_destroy(keypair);
 			result = ERR_CONN;
 		}
 	} else {
 		// No valid keys!
+		// Diag: every send in this state surfaces to the app as ENOTCONN
+		// (errno 128) — the "peer-present-but-no-keypair" signature.
+		wireguardif_tx_no_valid_keys++;
 		result = ERR_CONN;
 	}
 	return result;
@@ -1024,6 +1036,27 @@ err_t wireguardif_peer_is_up(struct netif *netif, u8_t peer_index, ip_addr_t *cu
 		}
 		if (current_port) {
 			*current_port = peer->port;
+		}
+	}
+	return result;
+}
+
+// Session-key freshness for this peer (run-20/21 ENOTCONN forensics):
+// *keypair_age_ms  = age of curr_keypair (0xFFFFFFFF when no valid keypair —
+//                    sends are failing ENOTCONN right now);
+// *init_tx_age_ms  = age of our last handshake-initiation TX (0xFFFFFFFF when
+//                    never sent). keypair_age > REKEY_AFTER_TIME (120 s) with
+//                    a recent init_tx = a rekey is IN FLIGHT and failing.
+err_t wireguardif_peer_handshake_age(struct netif *netif, u8_t peer_index, u32_t *keypair_age_ms, u32_t *init_tx_age_ms) {
+	struct wireguard_peer *peer;
+	err_t result = wireguardif_lookup_peer(netif, peer_index, &peer);
+	if (result == ERR_OK) {
+		uint32_t now = wireguard_sys_now();
+		if (keypair_age_ms) {
+			*keypair_age_ms = peer->curr_keypair.valid ? (now - peer->curr_keypair.keypair_millis) : 0xFFFFFFFFu;
+		}
+		if (init_tx_age_ms) {
+			*init_tx_age_ms = (peer->last_initiation_tx != 0) ? (now - peer->last_initiation_tx) : 0xFFFFFFFFu;
 		}
 	}
 	return result;
