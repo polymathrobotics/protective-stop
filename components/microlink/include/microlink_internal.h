@@ -238,6 +238,15 @@ extern "C"
  * this window. 1000 ms = 5 missed 5 Hz heartbeats — a path that quiet is
  * genuinely suspect and may demote; a working path refreshes every 200 ms. */
 #define ML_DEMOTE_DIRECT_RX_FRESH_MS 1000
+/* Hitless re-ingest (run-20 green drop, 2026-08-11): a coord/netmap teardown
+ * (re-key retire, REMOVE) of a safety peer is VETOED while the WG session
+ * shows authenticated data rx (any path) within this window — an immediate
+ * wireguardif_remove_peer makes heartbeat sends fail ENOTCONN until a fresh
+ * handshake, and >2 s of that is a machine STOP. 2000 ms = the pstop
+ * heartbeat timeout: data within it means the safety bond is alive by
+ * definition. A genuine re-key/removal goes stale within seconds (the old
+ * key stops authenticating) and applies on the next update. */
+#define ML_TEARDOWN_RX_FRESH_MS 2000
 
 /* Relay-bound direct-path re-establishment (net/derp-direct-reestablish):
  * while a SAFETY peer's session is alive but riding DERP, periodically re-run

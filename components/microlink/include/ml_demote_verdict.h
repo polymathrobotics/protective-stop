@@ -44,3 +44,22 @@ static inline ml_demote_verdict_t ml_demote_verdict(
   if (is_safety_peer && direct_rx_age_valid && direct_rx_age_ms <= fresh_ms) return ML_DEMOTE_VETO;
   return ML_DEMOTE_GO;
 }
+
+/* Hitless re-ingest (2026-08-11 green drop, run-20): a coord/netmap event
+ * (re-sync, re-key retire, REMOVE, cap-evict) must never invalidate a WG
+ * session that is actively passing authenticated safety data — an immediate
+ * wireguardif_remove_peer makes the 5 Hz heartbeat sends fail ENOTCONN until
+ * a fresh handshake lands, and >2 s of that is a machine STOP. Same principle
+ * as the demote verdict above, one layer up: authenticated data rx within
+ * fresh_ms outranks a control-plane teardown signal. A GENUINE re-key or
+ * removal goes stale within seconds (the old key stops authenticating), so
+ * deferring costs one update cycle; vetoing a working session saves the bond.
+ * Safety peers only — bulk tailnet peers keep the plain teardown behavior. */
+static inline bool ml_teardown_veto(
+  bool is_safety_peer,
+  bool rx_age_valid, /* false = no authenticated data rx ever recorded */
+  uint32_t rx_age_ms, /* age of last authenticated data rx, ANY path */
+  uint32_t fresh_ms)
+{
+  return is_safety_peer && rx_age_valid && rx_age_ms <= fresh_ms;
+}

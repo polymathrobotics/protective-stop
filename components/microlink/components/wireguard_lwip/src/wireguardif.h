@@ -139,6 +139,11 @@ err_t wireguardif_peer_is_up(struct netif *netif, u8_t peer_index, ip_addr_t *cu
 // direct data has ever arrived. Used for direct-path demote-verification.
 err_t wireguardif_peer_direct_rx_age(struct netif *netif, u8_t peer_index, u32_t *age_ms);
 
+// Age (ms) of the last authenticated data packet received on ANY path.
+// ERR_VAL when none ever. Used to veto control-plane teardowns of an
+// actively-used safety session (hitless re-ingest).
+err_t wireguardif_peer_rx_age(struct netif *netif, u8_t peer_index, u32_t *age_ms);
+
 // Register a DERP relay output callback for peers without direct endpoints
 // This callback is invoked when a WireGuard packet needs to be sent to a peer
 // that has no direct IP endpoint (ip is 0.0.0.0 or port is 0)

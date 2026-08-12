@@ -856,6 +856,43 @@ static uint32_t s_diag_demote_vetoes; /* direct demotes vetoed by fresh direct W
                                        * disco-silent-but-data-alive episode */
 static uint64_t s_last_demote_veto_log_ms; /* rate-limit the veto log line */
 
+/* Hitless re-ingest counters (run-20 green drop, 2026-08-11): the three WG
+ * session-teardown paths (re-key retire, coord REMOVE, cap-evict) were
+ * log-only, so the ENOTCONN green-drop forensics could not tell WHICH fired.
+ * Counters-not-logs, read via /admin/api/monitor. The *_vetoes counters mark
+ * teardowns of an ACTIVELY-USED safety session that were deferred instead
+ * (ml_teardown_veto): nonzero = the guard saved a live safety bond. */
+static uint32_t s_diag_rekey_retires; /* stale-entry retires on a key change    */
+static uint32_t s_diag_rekey_retire_vetoes; /* ... vetoed: session still live   */
+static uint32_t s_diag_peer_removes; /* coord ML_PEER_REMOVE teardowns applied  */
+static uint32_t s_diag_remove_vetoes; /* ... vetoed: session still live         */
+static uint32_t s_diag_evict_safety_skips; /* LRU evict skipped a safety peer   */
+
+void ml_wg_get_reingest_diag(uint32_t out[5])
+{
+  out[0] = s_diag_rekey_retires;
+  out[1] = s_diag_rekey_retire_vetoes;
+  out[2] = s_diag_peer_removes;
+  out[3] = s_diag_remove_vetoes;
+  out[4] = s_diag_evict_safety_skips;
+}
+
+/* True when tearing down this peer's WG session must be deferred: it is a
+ * SAFETY peer (priority/health-tracked) and its session shows authenticated
+ * data rx within ML_TEARDOWN_RX_FRESH_MS — i.e. the 5 Hz safety heartbeat is
+ * flowing RIGHT NOW and a wireguardif_remove_peer would fail those sends
+ * ENOTCONN until a fresh handshake (>2 s = machine STOP). See
+ * ml_demote_verdict.h for the invariant argument. */
+static bool teardown_vetoed(microlink_t * ml, uint32_t vpn_ip, int wg_peer_index)
+{
+  bool is_safety =
+    (ml->config.priority_peer_ip != 0 && vpn_ip == ml->config.priority_peer_ip) || is_health_tracked(vpn_ip);
+  u32_t age_ms = 0;
+  bool valid = ml->wg_netif && wg_peer_index >= 0 &&
+               wireguardif_peer_rx_age((struct netif *)ml->wg_netif, (u8_t)wg_peer_index, &age_ms) == ERR_OK;
+  return ml_teardown_veto(is_safety, valid, age_ms, ML_TEARDOWN_RX_FRESH_MS);
+}
+
 void ml_wg_get_disco_obs_diag(uint32_t out[4])
 {
   out[0] = s_diag_probe_tbl_hw;
@@ -1502,6 +1539,18 @@ static int add_peer(microlink_t * ml, const ml_peer_update_t * update)
          * the dead one — so retire the stale entry and reuse its slot. */
     idx = find_peer_by_ip(ml, update->vpn_ip);
     if (idx >= 0) {
+      /* Hitless re-ingest: if the "stale" entry is a SAFETY peer whose session
+       * is authenticating data RIGHT NOW, the old key is provably still in use
+       * — this update is transient/bogus (netmap churn), not a real re-key.
+       * Defer: skip the whole update. A genuine re-key stops authenticating
+       * within seconds and the retry lands on the next coord update. */
+      if (teardown_vetoed(ml, update->vpn_ip, ml->peers[idx].wg_peer_index)) {
+        s_diag_rekey_retire_vetoes++;
+        ESP_LOGW(
+          TAG, "IGNORING re-key retire for %s: session still passing authenticated data (deferred)", update->hostname);
+        return -1;
+      }
+      s_diag_rekey_retires++;
       ESP_LOGW(TAG, "Peer %s re-keyed — retiring stale entry (idx=%d)", update->hostname, idx);
       if (ml->peers[idx].wg_peer_index >= 0 && ml->wg_netif) {
         wireguardif_remove_peer((struct netif *)ml->wg_netif, (u8_t)ml->peers[idx].wg_peer_index);
@@ -1541,6 +1590,15 @@ static int add_peer(microlink_t * ml, const ml_peer_update_t * update)
       for (int i = 0; i < ML_MAX_PEERS; i++) {
         if (!ml->peers[i].active) continue;
         if (is_pinned_peer(ml, ml->peers[i].vpn_ip)) continue;
+        /* Never LRU-evict a safety peer, pinned or not — evicting the peer
+         * carrying the 5 Hz heartbeat is a guaranteed machine STOP. */
+        if (
+          (ml->config.priority_peer_ip != 0 && ml->peers[i].vpn_ip == ml->config.priority_peer_ip) ||
+          is_health_tracked(ml->peers[i].vpn_ip))
+        {
+          s_diag_evict_safety_skips++;
+          continue;
+        }
         uint64_t last_activity = ml->peers[i].last_send_ms;
         if (ml->peers[i].last_pong_recv_ms > last_activity) last_activity = ml->peers[i].last_pong_recv_ms;
         if (last_activity < oldest_ms) {
@@ -1732,6 +1790,23 @@ static void remove_peer(microlink_t * ml, const ml_peer_update_t * update)
 {
   int idx = find_peer_by_key(ml, update->public_key);
   if (idx < 0) return;
+
+  /* Hitless re-ingest: a coord REMOVE for a SAFETY peer whose session is
+   * authenticating data RIGHT NOW is presumptively a server glitch (netmap
+   * trim/re-sync churn) — applying it fails the 5 Hz heartbeat ENOTCONN and
+   * stops the machine. Defer: keep the live session; a genuinely-removed
+   * peer's session goes stale within seconds and a later REMOVE (or the
+   * peer's own disappearance) applies. Fail toward keeping a working safety
+   * bond, never toward a tidy peer table. */
+  if (teardown_vetoed(ml, ml->peers[idx].vpn_ip, ml->peers[idx].wg_peer_index)) {
+    s_diag_remove_vetoes++;
+    ESP_LOGW(
+      TAG,
+      "IGNORING coord REMOVE for %s: session still passing authenticated data (deferred)",
+      ml->peers[idx].hostname);
+    return;
+  }
+  s_diag_peer_removes++;
 
   /* Remove from wireguard-lwip */
   if (ml->wg_netif && ml->peers[idx].wg_peer_index >= 0) {

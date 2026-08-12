@@ -1030,6 +1030,23 @@ err_t wireguardif_peer_is_up(struct netif *netif, u8_t peer_index, ip_addr_t *cu
 }
 
 // Age (ms) of the last authenticated data packet received from this peer on
+// ANY path (direct or DERP-relayed). ERR_VAL when no data has ever arrived.
+// Proves the WG session itself is live — used to veto control-plane teardowns
+// of an actively-used safety session (hitless re-ingest).
+err_t wireguardif_peer_rx_age(struct netif *netif, u8_t peer_index, u32_t *age_ms) {
+	struct wireguard_peer *peer;
+	err_t result = wireguardif_lookup_peer(netif, peer_index, &peer);
+	if (result == ERR_OK) {
+		if (peer->last_rx == 0) {
+			result = ERR_VAL;
+		} else if (age_ms) {
+			*age_ms = wireguard_sys_now() - peer->last_rx;
+		}
+	}
+	return result;
+}
+
+// Age (ms) of the last authenticated data packet received from this peer on
 // the DIRECT UDP path. ERR_VAL when no direct data has ever arrived (fresh
 // peer, or all traffic DERP-relayed). Age is computed against the same
 // wireguard_sys_now() base that stamps it, so callers never mix time bases.

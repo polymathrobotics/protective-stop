@@ -1038,6 +1038,21 @@ static esp_err_t handler_monitor(httpd_req_t * req)
        * verification saved a working direct path from a spurious teardown. */
       cJSON_AddNumberToObject(json, "demote_vetoes", od[3]);
 
+      /* Hitless re-ingest (run-20 green-drop forensics): which WG session-
+       * teardown path fired, and whether the live-safety-session veto saved
+       * the bond. rekey_retires / peer_removes = teardowns APPLIED;
+       * *_vetoes = teardowns of an actively-authenticating safety session
+       * DEFERRED instead; evict_safety_skips = LRU eviction passed over a
+       * safety peer. */
+      extern void ml_wg_get_reingest_diag(uint32_t[5]);
+      uint32_t rg[5] = {0};
+      ml_wg_get_reingest_diag(rg);
+      cJSON_AddNumberToObject(json, "rekey_retires", rg[0]);
+      cJSON_AddNumberToObject(json, "rekey_retire_vetoes", rg[1]);
+      cJSON_AddNumberToObject(json, "peer_removes", rg[2]);
+      cJSON_AddNumberToObject(json, "remove_vetoes", rg[3]);
+      cJSON_AddNumberToObject(json, "evict_safety_skips", rg[4]);
+
       /* Same-LAN direct-path diagnostics for the priority peer (the machine):
        * what LAN endpoint we advertise, which candidate endpoints we hold for
        * the machine, and which one (if any) we selected as the direct path.

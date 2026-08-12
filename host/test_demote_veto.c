@@ -58,6 +58,16 @@ int main(void)
   CHECK(ml_demote_verdict(true, false, false, true, 0, FRESH) == ML_DEMOTE_GO, "bulk + fresh rx -> GO");
   CHECK(ml_demote_verdict(false, true, false, true, 100, FRESH) == ML_DEMOTE_GO, "bulk pong-dead + fresh rx -> GO");
 
+  /* Hitless re-ingest teardown veto (run-20 green drop): a control-plane
+   * teardown of a safety session is vetoed iff authenticated data (any path)
+   * is fresh. Bulk peers and stale/never-rx sessions tear down as before. */
+  const uint32_t TFRESH = 2000;
+  CHECK(ml_teardown_veto(true, true, 150, TFRESH), "safety + fresh rx -> veto teardown");
+  CHECK(ml_teardown_veto(true, true, TFRESH, TFRESH), "boundary age == fresh -> veto");
+  CHECK(!ml_teardown_veto(true, true, TFRESH + 1, TFRESH), "stale rx -> teardown proceeds");
+  CHECK(!ml_teardown_veto(true, false, 0, TFRESH), "no rx ever -> teardown proceeds");
+  CHECK(!ml_teardown_veto(false, true, 0, TFRESH), "bulk peer -> teardown proceeds");
+
   printf("test_demote_veto: %d checks, %d failures\n", g_checks, g_fails);
   return g_fails == 0 ? 0 : 1;
 }
