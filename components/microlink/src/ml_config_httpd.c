@@ -1066,6 +1066,15 @@ static esp_err_t handler_monitor(httpd_req_t * req)
       cJSON_AddNumberToObject(json, "wg_tx_no_valid_keys", wireguardif_tx_no_valid_keys);
       extern uint32_t ml_derp_get_route_fallbacks(void);
       cJSON_AddNumberToObject(json, "derp_route_fallbacks", ml_derp_get_route_fallbacks());
+      /* Home-DERP reconnect speed (edge-flush fix): worst < ~1500ms confirms
+       * the relay is back inside the 2s pstop timeout so green rides it
+       * through a firewall connection-table flush. */
+      extern void ml_derp_get_reconnect_diag(uint32_t[3]);
+      uint32_t rc[3] = {0};
+      ml_derp_get_reconnect_diag(rc);
+      cJSON_AddNumberToObject(json, "derp_reconnects", rc[0]);
+      cJSON_AddNumberToObject(json, "derp_reconnect_last_ms", rc[1]);
+      cJSON_AddNumberToObject(json, "derp_reconnect_worst_ms", rc[2]);
       extern void ml_wg_get_session_diag(microlink_t *, uint32_t[3]);
       uint32_t sd[3] = {0};
       ml_wg_get_session_diag(ml, sd);

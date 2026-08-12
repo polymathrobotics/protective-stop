@@ -569,6 +569,22 @@ uint32_t ml_derp_get_route_fallbacks(void)
   return s_diag_route_home_fallbacks;
 }
 
+/* Home-DERP reconnect telemetry (2026-08-12 edge-flush fix). reconnects =
+ * count of successful RST/EOF-triggered home reconnects; last/worst =
+ * wall-clock ms from RST detection to reconnected. worst < ~1500 confirms the
+ * relay is back inside the 2 s pstop timeout window (green rides it through a
+ * flush); a worst climbing toward/over 2000 means recovery is still too slow. */
+static uint32_t s_diag_derp_reconnects;
+static uint32_t s_diag_derp_last_reconnect_ms;
+static uint32_t s_diag_derp_worst_reconnect_ms;
+
+void ml_derp_get_reconnect_diag(uint32_t out[3])
+{
+  out[0] = s_diag_derp_reconnects;
+  out[1] = s_diag_derp_last_reconnect_ms;
+  out[2] = s_diag_derp_worst_reconnect_ms;
+}
+
 static ml_derp_conn_t * derp_route_conn(microlink_t * ml, uint16_t region_id, uint16_t eff_home)
 {
   int hs = ml->derp_home_slot;
@@ -1224,10 +1240,21 @@ void ml_derp_tx_task(void * arg)
       if (bits & ML_EVT_DERP_RECONNECT) {
         xEventGroupClearBits(ml->events, ML_EVT_DERP_RECONNECT);
         ESP_LOGW(TAG, "DERP reconnect requested (home was %s)", home->connected ? "connected" : "disconnected");
+        uint64_t reconn_t0 = ml_get_time_ms();
         ml_derp_disconnect(ml, home);
         verbose_phase = false;
-        /* Auto-reconnect after disconnect */
-        vTaskDelay(pdMS_TO_TICKS(1000));
+        /* IMMEDIATE first reconnect (run-20/21/22 root cause, 2026-08-12
+         * DUT-host wire+journal evidence): an RST/EOF here is almost always a
+         * middlebox connection-table FLUSH (the office edge firewall RSTs
+         * long-lived DERP TCP across regions and rebinds NAT in the same
+         * instant), NOT a down server. The old unconditional 1000 ms pre-delay
+         * + TLS handshake pushed relay recovery past the 2 s pstop timeout —
+         * and because the same flush kills the direct hairpin simultaneously,
+         * the heartbeat had NO path for those seconds -> green drop. tailscaled
+         * recovers in <1 s (connGen++); match it: try NOW, back off (2 s) only
+         * on CONSECUTIVE failures (a genuinely-down server). A short yield lets
+         * ml_derp_disconnect's socket close settle without stalling recovery. */
+        vTaskDelay(pdMS_TO_TICKS(20));
         for (int attempt = 0; attempt < 3 && !home->connected; attempt++) {
           if (attempt > 0) {
             ESP_LOGW(TAG, "DERP reconnect retry %d/3 in 2s...", attempt + 1);
@@ -1236,6 +1263,13 @@ void ml_derp_tx_task(void * arg)
           if (ml_derp_connect(ml, home, ml_effective_home_region(ml)) == ESP_OK) {
             connected_since_ms = ml_get_time_ms();
             verbose_phase = true;
+            s_diag_derp_reconnects++;
+            s_diag_derp_last_reconnect_ms = (uint32_t)(ml_get_time_ms() - reconn_t0);
+            if (s_diag_derp_last_reconnect_ms > s_diag_derp_worst_reconnect_ms) {
+              s_diag_derp_worst_reconnect_ms = s_diag_derp_last_reconnect_ms;
+            }
+            ESP_LOGW(
+              TAG, "DERP home reconnected in %ums (attempt %d)", (unsigned)s_diag_derp_last_reconnect_ms, attempt + 1);
             break;
           }
           ESP_LOGW(TAG, "DERP reconnect attempt %d failed", attempt + 1);
