@@ -1044,14 +1044,15 @@ static esp_err_t handler_monitor(httpd_req_t * req)
        * *_vetoes = teardowns of an actively-authenticating safety session
        * DEFERRED instead; evict_safety_skips = LRU eviction passed over a
        * safety peer. */
-      extern void ml_wg_get_reingest_diag(uint32_t[5]);
-      uint32_t rg[5] = {0};
+      extern void ml_wg_get_reingest_diag(uint32_t[6]);
+      uint32_t rg[6] = {0};
       ml_wg_get_reingest_diag(rg);
       cJSON_AddNumberToObject(json, "rekey_retires", rg[0]);
       cJSON_AddNumberToObject(json, "rekey_retire_vetoes", rg[1]);
       cJSON_AddNumberToObject(json, "peer_removes", rg[2]);
       cJSON_AddNumberToObject(json, "remove_vetoes", rg[3]);
       cJSON_AddNumberToObject(json, "evict_safety_skips", rg[4]);
+      cJSON_AddNumberToObject(json, "relay_disco_resets", rg[5]);
 
       /* WG session health (run-20/21 ENOTCONN forensics). The failure
        * signature to watch: wg_kp_age_max climbing past 120000 (rekey
@@ -1066,11 +1067,12 @@ static esp_err_t handler_monitor(httpd_req_t * req)
       cJSON_AddNumberToObject(json, "wg_tx_no_valid_keys", wireguardif_tx_no_valid_keys);
       extern uint32_t ml_derp_get_route_fallbacks(void);
       cJSON_AddNumberToObject(json, "derp_route_fallbacks", ml_derp_get_route_fallbacks());
-      /* aux_deferred: blocking aux-DERP connects skipped while a safety peer was
-       * relay-bound, to keep the ~2s TLS handshake from stalling home-rx (the
-       * edge-flush disarm fix). Climbs during a flush window; green should hold. */
-      extern uint32_t ml_derp_get_aux_deferred(void);
-      cJSON_AddNumberToObject(json, "aux_connect_deferred", ml_derp_get_aux_deferred());
+      /* home_pumps: home-conn rx drains performed DURING an aux DERP connect,
+       * so the safety heartbeat relay keeps flowing through a ~1-2s aux TLS
+       * handshake (edge-flush fix; replaced the self-deadlocking defer-aux).
+       * Climbs while a standby (re)connects; green should hold across it. */
+      extern uint32_t ml_derp_get_home_pumps(void);
+      cJSON_AddNumberToObject(json, "derp_home_pumps", ml_derp_get_home_pumps());
       /* Home-DERP reconnect speed (edge-flush fix): worst < ~1500ms confirms
        * the relay is back inside the 2s pstop timeout so green rides it
        * through a firewall connection-table flush. */

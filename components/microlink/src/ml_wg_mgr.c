@@ -772,21 +772,6 @@ int ml_wg_collect_safety_regions(microlink_t * ml, uint16_t * out, int max)
   return n;
 }
 
-/* True when any safety peer's heartbeat is currently riding a DERP relay
- * (no direct path). While this holds, a blocking aux-DERP TLS handshake in
- * the DERP I/O loop would stall the home-rx poll and gap that relayed
- * heartbeat (2026-08-12 edge-flush disarm) — the caller defers it. */
-bool ml_wg_any_safety_relay_bound(microlink_t * ml)
-{
-  if (ml == NULL) return false;
-  for (int i = 0; i < ml->peer_count; i++) {
-    ml_peer_t * p = &ml->peers[i];
-    if (!p->active || p->has_direct_path) continue;
-    if (is_pinned_peer(ml, p->vpn_ip) || is_health_tracked(p->vpn_ip)) return true;
-  }
-  return false;
-}
-
 /* Diagnostic: report the DERP region the chip has LEARNED for the management and
  * priority peers (0 = not learned yet). Distinguishes "never learned the server's
  * region -> re-home can't fire" from "learned but re-home/DERP-connect stuck".
@@ -885,13 +870,14 @@ static uint32_t s_diag_peer_removes; /* coord ML_PEER_REMOVE teardowns applied  
 static uint32_t s_diag_remove_vetoes; /* ... vetoed: session still live         */
 static uint32_t s_diag_evict_safety_skips; /* LRU evict skipped a safety peer   */
 
-void ml_wg_get_reingest_diag(uint32_t out[5])
+void ml_wg_get_reingest_diag(uint32_t out[6])
 {
   out[0] = s_diag_rekey_retires;
   out[1] = s_diag_rekey_retire_vetoes;
   out[2] = s_diag_peer_removes;
   out[3] = s_diag_remove_vetoes;
   out[4] = s_diag_evict_safety_skips;
+  out[5] = s_diag_relay_disco_resets; /* from-scratch disco resets on a relay-stuck safety peer (@claude review) */
 }
 
 /* WG session-health diag (run-20/21 ENOTCONN forensics): learn-evictions +

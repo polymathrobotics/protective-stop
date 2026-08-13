@@ -569,14 +569,29 @@ uint32_t ml_derp_get_route_fallbacks(void)
   return s_diag_route_home_fallbacks;
 }
 
-/* Aux DERP connects deferred to protect home-rx while a safety peer is
- * relay-bound (2026-08-12 edge-flush fix). Nonzero = the guard is holding the
- * standby rebuild so a blocking TLS handshake can't gap the relayed heartbeat. */
-static uint32_t s_diag_aux_connect_deferred;
+/* Drain up to a few pending frames from the HOME conn — called from inside a
+ * blocking AUX connect so the safety heartbeat relay riding home keeps flowing
+ * during the ~1-2s aux TLS handshake (2026-08-12 edge-flush fix; replaces the
+ * self-deadlocking defer-aux guard). Single-task, so re-entrant use of
+ * poll_derp_read on a DIFFERENT conn is safe. Stops on no-data (bounded 100ms
+ * per read) or error (the main loop handles a dead home conn after we return). */
+static uint32_t s_diag_home_pumps; /* home-rx drains performed during aux connects */
 
-uint32_t ml_derp_get_aux_deferred(void)
+static void derp_pump_home_rx(microlink_t * ml)
 {
-  return s_diag_aux_connect_deferred;
+  ml_derp_conn_t * home = &ml->derp[ml->derp_home_slot];
+  if (!home->connected || home->sockfd < 0) return;
+  for (int i = 0; i < 4; i++) {
+    int r = poll_derp_read(ml, home);
+    if (r <= 0) break; /* 0 = no more data; <0 = home needs the main loop */
+    home->last_recv_ms = ml_get_time_ms();
+    s_diag_home_pumps++;
+  }
+}
+
+uint32_t ml_derp_get_home_pumps(void)
+{
+  return s_diag_home_pumps;
 }
 
 /* Home-DERP reconnect telemetry (2026-08-12 edge-flush fix). reconnects =
@@ -696,20 +711,12 @@ static void derp_manage_aux(microlink_t * ml, uint16_t eff_home, int aux_burst[]
    *    region and return; the rest are picked up on the next task iteration,
    *    AFTER home connect/drain/read have run again. (Adversarial review 2026-08-04.) */
 
-  /* Home-rx protection (2026-08-12 edge-flush disarm): the one-connect-per-call
-   * cap above bounds N back-to-back connects, but a SINGLE ~2s aux TLS handshake
-   * still stalls the loop, delaying the next home-rx poll — so machn stops
-   * PROCESSING a safety peer's relayed heartbeat for the handshake duration and
-   * disarms (home conn never even dropped). So: while any safety peer's
-   * heartbeat is riding a relay (no direct path), DEFER the blocking aux connect
-   * entirely. Home carries the heartbeat; the standby is redundancy we rebuild
-   * once the peer is direct again. Trade-off: no warm standby / delayed MBB
-   * pre-warm while relay-bound — acceptable, safety > standby readiness. Reaping
-   * above already ran (non-blocking). */
-  if (ml_wg_any_safety_relay_bound(ml)) {
-    s_diag_aux_connect_deferred++;
-    return;
-  }
+  /* Home-rx protection (2026-08-12): the one-connect-per-call cap above bounds
+   * N back-to-back connects, but a single aux TLS handshake still takes ~1-2s.
+   * Rather than DEFER the aux (the removed guard self-deadlocked a cross-region
+   * relay-bound safety peer — @claude PR review), ml_derp_connect now services
+   * the home conn's rx during an aux handshake (derp_pump_home_rx), so the
+   * safety heartbeat relay keeps flowing while the standby (re)connects. */
   for (int w = 0; w < nwant; w++) {
     uint16_t rid = want[w];
     bool served = false;
@@ -1612,10 +1619,25 @@ esp_err_t ml_derp_connect(microlink_t * ml, ml_derp_conn_t * c, uint16_t region_
   c->sockfd = sock;
   mbedtls_ssl_set_bio(&c->ssl, &c->sockfd, ml_derp_bio_send, NULL, ml_derp_bio_recv_timeout);
 
-  /* TLS handshake - socket has 10s SO_RCVTIMEO from connect phase. */
+  /* TLS handshake. For an AUX conn, shorten the read timeout to 100 ms so the
+   * BIO returns SSL_TIMEOUT between flights (mbedTLS resumes cleanly on a TLS
+   * stream) — we service the home conn's rx there so a ~1-2s aux handshake
+   * doesn't gap the safety heartbeat relay riding home (2026-08-12 edge-flush
+   * fix; replaces defer-aux). Home keeps the long timeout. Overall deadline is
+   * unchanged (DERP_CONNECT_TIMEOUT_MS). */
+  if (!is_home) {
+    mbedtls_ssl_conf_read_timeout(&c->ssl_conf, 100);
+  }
+  uint64_t hs_deadline = ml_get_time_ms() + DERP_CONNECT_TIMEOUT_MS;
   int ret;
   while ((ret = mbedtls_ssl_handshake(&c->ssl)) != 0) {
-    if (ret == MBEDTLS_ERR_SSL_WANT_READ || ret == MBEDTLS_ERR_SSL_WANT_WRITE) {
+    if (ret == MBEDTLS_ERR_SSL_WANT_READ || ret == MBEDTLS_ERR_SSL_WANT_WRITE || ret == MBEDTLS_ERR_SSL_TIMEOUT) {
+      if (!is_home) derp_pump_home_rx(ml); /* keep the safety relay flowing */
+      if (ml_get_time_ms() > hs_deadline) {
+        ESP_LOGE(TAG, "TLS handshake timeout (%s)", is_home ? "home" : "aux");
+        DERP_CONNECT_FAIL_CLEANUP();
+        return ESP_FAIL;
+      }
       continue;
     }
     char err_buf[128];
@@ -1623,6 +1645,11 @@ esp_err_t ml_derp_connect(microlink_t * ml, ml_derp_conn_t * c, uint16_t region_
     ESP_LOGE(TAG, "TLS handshake failed: %s", err_buf);
     DERP_CONNECT_FAIL_CLEANUP();
     return ESP_FAIL;
+  }
+  /* Restore the long read timeout for the HTTP-upgrade + DERP-handshake reads
+   * below (those are fast, few round-trips — no per-flight pumping needed). */
+  if (!is_home) {
+    mbedtls_ssl_conf_read_timeout(&c->ssl_conf, DERP_CONNECT_TIMEOUT_MS);
   }
 
   int64_t t_derp_tls = esp_timer_get_time();
