@@ -19,6 +19,7 @@ Repro + evidence: run-26 + real-flush wire data (memory
 `flush-20260813T112019Z-*`).
 
 Scope decisions (operator, 2026-08-13):
+
 1. **Switch-path only.** The dead-home (RST/flush) reconnect is out of scope
    — different mechanism (nothing alive to keep serving), handled by the
    async engine (Stages 2–3).
@@ -88,7 +89,7 @@ Everything else in the executor (prove gates, generation preemption,
 `priority_peer_region = target; neg_cancel_mbb(); derp_home_region = target;
 fire ML_EVT_DERP_RECONNECT`. Replace with:
 
-```
+```text
 if (ml->derp_region_override != 0) {
   ml->priority_peer_region = target;            /* advert: unchanged */
   if (home_conn_alive(ml)                        /* NEW: gapless path */
@@ -265,5 +266,5 @@ via the new `pin_pending` monitor field):**
 Small diff (~150-200 LOC net, three files), no new tasks, no new locks, no
 sdkconfig change, no pstop_c contact. Highest-risk element is the outcome/
 retry bookkeeping in the negotiator (new small state machine: `s_pin_retry_at_ms`
-+ backoff): mitigated by the negative prove test (8.2) and by the fact that
+- backoff): mitigated by the negative prove test (8.2) and by the fact that
 every retry failure mode degrades to "old home keeps serving" (green-safe).

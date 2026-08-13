@@ -969,8 +969,8 @@ static esp_err_t handler_monitor(httpd_req_t * req)
         uint32_t pd[5] = {0};
         ml_wg_get_pin_diag(pd);
         ml_derp_conn_t * homec = &ml->derp[ml->derp_home_slot];
-        bool pin_ok = ml->derp_region_override == 0 ||
-          (homec->connected && homec->region_id == ml->derp_region_override);
+        bool pin_ok =
+          ml->derp_region_override == 0 || (homec->connected && homec->region_id == ml->derp_region_override);
         cJSON_AddBoolToObject(json, "pin_pending", !pin_ok);
         cJSON_AddNumberToObject(json, "pin_mbb_requests", pd[0]);
         cJSON_AddNumberToObject(json, "pin_mbb_commits", pd[1]);

@@ -908,8 +908,7 @@ void ml_wg_get_session_diag(microlink_t * ml, uint32_t out[5])
   for (int i = 0; i < ml->peer_count; i++) {
     ml_peer_t * p = &ml->peers[i];
     if (!p->active || p->wg_peer_index < 0) continue;
-    bool safety =
-      is_safety_peer(ml, p->vpn_ip);
+    bool safety = is_safety_peer(ml, p->vpn_ip);
     if (!safety) continue;
     u32_t kp_age = 0, init_age = 0;
     if (
@@ -937,8 +936,7 @@ void ml_wg_get_session_diag(microlink_t * ml, uint32_t out[5])
  * ml_demote_verdict.h for the invariant argument. */
 static bool teardown_vetoed(microlink_t * ml, uint32_t vpn_ip, int wg_peer_index)
 {
-  bool is_safety =
-    is_safety_peer(ml, vpn_ip);
+  bool is_safety = is_safety_peer(ml, vpn_ip);
   u32_t age_ms = 0;
   bool valid = ml->wg_netif && wg_peer_index >= 0 &&
                wireguardif_peer_rx_age((struct netif *)ml->wg_netif, (u8_t)wg_peer_index, &age_ms) == ERR_OK;
@@ -969,8 +967,7 @@ void ml_wg_get_direct_retry_diag(microlink_t * ml, uint32_t out[4])
   for (int i = 0; i < ml->peer_count; i++) {
     ml_peer_t * p = &ml->peers[i];
     if (!p->active || p->has_direct_path) continue;
-    bool safety =
-      is_safety_peer(ml, p->vpn_ip);
+    bool safety = is_safety_peer(ml, p->vpn_ip);
     if (!safety) continue;
     out[2]++;
     if (p->relay_retry_next_ms != 0 && (soonest == 0 || p->relay_retry_next_ms < soonest)) {
@@ -1234,8 +1231,7 @@ static bool safety_rekey_inflight(microlink_t * ml)
   for (int i = 0; i < ml->peer_count; i++) {
     ml_peer_t * p = &ml->peers[i];
     if (!p->active || p->wg_peer_index < 0) continue;
-    bool safety =
-      is_safety_peer(ml, p->vpn_ip);
+    bool safety = is_safety_peer(ml, p->vpn_ip);
     if (!safety) continue;
     u32_t kp_age = 0, init_age = 0;
     if (
@@ -2574,8 +2570,7 @@ static void process_disco_pong(
        * re-handshake (that momentary DERP fallback is what dropped the safety
        * heartbeat). Mirrors tailscale magicsock trustBestAddrUntil+betterAddr. */
       bool had_direct = p->has_direct_path;
-      bool is_prio =
-        is_safety_peer(ml, p->vpn_ip);
+      bool is_prio = is_safety_peer(ml, p->vpn_ip);
 
       /* Any direct pong proves reachability — renew liveness first, regardless
        * of whether we adopt this specific endpoint below. */
