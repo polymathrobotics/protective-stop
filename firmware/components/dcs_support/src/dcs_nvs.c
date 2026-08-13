@@ -235,6 +235,9 @@ uint8_t dcs_nvs_read_led_brightness(void)
   (void)nvs_get_u8(h, DCS_NVS_KEY_LED_BRIGHT, &v); /* absent -> default */
   nvs_close(h);
   if (v > 100u) return DCS_LED_BRIGHTNESS_DEFAULT; /* corrupt/older schema degrades to default */
+  if (v < DCS_LED_BRIGHTNESS_MIN) return DCS_LED_BRIGHTNESS_MIN; /* self-heal a persisted sub-floor
+                                                                  * value (e.g. 0 written by a pre-floor
+                                                                  * build) so the ring can never boot dark */
   return v;
 }
 

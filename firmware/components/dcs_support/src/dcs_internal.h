@@ -41,6 +41,10 @@ extern "C"
 #define DCS_NVS_KEY_LED_BRIGHT "led_bri" /* master LED brightness, 0..100%; absent = default */
 
 #define DCS_LED_BRIGHTNESS_DEFAULT 50 /* master ring brightness when the NVS key is absent */
+#define DCS_LED_BRIGHTNESS_MIN 10 /* floor: the ring shows SAFETY state (RED STOP / GREEN OK /
+                                   * PURPLE MISMATCH); 0%% would blank all of it, persist across
+                                   * reboots, and leave no visible way back (PR #94 review + David).
+                                   * Mirrors the locate-mode timeout's anti-masking principle. */
 
 #define DCS_RST_HIST_LEN 16
 

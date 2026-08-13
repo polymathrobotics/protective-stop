@@ -136,8 +136,8 @@ static const char k_index_html[] =
 #endif
   /* Master LED brightness: one scale over ALL ring output (persisted). */
   "<div class='panel'>"
-  "<div class='secttl'>LED brightness <small>(master ring dimming, 0-100% &mdash; live &amp; persisted)</small></div>"
-  "<p style='margin:.55em 0'>Brightness: <input id='lbr' type='range' min='0' max='100' value='50'"
+  "<div class='secttl'>LED brightness <small>(master ring dimming, 10-100% &mdash; live &amp; persisted; floor keeps safety colours visible)</small></div>"
+  "<p style='margin:.55em 0'>Brightness: <input id='lbr' type='range' min='10' max='100' value='50'"
   " style='vertical-align:middle'> <span id='lbrv'>-</span>%</p></div>"
   /* All diagnostics/config (unchanged) collected into one fleet-style panel. */
   "<div class='panel'>"
