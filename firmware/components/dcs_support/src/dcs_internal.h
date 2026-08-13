@@ -38,6 +38,9 @@ extern "C"
 #define DCS_NVS_KEY_PSTOP_PEERS "ps_peers" /* multi-machine peer table (blob, see dcs_nvs.c) */
 #define DCS_NVS_KEY_OPERATORS "operators" /* operator allowlist (blob: count byte + u32 ids) */
 #define DCS_NVS_KEY_WIFI_TXP "wifi_txp" /* WiFi max TX power, quarter-dBm (8..84); 0/absent = config default */
+#define DCS_NVS_KEY_LED_BRIGHT "led_bri" /* master LED brightness, 0..100%; absent = default */
+
+#define DCS_LED_BRIGHTNESS_DEFAULT 50 /* master ring brightness when the NVS key is absent */
 
 #define DCS_RST_HIST_LEN 16
 
@@ -303,6 +306,12 @@ extern "C"
   uint8_t dcs_nvs_read_wifi_tx_power(void);
   esp_err_t dcs_nvs_write_wifi_tx_power(uint8_t quarter_dbm);
 
+  /* Master LED brightness (0..100%) scaling ALL ring output. Read returns
+ * DCS_LED_BRIGHTNESS_DEFAULT when unset or the persisted value is corrupt
+ * (>100); applied live by dcs_pstop_ring_set_brightness and re-loaded at boot. */
+  uint8_t dcs_nvs_read_led_brightness(void);
+  esp_err_t dcs_nvs_write_led_brightness(uint8_t pct);
+
   /* Multi-machine peer table (ps_peers blob). One record per slot. Read
  * falls back to migrating the legacy ps_ip/ps_port pair into slot 0 when
  * the blob is absent (first boot on this firmware). */
@@ -378,6 +387,13 @@ extern "C"
  * persists to NVS separately (dcs_nvs_write_ring_offset). */
   void dcs_pstop_ring_set_offset(uint8_t off);
   uint8_t dcs_pstop_ring_get_offset(void);
+
+  /* Master ring brightness (live value, mirrors NVS led_bri): a 0..100% scale
+ * applied to EVERY ring pixel at transmit time, so all state colours dim
+ * proportionally. set clamps to 0..100 and takes effect on the next repaint
+ * (<=250 ms); the caller persists to NVS separately (dcs_nvs_write_led_brightness). */
+  void dcs_pstop_ring_set_brightness(uint8_t pct);
+  uint8_t dcs_pstop_ring_get_brightness(void);
 
 /* Locate mode: paint ONLY logical LED 1 solid white so an installer can see /
  * verify the rotation offset. Overrides the state colours; auto-expires after
