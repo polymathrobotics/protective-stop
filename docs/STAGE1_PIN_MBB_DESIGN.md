@@ -196,6 +196,26 @@ safety; every failure mode below fails toward "old home keeps serving" or
 
 ## 8. Validation plan (gate for the PR)
 
+**Results so far (2026-08-13, machn OTA'd with bcc9d5d, verified behaviorally
+via the new `pin_pending` monitor field):**
+- **8.1 matrix: PASS.** Pins 9→2→10→12→9: 4/4 committed gaplessly in 12-15 s
+  (pin tick ≤3 s, prove ~10 s, index swap), **`derp_reconnects` stayed 0 for
+  the whole matrix** (legacy path was +1/switch), green held on every 3 s
+  sample, 3/3 direct throughout.
+- **8.2 negative: legacy semantic inherited, not testable on this bench.**
+  Pinning a nonexistent region (999) COMMITS rather than retries: unknown
+  regions fall back to the compiled default DERP host (`ml_derp.c` region
+  lookup, documented pre-existing behavior identical in the legacy path), so
+  the conn connects and proves against a real server. The retry-forever
+  machinery therefore engages only for genuinely unreachable regions
+  (server/network down) — exercised by code review + the rollback path;
+  every failure mode degrades to "old home keeps serving".
+- **8.3 preemption: PASS.** Pin →2 re-pinned →10 4 s later: executor
+  restarted to 10 immediately (generation bump), exactly one commit, landed
+  on 10, green held, reconnects 0.
+- **8.4 run-27 gate soak: IN PROGRESS** (started 14:26 Z, 8 h, 19 min
+  cadence, ~25 switches, cycle [9,2,10,12]).
+
 1. **Bench live-switch matrix** (fast): pin 9→2→10→12→9 with all 3 remotes
    bonded; for each switch confirm in logs: `PIN via MBB` → `MBB AUX_OPENING`
    → `MBB COMMIT` (and **no** `DERP reconnect requested` line); green held;
