@@ -642,11 +642,19 @@ static void derp_manage_aux(microlink_t * ml, uint16_t eff_home, int aux_burst[]
   uint16_t regs[ML_DERP_MAX_CONNS];
   int nregs = ml_wg_collect_safety_regions(ml, regs, ML_DERP_MAX_CONNS);
 
-  /* Distinct wanted aux regions = safety regions minus the home region. */
+  /* Distinct wanted aux regions = safety regions minus the home region.
+   * "Home region" here must cover BOTH the effective home (where we are
+   * heading) and the LIVE home conn's region (where we are serving from):
+   * during a Stage-1 pin MBB prove window they differ (eff == the pin, live
+   * == the old region), and excluding only eff would open a DUPLICATE aux to
+   * the region the home slot is actively serving (the served-check below
+   * deliberately skips the home slot). Under autoneg the two are equal until
+   * commit, so this is behavior-neutral there. */
+  uint16_t live_home_region = ml->derp[hs].connected ? ml->derp[hs].region_id : 0;
   uint16_t want[ML_DERP_MAX_CONNS];
   int nwant = 0;
   for (int i = 0; i < nregs; i++) {
-    if (regs[i] != 0 && regs[i] != eff_home) want[nwant++] = regs[i];
+    if (regs[i] != 0 && regs[i] != eff_home && regs[i] != live_home_region) want[nwant++] = regs[i];
   }
 
   /* §7 AUX_OPENING: a pending MBB target region joins the want-set, so the
@@ -655,7 +663,14 @@ static void derp_manage_aux(microlink_t * ml, uint16_t eff_home, int aux_burst[]
    * instead of duplicating connect logic. */
   {
     uint16_t mbb_tgt = ml->mbb_target_region;
-    if (mbb_tgt != 0 && mbb_tgt != eff_home && nwant < ML_DERP_MAX_CONNS) {
+    /* Exclude the target only when the LIVE home conn already serves it —
+     * not when it merely equals eff_home. Under a pin (Stage-1),
+     * eff_home == the override == the MBB target from the instant the pin is
+     * set, while the actual home conn still sits on the OLD region; comparing
+     * against eff_home would keep the target out of the want-set and the
+     * pin's MBB could never open its conn. */
+    bool tgt_is_live_home = ml->derp[hs].connected && ml->derp[hs].region_id == mbb_tgt;
+    if (mbb_tgt != 0 && !tgt_is_live_home && nwant < ML_DERP_MAX_CONNS) {
       bool dup = false;
       for (int i = 0; i < nwant; i++) {
         if (want[i] == mbb_tgt) {
@@ -923,18 +938,28 @@ static void derp_mbb_tick(microlink_t * ml, uint64_t now)
     return;
   }
 
-  /* I2: a lock landing mid-switch wins instantly — abort, no ban (nothing was
-   * proven bad; the operator simply took over). */
-  if (ml->derp_region_override != 0) {
+  /* I2' (Stage-1 pin->MBB, docs/STAGE1_PIN_MBB_DESIGN.md): an override aborts
+   * an in-flight MBB only when it names a DIFFERENT region than the target —
+   * operator preemption of an autoneg switch, the original I2 intent. An MBB
+   * whose target EQUALS the override IS the override being applied (the
+   * negotiator's pin tick issued it); it must proceed, or the pin could only
+   * ever land via the gap-prone teardown path. */
+  if (ml->derp_region_override != 0 && ml->derp_region_override != s_mbb.target) {
     ESP_LOGW(TAG, "MBB ABORT: region lock %u applied mid-switch", (unsigned)ml->derp_region_override);
     derp_mbb_post_outcome(ml, ML_MBB_OUTCOME_ABORTED, s_mbb.target);
     return;
   }
-  /* Target became the effective home some other way (e.g. legacy rehome after
-   * the bond dropped): nothing left to do. */
-  if (s_mbb.target == ml_effective_home_region(ml)) {
-    derp_mbb_post_outcome(ml, ML_MBB_OUTCOME_ABORTED, s_mbb.target);
-    return;
+  /* Target is already the LIVE home (e.g. legacy rehome after the bond
+   * dropped reconnected straight there): nothing left to do. Compare against
+   * the actual connected home conn, NOT ml_effective_home_region() — under a
+   * pin the eff alias equals the override from the instant it is set, long
+   * before any conn has moved, and would falsely abort the pin's own MBB. */
+  {
+    ml_derp_conn_t * homec = &ml->derp[ml->derp_home_slot];
+    if (homec->connected && homec->region_id == s_mbb.target) {
+      derp_mbb_post_outcome(ml, ML_MBB_OUTCOME_ABORTED, s_mbb.target);
+      return;
+    }
   }
 
   if (s_mbb.state == ML_MBB_AUX_OPENING) {
