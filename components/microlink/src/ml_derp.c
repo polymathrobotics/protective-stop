@@ -144,9 +144,10 @@ static const uint8_t DISCO_MAGIC[6] = {'T', 'S', 0xf0, 0x9f, 0x92, 0xac};
  * Read exactly `len` bytes via TLS with timeout and WANT_READ retry.
  * Returns number of bytes read on success, -1 on error, -2 on timeout.
  */
+static void derp_pump_home_rx(microlink_t * ml); /* fwd: defined with the aux-connect machinery */
+
 static int derp_tls_read_all(microlink_t * ml, ml_derp_conn_t * c, uint8_t * data, size_t len, int timeout_ms)
 {
-  (void)ml;
   size_t received = 0;
   uint64_t start_ms = ml_get_time_ms();
 
@@ -159,7 +160,19 @@ static int derp_tls_read_all(microlink_t * ml, ml_derp_conn_t * c, uint8_t * dat
     int ret = mbedtls_ssl_read(&c->ssl, data + received, len - received);
     if (ret < 0) {
       if (ret == MBEDTLS_ERR_SSL_WANT_READ || ret == MBEDTLS_ERR_SSL_WANT_WRITE || ret == MBEDTLS_ERR_SSL_TIMEOUT) {
-        vTaskDelay(pdMS_TO_TICKS(10));
+        /* An AUX conn mid-CONNECT waits here at 100 ms granularity (the short
+         * read timeout is now kept for the WHOLE aux connect sequence, not
+         * just the TLS handshake) — service the home conn's rx instead of
+         * sleeping, so a silent post-TLS stall (NAT-churned half-open conn:
+         * TCP+TLS complete, then blackhole — the 2026-08-13 storm's 28 s
+         * machn->remote delivery hole) can never starve the safety path.
+         * Operational reads (c->connected) and the home conn's own connect
+         * keep the plain yield. */
+        if (!c->connected && c != &ml->derp[ml->derp_home_slot]) {
+          derp_pump_home_rx(ml);
+        } else {
+          vTaskDelay(pdMS_TO_TICKS(10));
+        }
         continue;
       }
       if (ret == MBEDTLS_ERR_SSL_PEER_CLOSE_NOTIFY) {
@@ -1671,11 +1684,14 @@ esp_err_t ml_derp_connect(microlink_t * ml, ml_derp_conn_t * c, uint16_t region_
     DERP_CONNECT_FAIL_CLEANUP();
     return ESP_FAIL;
   }
-  /* Restore the long read timeout for the HTTP-upgrade + DERP-handshake reads
-   * below (those are fast, few round-trips — no per-flight pumping needed). */
-  if (!is_home) {
-    mbedtls_ssl_conf_read_timeout(&c->ssl_conf, DERP_CONNECT_TIMEOUT_MS);
-  }
+  /* AUX conns KEEP the 100 ms read timeout through the HTTP-upgrade and DERP
+   * handshake reads below (PR #94 review finding, initially deferred — then a
+   * real storm produced its exact failure: a NAT-churned half-open conn that
+   * completes TCP+TLS and silently blackholes stalled these "fast" phases for
+   * the full 20 s budget with zero home-rx service — a wire-measured 28 s
+   * machn->remote delivery hole, 2026-08-13). Every read loop below tolerates
+   * SSL_TIMEOUT and now pumps home-rx while waiting; outer deadlines are
+   * unchanged. The data phase drops to 200 ms at connect success as before. */
 
   int64_t t_derp_tls = esp_timer_get_time();
   ESP_LOGW(TAG, "[TIMING-DERP] TLS handshake: %lld ms", (t_derp_tls - t_derp_tcp) / 1000);
@@ -1728,7 +1744,11 @@ esp_err_t ml_derp_connect(microlink_t * ml, ml_derp_conn_t * c, uint16_t region_
       ret = mbedtls_ssl_read(&c->ssl, resp_buf + resp_len, 1);
       if (ret < 0) {
         if (ret == MBEDTLS_ERR_SSL_WANT_READ || ret == MBEDTLS_ERR_SSL_WANT_WRITE || ret == MBEDTLS_ERR_SSL_TIMEOUT) {
-          vTaskDelay(pdMS_TO_TICKS(10));
+          if (!is_home) {
+            derp_pump_home_rx(ml); /* aux waits at 100 ms granularity: keep home rx flowing */
+          } else {
+            vTaskDelay(pdMS_TO_TICKS(10));
+          }
           continue;
         }
         ESP_LOGE(TAG, "HTTP upgrade read failed: -0x%04x", -ret);
