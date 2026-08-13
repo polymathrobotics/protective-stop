@@ -1014,7 +1014,7 @@ static esp_err_t api_led_brightness(httpd_req_t * req)
   if ((pct < 0) || (pct > 100)) {
     (void)httpd_resp_set_status(req, "400 Bad Request");
     (void)httpd_resp_set_type(req, "application/json");
-    return httpd_resp_sendstr(req, "{\"ok\":false,\"error\":\"pct must be 10..100\"}");
+    return httpd_resp_sendstr(req, "{\"ok\":false,\"error\":\"pct must be 0..100 (values below 10 floor to 10)\"}");
   }
   if (pct < DCS_LED_BRIGHTNESS_MIN) {
     pct = DCS_LED_BRIGHTNESS_MIN; /* floor, not reject: the response reports the effective value */

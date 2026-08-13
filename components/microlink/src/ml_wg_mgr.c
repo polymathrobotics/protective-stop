@@ -1500,6 +1500,8 @@ static void neg_pin_tick(microlink_t * ml)
    * §8 damping/ban guards are deliberately NOT consulted: an operator pin is
    * a command; the mbb_target dedupe above is the only rate limit needed. */
   s_neg_pending_source = MICROLINK_REGION_SRC_LOCKED;
+  s_pin_retry_at_ms = 0; /* leaving backoff: the re-issued MBB is in flight, not waiting —
+                          * keeps pin_backoff_pending telemetry truthful (PR #95 review) */
   ml->mbb_target_region = pin;
   ml->mbb_generation++;
   s_pin_last_target = pin;
