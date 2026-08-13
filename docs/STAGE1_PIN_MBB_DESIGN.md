@@ -213,8 +213,24 @@ via the new `pin_pending` monitor field):**
 - **8.3 preemption: PASS.** Pin →2 re-pinned →10 4 s later: executor
   restarted to 10 immediately (generation bump), exactly one commit, landed
   on 10, green held, reconnects 0.
-- **8.4 run-27 gate soak: IN PROGRESS** (started 14:26 Z, 8 h, 19 min
-  cadence, ~25 switches, cycle [9,2,10,12]).
+- **8.4 run-27 gate soak: 17/17 SWITCHES GREEN, 0 switch-triggered drops**
+  (runs 27a–d, 2026-08-13, stopped at 17/25 by the operator with the edge in
+  a sustained flush storm — evidence deemed sufficient). Breakdown: 8 (27a,
+  build bcc9d5d) + 1 (27b, 38b4645) + 8 (27c/d, cbb1545 machn), including
+  **3 switches committed gaplessly MID-STORM** and run-26's killer
+  transition (switch #5 → region 2) repeatedly. `pin_commits` tracked
+  +1/switch exactly; `derp_reconnects` stayed FLAT during switching (the
+  legacy path cost +1/switch and ~1/5 disarms). ~10 non-switch disarms
+  occurred across the day — every one attributed to real edge flush events
+  by independent wire captures (peer pcap µs clocks) or concurrent
+  RST-counter deltas, and excluded per the pre-registered triage; none were
+  switch-triggered. Contrast baseline: run-26 on the legacy path = 1
+  switch-triggered disarm in 13 switches plus a reconnect storm and RTT
+  inflation, none of which recurred under pin→MBB.
+- **Residual (out of scope, Stage-2/3):** dead-home flush survival — a
+  flush that RSTs the live home conn (or wipes the NAT hairpins) can still
+  gap heartbeats 2–9.5 s. Five wire-attributed case studies with disarm
+  wall-clocks are banked as the Stage-2 validation targets.
 
 1. **Bench live-switch matrix** (fast): pin 9→2→10→12→9 with all 3 remotes
    bonded; for each switch confirm in logs: `PIN via MBB` → `MBB AUX_OPENING`
