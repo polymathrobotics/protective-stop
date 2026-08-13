@@ -715,6 +715,19 @@ bool ml_wg_is_health_tracked(uint32_t vpn_ip)
   return is_health_tracked(vpn_ip);
 }
 
+/* THE safety-peer membership test — the single definition of "this peer's
+ * link carries the safety heartbeat": the configured priority peer OR any
+ * health-tracked peer. Used by teardown vetoes, session diagnostics, the
+ * rekey-in-flight freeze, LRU-evict protection and the reingest sweep — one
+ * predicate, so a future criterion change cannot drift across call sites
+ * (PR #94 review: 6 hand-inlined copies had accumulated in this file).
+ * NOTE: distinct from ml_wg_is_safety_pubkey()'s pinned||health rule — pinned
+ * covers reachability armor (fleet anchor etc.), not heartbeat carriage. */
+static bool is_safety_peer(microlink_t * ml, uint32_t vpn_ip)
+{
+  return (ml->config.priority_peer_ip != 0 && vpn_ip == ml->config.priority_peer_ip) || is_health_tracked(vpn_ip);
+}
+
 /* DERP home region of a peer identified by its 32-byte WG public key.
  * 0 = unknown peer or region not learned. Called from ml_derp_queue_send on the
  * wg_mgr task (the peer-table owner), so this is a same-task read — no lock. */
@@ -896,7 +909,7 @@ void ml_wg_get_session_diag(microlink_t * ml, uint32_t out[5])
     ml_peer_t * p = &ml->peers[i];
     if (!p->active || p->wg_peer_index < 0) continue;
     bool safety =
-      (ml->config.priority_peer_ip != 0 && p->vpn_ip == ml->config.priority_peer_ip) || is_health_tracked(p->vpn_ip);
+      is_safety_peer(ml, p->vpn_ip);
     if (!safety) continue;
     u32_t kp_age = 0, init_age = 0;
     if (
@@ -925,7 +938,7 @@ void ml_wg_get_session_diag(microlink_t * ml, uint32_t out[5])
 static bool teardown_vetoed(microlink_t * ml, uint32_t vpn_ip, int wg_peer_index)
 {
   bool is_safety =
-    (ml->config.priority_peer_ip != 0 && vpn_ip == ml->config.priority_peer_ip) || is_health_tracked(vpn_ip);
+    is_safety_peer(ml, vpn_ip);
   u32_t age_ms = 0;
   bool valid = ml->wg_netif && wg_peer_index >= 0 &&
                wireguardif_peer_rx_age((struct netif *)ml->wg_netif, (u8_t)wg_peer_index, &age_ms) == ERR_OK;
@@ -957,7 +970,7 @@ void ml_wg_get_direct_retry_diag(microlink_t * ml, uint32_t out[4])
     ml_peer_t * p = &ml->peers[i];
     if (!p->active || p->has_direct_path) continue;
     bool safety =
-      (ml->config.priority_peer_ip != 0 && p->vpn_ip == ml->config.priority_peer_ip) || is_health_tracked(p->vpn_ip);
+      is_safety_peer(ml, p->vpn_ip);
     if (!safety) continue;
     out[2]++;
     if (p->relay_retry_next_ms != 0 && (soonest == 0 || p->relay_retry_next_ms < soonest)) {
@@ -1222,7 +1235,7 @@ static bool safety_rekey_inflight(microlink_t * ml)
     ml_peer_t * p = &ml->peers[i];
     if (!p->active || p->wg_peer_index < 0) continue;
     bool safety =
-      (ml->config.priority_peer_ip != 0 && p->vpn_ip == ml->config.priority_peer_ip) || is_health_tracked(p->vpn_ip);
+      is_safety_peer(ml, p->vpn_ip);
     if (!safety) continue;
     u32_t kp_age = 0, init_age = 0;
     if (
@@ -1830,10 +1843,7 @@ static int add_peer(microlink_t * ml, const ml_peer_update_t * update)
         if (is_pinned_peer(ml, ml->peers[i].vpn_ip)) continue;
         /* Never LRU-evict a safety peer, pinned or not — evicting the peer
          * carrying the 5 Hz heartbeat is a guaranteed machine STOP. */
-        if (
-          (ml->config.priority_peer_ip != 0 && ml->peers[i].vpn_ip == ml->config.priority_peer_ip) ||
-          is_health_tracked(ml->peers[i].vpn_ip))
-        {
+        if (is_safety_peer(ml, ml->peers[i].vpn_ip)) {
           s_diag_evict_safety_skips++;
           continue;
         }
@@ -2563,7 +2573,7 @@ static void process_disco_pong(
        * heartbeat). Mirrors tailscale magicsock trustBestAddrUntil+betterAddr. */
       bool had_direct = p->has_direct_path;
       bool is_prio =
-        (ml->config.priority_peer_ip != 0 && p->vpn_ip == ml->config.priority_peer_ip) || is_health_tracked(p->vpn_ip);
+        is_safety_peer(ml, p->vpn_ip);
 
       /* Any direct pong proves reachability — renew liveness first, regardless
        * of whether we adopt this specific endpoint below. */
