@@ -903,9 +903,10 @@ extern "C"
 
   /* Stage-1 pin->MBB telemetry (docs/STAGE1_PIN_MBB_DESIGN.md):
    * out[0]=pin MBB requests, out[1]=commits, out[2]=retries (failed proves,
-   * retry-forever), out[3]=backoff currently pending (0/1). Owned by the
-   * wg_mgr task; word-sized cross-task reads. */
-  void ml_wg_get_pin_diag(uint32_t out[4]);
+   * retry-forever), out[3]=backoff currently pending (0/1), out[4]=coord
+   * full-resyncs forced by a pinned-but-absent peer (f498 heal). Owned by
+   * the wg_mgr task; word-sized cross-task reads. */
+  void ml_wg_get_pin_diag(uint32_t out[5]);
 
   /* Effective home DERP region for slot 0: the runtime override wins, else the
    * learned/rehomed home region. 0 = neither known (caller falls back to

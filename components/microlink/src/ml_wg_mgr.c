@@ -1382,13 +1382,68 @@ static uint32_t s_pin_mbb_retries; /* re-issues after a failed prove */
 static uint64_t s_pin_retry_at_ms; /* 0 = no backoff pending */
 static uint32_t s_pin_backoff_ms; /* current backoff step */
 static uint16_t s_pin_last_target; /* region of the pin MBB we issued (edge 4: cancel-on-clear) */
+static uint32_t s_pin_absent_resyncs; /* coord full-resyncs forced by an absent pinned peer (f498 heal) */
+static uint64_t s_pin_absent_next_ms; /* pin-presence heal backoff gate */
+static uint32_t s_pin_absent_backoff_ms;
 
-void ml_wg_get_pin_diag(uint32_t out[4])
+void ml_wg_get_pin_diag(uint32_t out[5])
 {
   out[0] = s_pin_mbb_requests;
   out[1] = s_pin_mbb_commits;
   out[2] = s_pin_mbb_retries;
   out[3] = (s_pin_retry_at_ms != 0) ? 1u : 0u; /* backoff currently pending */
+  out[4] = s_pin_absent_resyncs; /* forced coord resyncs for a pinned-but-absent peer */
+}
+
+/* Pin-presence self-heal (f498 EHOSTUNREACH, 2026-08-12): an extra-pinned IP
+ * (a configured pstop machine / fleet anchor) that is ABSENT from the peer
+ * table can never be reached — and with OmitPeers the control plane will not
+ * re-send it unprompted, so the outage is PERMANENT until a lucky reboot.
+ * How it happens: the initial full-netmap ingest can race ahead of the app's
+ * boot-time pstop_slot_pins_sync(); on an over-cap tailnet the machine is
+ * then dropped UN-pinned ("Peer table full, cannot add") and no later patch
+ * re-delivers it. Heal: detect pinned-but-absent on the 3 s cadence and kick
+ * ML_CMD_FORCE_RECONNECT (re-register -> full FETCH_PEERS re-ingests the map;
+ * by then the pin is registered, so admission LRU-evicts a non-pinned peer).
+ * Escalating backoff 60 s -> 10 min cap: a reconnect is heavier than an
+ * announce, and a misconfigured (never-on-tailnet) machine IP must not storm
+ * control — it stays visible via the counter + log instead. (Statics live
+ * with the other pin counters above, ahead of ml_wg_get_pin_diag.) */
+static void pin_presence_heal(microlink_t * ml)
+{
+  if (!(xEventGroupGetBits(ml->events) & ML_EVT_COORD_REGISTERED)) {
+    return; /* boot/reconnect grace: the full map may still be ingesting */
+  }
+  uint32_t absent_ip = 0;
+  for (int i = 0; i < ML_EXTRA_PINS; i++) {
+    uint32_t ip = s_extra_pins[i];
+    if (ip != 0 && find_peer_by_ip(ml, ip) < 0) {
+      absent_ip = ip;
+      break;
+    }
+  }
+  uint64_t now = ml_get_time_ms();
+  if (absent_ip == 0) {
+    s_pin_absent_backoff_ms = 0; /* healthy — reset the backoff ladder */
+    return;
+  }
+  if (s_pin_absent_next_ms != 0 && now < s_pin_absent_next_ms) {
+    return;
+  }
+  s_pin_absent_backoff_ms =
+    (s_pin_absent_backoff_ms == 0) ? 60000 : (s_pin_absent_backoff_ms >= 300000 ? 600000 : s_pin_absent_backoff_ms * 5);
+  s_pin_absent_next_ms = now + s_pin_absent_backoff_ms;
+  s_pin_absent_resyncs++;
+  char ipstr[16];
+  microlink_ip_to_str(absent_ip, ipstr);
+  ESP_LOGW(
+    TAG,
+    "Pinned peer %s ABSENT from peer table — forcing coord resync #%u (next retry in %us)",
+    ipstr,
+    (unsigned)s_pin_absent_resyncs,
+    (unsigned)(s_pin_absent_backoff_ms / 1000));
+  ml_coord_cmd_t cmd = ML_CMD_FORCE_RECONNECT;
+  (void)xQueueSend(ml->coord_cmd_queue, &cmd, 0); /* full = one already pending */
 }
 
 static void neg_pin_tick(microlink_t * ml)
@@ -3805,6 +3860,8 @@ static void self_heal_rehome(microlink_t * ml)
   /* Stage-1 pin->MBB: converge the operator region pin gaplessly (same
    * cadence, same single-writer command interface as autoneg). */
   neg_pin_tick(ml);
+  /* Pinned-but-absent peer => force a coord full resync (f498 heal). */
+  pin_presence_heal(ml);
   /* Heal against the DERIVED §4.2 primary (falls back to the legacy static
    * priority_peer_ip when no callback is registered — machn/plain builds). */
   uint32_t prim = neg_primary_ip(ml);
