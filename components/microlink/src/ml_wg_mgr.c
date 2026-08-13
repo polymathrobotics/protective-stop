@@ -1250,17 +1250,16 @@ static void neg_apply_target(microlink_t * ml, uint16_t target, uint8_t src)
 
   if (ml->derp_region_override != 0) {
     ml->priority_peer_region = target; /* advertised as PreferredDERP (override still wins) */
-    neg_cancel_mbb(ml);
-    if (ml->derp_home_region != target) {
-      s_diag_rehome_applied++;
-      ESP_LOGW(
-        TAG,
-        "Re-homing DERP region %u -> %u (locked: override %u wins on connect/advert)",
-        (unsigned)ml->derp_home_region,
-        (unsigned)target,
-        (unsigned)ml->derp_region_override);
-      ml->derp_home_region = target;
-      xEventGroupSetBits(ml->events, ML_EVT_DERP_RECONNECT);
+    /* Stage-1 (pin->MBB): pin convergence is owned by neg_pin_tick — gapless
+     * MBB while the home conn is alive, the DERP task's own home-reconnect
+     * (straight to the override) when it is not. The legacy teardown +
+     * ML_EVT_DERP_RECONNECT that used to live here is exactly the ~1-2 s
+     * blocking-TLS rx starvation run-26 measured (nuisance disarm ~1/5).
+     * Cancel only a FOREIGN in-flight MBB (autoneg toward some other region —
+     * the old I2 "lock wins instantly" intent); NEVER the pin's own, or the
+     * pin could never complete (this runs every 3 s). */
+    if (ml->mbb_target_region != 0 && ml->mbb_target_region != ml->derp_region_override) {
+      neg_cancel_mbb(ml);
     }
     return;
   }
@@ -1362,6 +1361,88 @@ static void neg_apply_target(microlink_t * ml, uint16_t target, uint8_t src)
     microlink_region_source_str(src));
 }
 
+/* ============================================================================
+ * Stage-1 pin->MBB (docs/STAGE1_PIN_MBB_DESIGN.md): drive the operator region
+ * pin (derp_region_override) GAPLESSLY. While the home conn is alive, the pin
+ * is applied via the §7 make-before-break executor (open target as aux, prove,
+ * swap the home index — no teardown, no rx gap). With no live home there is
+ * nothing to protect: the DERP task's own home-reconnect path already connects
+ * straight to ml_effective_home_region() == the override.
+ *
+ * Fallback semantics (operator decision 2026-08-13): RETRY FOREVER, NEVER GAP.
+ * A pin toward an unprovable region keeps the old (working) home serving and
+ * retries with 5 s -> 15 s -> 60 s backoff (60 s cap, RAM-only) — a pin is a
+ * command, not advice, so rollbacks neither ban the region nor give up. The
+ * unfulfilled pin is visible as pin_pending in /api/status.
+ * State + counters owned by the wg_mgr task (single writer); counters read
+ * cross-task via ml_wg_get_pin_diag (word reads). */
+static uint32_t s_pin_mbb_requests; /* MBB commands issued for the pin */
+static uint32_t s_pin_mbb_commits; /* pin MBBs that committed */
+static uint32_t s_pin_mbb_retries; /* re-issues after a failed prove */
+static uint64_t s_pin_retry_at_ms; /* 0 = no backoff pending */
+static uint32_t s_pin_backoff_ms; /* current backoff step */
+static uint16_t s_pin_last_target; /* region of the pin MBB we issued (edge 4: cancel-on-clear) */
+
+void ml_wg_get_pin_diag(uint32_t out[4])
+{
+  out[0] = s_pin_mbb_requests;
+  out[1] = s_pin_mbb_commits;
+  out[2] = s_pin_mbb_retries;
+  out[3] = (s_pin_retry_at_ms != 0) ? 1u : 0u; /* backoff currently pending */
+}
+
+static void neg_pin_tick(microlink_t * ml)
+{
+  uint16_t pin = ml->derp_region_override;
+  if (pin == 0) {
+    /* Edge 4: pin cleared while its own MBB is in flight — cancel it (the
+     * generation bump aborts the executor back to IDLE, no ban). Autoneg
+     * resumes ownership on its own cadence. */
+    if (s_pin_last_target != 0 && ml->mbb_target_region == s_pin_last_target) {
+      neg_cancel_mbb(ml);
+    }
+    s_pin_last_target = 0;
+    s_pin_retry_at_ms = 0;
+    s_pin_backoff_ms = 0;
+    return;
+  }
+  /* Cross-task read of the DERP-task-owned home conn: volatile word reads. A
+   * torn/stale read is conservative — worst case we wait one 3 s tick. */
+  ml_derp_conn_t * home = &ml->derp[ml->derp_home_slot];
+  bool home_alive = home->connected;
+  if (home_alive && home->region_id == pin) {
+    s_pin_retry_at_ms = 0; /* pin satisfied — clear any backoff */
+    s_pin_backoff_ms = 0;
+    return;
+  }
+  if (!home_alive) {
+    /* No live home = no gap to protect. The DERP I/O task's home-reconnect
+     * path connects to ml_effective_home_region() (= the override) on its
+     * own; issuing an MBB here would just race it. Nothing to do. */
+    return;
+  }
+  uint64_t now = ml_get_time_ms();
+  if (s_pin_retry_at_ms != 0 && now < s_pin_retry_at_ms) {
+    return; /* backing off after a failed prove */
+  }
+  if (ml->mbb_target_region == pin) {
+    return; /* already in flight toward the pin — let the executor work */
+  }
+  /* Issue the MBB command (same single-writer interface autoneg uses). The
+   * §8 damping/ban guards are deliberately NOT consulted: an operator pin is
+   * a command; the mbb_target dedupe above is the only rate limit needed. */
+  s_neg_pending_source = MICROLINK_REGION_SRC_LOCKED;
+  ml->mbb_target_region = pin;
+  ml->mbb_generation++;
+  s_pin_last_target = pin;
+  s_pin_mbb_requests++;
+  ESP_LOGW(
+    TAG,
+    "PIN via MBB: home region %u -> %u (gapless; old home serves until the new conn proves)",
+    (unsigned)home->region_id,
+    (unsigned)pin);
+}
+
 /* Consume the MBB executor's outcome (posted by the DERP I/O task). Runs on
  * the wg_mgr 3 s self-heal cadence — the advert/announce stays single-writer
  * (this task), off the 10 Hz safety send path. */
@@ -1375,6 +1456,11 @@ static void neg_consume_mbb_outcome(microlink_t * ml)
   uint64_t now = ml_get_time_ms();
 
   if (oc == ML_MBB_OUTCOME_COMMITTED) {
+    if (ml->derp_region_override != 0 && region == ml->derp_region_override) {
+      s_pin_mbb_commits++; /* Stage-1: the pin landed gaplessly */
+      s_pin_retry_at_ms = 0;
+      s_pin_backoff_ms = 0;
+    }
     neg_note_commit(now);
     /* §6/§7 SWITCH_ADVERT tail: an MBB-committed region is treated exactly
      * like priority_peer_region — it owns the PreferredDERP advert and arms
@@ -1396,6 +1482,22 @@ static void neg_consume_mbb_outcome(microlink_t * ml)
       (unsigned)region,
       microlink_region_source_str(s_neg_pending_source));
   } else if (oc == ML_MBB_OUTCOME_ROLLED_BACK) {
+    if (ml->derp_region_override != 0 && region == ml->derp_region_override) {
+      /* Stage-1 retry-forever: a pin is a command, not advice — no region ban,
+       * no give-up. Back off 5 s -> 15 s -> 60 s (cap) and re-issue; the old
+       * (working) home keeps serving throughout, so green is never at risk.
+       * The unfulfilled pin is visible as pin_pending in /api/status. */
+      s_pin_backoff_ms = (s_pin_backoff_ms == 0) ? 5000 : (s_pin_backoff_ms == 5000 ? 15000 : 60000);
+      s_pin_retry_at_ms = now + s_pin_backoff_ms;
+      s_pin_mbb_retries++;
+      s_neg_candidate = 0;
+      ESP_LOGW(
+        TAG,
+        "PIN MBB ROLLBACK: region %u failed proving — retrying in %us (no ban; old home keeps serving)",
+        (unsigned)region,
+        (unsigned)(s_pin_backoff_ms / 1000));
+      return;
+    }
     neg_ban_region(region, now); /* §8: 15-min cooldown before retrying an unprovable region */
     s_neg_candidate = 0; /* restart the stability window from scratch */
     ESP_LOGW(
@@ -3700,6 +3802,9 @@ static void self_heal_rehome(microlink_t * ml)
    * rollback => region ban. Runs here (3 s cadence, wg_mgr task) so the
    * negotiator stays single-writer and off the 10 Hz safety send path. */
   neg_consume_mbb_outcome(ml);
+  /* Stage-1 pin->MBB: converge the operator region pin gaplessly (same
+   * cadence, same single-writer command interface as autoneg). */
+  neg_pin_tick(ml);
   /* Heal against the DERIVED §4.2 primary (falls back to the legacy static
    * priority_peer_ip when no callback is registered — machn/plain builds). */
   uint32_t prim = neg_primary_ip(ml);

@@ -645,8 +645,15 @@ static esp_err_t handler_post_settings(httpd_req_t * req)
 
   if (derp_region_changed && ctx->ml != NULL) {
     ctx->ml->derp_region_override = ctx->settings.derp_region;
-    /* Re-home slot 0 locally so inbound + relay land on the pinned region. */
-    xEventGroupSetBits(ctx->ml->events, ML_EVT_DERP_RECONNECT);
+    /* Stage-1 (pin->MBB, docs/STAGE1_PIN_MBB_DESIGN.md): do NOT fire
+     * ML_EVT_DERP_RECONNECT here. That path tears the live home conn down and
+     * BLOCKING-reconnects (~1-2 s TLS burst on the DERP I/O task), starving
+     * inbound heartbeat processing past the 2 s machine timeout (~1/5 nuisance
+     * disarm, run-26). The wg_mgr negotiator's pin tick (3 s cadence) now
+     * drives the pin: make-before-break when the home conn is alive (open the
+     * target as an aux, prove, swap the home index — no teardown), and the
+     * DERP task's own home-reconnect path (which connects straight to the
+     * override) when there is no live home to protect. */
     /* CRITICAL: re-home alone only fixes US. Remote peers still hold the STALE
      * region in their netmap until the coordination server re-populates our
      * Node.HomeDERP — which it only does when we re-advertise PreferredDERP.
@@ -658,7 +665,7 @@ static esp_err_t handler_post_settings(httpd_req_t * req)
     esp_err_t are = microlink_request_announce(ctx->ml);
     ESP_LOGI(
       TAG,
-      "DERP region pin applied live: %u (slot-0 reconnect + coord re-advertise %s)",
+      "DERP region pin applied live: %u (gapless MBB via negotiator pin tick + coord re-advertise %s)",
       (unsigned)ctx->settings.derp_region,
       are == ESP_OK ? "queued" : "already-pending");
   }
@@ -953,6 +960,23 @@ static esp_err_t handler_monitor(httpd_req_t * req)
       cJSON_AddNumberToObject(json, "neg_damping_suppressed", an.damping_suppressed);
       cJSON_AddNumberToObject(json, "neg_cooldown_trips", an.cooldown_trips);
       cJSON_AddNumberToObject(json, "switches_1h", an.switches_1h);
+      /* Stage-1 pin->MBB: pin_pending distinguishes "pin applied" from "pin
+       * retrying toward an unproven region" (retry-forever, old home serving).
+       * Compare against the ACTUAL connected home conn — under a pin,
+       * effective-home == the override from the instant it is set, so the
+       * eff alias can't tell whether the conn has moved yet. */
+      {
+        uint32_t pd[4] = {0};
+        ml_wg_get_pin_diag(pd);
+        ml_derp_conn_t * homec = &ml->derp[ml->derp_home_slot];
+        bool pin_ok = ml->derp_region_override == 0 ||
+          (homec->connected && homec->region_id == ml->derp_region_override);
+        cJSON_AddBoolToObject(json, "pin_pending", !pin_ok);
+        cJSON_AddNumberToObject(json, "pin_mbb_requests", pd[0]);
+        cJSON_AddNumberToObject(json, "pin_mbb_commits", pd[1]);
+        cJSON_AddNumberToObject(json, "pin_mbb_retries", pd[2]);
+        cJSON_AddNumberToObject(json, "pin_backoff_pending", pd[3]);
+      }
     }
     /* Home-region-unreachable fallback telemetry (DERP design-review finding):
      * how many times slot 0 fell back off an unreachable home region, or opened
