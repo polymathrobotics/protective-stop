@@ -556,6 +556,60 @@ esp_err_t ml_derp_queue_send(microlink_t * ml, const uint8_t * dest_key, const u
  * safety peer's frame is NEVER silently dropped (the caller logs the
  * fallback). Returns NULL only when the chosen conn is down (nothing can
  * carry it this pass). */
+/* Frames stamped for a non-home region that had NO connected aux conn and
+ * fell back to the HOME conn. A DERP server only delivers to clients
+ * connected to IT — so unless the destination peer also sits on our home
+ * region, every one of these frames is silently eaten server-side ("does not
+ * know about peer"). This is the black-hole that starves WG rekeys after a
+ * region switch when a peer-region record is stale (run-20/21 forensics). */
+static uint32_t s_diag_route_home_fallbacks;
+
+uint32_t ml_derp_get_route_fallbacks(void)
+{
+  return s_diag_route_home_fallbacks;
+}
+
+/* Drain up to a few pending frames from the HOME conn — called from inside a
+ * blocking AUX connect so the safety heartbeat relay riding home keeps flowing
+ * during the ~1-2s aux TLS handshake (2026-08-12 edge-flush fix; replaces the
+ * self-deadlocking defer-aux guard). Single-task, so re-entrant use of
+ * poll_derp_read on a DIFFERENT conn is safe. Stops on no-data (bounded 100ms
+ * per read) or error (the main loop handles a dead home conn after we return). */
+static uint32_t s_diag_home_pumps; /* home-rx drains performed during aux connects */
+
+static void derp_pump_home_rx(microlink_t * ml)
+{
+  ml_derp_conn_t * home = &ml->derp[ml->derp_home_slot];
+  if (!home->connected || home->sockfd < 0) return;
+  for (int i = 0; i < 4; i++) {
+    int r = poll_derp_read(ml, home);
+    if (r <= 0) break; /* 0 = no more data; <0 = home needs the main loop */
+    home->last_recv_ms = ml_get_time_ms();
+    s_diag_home_pumps++;
+  }
+}
+
+uint32_t ml_derp_get_home_pumps(void)
+{
+  return s_diag_home_pumps;
+}
+
+/* Home-DERP reconnect telemetry (2026-08-12 edge-flush fix). reconnects =
+ * count of successful RST/EOF-triggered home reconnects; last/worst =
+ * wall-clock ms from RST detection to reconnected. worst < ~1500 confirms the
+ * relay is back inside the 2 s pstop timeout window (green rides it through a
+ * flush); a worst climbing toward/over 2000 means recovery is still too slow. */
+static uint32_t s_diag_derp_reconnects;
+static uint32_t s_diag_derp_last_reconnect_ms;
+static uint32_t s_diag_derp_worst_reconnect_ms;
+
+void ml_derp_get_reconnect_diag(uint32_t out[3])
+{
+  out[0] = s_diag_derp_reconnects;
+  out[1] = s_diag_derp_last_reconnect_ms;
+  out[2] = s_diag_derp_worst_reconnect_ms;
+}
+
 static ml_derp_conn_t * derp_route_conn(microlink_t * ml, uint16_t region_id, uint16_t eff_home)
 {
   int hs = ml->derp_home_slot;
@@ -567,6 +621,7 @@ static ml_derp_conn_t * derp_route_conn(microlink_t * ml, uint16_t region_id, ui
         return &ml->derp[s];
       }
     }
+    s_diag_route_home_fallbacks++;
   }
   return home->connected ? home : NULL;
 }
@@ -655,6 +710,13 @@ static void derp_manage_aux(microlink_t * ml, uint16_t eff_home, int aux_burst[]
    *    inbound path) for tens of seconds → nuisance STOP risk. We attempt one
    *    region and return; the rest are picked up on the next task iteration,
    *    AFTER home connect/drain/read have run again. (Adversarial review 2026-08-04.) */
+
+  /* Home-rx protection (2026-08-12): the one-connect-per-call cap above bounds
+   * N back-to-back connects, but a single aux TLS handshake still takes ~1-2s.
+   * Rather than DEFER the aux (the removed guard self-deadlocked a cross-region
+   * relay-bound safety peer — @claude PR review), ml_derp_connect now services
+   * the home conn's rx during an aux handshake (derp_pump_home_rx), so the
+   * safety heartbeat relay keeps flowing while the standby (re)connects. */
   for (int w = 0; w < nwant; w++) {
     uint16_t rid = want[w];
     bool served = false;
@@ -1210,10 +1272,21 @@ void ml_derp_tx_task(void * arg)
       if (bits & ML_EVT_DERP_RECONNECT) {
         xEventGroupClearBits(ml->events, ML_EVT_DERP_RECONNECT);
         ESP_LOGW(TAG, "DERP reconnect requested (home was %s)", home->connected ? "connected" : "disconnected");
+        uint64_t reconn_t0 = ml_get_time_ms();
         ml_derp_disconnect(ml, home);
         verbose_phase = false;
-        /* Auto-reconnect after disconnect */
-        vTaskDelay(pdMS_TO_TICKS(1000));
+        /* IMMEDIATE first reconnect (run-20/21/22 root cause, 2026-08-12
+         * DUT-host wire+journal evidence): an RST/EOF here is almost always a
+         * middlebox connection-table FLUSH (the office edge firewall RSTs
+         * long-lived DERP TCP across regions and rebinds NAT in the same
+         * instant), NOT a down server. The old unconditional 1000 ms pre-delay
+         * + TLS handshake pushed relay recovery past the 2 s pstop timeout —
+         * and because the same flush kills the direct hairpin simultaneously,
+         * the heartbeat had NO path for those seconds -> green drop. tailscaled
+         * recovers in <1 s (connGen++); match it: try NOW, back off (2 s) only
+         * on CONSECUTIVE failures (a genuinely-down server). A short yield lets
+         * ml_derp_disconnect's socket close settle without stalling recovery. */
+        vTaskDelay(pdMS_TO_TICKS(20));
         for (int attempt = 0; attempt < 3 && !home->connected; attempt++) {
           if (attempt > 0) {
             ESP_LOGW(TAG, "DERP reconnect retry %d/3 in 2s...", attempt + 1);
@@ -1222,6 +1295,13 @@ void ml_derp_tx_task(void * arg)
           if (ml_derp_connect(ml, home, ml_effective_home_region(ml)) == ESP_OK) {
             connected_since_ms = ml_get_time_ms();
             verbose_phase = true;
+            s_diag_derp_reconnects++;
+            s_diag_derp_last_reconnect_ms = (uint32_t)(ml_get_time_ms() - reconn_t0);
+            if (s_diag_derp_last_reconnect_ms > s_diag_derp_worst_reconnect_ms) {
+              s_diag_derp_worst_reconnect_ms = s_diag_derp_last_reconnect_ms;
+            }
+            ESP_LOGW(
+              TAG, "DERP home reconnected in %ums (attempt %d)", (unsigned)s_diag_derp_last_reconnect_ms, attempt + 1);
             break;
           }
           ESP_LOGW(TAG, "DERP reconnect attempt %d failed", attempt + 1);
@@ -1539,10 +1619,25 @@ esp_err_t ml_derp_connect(microlink_t * ml, ml_derp_conn_t * c, uint16_t region_
   c->sockfd = sock;
   mbedtls_ssl_set_bio(&c->ssl, &c->sockfd, ml_derp_bio_send, NULL, ml_derp_bio_recv_timeout);
 
-  /* TLS handshake - socket has 10s SO_RCVTIMEO from connect phase. */
+  /* TLS handshake. For an AUX conn, shorten the read timeout to 100 ms so the
+   * BIO returns SSL_TIMEOUT between flights (mbedTLS resumes cleanly on a TLS
+   * stream) — we service the home conn's rx there so a ~1-2s aux handshake
+   * doesn't gap the safety heartbeat relay riding home (2026-08-12 edge-flush
+   * fix; replaces defer-aux). Home keeps the long timeout. Overall deadline is
+   * unchanged (DERP_CONNECT_TIMEOUT_MS). */
+  if (!is_home) {
+    mbedtls_ssl_conf_read_timeout(&c->ssl_conf, 100);
+  }
+  uint64_t hs_deadline = ml_get_time_ms() + DERP_CONNECT_TIMEOUT_MS;
   int ret;
   while ((ret = mbedtls_ssl_handshake(&c->ssl)) != 0) {
-    if (ret == MBEDTLS_ERR_SSL_WANT_READ || ret == MBEDTLS_ERR_SSL_WANT_WRITE) {
+    if (ret == MBEDTLS_ERR_SSL_WANT_READ || ret == MBEDTLS_ERR_SSL_WANT_WRITE || ret == MBEDTLS_ERR_SSL_TIMEOUT) {
+      if (!is_home) derp_pump_home_rx(ml); /* keep the safety relay flowing */
+      if (ml_get_time_ms() > hs_deadline) {
+        ESP_LOGE(TAG, "TLS handshake timeout (%s)", is_home ? "home" : "aux");
+        DERP_CONNECT_FAIL_CLEANUP();
+        return ESP_FAIL;
+      }
       continue;
     }
     char err_buf[128];
@@ -1550,6 +1645,11 @@ esp_err_t ml_derp_connect(microlink_t * ml, ml_derp_conn_t * c, uint16_t region_
     ESP_LOGE(TAG, "TLS handshake failed: %s", err_buf);
     DERP_CONNECT_FAIL_CLEANUP();
     return ESP_FAIL;
+  }
+  /* Restore the long read timeout for the HTTP-upgrade + DERP-handshake reads
+   * below (those are fast, few round-trips — no per-flight pumping needed). */
+  if (!is_home) {
+    mbedtls_ssl_conf_read_timeout(&c->ssl_conf, DERP_CONNECT_TIMEOUT_MS);
   }
 
   int64_t t_derp_tls = esp_timer_get_time();

@@ -1,0 +1,28 @@
+# Repo-local Ruff config, mirroring polymath_code_standard v2.1.1 config/ruff.toml.
+#
+# The pre-commit `polymath-python` checker copies its own ruff.toml to a
+# gitignored `.ruff.toml` at runtime and relies on ruff's ancestor-walk
+# discovery. On CI runners that copy is not discovered from the hook's cwd, so
+# ruff silently falls back to its built-in default (quote-style = "double") and
+# rewrites the repo's single-quoted Python — failing every PR on unchanged
+# files. This tracked, non-dot `ruff.toml` is discovered by ruff regardless of
+# cwd, pinning the org standard (single quotes) in CI. When the checker's
+# runtime `.ruff.toml` IS present it takes precedence and is identical, so the
+# two never disagree. Keep in sync with polymath_code_standard.
+
+line-length = 120
+indent-width = 4
+
+[format]
+preview = true
+quote-style = "single"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "lf"
+
+[lint]
+select = ["E4", "E7", "E9", "F", "I"]
+ignore = []
+fixable = ["ALL"]
+unfixable = []
+dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"

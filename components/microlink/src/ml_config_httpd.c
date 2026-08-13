@@ -1026,12 +1026,72 @@ static esp_err_t handler_monitor(httpd_req_t * req)
        *                    includes bulk peers; a climbing regains_safety
        *                    with flat direct_relay_bound = the safety path
        *                    itself is oscillating. */
-      extern void ml_wg_get_disco_obs_diag(uint32_t[3]);
-      uint32_t od[3] = {0};
+      extern void ml_wg_get_disco_obs_diag(uint32_t[4]);
+      uint32_t od[4] = {0};
       ml_wg_get_disco_obs_diag(od);
       cJSON_AddNumberToObject(json, "probe_tbl_hw", od[0]);
       cJSON_AddNumberToObject(json, "cmm_rx_count", od[1]);
       cJSON_AddNumberToObject(json, "regains_safety", od[2]);
+      /* demote_vetoes: direct demotes vetoed because authenticated WG data was
+       * still arriving on the direct path (disco-silent-but-data-alive). Climbs
+       * ~1/s while such an episode lasts — a nonzero value means the demote-
+       * verification saved a working direct path from a spurious teardown. */
+      cJSON_AddNumberToObject(json, "demote_vetoes", od[3]);
+
+      /* Hitless re-ingest (run-20 green-drop forensics): which WG session-
+       * teardown path fired, and whether the live-safety-session veto saved
+       * the bond. rekey_retires / peer_removes = teardowns APPLIED;
+       * *_vetoes = teardowns of an actively-authenticating safety session
+       * DEFERRED instead; evict_safety_skips = LRU eviction passed over a
+       * safety peer. */
+      extern void ml_wg_get_reingest_diag(uint32_t[6]);
+      uint32_t rg[6] = {0};
+      ml_wg_get_reingest_diag(rg);
+      cJSON_AddNumberToObject(json, "rekey_retires", rg[0]);
+      cJSON_AddNumberToObject(json, "rekey_retire_vetoes", rg[1]);
+      cJSON_AddNumberToObject(json, "peer_removes", rg[2]);
+      cJSON_AddNumberToObject(json, "remove_vetoes", rg[3]);
+      cJSON_AddNumberToObject(json, "evict_safety_skips", rg[4]);
+      cJSON_AddNumberToObject(json, "relay_disco_resets", rg[5]);
+
+      /* WG session health (run-20/21 ENOTCONN forensics). The failure
+       * signature to watch: wg_kp_age_max climbing past 120000 (rekey
+       * starving) -> wg_tx_keypair_expired increments (session died) ->
+       * wg_tx_no_valid_keys climbing (every send now ENOTCONN). Correlate
+       * with derp_route_fallbacks (handshake frames black-holed to a DERP
+       * conn the peer isn't on) and ep_learn_evictions (the symmetric-NAT
+       * table wedge being absorbed instead of going terminal). */
+      extern volatile uint32_t wireguardif_tx_keypair_expired;
+      extern volatile uint32_t wireguardif_tx_no_valid_keys;
+      cJSON_AddNumberToObject(json, "wg_tx_keypair_expired", wireguardif_tx_keypair_expired);
+      cJSON_AddNumberToObject(json, "wg_tx_no_valid_keys", wireguardif_tx_no_valid_keys);
+      extern uint32_t ml_derp_get_route_fallbacks(void);
+      cJSON_AddNumberToObject(json, "derp_route_fallbacks", ml_derp_get_route_fallbacks());
+      /* home_pumps: home-conn rx drains performed DURING an aux DERP connect,
+       * so the safety heartbeat relay keeps flowing through a ~1-2s aux TLS
+       * handshake (edge-flush fix; replaced the self-deadlocking defer-aux).
+       * Climbs while a standby (re)connects; green should hold across it. */
+      extern uint32_t ml_derp_get_home_pumps(void);
+      cJSON_AddNumberToObject(json, "derp_home_pumps", ml_derp_get_home_pumps());
+      /* Home-DERP reconnect speed (edge-flush fix): worst < ~1500ms confirms
+       * the relay is back inside the 2s pstop timeout so green rides it
+       * through a firewall connection-table flush. */
+      extern void ml_derp_get_reconnect_diag(uint32_t[3]);
+      uint32_t rc[3] = {0};
+      ml_derp_get_reconnect_diag(rc);
+      cJSON_AddNumberToObject(json, "derp_reconnects", rc[0]);
+      cJSON_AddNumberToObject(json, "derp_reconnect_last_ms", rc[1]);
+      cJSON_AddNumberToObject(json, "derp_reconnect_worst_ms", rc[2]);
+      extern void ml_wg_get_session_diag(microlink_t *, uint32_t[5]);
+      uint32_t sd[5] = {0};
+      ml_wg_get_session_diag(ml, sd);
+      cJSON_AddNumberToObject(json, "ep_learn_evictions", sd[0]);
+      cJSON_AddNumberToObject(json, "wg_kp_age_max", sd[1]);
+      cJSON_AddNumberToObject(json, "wg_init_age_max", sd[2]);
+      /* Receive-stall metric (2026-08-12 edge-flush): worst any-path inter-frame
+       * rx gap from a safety peer. ~2000 during a flush = a ~2s inbound stall on
+       * THIS node = the disarm cause, even with derp_reconnects=0. */
+      cJSON_AddNumberToObject(json, "rx_worst_gap_ms", sd[3]);
 
       /* Same-LAN direct-path diagnostics for the priority peer (the machine):
        * what LAN endpoint we advertise, which candidate endpoints we hold for

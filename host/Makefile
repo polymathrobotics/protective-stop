@@ -46,10 +46,16 @@ CRYPTO_SRCS := \
 test_crypto_kat: test_crypto_kat.c $(CRYPTO_SRCS)
 	$(CC) -O3 -Wall -Wextra -Wno-unused-parameter -o $@ $^
 
+# Direct-path demote-verification verdict (ml_demote_verdict.h): pure
+# header-only logic, no ESP-IDF/lwIP — see test_demote_veto.c for the contract.
+test_demote_veto: test_demote_veto.c $(MICROLINK)/include/ml_demote_verdict.h
+	$(CC) $(CFLAGS) -I$(MICROLINK)/include -o $@ test_demote_veto.c
+
 .PHONY: test clean
-test: test_clock_guard test_crypto_kat
+test: test_clock_guard test_crypto_kat test_demote_veto
 	./test_clock_guard
 	./test_crypto_kat
+	./test_demote_veto
 
 clean:
-	rm -f machine_app_runner test_clock_guard test_crypto_kat
+	rm -f machine_app_runner test_clock_guard test_crypto_kat test_demote_veto

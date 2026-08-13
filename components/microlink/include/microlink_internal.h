@@ -229,6 +229,29 @@ extern "C"
                                                 * safety impact (dual-path send
                                                 * keeps the uplink gapless anyway). */
 #define ML_DISCO_PRIORITY_REPROBE_MS 5000
+/* Demote-verification (see ml_demote_verdict.h): the PATH_DEAD_MS comment
+ * above assumes a spurious demotion is harmless ("re-probe restores direct
+ * in ~5s"). 2026-08-11 falsified that for a symmetric-NAT/USB-NCM safety
+ * peer: demotion tears down a direct path that may never re-establish
+ * without a reboot, onto a relay too jittery for the 2 s pstop timeout. So:
+ * hold the demote while authenticated WG data still arrives DIRECT within
+ * this window. 1000 ms = 5 missed 5 Hz heartbeats — a path that quiet is
+ * genuinely suspect and may demote; a working path refreshes every 200 ms. */
+#define ML_DEMOTE_DIRECT_RX_FRESH_MS 1000
+/* Cap on consecutive demote-veto ticks (~1 s apart): past this, the disco
+ * side-channel has been dead for ~10 s while data still flows — stop pinning
+ * and let the demote proceed (DERP fallback + re-probe is the safer state;
+ * see ml_peer_t.demote_veto_ticks). */
+#define ML_DEMOTE_VETO_MAX_TICKS 10
+/* Hitless re-ingest (run-20 green drop, 2026-08-11): a coord/netmap teardown
+ * (re-key retire, REMOVE) of a safety peer is VETOED while the WG session
+ * shows authenticated data rx (any path) within this window — an immediate
+ * wireguardif_remove_peer makes heartbeat sends fail ENOTCONN until a fresh
+ * handshake, and >2 s of that is a machine STOP. 2000 ms = the pstop
+ * heartbeat timeout: data within it means the safety bond is alive by
+ * definition. A genuine re-key/removal goes stale within seconds (the old
+ * key stops authenticating) and applies on the next update. */
+#define ML_TEARDOWN_RX_FRESH_MS 2000
 
 /* Relay-bound direct-path re-establishment (net/derp-direct-reestablish):
  * while a SAFETY peer's session is alive but riding DERP, periodically re-run
@@ -519,6 +542,26 @@ extern "C"
      * cleared on every genuine direct promotion. */
     uint64_t relay_retry_next_ms;
     uint8_t relay_retry_count;
+
+    /* Demote-verification veto streak (ml_demote_verdict.h): consecutive
+     * maintenance ticks the veto held this peer's direct path. Capped at
+     * ML_DEMOTE_VETO_MAX_TICKS — a veto that persists that long means the
+     * disco side-channel is durably broken even though data flows; fail
+     * toward the DERP demote rather than pin the path indefinitely (the
+     * audited a175361 hazard: RX-only evidence can pin a TX-dead path).
+     * Reset when no demote trigger fires or a demote executes. */
+    uint8_t demote_veto_ticks;
+
+    /* Learn-from-ping ring eviction (run-20/21 finding B-1): with the 8-slot
+     * endpoint table full of dead symmetric-NAT candidates, the append-only
+     * learn silently dropped the ONE live candidate a rebooted peer presents
+     * — a terminal, reboot-surviving wedge on the MACHINE side. When full,
+     * learned candidates now overwrite the last two slots round-robin. */
+    uint8_t learn_evict_next;
+
+    /* Disco-reset v2: per-peer rate limit (was a single global stamp that let
+     * two stuck peers starve each other). 0 = never fired. */
+    uint64_t disco_reset_next_ms;
 
     /* Chip<->chip CMM chain breaker (see ML_DISCO_CMM_MIN_INTERVAL_MS): ms of
      * the last CallMeMaybe SENT to this peer. 0 = never sent. */

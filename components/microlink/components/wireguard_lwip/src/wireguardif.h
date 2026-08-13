@@ -134,6 +134,30 @@ err_t wireguardif_disconnect(struct netif *netif, u8_t peer_index);
 // Is the given peer "up"? A peer is up if it has a valid session key it can communicate with
 err_t wireguardif_peer_is_up(struct netif *netif, u8_t peer_index, ip_addr_t *current_ip, u16_t *current_port);
 
+// Age (ms) of the last authenticated data packet received from this peer on
+// the DIRECT UDP path (DERP-relayed rx never refreshes it). ERR_VAL when no
+// direct data has ever arrived. Used for direct-path demote-verification.
+err_t wireguardif_peer_direct_rx_age(struct netif *netif, u8_t peer_index, u32_t *age_ms);
+
+// Age (ms) of the last authenticated data packet received on ANY path.
+// ERR_VAL when none ever. Used to veto control-plane teardowns of an
+// actively-used safety session (hitless re-ingest).
+err_t wireguardif_peer_rx_age(struct netif *netif, u8_t peer_index, u32_t *age_ms);
+
+// Worst inter-frame rx gap (any path) — the "received nothing" window that
+// maps to a heartbeat-timeout disarm (edge-flush receive-stall metric).
+err_t wireguardif_peer_worst_rx_gap(struct netif *netif, u8_t peer_index, u32_t *worst_gap_ms);
+
+// Session-key freshness: curr-keypair age (0xFFFFFFFF = none valid, sends are
+// failing ENOTCONN) and last handshake-initiation TX age. Diag + the
+// negotiator's rekey-in-flight freeze.
+err_t wireguardif_peer_handshake_age(struct netif *netif, u8_t peer_index, u32_t *keypair_age_ms, u32_t *init_tx_age_ms);
+
+// TX failures by cause: keypair expired (rekey starved past REJECT_AFTER_TIME)
+// vs no-valid-keys (every such send surfaces as ENOTCONN/errno 128).
+extern volatile uint32_t wireguardif_tx_keypair_expired;
+extern volatile uint32_t wireguardif_tx_no_valid_keys;
+
 // Register a DERP relay output callback for peers without direct endpoints
 // This callback is invoked when a WireGuard packet needs to be sent to a peer
 // that has no direct IP endpoint (ip is 0.0.0.0 or port is 0)

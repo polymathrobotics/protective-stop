@@ -22,6 +22,7 @@
  *   POST /api/pstop_num?n=N       Set USB "PSTOPxx" unit number (0 = auto)
  *   POST /api/pstop_peers?slot..  Multi-machine peer table (set/clear slot)
  *   POST /api/ring_offset?n=N     Set + persist LED-ring rotation (physical LED 1)
+ *   POST /api/led_brightness?pct=N  Set + persist master LED brightness (0..100%)
  *   POST /api/ring_led1?on=0|1    Locate mode: only LED 1 white (auto-expires)
  *   POST /api/enter_download      Enter USB download (flashing) mode
  *
@@ -275,7 +276,7 @@ static esp_err_t page_state(httpd_req_t * req)
     "\"rst_hist\":%s,\"ota_state\":%d,\"pstop_num\":%d,"
     "\"relay_fault_a\":%lu,\"relay_fault_b\":%lu,\"relay_stop\":%lu,\"relay_feedback_monitored\":%lu,"
     "\"remote_stop_id\":%lu,\"restart_state\":%lu,"
-    "\"ring_offset\":%d,\"ring_led1\":%d,\"pstop_machines\":",
+    "\"ring_offset\":%d,\"ring_led1\":%d,\"led_brightness\":%d,\"pstop_machines\":",
     (unsigned long)atomic_load(&g_dcs_core_tick[0]),
     (unsigned long)atomic_load(&g_dcs_core_tick[1]),
     (int)atomic_load(&g_dcs_core_verdict[0]),
@@ -377,7 +378,8 @@ static esp_err_t page_state(httpd_req_t * req)
     (unsigned long)atomic_load(&g_dcs_machn_arm_owner),
     (unsigned long)atomic_load(&g_dcs_machn_restart_state),
     (int)dcs_pstop_ring_get_offset(),
-    dcs_pstop_ring_locate_active() ? 1 : 0);
+    dcs_pstop_ring_locate_active() ? 1 : 0,
+    (int)dcs_pstop_ring_get_brightness());
 
 /* Clamp the running offset after EVERY append so `buf + n` and `cap - n`
      * can never run past the buffer. snprintf() returns the length it WOULD
@@ -980,6 +982,45 @@ static esp_err_t api_ring_offset(httpd_req_t * req)
   return httpd_resp_send(req, buf, len);
 }
 
+/* === POST /api/led_brightness?pct=0..100 ================================== *
+ * Master LED brightness: a single 0..100% scale applied to ALL ring output.
+ * Applies immediately (next repaint) and persists to NVS; survives reboots and
+ * firmware updates. Absent key -> DCS_LED_BRIGHTNESS_DEFAULT. */
+static esp_err_t api_led_brightness(httpd_req_t * req)
+{
+  char query[48], val[8];
+  if (
+    (httpd_req_get_url_query_str(req, query, sizeof(query)) != ESP_OK) ||
+    (httpd_query_key_value(query, "pct", val, sizeof(val)) != ESP_OK))
+  {
+    (void)httpd_resp_set_status(req, "400 Bad Request");
+    (void)httpd_resp_set_type(req, "application/json");
+    return httpd_resp_sendstr(req, "{\"ok\":false,\"error\":\"missing ?pct=0..100\"}");
+  }
+  int pct = (int)strtol(val, NULL, 10);
+  if ((pct < 0) || (pct > 100)) {
+    (void)httpd_resp_set_status(req, "400 Bad Request");
+    (void)httpd_resp_set_type(req, "application/json");
+    return httpd_resp_sendstr(req, "{\"ok\":false,\"error\":\"pct must be 0..100\"}");
+  }
+  esp_err_t r = dcs_nvs_write_led_brightness((uint8_t)pct);
+  if (r == ESP_OK) {
+    dcs_pstop_ring_set_brightness((uint8_t)pct); /* live, next repaint */
+  }
+  char buf[80];
+  int len = snprintf(
+    buf,
+    sizeof(buf),
+    "{\"ok\":%s,\"led_brightness\":%d}",
+    (r == ESP_OK) ? "true" : "false",
+    (int)dcs_pstop_ring_get_brightness());
+  (void)httpd_resp_set_type(req, "application/json");
+  if (r != ESP_OK) {
+    (void)httpd_resp_set_status(req, "500 Internal Server Error");
+  }
+  return httpd_resp_send(req, buf, len);
+}
+
 /* === POST /api/ring_led1?on=0|1 =========================================== *
  * Locate mode: only LED 1 lit, white — shows where the current ring_offset
  * puts LED 1 so an installer can verify/adjust it. Overrides the state
@@ -1122,6 +1163,7 @@ void dcs_admin_pages_register(ml_app_t * app)
   (void)ml_app_add_page(app, "/api/iface/usb", HTTP_POST, api_iface_usb);
   (void)ml_app_add_page(app, "/api/pstop_num", HTTP_POST, api_pstop_num);
   (void)ml_app_add_page(app, "/api/ring_offset", HTTP_POST, api_ring_offset);
+  (void)ml_app_add_page(app, "/api/led_brightness", HTTP_POST, api_led_brightness);
   (void)ml_app_add_page(app, "/api/ring_led1", HTTP_POST, api_ring_led1);
   (void)ml_app_add_page(app, "/api/enter_download", HTTP_POST, api_enter_download);
   (void)ml_app_add_page(app, "/api/operators", HTTP_GET, api_operators_get);

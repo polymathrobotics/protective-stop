@@ -182,6 +182,15 @@ struct wireguard_peer {
 	uint32_t last_tx;
 	uint32_t last_rx;
 
+	// last_rx of a data packet that arrived on the DIRECT UDP path (a real
+	// source address; DERP-relayed injections carry 0.0.0.0). Authenticated
+	// direct data is first-class liveness evidence for the direct path —
+	// consumed by wireguardif_peer_direct_rx_age() for demote-verification.
+	uint32_t last_direct_rx;
+	// Worst inter-frame gap across ANY path — the "received nothing" window
+	// that maps to a heartbeat-timeout disarm (2026-08-12 edge-flush metric).
+	uint32_t worst_rx_gap;
+
 	// We set this flag on RX/TX of packets if we think that we should initiate a new handshake
 	bool send_handshake;
 };

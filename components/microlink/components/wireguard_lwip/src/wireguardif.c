@@ -79,6 +79,11 @@ volatile int wg_verbose_logging = 0;
 // network wedge from userspace. Count failures here so /state.json can surface
 // the symptom instead of leaving it invisible.
 volatile uint32_t wireguardif_pbuf_alloc_fails = 0;
+// TX failures by cause (run-20/21 ENOTCONN forensics — see wireguardif_output_to_peer):
+// keypair_expired = session hit REJECT_AFTER_TIME (rekey starved ~60 s prior);
+// no_valid_keys   = subsequent sends with no session at all (surface as errno 128).
+volatile uint32_t wireguardif_tx_keypair_expired = 0;
+volatile uint32_t wireguardif_tx_no_valid_keys = 0;
 
 #define WIREGUARDIF_TIMER_MSECS 400
 
@@ -348,11 +353,18 @@ static err_t wireguardif_output_to_peer(struct netif *netif, struct pbuf *q, con
 			}
 		} else {
 			// key has expired...
+			// Diag (run-20/21 ENOTCONN forensics): this exit means the session
+			// aged past REJECT_AFTER_TIME with no successful rekey — i.e. the
+			// handshake leg has been failing for ~REJECT-REKEY = 60 s already.
+			wireguardif_tx_keypair_expired++;
 			keypair_destroy(keypair);
 			result = ERR_CONN;
 		}
 	} else {
 		// No valid keys!
+		// Diag: every send in this state surfaces to the app as ENOTCONN
+		// (errno 128) — the "peer-present-but-no-keypair" signature.
+		wireguardif_tx_no_valid_keys++;
 		result = ERR_CONN;
 	}
 	return result;
@@ -509,8 +521,22 @@ static void wireguardif_process_data_message(struct wireguard_device *device, st
 					update_peer_addr(peer, addr, port);
 
 					now = wireguard_sys_now();
+					// Worst "received nothing" window across ANY path — the metric
+					// that maps to a disarm (a >2s gap == a heartbeat timeout). ~200ms
+					// steady-state, spikes to the stall duration during an edge flush.
+					// Path-agnostic on purpose: a relay-only gap misses the
+					// direct->relay handover (2026-08-12 edge-flush investigation).
+					if (peer->last_rx != 0) {
+						uint32_t gap = now - peer->last_rx;
+						if (gap > peer->worst_rx_gap) peer->worst_rx_gap = gap;
+					}
 					keypair->last_rx = now;
 					peer->last_rx = now;
+					// Direct-path liveness: only a real outer source refreshes it
+					// (DERP injections arrive as 0.0.0.0; see update_peer_addr above).
+					if (!ip_addr_isany(addr)) {
+						peer->last_direct_rx = now;
+					}
 
 					// Might need to shuffle next key --> current keypair
 					keypair_update(peer, keypair);
@@ -1020,6 +1046,71 @@ err_t wireguardif_peer_is_up(struct netif *netif, u8_t peer_index, ip_addr_t *cu
 			*current_port = peer->port;
 		}
 	}
+	return result;
+}
+
+// Session-key freshness for this peer (run-20/21 ENOTCONN forensics):
+// *keypair_age_ms  = age of curr_keypair (0xFFFFFFFF when no valid keypair —
+//                    sends are failing ENOTCONN right now);
+// *init_tx_age_ms  = age of our last handshake-initiation TX (0xFFFFFFFF when
+//                    never sent). keypair_age > REKEY_AFTER_TIME (120 s) with
+//                    a recent init_tx = a rekey is IN FLIGHT and failing.
+err_t wireguardif_peer_handshake_age(struct netif *netif, u8_t peer_index, u32_t *keypair_age_ms, u32_t *init_tx_age_ms) {
+	struct wireguard_peer *peer;
+	err_t result = wireguardif_lookup_peer(netif, peer_index, &peer);
+	if (result == ERR_OK) {
+		uint32_t now = wireguard_sys_now();
+		if (keypair_age_ms) {
+			*keypair_age_ms = peer->curr_keypair.valid ? (now - peer->curr_keypair.keypair_millis) : 0xFFFFFFFFu;
+		}
+		if (init_tx_age_ms) {
+			*init_tx_age_ms = (peer->last_initiation_tx != 0) ? (now - peer->last_initiation_tx) : 0xFFFFFFFFu;
+		}
+	}
+	return result;
+}
+
+// Age (ms) of the last authenticated data packet received from this peer on
+// ANY path (direct or DERP-relayed). ERR_VAL when no data has ever arrived.
+// Proves the WG session itself is live — used to veto control-plane teardowns
+// of an actively-used safety session (hitless re-ingest).
+err_t wireguardif_peer_rx_age(struct netif *netif, u8_t peer_index, u32_t *age_ms) {
+	struct wireguard_peer *peer;
+	err_t result = wireguardif_lookup_peer(netif, peer_index, &peer);
+	if (result == ERR_OK) {
+		if (peer->last_rx == 0) {
+			result = ERR_VAL;
+		} else if (age_ms) {
+			*age_ms = wireguard_sys_now() - peer->last_rx;
+		}
+	}
+	return result;
+}
+
+// Age (ms) of the last authenticated data packet received from this peer on
+// the DIRECT UDP path. ERR_VAL when no direct data has ever arrived (fresh
+// peer, or all traffic DERP-relayed). Age is computed against the same
+// wireguard_sys_now() base that stamps it, so callers never mix time bases.
+err_t wireguardif_peer_direct_rx_age(struct netif *netif, u8_t peer_index, u32_t *age_ms) {
+	struct wireguard_peer *peer;
+	err_t result = wireguardif_lookup_peer(netif, peer_index, &peer);
+	if (result == ERR_OK) {
+		if (peer->last_direct_rx == 0) {
+			result = ERR_VAL;
+		} else if (age_ms) {
+			*age_ms = wireguard_sys_now() - peer->last_direct_rx;
+		}
+	}
+	return result;
+}
+
+// Worst inter-frame rx gap (any path) for this peer — the "received nothing"
+// window that maps to a heartbeat-timeout disarm. ~2000 during an edge flush
+// pinpoints a ~2s inbound stall on THIS node even if its DERP conn stayed up.
+err_t wireguardif_peer_worst_rx_gap(struct netif *netif, u8_t peer_index, u32_t *worst_gap_ms) {
+	struct wireguard_peer *peer;
+	err_t result = wireguardif_lookup_peer(netif, peer_index, &peer);
+	if (result == ERR_OK && worst_gap_ms) *worst_gap_ms = peer->worst_rx_gap;
 	return result;
 }
 

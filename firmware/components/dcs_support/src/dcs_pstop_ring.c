@@ -117,6 +117,12 @@ static uint8_t s_grb[RING_LEDS * 3]; /* WS2812 wants GRB order, per pixel — LO
  * spins unrotated — it's a sign of life, orientation is irrelevant. */
 static atomic_uint_fast32_t s_ring_offset;
 
+/* Master brightness (0..100%): scales EVERY pixel at transmit time so all ring
+ * states dim proportionally. Seeded to the default so the boot sign-of-life
+ * spinner (paints before NVS is up) is visible; dcs_pstop_ring_start() replaces
+ * it with the persisted led_bri. */
+static atomic_uint_fast32_t s_ring_brightness_pct = DCS_LED_BRIGHTNESS_DEFAULT;
+
 /* Locate mode: ms-uptime deadline until which ONLY logical LED 1 is painted
  * white (0 = off). Set via dcs_pstop_ring_locate(); auto-expires so a
  * forgotten locate can't mask the safety state colours indefinitely. */
@@ -133,9 +139,14 @@ static void ring_show(void)
   }
   static uint8_t tx_grb[RING_LEDS * 3];
   uint32_t off = (uint32_t)atomic_load(&s_ring_offset);
+  /* Master-brightness scale, applied HERE (the single WS2812 write for every
+   * ring state) so all colours dim by the same factor. */
+  uint32_t bri = (uint32_t)atomic_load(&s_ring_brightness_pct);
   for (int i = 0; i < RING_LEDS; i++) {
     int p = (int)(((uint32_t)i + off) % RING_LEDS);
-    (void)memcpy(&tx_grb[p * 3], &s_grb[i * 3], 3);
+    for (int c = 0; c < 3; c++) {
+      tx_grb[(p * 3) + c] = (uint8_t)(((uint32_t)s_grb[(i * 3) + c] * bri) / 100u);
+    }
   }
   rmt_transmit_config_t tx = {.loop_count = 0};
   if (rmt_transmit(s_chan, s_enc, tx_grb, sizeof(tx_grb), &tx) == ESP_OK) {
@@ -537,6 +548,7 @@ void dcs_pstop_ring_start(void)
   /* Load the persisted rotation HERE (caller's internal stack, NVS already
      * up) — the ring task lives on a PSRAM stack and must not touch NVS. */
   atomic_store(&s_ring_offset, dcs_nvs_read_ring_offset());
+  atomic_store(&s_ring_brightness_pct, dcs_nvs_read_led_brightness());
   /* PSRAM stack: LED ring is non-safety, does no flash/NVS. */
   (void)dcs_task_spawn_psram(ring_task, "pstop_ring", 4096, NULL, 2, tskNO_AFFINITY);
 }
@@ -550,6 +562,17 @@ void dcs_pstop_ring_set_offset(uint8_t off)
 uint8_t dcs_pstop_ring_get_offset(void)
 {
   return (uint8_t)atomic_load(&s_ring_offset);
+}
+
+void dcs_pstop_ring_set_brightness(uint8_t pct)
+{
+  atomic_store(&s_ring_brightness_pct, (uint32_t)((pct > 100u) ? 100u : pct));
+  /* Next repaint (<=250 ms) — or the next locate/comet frame — picks it up. */
+}
+
+uint8_t dcs_pstop_ring_get_brightness(void)
+{
+  return (uint8_t)atomic_load(&s_ring_brightness_pct);
 }
 
 void dcs_pstop_ring_locate(bool on)
