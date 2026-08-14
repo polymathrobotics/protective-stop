@@ -34,7 +34,7 @@ import time
 
 PSTOP_VERSION = 0x00
 MSG_OK, MSG_STOP, MSG_BOND, MSG_UNBOND = 0, 1, 2, 3
-NAMES = {0: "OK", 1: "STOP", 2: "BOND", 3: "UNBOND"}
+NAMES = {0: 'OK', 1: 'STOP', 2: 'BOND', 3: 'UNBOND'}
 SIZE = 40
 
 REMOTE_ID = 0x01020381  # distinct from the chip's 0x01020380
@@ -54,7 +54,7 @@ def crc16(data: bytes) -> int:
 
 def encode(message, stamp, received_stamp, counter, received_counter):
     body = struct.pack(
-        "<BBQQIIIII",
+        '<BBQQIIIII',
         PSTOP_VERSION,
         message,
         stamp,
@@ -65,7 +65,7 @@ def encode(message, stamp, received_stamp, counter, received_counter):
         counter,
         received_counter,
     )
-    return body + struct.pack("<H", crc16(body))
+    return body + struct.pack('<H', crc16(body))
 
 
 def decode(data):
@@ -79,8 +79,8 @@ def decode(data):
         hb,
         counter,
         received_counter,
-    ) = struct.unpack("<BBQQIIIII", data[:38])
-    (checksum,) = struct.unpack("<H", data[38:40])
+    ) = struct.unpack('<BBQQIIIII', data[:38])
+    (checksum,) = struct.unpack('<H', data[38:40])
     ok = checksum == crc16(data[:38])
     return dict(
         message=message,
@@ -118,9 +118,9 @@ class Remote:
             reply = decode(self.sock.recv(SIZE))
         except socket.timeout:
             return None
-        if reply["crc_ok"]:
-            self.last_rx_counter = reply["counter"]
-            self.last_rx_stamp = reply["stamp"]
+        if reply['crc_ok']:
+            self.last_rx_counter = reply['counter']
+            self.last_rx_stamp = reply['stamp']
         return reply
 
     def bond(self):
@@ -137,9 +137,9 @@ class Remote:
                 reply = decode(self.sock.recv(SIZE))
             except socket.timeout:
                 continue
-            if reply["crc_ok"] and reply["message"] == MSG_BOND:
-                self.last_rx_counter = reply["counter"]
-                self.last_rx_stamp = reply["stamp"]
+            if reply['crc_ok'] and reply['message'] == MSG_BOND:
+                self.last_rx_counter = reply['counter']
+                self.last_rx_stamp = reply['stamp']
                 return True
             time.sleep(2.5)  # let the machine age out stale state
         return False
@@ -157,68 +157,64 @@ class Remote:
 
 
 def expect(cond, label):
-    print(f"  {'PASS' if cond else 'FAIL'}: {label}")
+    print(f'  {"PASS" if cond else "FAIL"}: {label}')
     return bool(cond)
 
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--host", default="127.0.0.1")
-    ap.add_argument("--port", type=int, default=8893)
+    ap.add_argument('--host', default='127.0.0.1')
+    ap.add_argument('--port', type=int, default=8893)
     args = ap.parse_args()
 
     r = Remote(args.host, args.port)
     ok = True
 
-    print("1. bond + OK stream (machine must stay STOP / NEED_STOP)")
+    print('1. bond + OK stream (machine must stay STOP / NEED_STOP)')
     if not r.bond():
-        sys.exit("bond failed — is machine_app_runner listening?")
+        sys.exit('bond failed — is machine_app_runner listening?')
     last = r.stream(MSG_OK, 1.5)
     ok &= expect(
-        last and last["message"] == MSG_STOP,
-        "OK stream answered with STOP before any arming cycle",
+        last and last['message'] == MSG_STOP,
+        'OK stream answered with STOP before any arming cycle',
     )
 
-    print("2. blip: STOP 200 ms then OK — early OK refused, arms after min delay")
+    print('2. blip: STOP 200 ms then OK — early OK refused, arms after min delay')
     r.stream(MSG_STOP, 0.2)
     first = r.xfer(MSG_OK)
     ok &= expect(
-        first and first["message"] == MSG_STOP,
-        "OK 200 ms after STOP refused (library min delay)",
+        first and first['message'] == MSG_STOP,
+        'OK 200 ms after STOP refused (library min delay)',
     )
     last = r.stream(MSG_OK, 1.5)
     ok &= expect(
-        last and last["message"] == MSG_OK,
-        "steady OK stream arms once the min delay elapses",
+        last and last['message'] == MSG_OK,
+        'steady OK stream arms once the min delay elapses',
     )
 
-    print("3. press: STOP 800 ms then OK (must ARM immediately)")
+    print('3. press: STOP 800 ms then OK (must ARM immediately)')
     r.stream(MSG_STOP, 0.8)
     last = r.stream(MSG_OK, 1.5)
-    ok &= expect(
-        last and last["message"] == MSG_OK, "held STOP->OK armed (replies turn OK)"
-    )
+    ok &= expect(last and last['message'] == MSG_OK, 'held STOP->OK armed (replies turn OK)')
 
-    print("4. blip while armed: robot stops; early release refused, self-re-arms")
+    print('4. blip while armed: robot stops; early release refused, self-re-arms')
     r.stream(MSG_STOP, 0.2)
     first = r.xfer(MSG_OK)
     ok &= expect(
-        first and first["message"] == MSG_STOP,
-        "blip stopped the robot; immediate OK refused",
+        first and first['message'] == MSG_STOP,
+        'blip stopped the robot; immediate OK refused',
     )
     last = r.stream(MSG_OK, 1.5)
-    ok &= expect(
-        last and last["message"] == MSG_OK, "steady OK re-arms after the min delay"
-    )
+    ok &= expect(last and last['message'] == MSG_OK, 'steady OK re-arms after the min delay')
 
-    print("5. press-and-hold then release (normal gesture must still arm)")
+    print('5. press-and-hold then release (normal gesture must still arm)')
     r.stream(MSG_STOP, 0.8)
     last = r.stream(MSG_OK, 1.5)
-    ok &= expect(last and last["message"] == MSG_OK, "re-armed after a held press")
+    ok &= expect(last and last['message'] == MSG_OK, 're-armed after a held press')
 
-    print("ALL PASS" if ok else "FAILURES PRESENT")
+    print('ALL PASS' if ok else 'FAILURES PRESENT')
     sys.exit(0 if ok else 1)
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()

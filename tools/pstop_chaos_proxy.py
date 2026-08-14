@@ -36,7 +36,7 @@ import socket
 import threading
 import time
 
-PARAMS = ["loss", "delay_ms", "jitter_ms", "dup", "corrupt"]
+PARAMS = ['loss', 'delay_ms', 'jitter_ms', 'dup', 'corrupt']
 
 
 class Impairments:
@@ -49,20 +49,20 @@ class Impairments:
     def set_from_line(self, line):
         with self.lock:
             for tok in line.split():
-                if "=" not in tok:
+                if '=' not in tok:
                     continue
-                k, v = tok.split("=", 1)
+                k, v = tok.split('=', 1)
                 try:
                     v = float(v)
                 except ValueError:
                     continue
                 if k in PARAMS:
                     self.base[k] = v
-                elif k.endswith("_up") and k[:-3] in PARAMS:
+                elif k.endswith('_up') and k[:-3] in PARAMS:
                     self.up[k[:-3]] = v
-                elif k.endswith("_down") and k[:-5] in PARAMS:
+                elif k.endswith('_down') and k[:-5] in PARAMS:
                     self.down[k[:-5]] = v
-                elif k == "clear":
+                elif k == 'clear':
                     self.base = {p: 0.0 for p in PARAMS}
                     self.up.clear()
                     self.down.clear()
@@ -70,7 +70,7 @@ class Impairments:
     def get(self, direction):
         with self.lock:
             eff = dict(self.base)
-            eff.update(self.up if direction == "up" else self.down)
+            eff.update(self.up if direction == 'up' else self.down)
             return eff
 
 
@@ -80,14 +80,14 @@ class Stats:
         self.c = {
             k: 0
             for k in (
-                "fwd",
-                "ret",
-                "drop_up",
-                "drop_down",
-                "dup_up",
-                "dup_down",
-                "corrupt_up",
-                "corrupt_down",
+                'fwd',
+                'ret',
+                'drop_up',
+                'drop_down',
+                'dup_up',
+                'dup_down',
+                'corrupt_up',
+                'corrupt_down',
             )
         }
 
@@ -102,22 +102,22 @@ class Stats:
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--listen", type=int, default=8891)
-    ap.add_argument("--fwd", type=int, default=8890)
-    ap.add_argument("--fwd-host", default="127.0.0.1")
-    ap.add_argument("--ctrl", type=int, default=8892)
+    ap.add_argument('--listen', type=int, default=8891)
+    ap.add_argument('--fwd', type=int, default=8890)
+    ap.add_argument('--fwd-host', default='127.0.0.1')
+    ap.add_argument('--ctrl', type=int, default=8892)
     args = ap.parse_args()
 
     imp = Impairments()
     stats = Stats()
 
     front = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)  # chip side
-    front.bind(("0.0.0.0", args.listen))
+    front.bind(('0.0.0.0', args.listen))
     back = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)  # machine side
     back.connect((args.fwd_host, args.fwd))
 
     ctrl = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    ctrl.bind(("127.0.0.1", args.ctrl))
+    ctrl.bind(('127.0.0.1', args.ctrl))
 
     chip_addr = [None]  # learned from first inbound packet
 
@@ -129,23 +129,21 @@ def main():
     def process(data, direction, sock_send):
         """Apply impairments; sock_send(data) transmits one datagram."""
         e = imp.get(direction)
-        sfx = "_up" if direction == "up" else "_down"
-        if random.random() < e["loss"]:
-            stats.bump("drop" + sfx)
+        sfx = '_up' if direction == 'up' else '_down'
+        if random.random() < e['loss']:
+            stats.bump('drop' + sfx)
             return
-        if e["corrupt"] > 0 and random.random() < e["corrupt"]:
+        if e['corrupt'] > 0 and random.random() < e['corrupt']:
             b = bytearray(data)
             b[random.randrange(len(b))] ^= 1 << random.randrange(8)
             data = bytes(b)
-            stats.bump("corrupt" + sfx)
+            stats.bump('corrupt' + sfx)
         copies = 1
-        if e["dup"] > 0 and random.random() < e["dup"]:
+        if e['dup'] > 0 and random.random() < e['dup']:
             copies = 2
-            stats.bump("dup" + sfx)
+            stats.bump('dup' + sfx)
         for _ in range(copies):
-            d = e["delay_ms"] + (
-                random.uniform(0, e["jitter_ms"]) if e["jitter_ms"] else 0
-            )
+            d = e['delay_ms'] + (random.uniform(0, e['jitter_ms']) if e['jitter_ms'] else 0)
             if d > 0:
                 send_later(sock_send, data, d / 1000.0)
             else:
@@ -155,24 +153,24 @@ def main():
         while True:
             data, addr = front.recvfrom(2048)
             chip_addr[0] = addr
-            stats.bump("fwd")
-            process(data, "up", back.send)
+            stats.bump('fwd')
+            process(data, 'up', back.send)
 
     def back_loop():  # machine -> chip
         while True:
             data = back.recv(2048)
             if chip_addr[0] is None:
                 continue
-            stats.bump("ret")
+            stats.bump('ret')
             a = chip_addr[0]
-            process(data, "down", lambda d, a=a: front.sendto(d, a))
+            process(data, 'down', lambda d, a=a: front.sendto(d, a))
 
     def ctrl_loop():
         while True:
             line, _ = ctrl.recvfrom(512)
-            imp.set_from_line(line.decode(errors="replace"))
+            imp.set_from_line(line.decode(errors='replace'))
             print(
-                f"[ctrl] {line.decode(errors='replace').strip()} -> base={imp.base} up={imp.up} down={imp.down}",
+                f'[ctrl] {line.decode(errors="replace").strip()} -> base={imp.base} up={imp.up} down={imp.down}',
                 flush=True,
             )
 
@@ -180,13 +178,13 @@ def main():
         threading.Thread(target=fn, daemon=True).start()
 
     print(
-        f"chaos proxy: chip->:{args.listen} => {args.fwd_host}:{args.fwd}, ctrl 127.0.0.1:{args.ctrl}",
+        f'chaos proxy: chip->:{args.listen} => {args.fwd_host}:{args.fwd}, ctrl 127.0.0.1:{args.ctrl}',
         flush=True,
     )
     while True:
         time.sleep(10)
-        print(f"[stats] {stats.snapshot()}", flush=True)
+        print(f'[stats] {stats.snapshot()}', flush=True)
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()
