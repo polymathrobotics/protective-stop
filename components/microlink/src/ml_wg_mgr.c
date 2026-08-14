@@ -1387,15 +1387,18 @@ static void neg_apply_target(microlink_t * ml, uint16_t target, uint8_t src)
  * unfulfilled pin is visible as pin_pending in /api/status.
  * State + counters owned by the wg_mgr task (single writer); counters read
  * cross-task via ml_wg_get_pin_diag (word reads). */
-static uint32_t s_pin_mbb_requests; /* MBB commands issued for the pin */
-static uint32_t s_pin_mbb_commits; /* pin MBBs that committed */
-static uint32_t s_pin_mbb_retries; /* re-issues after a failed prove */
-static uint64_t s_pin_retry_at_ms; /* 0 = no backoff pending */
-static uint32_t s_pin_backoff_ms; /* current backoff step */
-static uint16_t s_pin_last_target; /* region of the pin MBB we issued (edge 4: cancel-on-clear) */
-static uint32_t s_pin_absent_resyncs; /* coord full-resyncs forced by an absent pinned peer (f498 heal) */
-static uint64_t s_pin_absent_next_ms; /* pin-presence heal backoff gate */
-static uint32_t s_pin_absent_backoff_ms;
+static struct
+{
+  uint32_t mbb_requests; /* MBB commands issued for the pin (cumulative) */
+  uint32_t mbb_commits; /* pin MBBs that committed (cumulative) */
+  uint32_t mbb_retries; /* re-issues after a failed prove (cumulative) */
+  uint64_t retry_at_ms; /* 0 = no backoff pending */
+  uint32_t backoff_ms; /* current backoff step */
+  uint16_t last_target; /* region of the pin MBB we issued (edge 4: cancel-on-clear) */
+  uint32_t absent_resyncs; /* coord full-resyncs forced by an absent pinned peer (cumulative) */
+  uint64_t absent_next_ms; /* pin-presence heal backoff gate */
+  uint32_t absent_backoff_ms;
+} s_pin; /* never bulk-reset: counters are cumulative, reset sites clear differing subsets */
 
 /* Stage-0b gauge (run-29 disarm class #4/#10): worst single wg_mgr loop
  * iteration — heartbeats ride THIS task (WG rx -> decrypt -> pstop), so a
@@ -1410,11 +1413,11 @@ uint32_t ml_wg_get_max_iter_ms(void)
 
 void ml_wg_get_pin_diag(uint32_t out[5])
 {
-  out[0] = s_pin_mbb_requests;
-  out[1] = s_pin_mbb_commits;
-  out[2] = s_pin_mbb_retries;
-  out[3] = (s_pin_retry_at_ms != 0) ? 1u : 0u; /* backoff currently pending */
-  out[4] = s_pin_absent_resyncs; /* forced coord resyncs for a pinned-but-absent peer */
+  out[0] = s_pin.mbb_requests;
+  out[1] = s_pin.mbb_commits;
+  out[2] = s_pin.mbb_retries;
+  out[3] = (s_pin.retry_at_ms != 0) ? 1u : 0u; /* backoff currently pending */
+  out[4] = s_pin.absent_resyncs; /* forced coord resyncs for a pinned-but-absent peer */
 }
 
 /* Pin-presence self-heal (f498 EHOSTUNREACH, 2026-08-12): an extra-pinned IP
@@ -1446,25 +1449,25 @@ static void pin_presence_heal(microlink_t * ml)
   }
   uint64_t now = ml_get_time_ms();
   if (absent_ip == 0) {
-    s_pin_absent_backoff_ms = 0; /* healthy — reset the backoff ladder */
-    s_pin_absent_next_ms = 0; /* and the gate, so a re-absence heals immediately (PR #95 review) */
+    s_pin.absent_backoff_ms = 0; /* healthy — reset the backoff ladder */
+    s_pin.absent_next_ms = 0; /* and the gate, so a re-absence heals immediately (PR #95 review) */
     return;
   }
-  if (s_pin_absent_next_ms != 0 && now < s_pin_absent_next_ms) {
+  if (s_pin.absent_next_ms != 0 && now < s_pin.absent_next_ms) {
     return;
   }
-  s_pin_absent_backoff_ms =
-    (s_pin_absent_backoff_ms == 0) ? 60000 : (s_pin_absent_backoff_ms >= 300000 ? 600000 : s_pin_absent_backoff_ms * 5);
-  s_pin_absent_next_ms = now + s_pin_absent_backoff_ms;
-  s_pin_absent_resyncs++;
+  s_pin.absent_backoff_ms =
+    (s_pin.absent_backoff_ms == 0) ? 60000 : (s_pin.absent_backoff_ms >= 300000 ? 600000 : s_pin.absent_backoff_ms * 5);
+  s_pin.absent_next_ms = now + s_pin.absent_backoff_ms;
+  s_pin.absent_resyncs++;
   char ipstr[16];
   microlink_ip_to_str(absent_ip, ipstr);
   ESP_LOGW(
     TAG,
     "Pinned peer %s ABSENT from peer table — forcing coord resync #%u (next retry in %us)",
     ipstr,
-    (unsigned)s_pin_absent_resyncs,
-    (unsigned)(s_pin_absent_backoff_ms / 1000));
+    (unsigned)s_pin.absent_resyncs,
+    (unsigned)(s_pin.absent_backoff_ms / 1000));
   ml_coord_cmd_t cmd = ML_CMD_FORCE_RECONNECT;
   (void)xQueueSend(ml->coord_cmd_queue, &cmd, 0); /* full = one already pending */
 }
@@ -1476,27 +1479,27 @@ static void neg_pin_tick(microlink_t * ml)
     /* Edge 4: pin cleared while its own MBB is in flight — cancel it (the
      * generation bump aborts the executor back to IDLE, no ban). Autoneg
      * resumes ownership on its own cadence. */
-    if (s_pin_last_target != 0 && ml->mbb_target_region == s_pin_last_target) {
+    if (s_pin.last_target != 0 && ml->mbb_target_region == s_pin.last_target) {
       neg_cancel_mbb(ml);
     }
-    s_pin_last_target = 0;
-    s_pin_retry_at_ms = 0;
-    s_pin_backoff_ms = 0;
+    s_pin.last_target = 0;
+    s_pin.retry_at_ms = 0;
+    s_pin.backoff_ms = 0;
     return;
   }
   /* Cross-task read of the DERP-task-owned home conn: volatile word reads. A
    * torn/stale read is conservative — worst case we wait one 3 s tick. */
   ml_derp_conn_t * home = &ml->derp[ml->derp_home_slot];
   bool home_alive = home->connected;
-  if (pin != s_pin_last_target) {
+  if (pin != s_pin.last_target) {
     /* Operator re-pinned to a DIFFERENT region: the old target's backoff must
      * not delay the new command (PR #95 review — a pin is a command). */
-    s_pin_retry_at_ms = 0;
-    s_pin_backoff_ms = 0;
+    s_pin.retry_at_ms = 0;
+    s_pin.backoff_ms = 0;
   }
   if (home_alive && home->region_id == pin) {
-    s_pin_retry_at_ms = 0; /* pin satisfied — clear any backoff */
-    s_pin_backoff_ms = 0;
+    s_pin.retry_at_ms = 0; /* pin satisfied — clear any backoff */
+    s_pin.backoff_ms = 0;
     return;
   }
   if (!home_alive) {
@@ -1506,7 +1509,7 @@ static void neg_pin_tick(microlink_t * ml)
     return;
   }
   uint64_t now = ml_get_time_ms();
-  if (s_pin_retry_at_ms != 0 && now < s_pin_retry_at_ms) {
+  if (s_pin.retry_at_ms != 0 && now < s_pin.retry_at_ms) {
     return; /* backing off after a failed prove */
   }
   if (ml->mbb_target_region == pin) {
@@ -1516,12 +1519,12 @@ static void neg_pin_tick(microlink_t * ml)
    * §8 damping/ban guards are deliberately NOT consulted: an operator pin is
    * a command; the mbb_target dedupe above is the only rate limit needed. */
   s_neg_pending_source = MICROLINK_REGION_SRC_LOCKED;
-  s_pin_retry_at_ms = 0; /* leaving backoff: the re-issued MBB is in flight, not waiting —
+  s_pin.retry_at_ms = 0; /* leaving backoff: the re-issued MBB is in flight, not waiting —
                           * keeps pin_backoff_pending telemetry truthful (PR #95 review) */
   ml->mbb_target_region = pin;
   ml->mbb_generation++;
-  s_pin_last_target = pin;
-  s_pin_mbb_requests++;
+  s_pin.last_target = pin;
+  s_pin.mbb_requests++;
   ESP_LOGW(
     TAG,
     "PIN via MBB: home region %u -> %u (gapless; old home serves until the new conn proves)",
@@ -1544,9 +1547,9 @@ static void neg_consume_mbb_outcome(microlink_t * ml)
   if (oc == ML_MBB_OUTCOME_COMMITTED) {
     bool pin_commit = (ml->derp_region_override != 0 && region == ml->derp_region_override);
     if (pin_commit) {
-      s_pin_mbb_commits++; /* Stage-1: the pin landed gaplessly */
-      s_pin_retry_at_ms = 0;
-      s_pin_backoff_ms = 0;
+      s_pin.mbb_commits++; /* Stage-1: the pin landed gaplessly */
+      s_pin.retry_at_ms = 0;
+      s_pin.backoff_ms = 0;
     }
     /* The commit ring feeds AUTONEG's switches/hour circuit breaker — operator
      * pin commits must not count against it, or a few pins in an hour suppress
@@ -1580,15 +1583,15 @@ static void neg_consume_mbb_outcome(microlink_t * ml)
        * no give-up. Back off 5 s -> 15 s -> 60 s (cap) and re-issue; the old
        * (working) home keeps serving throughout, so green is never at risk.
        * The unfulfilled pin is visible as pin_pending in /api/status. */
-      s_pin_backoff_ms = (s_pin_backoff_ms == 0) ? 5000 : (s_pin_backoff_ms == 5000 ? 15000 : 60000);
-      s_pin_retry_at_ms = now + s_pin_backoff_ms;
-      s_pin_mbb_retries++;
+      s_pin.backoff_ms = (s_pin.backoff_ms == 0) ? 5000 : (s_pin.backoff_ms == 5000 ? 15000 : 60000);
+      s_pin.retry_at_ms = now + s_pin.backoff_ms;
+      s_pin.mbb_retries++;
       s_neg_candidate = 0;
       ESP_LOGW(
         TAG,
         "PIN MBB ROLLBACK: region %u failed proving — retrying in %us (no ban; old home keeps serving)",
         (unsigned)region,
-        (unsigned)(s_pin_backoff_ms / 1000));
+        (unsigned)(s_pin.backoff_ms / 1000));
       return;
     }
     neg_ban_region(region, now); /* §8: 15-min cooldown before retrying an unprovable region */

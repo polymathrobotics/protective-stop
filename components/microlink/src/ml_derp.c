@@ -1107,7 +1107,7 @@ void ml_derp_get_iter_diag(uint32_t out[2])
  * crypto-heavy TLS steps per pass). Completion bookkeeping for the home conn
  * (retry-burst reset, reconnect diag, fallback apply) lives here so the kick
  * sites can stay fire-and-forget. */
-static void derp_drive_connects(microlink_t * ml, int aux_burst[], uint64_t * connected_since_ms, bool * verbose_phase)
+static void derp_drive_connects(microlink_t * ml, int aux_burst[])
 {
   int crypto_steps = 0;
   int hs = ml->derp_home_slot;
@@ -1129,8 +1129,6 @@ static void derp_drive_connects(microlink_t * ml, int aux_burst[], uint64_t * co
     int r = ml_derp_connect_step(ml, c);
     if (r == 1) {
       if (idx == hs) {
-        *connected_since_ms = ml_get_time_ms();
-        *verbose_phase = true;
         s_home_retry_burst = 0;
         if (s_reconn_t0 != 0) {
           s_diag_derp_reconnects++;
@@ -1181,8 +1179,6 @@ void ml_derp_tx_task(void * arg)
   uint64_t last_status_ms = 0;
   uint32_t loop_count = 0;
   uint64_t last_heartbeat_ms = 0;
-  uint64_t connected_since_ms = 0;
-  bool verbose_phase = false; /* verbose logging for first 15s after connect */
   int aux_burst[ML_DERP_MAX_CONNS] = {0}; /* per-slot aux connect backoff state */
 
   while (!(xEventGroupGetBits(ml->events) & ML_EVT_SHUTDOWN_REQUEST)) {
@@ -1356,7 +1352,6 @@ void ml_derp_tx_task(void * arg)
         ESP_LOGW(TAG, "DERP reconnect requested (home was %s)", home->connected ? "connected" : "disconnected");
         uint64_t reconn_t0 = ml_get_time_ms();
         ml_derp_disconnect(ml, home);
-        verbose_phase = false;
         /* IMMEDIATE first reconnect (run-20/21/22 root cause, 2026-08-12
          * DUT-host wire+journal evidence): an RST/EOF here is almost always a
          * middlebox connection-table FLUSH (the office edge firewall RSTs
@@ -1380,43 +1375,22 @@ void ml_derp_tx_task(void * arg)
     }
 
     /* ---- Stage-2/3: advance every in-progress connect one bounded step. ---- */
-    derp_drive_connects(ml, aux_burst, &connected_since_ms, &verbose_phase);
+    derp_drive_connects(ml, aux_burst);
 
-    /* Disable verbose logging after 15s */
-    if (verbose_phase && ml_get_time_ms() - connected_since_ms > 15000) {
-      verbose_phase = false;
-    }
-
-    /* If NOTHING in the pool is connected there's nothing to service. Home is
-         * (re)tried above; aux is managed at the tail. Just wait a beat. */
-    {
-      bool any_connected = false;
-      for (int s = 0; s < ML_DERP_MAX_CONNS; s++) {
-        if (ml->derp[s].connected) {
-          any_connected = true;
-          break;
-        }
-      }
-      if (!any_connected) {
-        derp_manage_aux(ml, ml_effective_home_region(ml), aux_burst, loop_start);
-        /* Keep the §7 MBB machine responsive to cancels/locks even with the
-             * whole pool dark (it cannot progress, but it must stay abortable). */
-        derp_mbb_tick(ml, loop_start);
-        bool connecting = false;
-        for (int s2 = 0; s2 < ML_DERP_MAX_CONNS; s2++) {
-          if (ml->derp[s2].cstate != DERP_CS_IDLE) {
-            connecting = true;
-            break;
-          }
-        }
-        vTaskDelay(pdMS_TO_TICKS(connecting ? 20 : 100)); /* keep stepping briskly */
-        continue;
+    /* Pool dark => skip Phase 1/2 (frames wait in their queues); the shared
+     * tail below still runs aux management and keeps the §7 MBB machine
+     * abortable, and the delay at the bottom shortens to keep stepping. */
+    bool any_connected = false;
+    for (int s = 0; s < ML_DERP_MAX_CONNS; s++) {
+      if (ml->derp[s].connected) {
+        any_connected = true;
+        break;
       }
     }
 
     /* ---- Phase 1: Drain TX queue FIRST (prioritize outgoing), routing each
          *      frame to the pool connection homed on the destination's region. ---- */
-    {
+    if (any_connected) {
       /* Drain the PRIORITY (safety/handshake) queue FULLY first, then the disco
        * queue (bounded). Two separate FIFO queues => a 5 Hz safety heartbeat is
        * never stuck behind a disco burst, enqueue stays single-atomic per queue
@@ -1490,11 +1464,10 @@ void ml_derp_tx_task(void * arg)
           free(item.data);
         }
       }
-    }
 
-    /* Stage-0 gauge: gap between consecutive rx-poll passes (the quantity the
-     * async engine exists to bound). Tracked only while home is connected. */
-    {
+      /* Stage-0 gauge: gap between consecutive rx-poll passes (the quantity the
+       * async engine exists to bound). Tracked only while home is connected. */
+      {
       static uint64_t s_last_rx_poll_ms = 0;
       uint64_t rx_now = ml_get_time_ms();
       if (home->connected && s_last_rx_poll_ms != 0) {
@@ -1536,10 +1509,11 @@ void ml_derp_tx_task(void * arg)
         }
       }
     }
+    } /* any_connected: Phase 1 + rx-gap gauge + Phase 2 */
 
     /* ---- Aux pool management at the TAIL: home is already serviced this
-         *      iteration, so a (potentially blocking) aux TLS handshake here can't
-         *      starve the home slot / the safety path. ---- */
+         *      iteration, so an aux connect kicked here can't starve the home
+         *      slot / the safety path. Runs pool-dark too (it opens conns). ---- */
     derp_manage_aux(ml, ml_effective_home_region(ml), aux_burst, ml_get_time_ms());
 
     /* ---- §7 MBB home-switch machine, after manage_aux so a just-connected
@@ -1553,8 +1527,21 @@ void ml_derp_tx_task(void * arg)
       if (iter_ms > s_diag_max_iter_ms) s_diag_max_iter_ms = iter_ms;
     }
 
-    /* Yield briefly (runtime-tunable via microlink_set_derp_loop_delay_ms). */
-    vTaskDelay(pdMS_TO_TICKS(atomic_load(&s_derp_loop_delay_ms)));
+    /* Yield briefly (runtime-tunable via microlink_set_derp_loop_delay_ms).
+     * Pool dark: 20 ms while a connect is in flight (keep stepping briskly),
+     * 100 ms otherwise. */
+    uint32_t delay_ms = atomic_load(&s_derp_loop_delay_ms);
+    if (!any_connected) {
+      bool connecting = false;
+      for (int s = 0; s < ML_DERP_MAX_CONNS; s++) {
+        if (ml->derp[s].cstate != DERP_CS_IDLE) {
+          connecting = true;
+          break;
+        }
+      }
+      delay_ms = connecting ? 20 : 100;
+    }
+    vTaskDelay(pdMS_TO_TICKS(delay_ms));
   }
 
   ESP_LOGI(TAG, "DERP I/O task exiting");
@@ -1957,7 +1944,7 @@ int ml_derp_connect_step(microlink_t * ml, ml_derp_conn_t * c)
       /* Receive phase: up to 64 bytes per step, byte-at-a-time so we never
        * over-read into the DERP binary stream (v1 rule preserved). */
       for (int k = 0; k < 64; k++) {
-        if (c->cs_http_len >= (int)sizeof(c->cs_buf) - 1) {
+        if (c->cs_http_len >= sizeof(c->cs_buf) - 1) {
           derp_cs_fail(ml, c, "http-overflow");
           return -1;
         }
@@ -1994,9 +1981,7 @@ int ml_derp_connect_step(microlink_t * ml, ml_derp_conn_t * c)
       static const uint8_t DERP_MAGIC[8] = {0x44, 0x45, 0x52, 0x50, 0xf0, 0x9f, 0x94, 0x91};
       switch (c->cs_derp_step) {
         case 0: { /* ServerKey frame header */
-          uint32_t got = (uint32_t)c->cs_hdr_got;
-          int r = derp_cs_read(c, c->cs_hdr, 5, &got);
-          c->cs_hdr_got = (int)got;
+          int r = derp_cs_read(c, c->cs_hdr, 5, &c->cs_hdr_got);
           if (r == 0) return 0;
           if (r < 0) {
             derp_cs_fail(ml, c, "skey-hdr");
@@ -2083,9 +2068,7 @@ int ml_derp_connect_step(microlink_t * ml, ml_derp_conn_t * c)
           return 0;
         }
         case 3: { /* ServerInfo frame header (tolerated-missing via deadline) */
-          uint32_t got = (uint32_t)c->cs_hdr_got;
-          int r = derp_cs_read(c, c->cs_hdr, 5, &got);
-          c->cs_hdr_got = (int)got;
+          int r = derp_cs_read(c, c->cs_hdr, 5, &c->cs_hdr_got);
           if (r == 0) return 0;
           if (r < 0) {
             ESP_LOGW(TAG, "No ServerInfo frame (continuing anyway)");

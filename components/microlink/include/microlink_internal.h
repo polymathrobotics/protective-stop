@@ -648,11 +648,12 @@ extern "C"
     mbedtls_ssl_config ssl_conf;
     mbedtls_entropy_context entropy;
     mbedtls_ctr_drbg_context ctr_drbg;
-    bool connected;
+    volatile bool connected; /* volatile: wg_mgr/httpd read it cross-task */
     uint64_t last_recv_ms; /* For keepalive watchdog */
 
     /* Multi-region pool bookkeeping (all owned by the DERP I/O task) */
-    uint16_t region_id; /* DERP region this conn serves; 0 = unused/free slot */
+    volatile uint16_t region_id; /* DERP region this conn serves; 0 = free slot.
+                                  * volatile: cross-task readers (word-sized) */
     bool tls_inited; /* the four mbedTLS contexts above are live (must be freed) */
     uint64_t last_connect_attempt_ms; /* per-slot connect backoff timestamp */
     uint64_t last_used_ms; /* last time a frame egressed here (aux reap clock) */
@@ -678,11 +679,11 @@ extern "C"
     ml_derp_cstate_t cstate; /* connect progress; IDLE when free or CONNECTED */
     uint64_t cstate_deadline_ms; /* whole-connect deadline (DERP_CONNECT_TIMEOUT_MS) */
     uint16_t cs_region; /* region this in-progress connect targets */
-    int cs_http_len; /* bytes accumulated in cs_buf during HTTP_UPGRADE */
+    uint32_t cs_http_len; /* bytes accumulated in cs_buf during HTTP_UPGRADE */
     uint8_t cs_derp_step; /* 0=ServerKey hdr, 1=ServerKey payload, 2=ClientInfo send,
                            * 3=ServerInfo hdr, 4=ServerInfo payload/skip */
     uint8_t cs_hdr[5]; /* partial DERP frame header (resumable) */
-    int cs_hdr_got;
+    uint32_t cs_hdr_got;
     uint8_t cs_frame_type;
     uint32_t cs_frame_len;
     uint32_t cs_payload_got; /* payload bytes consumed so far (resumable) */
