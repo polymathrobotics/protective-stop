@@ -1395,6 +1395,17 @@ static uint32_t s_pin_absent_resyncs; /* coord full-resyncs forced by an absent 
 static uint64_t s_pin_absent_next_ms; /* pin-presence heal backoff gate */
 static uint32_t s_pin_absent_backoff_ms;
 
+/* Stage-0b gauge (run-29 disarm class #4/#10): worst single wg_mgr loop
+ * iteration — heartbeats ride THIS task (WG rx -> decrypt -> pstop), so a
+ * multi-second stall here gaps every remote simultaneously with the DERP
+ * task innocent. Owned by wg_mgr; word-sized cross-task read. */
+static uint32_t s_diag_wg_max_iter_ms;
+
+uint32_t ml_wg_get_max_iter_ms(void)
+{
+  return s_diag_wg_max_iter_ms;
+}
+
 void ml_wg_get_pin_diag(uint32_t out[5])
 {
   out[0] = s_pin_mbb_requests;
@@ -3990,6 +4001,7 @@ void ml_wg_mgr_task(void * arg)
   bool stun_cmm_sent = false; /* One-shot: send CMMs after first STUN result */
 
   while (!(xEventGroupGetBits(ml->events) & ML_EVT_SHUTDOWN_REQUEST)) {
+    uint64_t wg_iter_t0 = ml_get_time_ms(); /* Stage-0b gauge */
     /* WG packets FIRST: this queue carries the 10 Hz pstop heartbeats.
          * It used to be drained after all disco crypto and peer ingestion,
          * so any burst of ~30 ms box-opens delayed (or overflowed) the
@@ -4132,6 +4144,12 @@ void ml_wg_mgr_task(void * arg)
     if (now - last_rehome_check_ms > 3000) {
       self_heal_rehome(ml);
       last_rehome_check_ms = now;
+    }
+
+    /* Stage-0b gauge: worst single iteration (heartbeat-path stall detector). */
+    {
+      uint32_t wg_iter_ms = (uint32_t)(ml_get_time_ms() - wg_iter_t0);
+      if (wg_iter_ms > s_diag_wg_max_iter_ms) s_diag_wg_max_iter_ms = wg_iter_ms;
     }
 
     /* Yield - 10ms loop rate for minimum packet processing latency.

@@ -945,6 +945,8 @@ extern "C"
    * full-resyncs forced by a pinned-but-absent peer (f498 heal). Owned by
    * the wg_mgr task; word-sized cross-task reads. */
   void ml_wg_get_pin_diag(uint32_t out[5]);
+  /* Stage-0b: worst single wg_mgr loop iteration ms (heartbeat-path stall). */
+  uint32_t ml_wg_get_max_iter_ms(void);
 
   /* Effective home DERP region for slot 0: the runtime override wins, else the
    * learned/rehomed home region. 0 = neither known (caller falls back to
