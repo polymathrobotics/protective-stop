@@ -544,6 +544,12 @@ void ml_derp_get_reconnect_diag(uint32_t out[3])
 static uint32_t s_diag_leg2_sent; /* path-diversity mirrors egressed */
 static uint32_t s_diag_leg2_skipped; /* mirrors skipped (no distinct connected conn) */
 static uint32_t s_diag_rescue_routes; /* primary frames rescued onto any-connected conn */
+static uint32_t s_diag_rx_stale_reaps; /* tx-active conns reaped for rx-silence */
+
+uint32_t ml_derp_get_rx_stale_reaps(void)
+{
+  return s_diag_rx_stale_reaps;
+}
 
 void ml_derp_get_diversity_diag(uint32_t out[3])
 {
@@ -1481,6 +1487,35 @@ void ml_derp_tx_task(void * arg)
         }
       }
     } /* any_connected: Phase 1 + rx-gap gauge + Phase 2 */
+
+    /* rx-staleness reap: a conn we actively egress into that has returned
+     * NOTHING for ML_DERP_RX_STALE_MS is server-side black-holed or a
+     * half-dead TCP (a quiet registration loss TX'd replies into a denying
+     * server for 25 min with every local gauge clean). Cycle it; the
+     * reconnect re-auths against the (re-registered) control plane. Idle
+     * conns are exempt — nothing is owed back on them. */
+    {
+      uint64_t rnow = ml_get_time_ms();
+      for (int s = 0; s < ML_DERP_MAX_CONNS; s++) {
+        ml_derp_conn_t * c = &ml->derp[s];
+        if (!c->connected || c->last_recv_ms == 0) continue;
+        if (rnow - c->last_recv_ms <= ML_DERP_RX_STALE_MS) continue;
+        if (c->last_used_ms == 0 || rnow - c->last_used_ms > ML_DERP_RX_STALE_TX_ACTIVE_MS) continue;
+        s_diag_rx_stale_reaps++;
+        ESP_LOGW(
+          TAG,
+          "DERP conn slot %d (region %u) tx-active but rx-silent %us — reaping",
+          s,
+          (unsigned)c->region_id,
+          (unsigned)((rnow - c->last_recv_ms) / 1000));
+        c->connected = false;
+        if (s == ml->derp_home_slot) {
+          xEventGroupSetBits(ml->events, ML_EVT_DERP_RECONNECT);
+        } else {
+          ml_derp_disconnect(ml, c);
+        }
+      }
+    }
 
     /* ---- Aux pool management at the TAIL: home is already serviced this
          *      iteration, so an aux connect kicked here can't starve the home

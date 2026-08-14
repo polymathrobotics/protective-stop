@@ -2604,6 +2604,7 @@ static void process_disco_pong(
       /* Any direct pong proves reachability — renew liveness first, regardless
        * of whether we adopt this specific endpoint below. */
       p->has_direct_path = true;
+      p->last_direct_pong_recv_ms = now;
       p->trust_until_ms = now + ML_DISCO_TRUST_DURATION_MS;
 
       /* Flap-damping bookkeeping (FIX 2). Timestamp only the genuine false->true
@@ -3571,8 +3572,14 @@ static void disco_periodic_probes(microlink_t * ml)
          *    10-60 s (measured) before failover. With the 3 s priority
          *    heartbeat below, two missed pongs demote in ~8-9 s. */
     bool lease_expired = p->has_direct_path && now > p->trust_until_ms;
-    bool pong_dead = p->has_direct_path && is_priority && p->last_pong_recv_ms != 0 &&
-                     now - p->last_pong_recv_ms > ML_DISCO_PRIORITY_PATH_DEAD_MS;
+    /* pong_dead keys on the DIRECT-path pong stamp: a relay-carried pong
+     * proves the peer, not this path, and using the path-blind stamp let a
+     * half-dead direct path (rx alive, tx dead) evade the veto-streak cap
+     * indefinitely — the trigger cleared and reset the streak each time a
+     * relay pong landed (2026-08-14 bbd8 wedge). With the direct stamp, a
+     * truly dead path keeps the trigger true and the cap demotes in ~10 s. */
+    bool pong_dead = p->has_direct_path && is_priority && p->last_direct_pong_recv_ms != 0 &&
+                     now - p->last_direct_pong_recv_ms > ML_DISCO_PRIORITY_PATH_DEAD_MS;
 
     /* Demote-VERIFICATION (ml_demote_verdict.h): both triggers above rest on
      * the DISCO side-channel, whose pings can go silent on a jittery uplink

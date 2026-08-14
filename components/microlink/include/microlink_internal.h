@@ -243,6 +243,18 @@ extern "C"
  * and let the demote proceed (DERP fallback + re-probe is the safer state;
  * see ml_peer_t.demote_veto_ticks). */
 #define ML_DEMOTE_VETO_MAX_TICKS 10
+/* Periodic idempotent coord re-registration: cures a QUIET registration loss
+ * (control plane forgot the node; DERP servers deny relaying to it — 100%
+ * inbound relay black-hole, invisible to local gauges) within one period.
+ * The reconnect flow is hitless (peers/WG preserved, map re-ingest). */
+#define ML_COORD_REREGISTER_MS 300000
+/* Reap a CONNECTED pool conn that we actively egress into but that has
+ * returned NOTHING for this long: in the safety topology every used conn
+ * carries return traffic (replies/mirrors), so tx-active + rx-silent means a
+ * server-side black-hole or half-dead TCP. Idle conns (no recent tx) are NOT
+ * reaped — nothing is owed back on them. */
+#define ML_DERP_RX_STALE_MS 150000
+#define ML_DERP_RX_STALE_TX_ACTIVE_MS 30000
 /* Hitless re-ingest (run-20 green drop, 2026-08-11): a coord/netmap teardown
  * (re-key retire, REMOVE) of a safety peer is VETOED while the WG session
  * shows authenticated data rx (any path) within this window — an immediate
@@ -511,7 +523,12 @@ extern "C"
 
     /* DISCO state (rate limiting) */
     uint64_t last_ping_sent_ms; /* Last DISCO ping we sent */
-    uint64_t last_pong_recv_ms; /* Last DISCO pong we received */
+    uint64_t last_pong_recv_ms; /* Last DISCO pong we received (any path) */
+    uint64_t last_direct_pong_recv_ms; /* Last pong received DIRECT — the
+                                        * pong-dead demote trigger keys on
+                                        * this, not the path-blind stamp: a
+                                        * relay-carried pong must not hold a
+                                        * dead direct path out of demotion */
     uint32_t disco_rtt_ms; /* txid-matched ping->pong RTT (true path metric) */
     bool disco_rtt_direct; /* the measured pong came direct (not via DERP) */
     uint64_t trust_until_ms; /* Direct path trusted until */
@@ -925,6 +942,10 @@ extern "C"
   esp_err_t ml_derp_connect_kick(microlink_t * ml, ml_derp_conn_t * c, uint16_t region_id);
   int ml_derp_connect_step(microlink_t * ml, ml_derp_conn_t * c);
   uint32_t ml_derp_get_connect_steps(void);
+  /* Pool conns reaped for tx-active rx-silence (server-side black-hole). */
+  uint32_t ml_derp_get_rx_stale_reaps(void);
+  /* Periodic idempotent coord re-registrations executed. */
+  uint32_t ml_coord_get_reregisters(void);
   /* Stage-0 gauges: out[0]=worst single DERP-task iteration ms, out[1]=worst
    * gap between consecutive rx-poll passes ms (both since boot). */
   void ml_derp_get_iter_diag(uint32_t out[2]);

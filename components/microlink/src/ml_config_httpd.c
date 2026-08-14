@@ -1098,6 +1098,8 @@ static esp_err_t handler_monitor(httpd_req_t * req)
       /* Stage-2/3: pump-home-rx is retired (async engine); expose the
        * engine's step counter + the Stage-0 loop gauges instead. */
       cJSON_AddNumberToObject(json, "derp_connect_steps", ml_derp_get_connect_steps());
+      cJSON_AddNumberToObject(json, "derp_rx_stale_reaps", ml_derp_get_rx_stale_reaps());
+      cJSON_AddNumberToObject(json, "coord_reregisters", ml_coord_get_reregisters());
       {
         uint32_t it[2] = {0};
         ml_derp_get_iter_diag(it);

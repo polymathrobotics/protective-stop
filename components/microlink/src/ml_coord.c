@@ -40,6 +40,15 @@
 
 static const char * TAG = "ml_coord";
 
+/* Periodic re-registrations executed (coord-task-owned; word-sized cross-task
+ * read via ml_coord_get_reregisters for /admin/api/monitor). */
+static uint32_t s_diag_coord_reregisters;
+
+uint32_t ml_coord_get_reregisters(void)
+{
+  return s_diag_coord_reregisters;
+}
+
 /* Effective control plane host: NVS override or compiled default */
 #define CTRL_HOST(ml) ((ml)->ctrl_host[0] ? (ml)->ctrl_host : ML_CTRL_HOST)
 
@@ -2862,6 +2871,24 @@ void ml_coord_task(void * arg)
             }
           }
           last_derp_keepalive_ms = now;
+        }
+
+        /* Periodic idempotent re-registration: a QUIET registration loss
+         * (control plane forgets this node; DERP servers then DENY relaying
+         * to it) is invisible from the chip — inbound relay traffic just
+         * stops while local gauges stay clean. The normal reconnect flow
+         * re-registers hitlessly (peers/WG preserved, map re-ingest is
+         * hitless), so run it on a timer as the standing cure. */
+        {
+          static uint64_t last_rereg_ms = 0;
+          if (last_rereg_ms == 0) last_rereg_ms = now;
+          if (now - last_rereg_ms > ML_COORD_REREGISTER_MS) {
+            last_rereg_ms = now;
+            s_diag_coord_reregisters++;
+            ESP_LOGI(TAG, "Periodic coord re-register #%u", (unsigned)s_diag_coord_reregisters);
+            state = COORD_RECONNECTING;
+            break;
+          }
         }
 
         /* Key expiry check (every 60s) — re-register if expired */
