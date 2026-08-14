@@ -319,7 +319,9 @@ void dcs_nvs_read_pstop_peers(dcs_pstop_peer_rec_t out[DCS_PSTOP_MAX_MACHINES])
   bool have_legacy = false;
   uint32_t legacy_ip = 0;
   if (nvs_open(DCS_NVS_NS, NVS_READONLY, &lh) == ESP_OK) {
-    have_legacy = (nvs_get_u32(lh, DCS_NVS_KEY_PSTOP_IP, &legacy_ip) == ESP_OK);
+    /* Value check, not key-exists: the writer mirrors a slot-0 CLEAR as
+     * ip=0, and migrating that would fabricate a configured 0.0.0.0 peer. */
+    have_legacy = (nvs_get_u32(lh, DCS_NVS_KEY_PSTOP_IP, &legacy_ip) == ESP_OK) && legacy_ip != 0;
     nvs_close(lh);
   }
   if (have_legacy) {

@@ -452,7 +452,10 @@ esp_err_t ml_derp_queue_send(microlink_t * ml, const uint8_t * dest_key, const u
    * ||health-tracked — the fleet pin is reachability armor; doubling its bulk
    * frames buys no diversity and crowds the prio queue). */
   bool mirror = false;
-  bool is_priority = is_wg_handshake || ml_wg_tx_class_pubkey(ml, dest_key, &mirror);
+  /* Classify FIRST: `||` short-circuiting on is_wg_handshake would skip the
+   * call and cost a safety peer's rekey handshake its leg-2 mirror. */
+  bool safety_prio = ml_wg_tx_class_pubkey(ml, dest_key, &mirror);
+  bool is_priority = is_wg_handshake || safety_prio;
   QueueHandle_t txq = is_priority ? ml->derp_tx_prio_queue : ml->derp_tx_queue;
 
   /* Path diversity (docs/HEARTBEAT_PATH_DIVERSITY_DESIGN.md): heartbeat

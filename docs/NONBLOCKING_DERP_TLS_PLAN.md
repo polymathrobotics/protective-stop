@@ -1,3 +1,6 @@
+<!-- SPDX-FileCopyrightText: 2026 Polymath Robotics -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+
 # Non-Blocking / Async DERP TLS Handshake Refactor — Implementation Plan
 
 > **STATUS 2026-08-14: Stages 0–3 IMPLEMENTED + field-validated on dev.**
