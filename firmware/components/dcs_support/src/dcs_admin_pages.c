@@ -627,12 +627,25 @@ static esp_err_t api_pstop_peer(httpd_req_t * req)
     (void)httpd_resp_set_status(req, "400 Bad Request");
     return httpd_resp_sendstr(req, "{\"ok\":false,\"error\":\"missing ?ip=A.B.C.D&port=N\"}");
   }
+  /* ?clear=1 empties the legacy target (slot 0) — mirrors /api/pstop_peers'
+   * clear semantics. Previously this handler demanded ip+port even to clear,
+   * forcing the dummy-peer (127.0.0.1:1) workaround to unbond a remote. */
+  if ((httpd_query_key_value(query, "clear", ipstr, sizeof(ipstr)) == ESP_OK) && (ipstr[0] == '1')) {
+    esp_err_t r = dcs_pstop_set_peer_slot(0, false, 0, 0, 0);
+    char resp[64];
+    int n = snprintf(resp, sizeof(resp), "{\"ok\":%s,\"cleared\":true}", (r == ESP_OK) ? "true" : "false");
+    if (r != ESP_OK) {
+      (void)httpd_resp_set_status(req, "500 Internal Server Error");
+    }
+    (void)httpd_resp_set_type(req, "application/json");
+    return httpd_resp_send(req, resp, n);
+  }
   if (
     (httpd_query_key_value(query, "ip", ipstr, sizeof(ipstr)) != ESP_OK) ||
     (httpd_query_key_value(query, "port", portstr, sizeof(portstr)) != ESP_OK))
   {
     (void)httpd_resp_set_status(req, "400 Bad Request");
-    return httpd_resp_sendstr(req, "{\"ok\":false,\"error\":\"need both ip and port\"}");
+    return httpd_resp_sendstr(req, "{\"ok\":false,\"error\":\"need both ip and port (or clear=1)\"}");
   }
   unsigned int a, b, c, d;
   if ((sscanf(ipstr, "%u.%u.%u.%u", &a, &b, &c, &d) != 4) || (a > 255U) || (b > 255U) || (c > 255U) || (d > 255U)) {
@@ -1001,8 +1014,9 @@ static esp_err_t api_led_brightness(httpd_req_t * req)
   if ((pct < 0) || (pct > 100)) {
     (void)httpd_resp_set_status(req, "400 Bad Request");
     (void)httpd_resp_set_type(req, "application/json");
-    return httpd_resp_sendstr(req, "{\"ok\":false,\"error\":\"pct must be 0..100\"}");
+    return httpd_resp_sendstr(req, "{\"ok\":false,\"error\":\"pct must be 0..100 (values below 10 floor to 10)\"}");
   }
+  pct = dcs_led_brightness_floor((uint8_t)pct); /* floor, not reject: response reports the effective value */
   esp_err_t r = dcs_nvs_write_led_brightness((uint8_t)pct);
   if (r == ESP_OK) {
     dcs_pstop_ring_set_brightness((uint8_t)pct); /* live, next repaint */

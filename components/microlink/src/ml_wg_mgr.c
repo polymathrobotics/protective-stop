@@ -715,6 +715,19 @@ bool ml_wg_is_health_tracked(uint32_t vpn_ip)
   return is_health_tracked(vpn_ip);
 }
 
+/* THE safety-peer membership test — the single definition of "this peer's
+ * link carries the safety heartbeat": the configured priority peer OR any
+ * health-tracked peer. Used by teardown vetoes, session diagnostics, the
+ * rekey-in-flight freeze, LRU-evict protection and the reingest sweep — one
+ * predicate, so a future criterion change cannot drift across call sites
+ * (6 hand-inlined copies had accumulated before it existed).
+ * NOTE: distinct from ml_wg_tx_class_pubkey()'s pinned||health prio rule —
+ * pinned covers reachability armor (fleet anchor etc.), not heartbeat carriage. */
+static bool is_safety_peer(microlink_t * ml, uint32_t vpn_ip)
+{
+  return (ml->config.priority_peer_ip != 0 && vpn_ip == ml->config.priority_peer_ip) || is_health_tracked(vpn_ip);
+}
+
 /* DERP home region of a peer identified by its 32-byte WG public key.
  * 0 = unknown peer or region not learned. Called from ml_derp_queue_send on the
  * wg_mgr task (the peer-table owner), so this is a same-task read — no lock. */
@@ -726,20 +739,22 @@ uint16_t ml_wg_region_for_pubkey(microlink_t * ml, const uint8_t * wg_pubkey)
   return ml->peers[idx].derp_region;
 }
 
-/* True when the WG-pubkey peer is one of the few SAFETY peers (pinned OR
- * health-tracked) — the ones exempt from the peer-scaling armor. The DERP TX
- * enqueue path uses this to give the 5 Hz pstop heartbeat frame priority
- * (front-of-queue) and to shield it from disco-burst backpressure. Same-task
- * read when called from wg_mgr; when called from wg_derp_output_cb (TCPIP
- * thread) it shares the existing lock-free tolerance of ml_wg_region_for_pubkey
- * — word-sized reads, worst case a transiently wrong classification. */
-bool ml_wg_is_safety_pubkey(microlink_t * ml, const uint8_t * wg_pubkey)
+/* DERP-egress classification for a destination pubkey, in ONE peer-table walk.
+ * Returns the PRIORITY-queue bit: pinned OR health-tracked (their frames never
+ * sit behind a disco burst). *mirror_out = heartbeat carriers only (priority OR
+ * health-tracked): the fleet pin is reachability armor, not heartbeat carriage,
+ * so its frames are not path-diversity mirrored. Safe from the TCPIP thread
+ * (wg_derp_output_cb): word-sized reads, worst case a transiently wrong
+ * classification, same tolerance as ml_wg_region_for_pubkey. */
+bool ml_wg_tx_class_pubkey(microlink_t * ml, const uint8_t * wg_pubkey, bool * mirror_out)
 {
+  *mirror_out = false;
   if (ml == NULL || wg_pubkey == NULL) return false;
   int idx = find_peer_by_key(ml, wg_pubkey);
   if (idx < 0) return false;
   uint32_t vpn_ip = ml->peers[idx].vpn_ip;
-  return is_pinned_peer(ml, vpn_ip) || is_health_tracked(vpn_ip);
+  *mirror_out = is_safety_peer(ml, vpn_ip);
+  return *mirror_out || is_pinned_peer(ml, vpn_ip);
 }
 
 /* Collect the DISTINCT DERP regions of the safety peers that are exempt from the
@@ -895,8 +910,7 @@ void ml_wg_get_session_diag(microlink_t * ml, uint32_t out[5])
   for (int i = 0; i < ml->peer_count; i++) {
     ml_peer_t * p = &ml->peers[i];
     if (!p->active || p->wg_peer_index < 0) continue;
-    bool safety =
-      (ml->config.priority_peer_ip != 0 && p->vpn_ip == ml->config.priority_peer_ip) || is_health_tracked(p->vpn_ip);
+    bool safety = is_safety_peer(ml, p->vpn_ip);
     if (!safety) continue;
     u32_t kp_age = 0, init_age = 0;
     if (
@@ -924,8 +938,7 @@ void ml_wg_get_session_diag(microlink_t * ml, uint32_t out[5])
  * ml_demote_verdict.h for the invariant argument. */
 static bool teardown_vetoed(microlink_t * ml, uint32_t vpn_ip, int wg_peer_index)
 {
-  bool is_safety =
-    (ml->config.priority_peer_ip != 0 && vpn_ip == ml->config.priority_peer_ip) || is_health_tracked(vpn_ip);
+  bool is_safety = is_safety_peer(ml, vpn_ip);
   u32_t age_ms = 0;
   bool valid = ml->wg_netif && wg_peer_index >= 0 &&
                wireguardif_peer_rx_age((struct netif *)ml->wg_netif, (u8_t)wg_peer_index, &age_ms) == ERR_OK;
@@ -956,8 +969,7 @@ void ml_wg_get_direct_retry_diag(microlink_t * ml, uint32_t out[4])
   for (int i = 0; i < ml->peer_count; i++) {
     ml_peer_t * p = &ml->peers[i];
     if (!p->active || p->has_direct_path) continue;
-    bool safety =
-      (ml->config.priority_peer_ip != 0 && p->vpn_ip == ml->config.priority_peer_ip) || is_health_tracked(p->vpn_ip);
+    bool safety = is_safety_peer(ml, p->vpn_ip);
     if (!safety) continue;
     out[2]++;
     if (p->relay_retry_next_ms != 0 && (soonest == 0 || p->relay_retry_next_ms < soonest)) {
@@ -1221,8 +1233,7 @@ static bool safety_rekey_inflight(microlink_t * ml)
   for (int i = 0; i < ml->peer_count; i++) {
     ml_peer_t * p = &ml->peers[i];
     if (!p->active || p->wg_peer_index < 0) continue;
-    bool safety =
-      (ml->config.priority_peer_ip != 0 && p->vpn_ip == ml->config.priority_peer_ip) || is_health_tracked(p->vpn_ip);
+    bool safety = is_safety_peer(ml, p->vpn_ip);
     if (!safety) continue;
     u32_t kp_age = 0, init_age = 0;
     if (
@@ -1250,17 +1261,15 @@ static void neg_apply_target(microlink_t * ml, uint16_t target, uint8_t src)
 
   if (ml->derp_region_override != 0) {
     ml->priority_peer_region = target; /* advertised as PreferredDERP (override still wins) */
-    neg_cancel_mbb(ml);
-    if (ml->derp_home_region != target) {
-      s_diag_rehome_applied++;
-      ESP_LOGW(
-        TAG,
-        "Re-homing DERP region %u -> %u (locked: override %u wins on connect/advert)",
-        (unsigned)ml->derp_home_region,
-        (unsigned)target,
-        (unsigned)ml->derp_region_override);
-      ml->derp_home_region = target;
-      xEventGroupSetBits(ml->events, ML_EVT_DERP_RECONNECT);
+    /* Pin->MBB: pin convergence is owned by neg_pin_tick — gapless MBB while
+     * the home conn is alive, the DERP task's own home-reconnect (straight to
+     * the override) when it is not; a teardown here would starve heartbeat rx
+     * (docs/STAGE1_PIN_MBB_DESIGN.md). Cancel only a FOREIGN in-flight MBB
+     * (autoneg toward some other region — the I2 "lock wins instantly"
+     * intent); NEVER the pin's own, or the pin could never complete (this
+     * runs every 3 s). */
+    if (ml->mbb_target_region != 0 && ml->mbb_target_region != ml->derp_region_override) {
+      neg_cancel_mbb(ml);
     }
     return;
   }
@@ -1362,6 +1371,166 @@ static void neg_apply_target(microlink_t * ml, uint16_t target, uint8_t src)
     microlink_region_source_str(src));
 }
 
+/* ============================================================================
+ * Stage-1 pin->MBB (docs/STAGE1_PIN_MBB_DESIGN.md): drive the operator region
+ * pin (derp_region_override) GAPLESSLY. While the home conn is alive, the pin
+ * is applied via the §7 make-before-break executor (open target as aux, prove,
+ * swap the home index — no teardown, no rx gap). With no live home there is
+ * nothing to protect: the DERP task's own home-reconnect path already connects
+ * straight to ml_effective_home_region() == the override.
+ *
+ * Fallback semantics (operator decision 2026-08-13): RETRY FOREVER, NEVER GAP.
+ * A pin toward an unprovable region keeps the old (working) home serving and
+ * retries with 5 s -> 15 s -> 60 s backoff (60 s cap, RAM-only) — a pin is a
+ * command, not advice, so rollbacks neither ban the region nor give up. The
+ * unfulfilled pin is visible as pin_pending in /api/status.
+ * State + counters owned by the wg_mgr task (single writer); counters read
+ * cross-task via ml_wg_get_pin_diag (word reads). */
+static struct
+{
+  uint32_t mbb_requests; /* MBB commands issued for the pin (cumulative) */
+  uint32_t mbb_commits; /* pin MBBs that committed (cumulative) */
+  uint32_t mbb_retries; /* re-issues after a failed prove (cumulative) */
+  uint64_t retry_at_ms; /* 0 = no backoff pending */
+  uint32_t backoff_ms; /* current backoff step */
+  uint16_t last_target; /* region of the pin MBB we issued (edge 4: cancel-on-clear) */
+  uint32_t absent_resyncs; /* coord full-resyncs forced by an absent pinned peer (cumulative) */
+  uint64_t absent_next_ms; /* pin-presence heal backoff gate */
+  uint32_t absent_backoff_ms;
+} s_pin; /* never bulk-reset: counters are cumulative, reset sites clear differing subsets */
+
+/* Stage-0b gauge (run-29 disarm class #4/#10): worst single wg_mgr loop
+ * iteration — heartbeats ride THIS task (WG rx -> decrypt -> pstop), so a
+ * multi-second stall here gaps every remote simultaneously with the DERP
+ * task innocent. Owned by wg_mgr; word-sized cross-task read. */
+static uint32_t s_diag_wg_max_iter_ms;
+
+uint32_t ml_wg_get_max_iter_ms(void)
+{
+  return s_diag_wg_max_iter_ms;
+}
+
+void ml_wg_get_pin_diag(uint32_t out[5])
+{
+  out[0] = s_pin.mbb_requests;
+  out[1] = s_pin.mbb_commits;
+  out[2] = s_pin.mbb_retries;
+  out[3] = (s_pin.retry_at_ms != 0) ? 1u : 0u; /* backoff currently pending */
+  out[4] = s_pin.absent_resyncs; /* forced coord resyncs for a pinned-but-absent peer */
+}
+
+/* Pin-presence self-heal: an extra-pinned IP
+ * (a configured pstop machine / fleet anchor) that is ABSENT from the peer
+ * table can never be reached — and with OmitPeers the control plane will not
+ * re-send it unprompted, so the outage is PERMANENT until a lucky reboot.
+ * How it happens: the initial full-netmap ingest can race ahead of the app's
+ * boot-time pstop_slot_pins_sync(); on an over-cap tailnet the machine is
+ * then dropped UN-pinned ("Peer table full, cannot add") and no later patch
+ * re-delivers it. Heal: detect pinned-but-absent on the 3 s cadence and kick
+ * ML_CMD_FORCE_RECONNECT (re-register -> full FETCH_PEERS re-ingests the map;
+ * by then the pin is registered, so admission LRU-evicts a non-pinned peer).
+ * Escalating backoff 60 s -> 10 min cap: a reconnect is heavier than an
+ * announce, and a misconfigured (never-on-tailnet) machine IP must not storm
+ * control — it stays visible via the counter + log instead. (Statics live
+ * with the other pin counters above, ahead of ml_wg_get_pin_diag.) */
+static void pin_presence_heal(microlink_t * ml)
+{
+  if (!(xEventGroupGetBits(ml->events) & ML_EVT_COORD_REGISTERED)) {
+    return; /* boot/reconnect grace: the full map may still be ingesting */
+  }
+  uint32_t absent_ip = 0;
+  for (int i = 0; i < ML_EXTRA_PINS; i++) {
+    uint32_t ip = s_extra_pins[i];
+    if (ip != 0 && find_peer_by_ip(ml, ip) < 0) {
+      absent_ip = ip;
+      break;
+    }
+  }
+  uint64_t now = ml_get_time_ms();
+  if (absent_ip == 0) {
+    s_pin.absent_backoff_ms = 0; /* healthy — reset the backoff ladder */
+    s_pin.absent_next_ms = 0; /* and the gate, so a re-absence heals immediately */
+    return;
+  }
+  if (s_pin.absent_next_ms != 0 && now < s_pin.absent_next_ms) {
+    return;
+  }
+  s_pin.absent_backoff_ms =
+    (s_pin.absent_backoff_ms == 0) ? 60000 : (s_pin.absent_backoff_ms >= 300000 ? 600000 : s_pin.absent_backoff_ms * 5);
+  s_pin.absent_next_ms = now + s_pin.absent_backoff_ms;
+  s_pin.absent_resyncs++;
+  char ipstr[16];
+  microlink_ip_to_str(absent_ip, ipstr);
+  ESP_LOGW(
+    TAG,
+    "Pinned peer %s ABSENT from peer table — forcing coord resync #%u (next retry in %us)",
+    ipstr,
+    (unsigned)s_pin.absent_resyncs,
+    (unsigned)(s_pin.absent_backoff_ms / 1000));
+  ml_coord_cmd_t cmd = ML_CMD_FORCE_RECONNECT;
+  (void)xQueueSend(ml->coord_cmd_queue, &cmd, 0); /* full = one already pending */
+}
+
+static void neg_pin_tick(microlink_t * ml)
+{
+  uint16_t pin = ml->derp_region_override;
+  if (pin == 0) {
+    /* Edge 4: pin cleared while its own MBB is in flight — cancel it (the
+     * generation bump aborts the executor back to IDLE, no ban). Autoneg
+     * resumes ownership on its own cadence. */
+    if (s_pin.last_target != 0 && ml->mbb_target_region == s_pin.last_target) {
+      neg_cancel_mbb(ml);
+    }
+    s_pin.last_target = 0;
+    s_pin.retry_at_ms = 0;
+    s_pin.backoff_ms = 0;
+    return;
+  }
+  /* Cross-task read of the DERP-task-owned home conn: volatile word reads. A
+   * torn/stale read is conservative — worst case we wait one 3 s tick. */
+  ml_derp_conn_t * home = &ml->derp[ml->derp_home_slot];
+  bool home_alive = home->connected;
+  if (pin != s_pin.last_target) {
+    /* Operator re-pinned to a DIFFERENT region: the old target's backoff must
+     * not delay the new command. */
+    s_pin.retry_at_ms = 0;
+    s_pin.backoff_ms = 0;
+  }
+  if (home_alive && home->region_id == pin) {
+    s_pin.retry_at_ms = 0; /* pin satisfied — clear any backoff */
+    s_pin.backoff_ms = 0;
+    return;
+  }
+  if (!home_alive) {
+    /* No live home = no gap to protect. The DERP I/O task's home-reconnect
+     * path connects to ml_effective_home_region() (= the override) on its
+     * own; issuing an MBB here would just race it. Nothing to do. */
+    return;
+  }
+  uint64_t now = ml_get_time_ms();
+  if (s_pin.retry_at_ms != 0 && now < s_pin.retry_at_ms) {
+    return; /* backing off after a failed prove */
+  }
+  if (ml->mbb_target_region == pin) {
+    return; /* already in flight toward the pin — let the executor work */
+  }
+  /* Issue the MBB command (same single-writer interface autoneg uses). The
+   * §8 damping/ban guards are deliberately NOT consulted: an operator pin is
+   * a command; the mbb_target dedupe above is the only rate limit needed. */
+  s_neg_pending_source = MICROLINK_REGION_SRC_LOCKED;
+  s_pin.retry_at_ms = 0; /* leaving backoff: the re-issued MBB is in flight, not waiting —
+                          * keeps pin_backoff_pending telemetry truthful */
+  ml->mbb_target_region = pin;
+  ml->mbb_generation++;
+  s_pin.last_target = pin;
+  s_pin.mbb_requests++;
+  ESP_LOGW(
+    TAG,
+    "PIN via MBB: home region %u -> %u (gapless; old home serves until the new conn proves)",
+    (unsigned)home->region_id,
+    (unsigned)pin);
+}
+
 /* Consume the MBB executor's outcome (posted by the DERP I/O task). Runs on
  * the wg_mgr 3 s self-heal cadence — the advert/announce stays single-writer
  * (this task), off the 10 Hz safety send path. */
@@ -1375,7 +1544,19 @@ static void neg_consume_mbb_outcome(microlink_t * ml)
   uint64_t now = ml_get_time_ms();
 
   if (oc == ML_MBB_OUTCOME_COMMITTED) {
-    neg_note_commit(now);
+    bool pin_commit = (ml->derp_region_override != 0 && region == ml->derp_region_override);
+    if (pin_commit) {
+      s_pin.mbb_commits++; /* Stage-1: the pin landed gaplessly */
+      s_pin.retry_at_ms = 0;
+      s_pin.backoff_ms = 0;
+    }
+    /* The commit ring feeds AUTONEG's switches/hour circuit breaker — operator
+     * pin commits must not count against it, or a few pins in an hour suppress
+     * legitimate autoneg switching for up to an hour after unlock. The advert
+     * tail below is still wanted for pins. */
+    if (!pin_commit) {
+      neg_note_commit(now);
+    }
     /* §6/§7 SWITCH_ADVERT tail: an MBB-committed region is treated exactly
      * like priority_peer_region — it owns the PreferredDERP advert and arms
      * the MapResponse authoritative guard so the server can't revert it. */
@@ -1396,6 +1577,22 @@ static void neg_consume_mbb_outcome(microlink_t * ml)
       (unsigned)region,
       microlink_region_source_str(s_neg_pending_source));
   } else if (oc == ML_MBB_OUTCOME_ROLLED_BACK) {
+    if (ml->derp_region_override != 0 && region == ml->derp_region_override) {
+      /* Stage-1 retry-forever: a pin is a command, not advice — no region ban,
+       * no give-up. Back off 5 s -> 15 s -> 60 s (cap) and re-issue; the old
+       * (working) home keeps serving throughout, so green is never at risk.
+       * The unfulfilled pin is visible as pin_pending in /api/status. */
+      s_pin.backoff_ms = (s_pin.backoff_ms == 0) ? 5000 : (s_pin.backoff_ms == 5000 ? 15000 : 60000);
+      s_pin.retry_at_ms = now + s_pin.backoff_ms;
+      s_pin.mbb_retries++;
+      s_neg_candidate = 0;
+      ESP_LOGW(
+        TAG,
+        "PIN MBB ROLLBACK: region %u failed proving — retrying in %us (no ban; old home keeps serving)",
+        (unsigned)region,
+        (unsigned)(s_pin.backoff_ms / 1000));
+      return;
+    }
     neg_ban_region(region, now); /* §8: 15-min cooldown before retrying an unprovable region */
     s_neg_candidate = 0; /* restart the stability window from scratch */
     ESP_LOGW(
@@ -1673,10 +1870,7 @@ static int add_peer(microlink_t * ml, const ml_peer_update_t * update)
         if (is_pinned_peer(ml, ml->peers[i].vpn_ip)) continue;
         /* Never LRU-evict a safety peer, pinned or not — evicting the peer
          * carrying the 5 Hz heartbeat is a guaranteed machine STOP. */
-        if (
-          (ml->config.priority_peer_ip != 0 && ml->peers[i].vpn_ip == ml->config.priority_peer_ip) ||
-          is_health_tracked(ml->peers[i].vpn_ip))
-        {
+        if (is_safety_peer(ml, ml->peers[i].vpn_ip)) {
           s_diag_evict_safety_skips++;
           continue;
         }
@@ -2405,8 +2599,7 @@ static void process_disco_pong(
        * re-handshake (that momentary DERP fallback is what dropped the safety
        * heartbeat). Mirrors tailscale magicsock trustBestAddrUntil+betterAddr. */
       bool had_direct = p->has_direct_path;
-      bool is_prio =
-        (ml->config.priority_peer_ip != 0 && p->vpn_ip == ml->config.priority_peer_ip) || is_health_tracked(p->vpn_ip);
+      bool is_prio = is_safety_peer(ml, p->vpn_ip);
 
       /* Any direct pong proves reachability — renew liveness first, regardless
        * of whether we adopt this specific endpoint below. */
@@ -3357,10 +3550,8 @@ static void disco_periodic_probes(microlink_t * ml)
          * Inbound DISCO pings from any peer are still answered (don't break remote). */
     bool peer_allowed = ml_config_peer_is_allowed(ml->config_httpd, p->vpn_ip);
 
-    bool is_priority = (ml->config.priority_peer_ip != 0 && p->vpn_ip == ml->config.priority_peer_ip) ||
-                       is_health_tracked(p->vpn_ip); /* every pstop counterpart gets the
-                            * safety-peer treatment: 3 s disco heartbeats (which also keep
-                            * the path RTT sample fresh on BOTH ends) + pong watchdog. */
+    bool is_priority = is_safety_peer(ml, p->vpn_ip); /* every pstop counterpart gets
+                            * 3 s disco heartbeats (fresh RTT on BOTH ends) + pong watchdog. */
 
     /* EVERY safety peer gets the DERP data+handshake mirror (dual_path) — it
      * was priority-peer-only, so the MACHINE's TX leg to its remotes (data
@@ -3700,6 +3891,11 @@ static void self_heal_rehome(microlink_t * ml)
    * rollback => region ban. Runs here (3 s cadence, wg_mgr task) so the
    * negotiator stays single-writer and off the 10 Hz safety send path. */
   neg_consume_mbb_outcome(ml);
+  /* Stage-1 pin->MBB: converge the operator region pin gaplessly (same
+   * cadence, same single-writer command interface as autoneg). */
+  neg_pin_tick(ml);
+  /* Pinned-but-absent peer => force a coord full resync (f498 heal). */
+  pin_presence_heal(ml);
   /* Heal against the DERIVED §4.2 primary (falls back to the legacy static
    * priority_peer_ip when no callback is registered — machn/plain builds). */
   uint32_t prim = neg_primary_ip(ml);
@@ -3821,6 +4017,7 @@ void ml_wg_mgr_task(void * arg)
   bool stun_cmm_sent = false; /* One-shot: send CMMs after first STUN result */
 
   while (!(xEventGroupGetBits(ml->events) & ML_EVT_SHUTDOWN_REQUEST)) {
+    uint64_t wg_iter_t0 = ml_get_time_ms(); /* Stage-0b gauge */
     /* WG packets FIRST: this queue carries the 10 Hz pstop heartbeats.
          * It used to be drained after all disco crypto and peer ingestion,
          * so any burst of ~30 ms box-opens delayed (or overflowed) the
@@ -3963,6 +4160,12 @@ void ml_wg_mgr_task(void * arg)
     if (now - last_rehome_check_ms > 3000) {
       self_heal_rehome(ml);
       last_rehome_check_ms = now;
+    }
+
+    /* Stage-0b gauge: worst single iteration (heartbeat-path stall detector). */
+    {
+      uint32_t wg_iter_ms = (uint32_t)(ml_get_time_ms() - wg_iter_t0);
+      if (wg_iter_ms > s_diag_wg_max_iter_ms) s_diag_wg_max_iter_ms = wg_iter_ms;
     }
 
     /* Yield - 10ms loop rate for minimum packet processing latency.

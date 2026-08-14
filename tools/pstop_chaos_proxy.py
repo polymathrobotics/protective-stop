@@ -78,7 +78,17 @@ class Stats:
     def __init__(self):
         self.lock = threading.Lock()
         self.c = {
-            k: 0 for k in ('fwd', 'ret', 'drop_up', 'drop_down', 'dup_up', 'dup_down', 'corrupt_up', 'corrupt_down')
+            k: 0
+            for k in (
+                'fwd',
+                'ret',
+                'drop_up',
+                'drop_down',
+                'dup_up',
+                'dup_down',
+                'corrupt_up',
+                'corrupt_down',
+            )
         }
 
     def bump(self, key):
@@ -167,7 +177,10 @@ def main():
     for fn in (front_loop, back_loop, ctrl_loop):
         threading.Thread(target=fn, daemon=True).start()
 
-    print(f'chaos proxy: chip->:{args.listen} => {args.fwd_host}:{args.fwd}, ctrl 127.0.0.1:{args.ctrl}', flush=True)
+    print(
+        f'chaos proxy: chip->:{args.listen} => {args.fwd_host}:{args.fwd}, ctrl 127.0.0.1:{args.ctrl}',
+        flush=True,
+    )
     while True:
         time.sleep(10)
         print(f'[stats] {stats.snapshot()}', flush=True)

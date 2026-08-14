@@ -128,7 +128,10 @@ class SerialCapture:
                     timeout=5,
                     stderr=subprocess.DEVNULL,
                 )
-                with open(self.dev, 'rb') as src, open(self.path, 'ab', buffering=0) as out:
+                with (
+                    open(self.dev, 'rb') as src,
+                    open(self.path, 'ab', buffering=0) as out,
+                ):
                     while True:
                         b = src.read(256)
                         if not b:
@@ -448,7 +451,9 @@ def build_parser():
         'matching slot on each remote. Default: first configured slot.',
     )
     p.add_argument(
-        '--admin-user', default=None, help="Admin user for /admin/api/monitor (default env ML_ADMIN_USER or 'admin')."
+        '--admin-user',
+        default=None,
+        help="Admin user for /admin/api/monitor (default env ML_ADMIN_USER or 'admin').",
     )
     p.add_argument(
         '--admin-pass',
@@ -462,7 +467,11 @@ def build_parser():
         help='Admin password for machine nodes if different from remotes (default env ML_MACHINE_ADMIN_PASSWORD).',
     )
     p.add_argument(
-        '--poll-sec', dest='poll_sec', type=float, default=5.0, help='Seconds between full poll cycles (default 5).'
+        '--poll-sec',
+        dest='poll_sec',
+        type=float,
+        default=5.0,
+        help='Seconds between full poll cycles (default 5).',
     )
     p.add_argument(
         '--telem-sec',
@@ -478,7 +487,12 @@ def build_parser():
         default=DEFAULT_REPLY_STALL_S,
         help='A bonded slot with sent advancing but replies frozen this long is a stall event (default 8).',
     )
-    p.add_argument('--duration', type=float, default=43200, help='Total run time in seconds (default 43200 = 12h).')
+    p.add_argument(
+        '--duration',
+        type=float,
+        default=43200,
+        help='Total run time in seconds (default 43200 = 12h).',
+    )
     p.add_argument(
         '--out',
         default='./soak_run',

@@ -173,7 +173,10 @@ class RelayRig:
         self.board.set_many({self.ch['a']: self.press_energizes, self.ch['b']: self.press_energizes})
 
     def release(self) -> None:
-        self.board.set_many({self.ch['a']: not self.press_energizes, self.ch['b']: not self.press_energizes})
+        self.board.set_many({
+            self.ch['a']: not self.press_energizes,
+            self.ch['b']: not self.press_energizes,
+        })
 
     def power_off(self) -> None:
         self.board.set(self.power_ch, self.cut_energizes)

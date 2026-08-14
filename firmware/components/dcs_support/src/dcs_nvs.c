@@ -235,7 +235,9 @@ uint8_t dcs_nvs_read_led_brightness(void)
   (void)nvs_get_u8(h, DCS_NVS_KEY_LED_BRIGHT, &v); /* absent -> default */
   nvs_close(h);
   if (v > 100u) return DCS_LED_BRIGHTNESS_DEFAULT; /* corrupt/older schema degrades to default */
-  return v;
+  /* Floor self-heals a persisted sub-floor value (e.g. 0 from a pre-floor
+   * build) so the ring can never boot dark. */
+  return dcs_led_brightness_floor(v);
 }
 
 esp_err_t dcs_nvs_write_led_brightness(uint8_t pct)
@@ -317,7 +319,9 @@ void dcs_nvs_read_pstop_peers(dcs_pstop_peer_rec_t out[DCS_PSTOP_MAX_MACHINES])
   bool have_legacy = false;
   uint32_t legacy_ip = 0;
   if (nvs_open(DCS_NVS_NS, NVS_READONLY, &lh) == ESP_OK) {
-    have_legacy = (nvs_get_u32(lh, DCS_NVS_KEY_PSTOP_IP, &legacy_ip) == ESP_OK);
+    /* Value check, not key-exists: the writer mirrors a slot-0 CLEAR as
+     * ip=0, and migrating that would fabricate a configured 0.0.0.0 peer. */
+    have_legacy = (nvs_get_u32(lh, DCS_NVS_KEY_PSTOP_IP, &legacy_ip) == ESP_OK) && legacy_ip != 0;
     nvs_close(lh);
   }
   if (have_legacy) {
@@ -346,12 +350,15 @@ esp_err_t dcs_nvs_write_pstop_peers(const dcs_pstop_peer_rec_t recs[DCS_PSTOP_MA
   esp_err_t r = nvs_open(DCS_NVS_NS, NVS_READWRITE, &h);
   if (r != ESP_OK) return r;
   r = nvs_set_blob(h, DCS_NVS_KEY_PSTOP_PEERS, blob, sizeof(blob));
-  if ((r == ESP_OK) && recs[0].configured) {
-    /* Mirror slot 0 to the legacy keys so a firmware ROLLBACK (old image
-     * reads only ps_ip/ps_port) still heartbeats its primary machine. */
-    r = nvs_set_u32(h, DCS_NVS_KEY_PSTOP_IP, recs[0].ip);
+  if (r == ESP_OK) {
+    /* Mirror slot 0 to the legacy keys UNCONDITIONALLY so a firmware ROLLBACK
+     * (old image reads only ps_ip/ps_port) tracks slot 0 exactly — including a
+     * CLEAR (ip=0/port=0 when unconfigured). Gating on configured left stale
+     * legacy keys behind /api/pstop_peer?clear=1, silently resurrecting the
+     * cleared peer after a rollback. */
+    r = nvs_set_u32(h, DCS_NVS_KEY_PSTOP_IP, recs[0].configured ? recs[0].ip : 0u);
     if (r == ESP_OK) {
-      r = nvs_set_u16(h, DCS_NVS_KEY_PSTOP_PORT, recs[0].port);
+      r = nvs_set_u16(h, DCS_NVS_KEY_PSTOP_PORT, recs[0].configured ? recs[0].port : 0u);
     }
   }
   if (r == ESP_OK) {

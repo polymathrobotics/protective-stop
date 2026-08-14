@@ -69,12 +69,26 @@ def encode(message, stamp, received_stamp, counter, received_counter):
 
 
 def decode(data):
-    (version, message, stamp, received_stamp, sender, receiver, hb, counter, received_counter) = struct.unpack(
-        '<BBQQIIIII', data[:38]
-    )
+    (
+        version,
+        message,
+        stamp,
+        received_stamp,
+        sender,
+        receiver,
+        hb,
+        counter,
+        received_counter,
+    ) = struct.unpack('<BBQQIIIII', data[:38])
     (checksum,) = struct.unpack('<H', data[38:40])
     ok = checksum == crc16(data[:38])
-    return dict(message=message, stamp=stamp, counter=counter, received_counter=received_counter, crc_ok=ok)
+    return dict(
+        message=message,
+        stamp=stamp,
+        counter=counter,
+        received_counter=received_counter,
+        crc_ok=ok,
+    )
 
 
 class Remote:
@@ -92,7 +106,13 @@ class Remote:
     def xfer(self, message):
         """Send one message, return the machine's reply dict or None."""
         self.counter += 1
-        pkt = encode(message, self.now_ms(), self.last_rx_stamp, self.counter, self.last_rx_counter)
+        pkt = encode(
+            message,
+            self.now_ms(),
+            self.last_rx_stamp,
+            self.counter,
+            self.last_rx_counter,
+        )
         self.sock.send(pkt)
         try:
             reply = decode(self.sock.recv(SIZE))
@@ -154,14 +174,23 @@ def main():
     if not r.bond():
         sys.exit('bond failed — is machine_app_runner listening?')
     last = r.stream(MSG_OK, 1.5)
-    ok &= expect(last and last['message'] == MSG_STOP, 'OK stream answered with STOP before any arming cycle')
+    ok &= expect(
+        last and last['message'] == MSG_STOP,
+        'OK stream answered with STOP before any arming cycle',
+    )
 
     print('2. blip: STOP 200 ms then OK — early OK refused, arms after min delay')
     r.stream(MSG_STOP, 0.2)
     first = r.xfer(MSG_OK)
-    ok &= expect(first and first['message'] == MSG_STOP, 'OK 200 ms after STOP refused (library min delay)')
+    ok &= expect(
+        first and first['message'] == MSG_STOP,
+        'OK 200 ms after STOP refused (library min delay)',
+    )
     last = r.stream(MSG_OK, 1.5)
-    ok &= expect(last and last['message'] == MSG_OK, 'steady OK stream arms once the min delay elapses')
+    ok &= expect(
+        last and last['message'] == MSG_OK,
+        'steady OK stream arms once the min delay elapses',
+    )
 
     print('3. press: STOP 800 ms then OK (must ARM immediately)')
     r.stream(MSG_STOP, 0.8)
@@ -171,7 +200,10 @@ def main():
     print('4. blip while armed: robot stops; early release refused, self-re-arms')
     r.stream(MSG_STOP, 0.2)
     first = r.xfer(MSG_OK)
-    ok &= expect(first and first['message'] == MSG_STOP, 'blip stopped the robot; immediate OK refused')
+    ok &= expect(
+        first and first['message'] == MSG_STOP,
+        'blip stopped the robot; immediate OK refused',
+    )
     last = r.stream(MSG_OK, 1.5)
     ok &= expect(last and last['message'] == MSG_OK, 'steady OK re-arms after the min delay')
 

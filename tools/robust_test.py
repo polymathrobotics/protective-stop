@@ -55,7 +55,17 @@ def reboot():
 def page_latency():
     try:
         o = subprocess.run(
-            ['curl', '-m', '15', '-s', '-o', '/dev/null', '-w', '%{time_connect} %{time_total}', f'http://{CHIP}/'],
+            [
+                'curl',
+                '-m',
+                '15',
+                '-s',
+                '-o',
+                '/dev/null',
+                '-w',
+                '%{time_connect} %{time_total}',
+                f'http://{CHIP}/',
+            ],
             capture_output=True,
             text=True,
             timeout=18,

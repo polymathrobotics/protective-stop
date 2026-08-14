@@ -645,8 +645,14 @@ static esp_err_t handler_post_settings(httpd_req_t * req)
 
   if (derp_region_changed && ctx->ml != NULL) {
     ctx->ml->derp_region_override = ctx->settings.derp_region;
-    /* Re-home slot 0 locally so inbound + relay land on the pinned region. */
-    xEventGroupSetBits(ctx->ml->events, ML_EVT_DERP_RECONNECT);
+    /* Pin->MBB (docs/STAGE1_PIN_MBB_DESIGN.md): do NOT fire
+     * ML_EVT_DERP_RECONNECT here — tearing down the live home conn starves
+     * inbound heartbeat processing past the 2 s machine timeout. The wg_mgr
+     * negotiator's pin tick (3 s cadence) drives the pin: make-before-break
+     * when the home conn is alive (open the target as an aux, prove, swap the
+     * home index — no teardown), and the DERP task's own home-reconnect path
+     * (which connects straight to the override) when there is no live home
+     * to protect. */
     /* CRITICAL: re-home alone only fixes US. Remote peers still hold the STALE
      * region in their netmap until the coordination server re-populates our
      * Node.HomeDERP — which it only does when we re-advertise PreferredDERP.
@@ -658,7 +664,7 @@ static esp_err_t handler_post_settings(httpd_req_t * req)
     esp_err_t are = microlink_request_announce(ctx->ml);
     ESP_LOGI(
       TAG,
-      "DERP region pin applied live: %u (slot-0 reconnect + coord re-advertise %s)",
+      "DERP region pin applied live: %u (gapless MBB via negotiator pin tick + coord re-advertise %s)",
       (unsigned)ctx->settings.derp_region,
       are == ESP_OK ? "queued" : "already-pending");
   }
@@ -953,6 +959,24 @@ static esp_err_t handler_monitor(httpd_req_t * req)
       cJSON_AddNumberToObject(json, "neg_damping_suppressed", an.damping_suppressed);
       cJSON_AddNumberToObject(json, "neg_cooldown_trips", an.cooldown_trips);
       cJSON_AddNumberToObject(json, "switches_1h", an.switches_1h);
+      /* Stage-1 pin->MBB: pin_pending distinguishes "pin applied" from "pin
+       * retrying toward an unproven region" (retry-forever, old home serving).
+       * Compare against the ACTUAL connected home conn — under a pin,
+       * effective-home == the override from the instant it is set, so the
+       * eff alias can't tell whether the conn has moved yet. */
+      {
+        uint32_t pd[5] = {0};
+        ml_wg_get_pin_diag(pd);
+        ml_derp_conn_t * homec = &ml->derp[ml->derp_home_slot];
+        bool pin_ok =
+          ml->derp_region_override == 0 || (homec->connected && homec->region_id == ml->derp_region_override);
+        cJSON_AddBoolToObject(json, "pin_pending", !pin_ok);
+        cJSON_AddNumberToObject(json, "pin_mbb_requests", pd[0]);
+        cJSON_AddNumberToObject(json, "pin_mbb_commits", pd[1]);
+        cJSON_AddNumberToObject(json, "pin_mbb_retries", pd[2]);
+        cJSON_AddNumberToObject(json, "pin_backoff_pending", pd[3]);
+        cJSON_AddNumberToObject(json, "pin_absent_resyncs", pd[4]);
+      }
     }
     /* Home-region-unreachable fallback telemetry (DERP design-review finding):
      * how many times slot 0 fell back off an unreachable home region, or opened
@@ -1071,8 +1095,23 @@ static esp_err_t handler_monitor(httpd_req_t * req)
        * so the safety heartbeat relay keeps flowing through a ~1-2s aux TLS
        * handshake (edge-flush fix; replaced the self-deadlocking defer-aux).
        * Climbs while a standby (re)connects; green should hold across it. */
-      extern uint32_t ml_derp_get_home_pumps(void);
-      cJSON_AddNumberToObject(json, "derp_home_pumps", ml_derp_get_home_pumps());
+      /* Stage-2/3: pump-home-rx is retired (async engine); expose the
+       * engine's step counter + the Stage-0 loop gauges instead. */
+      cJSON_AddNumberToObject(json, "derp_connect_steps", ml_derp_get_connect_steps());
+      {
+        uint32_t it[2] = {0};
+        ml_derp_get_iter_diag(it);
+        cJSON_AddNumberToObject(json, "derp_max_iter_ms", it[0]);
+        cJSON_AddNumberToObject(json, "derp_rx_poll_gap_worst_ms", it[1]);
+        cJSON_AddNumberToObject(json, "wg_max_iter_ms", ml_wg_get_max_iter_ms());
+        {
+          uint32_t dv[3] = {0};
+          ml_derp_get_diversity_diag(dv);
+          cJSON_AddNumberToObject(json, "hb_leg2_sent", dv[0]);
+          cJSON_AddNumberToObject(json, "hb_leg2_skipped", dv[1]);
+          cJSON_AddNumberToObject(json, "hb_rescue_routes", dv[2]);
+        }
+      }
       /* Home-DERP reconnect speed (edge-flush fix): worst < ~1500ms confirms
        * the relay is back inside the 2s pstop timeout so green rides it
        * through a firewall connection-table flush. */

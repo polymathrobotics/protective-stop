@@ -78,7 +78,7 @@ extern "C"
  * frames, drained FIRST by the DERP task so the 5 Hz pstop heartbeat is never
  * stuck behind, or dropped by, a disco relay burst. Small: a handful of safety
  * peers, each 5 Hz. */
-#define ML_DERP_TX_PRIO_DEPTH 12
+#define ML_DERP_TX_PRIO_DEPTH 16 /* headroom for path-diversity leg-2 mirrors */
 #define ML_DISCO_RX_QUEUE_DEPTH 8
 #define ML_WG_RX_QUEUE_DEPTH \
   32 /* carries the 10 Hz pstop heartbeats;
@@ -433,6 +433,9 @@ extern "C"
                          * -> route on the HOME connection (slot 0). Resolved at
                          * enqueue time from the peer table so the DERP task can
                          * egress the frame on the pool conn homed on THIS region. */
+    bool leg2; /* path-diversity mirror (safety frames): route on a CONNECTED
+                * conn DISTINCT from the primary leg's; silently skipped when
+                * no distinct conn exists. Receiver WG anti-replay dedups. */
   } ml_derp_tx_item_t;
 
   /* Received packet (from net_io to disco/wg queues) */
@@ -624,6 +627,20 @@ extern "C"
  * DERP Connection State
  * ========================================================================== */
 
+  /* Stage-2/3 async connect engine (docs/NONBLOCKING_DERP_TLS_PLAN.md §2): the
+   * monolithic blocking connect is decomposed into a per-conn state machine
+   * advanced ONE bounded step per DERP-task iteration, so a (re)connect can
+   * never starve the rx poll of connected conns or the direct-path heartbeat.
+   * All fields are written ONLY by the DERP I/O task (no-mutex invariant). */
+  typedef enum
+  {
+    DERP_CS_IDLE = 0, /* not connecting: slot free, or fully CONNECTED */
+    DERP_CS_TCP_CONNECT, /* non-blocking connect() in flight (DNS done at kick) */
+    DERP_CS_TLS_HANDSHAKE, /* mbedtls_ssl_handshake() incremental */
+    DERP_CS_HTTP_UPGRADE, /* GET /derp sent; reading the 101 incrementally */
+    DERP_CS_DERP_HS, /* ServerKey -> ClientInfo -> ServerInfo */
+  } ml_derp_cstate_t;
+
   typedef struct
   {
     int sockfd; /* Raw TCP socket */
@@ -631,11 +648,12 @@ extern "C"
     mbedtls_ssl_config ssl_conf;
     mbedtls_entropy_context entropy;
     mbedtls_ctr_drbg_context ctr_drbg;
-    bool connected;
+    volatile bool connected; /* volatile: wg_mgr/httpd read it cross-task */
     uint64_t last_recv_ms; /* For keepalive watchdog */
 
     /* Multi-region pool bookkeeping (all owned by the DERP I/O task) */
-    uint16_t region_id; /* DERP region this conn serves; 0 = unused/free slot */
+    volatile uint16_t region_id; /* DERP region this conn serves; 0 = free slot.
+                                  * volatile: cross-task readers (word-sized) */
     bool tls_inited; /* the four mbedTLS contexts above are live (must be freed) */
     uint64_t last_connect_attempt_ms; /* per-slot connect backoff timestamp */
     uint64_t last_used_ms; /* last time a frame egressed here (aux reap clock) */
@@ -656,6 +674,24 @@ extern "C"
     uint64_t connected_at_ms;
     uint64_t last_pong_ms;
     uint32_t rx_pkts;
+
+    /* --- async connect engine (Stage-2/3; DERP-task-owned) ------------------ */
+    ml_derp_cstate_t cstate; /* connect progress; IDLE when free or CONNECTED */
+    uint64_t cstate_deadline_ms; /* whole-connect deadline (DERP_CONNECT_TIMEOUT_MS) */
+    uint16_t cs_region; /* region this in-progress connect targets */
+    uint32_t cs_http_len; /* bytes accumulated in cs_buf during HTTP_UPGRADE */
+    uint8_t cs_derp_step; /* 0=ServerKey hdr, 1=ServerKey payload, 2=ClientInfo send,
+                           * 3=ServerInfo hdr, 4=ServerInfo payload/skip */
+    uint8_t cs_hdr[5]; /* partial DERP frame header (resumable) */
+    uint32_t cs_hdr_got;
+    uint8_t cs_frame_type;
+    uint32_t cs_frame_len;
+    uint32_t cs_payload_got; /* payload bytes consumed so far (resumable) */
+    uint8_t * cs_tx_buf; /* pending outbound (HTTP GET / ClientInfo frame); heap, freed on leave */
+    uint32_t cs_tx_len;
+    uint32_t cs_tx_sent; /* bytes of cs_tx_buf written so far (resumable) */
+    bool cs_used_dns_cache; /* this attempt used the per-region addr cache (invalidate on fail) */
+    uint8_t cs_buf[512]; /* HTTP response / ServerKey+ServerInfo scratch (resumable) */
   } ml_derp_conn_t;
 
   /* ============================================================================
@@ -885,7 +921,13 @@ extern "C"
   /* ml_derp.c */
   void ml_derp_tx_task(void * arg);
   /* Connect a specific pool connection `c` to `region_id`'s DERP node. */
-  esp_err_t ml_derp_connect(microlink_t * ml, ml_derp_conn_t * c, uint16_t region_id);
+  /* Stage-2/3 async connect engine (see ml_derp.c engine header). */
+  esp_err_t ml_derp_connect_kick(microlink_t * ml, ml_derp_conn_t * c, uint16_t region_id);
+  int ml_derp_connect_step(microlink_t * ml, ml_derp_conn_t * c);
+  uint32_t ml_derp_get_connect_steps(void);
+  /* Stage-0 gauges: out[0]=worst single DERP-task iteration ms, out[1]=worst
+   * gap between consecutive rx-poll passes ms (both since boot). */
+  void ml_derp_get_iter_diag(uint32_t out[2]);
   /* Tear down a specific pool connection (frees its mbedTLS contexts + socket). */
   void ml_derp_disconnect(microlink_t * ml, ml_derp_conn_t * c);
   esp_err_t ml_derp_queue_send(microlink_t * ml, const uint8_t * dest_key, const uint8_t * data, size_t len);
@@ -900,6 +942,18 @@ extern "C"
    * out[2]=proofs_ok, out[3]=proofs_failed. Counters owned by the DERP I/O
    * task; word-sized cross-task reads (same contract as the diag getters). */
   void ml_derp_get_mbb_diag(uint32_t out[4]);
+
+  /* Stage-1 pin->MBB telemetry (docs/STAGE1_PIN_MBB_DESIGN.md):
+   * out[0]=pin MBB requests, out[1]=commits, out[2]=retries (failed proves,
+   * retry-forever), out[3]=backoff currently pending (0/1), out[4]=coord
+   * full-resyncs forced by a pinned-but-absent peer (f498 heal). Owned by
+   * the wg_mgr task; word-sized cross-task reads. */
+  void ml_wg_get_pin_diag(uint32_t out[5]);
+  /* Stage-0b: worst single wg_mgr loop iteration ms (heartbeat-path stall). */
+  uint32_t ml_wg_get_max_iter_ms(void);
+  /* Path-diversity telemetry: out[0]=leg-2 mirrors sent, out[1]=mirrors
+   * skipped (no distinct conn), out[2]=primary frames rescue-routed. */
+  void ml_derp_get_diversity_diag(uint32_t out[3]);
 
   /* Effective home DERP region for slot 0: the runtime override wins, else the
    * learned/rehomed home region. 0 = neither known (caller falls back to
@@ -920,12 +974,11 @@ extern "C"
    * 0 = peer unknown or region not yet learned. Called from the enqueue path
    * (same wg_mgr task that owns the peer table) to tag each relayed frame. */
   uint16_t ml_wg_region_for_pubkey(microlink_t * ml, const uint8_t * wg_pubkey);
-  /* True if the peer identified by its 32-byte WG public key is a SAFETY peer
-   * (pinned incl. priority/fleet/app-pin, OR health-tracked). Used by the DERP
-   * TX enqueue path to front-queue and protect the safety heartbeat frame from
-   * disco backpressure. Same cross-task read profile as ml_wg_region_for_pubkey:
-   * word-sized reads of the peer table, worst case a transiently stale answer. */
-  bool ml_wg_is_safety_pubkey(microlink_t * ml, const uint8_t * wg_pubkey);
+  /* DERP-egress classification for a destination pubkey. Returns the priority-
+   * queue bit (pinned OR health-tracked); *mirror_out = heartbeat carriers only
+   * (priority OR health-tracked — excludes the fleet pin). Same cross-task read
+   * profile as ml_wg_region_for_pubkey. */
+  bool ml_wg_tx_class_pubkey(microlink_t * ml, const uint8_t * wg_pubkey, bool * mirror_out);
   /* Collect the DISTINCT DERP regions of the safety peers exempt from the
    * peer-scaling armor (pinned OR priority OR health-tracked). Writes up to
    * `max` region ids into `out`, returns the count. Used by the DERP task to

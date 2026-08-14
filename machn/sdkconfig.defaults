@@ -138,7 +138,10 @@ CONFIG_ML_CONFIG_MAX_ALLOWED_PEERS=512
 # priority_peer_ip in NVS keeps the host in the 16-slot table via the LRU
 # eviction code in ml_wg_mgr.c.
 CONFIG_ML_MAX_PEERS=128
-CONFIG_ML_DEFAULT_MAX_PEERS=32   # production active-set default (ceiling stays 128)
+# Production active-set default (ceiling stays 128). NOTE: Kconfig int lines
+# must NOT carry inline comments — the parser treats the whole rhs as the
+# value and silently ignores the assignment (bit us on #84).
+CONFIG_ML_DEFAULT_MAX_PEERS=32
 CONFIG_ML_NVS_MAX_PEERS=128
 
 # Browser request headers can easily exceed the 512-byte default.
