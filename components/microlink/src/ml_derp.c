@@ -463,6 +463,24 @@ esp_err_t ml_derp_queue_send(microlink_t * ml, const uint8_t * dest_key, const u
   bool is_priority = is_wg_handshake || ml_wg_is_safety_pubkey(ml, dest_key);
   QueueHandle_t txq = is_priority ? ml->derp_tx_prio_queue : ml->derp_tx_queue;
 
+  /* Path diversity (docs/HEARTBEAT_PATH_DIVERSITY_DESIGN.md): safety frames
+   * (heartbeats, replies, rekeys) get a SECOND DERP leg on a distinct
+   * connected pool conn, so a relay-bound bond no longer has a single point
+   * of failure and the dual-path mirror survives its primary conn being mid-
+   * reconnect. The receiver's WG anti-replay window dedups. Best-effort: a
+   * full queue or no distinct conn just skips the mirror. */
+  if (is_priority) {
+    ml_derp_tx_item_t leg2 = item;
+    leg2.leg2 = true;
+    leg2.data = malloc(len);
+    if (leg2.data) {
+      memcpy(leg2.data, data, len);
+      if (xQueueSend(txq, &leg2, 0) != pdTRUE) {
+        free(leg2.data); /* mirror is best-effort; the primary still goes */
+      }
+    }
+  }
+
   if (xQueueSend(txq, &item, 0) == pdTRUE) {
     return ESP_OK;
   }
@@ -529,6 +547,45 @@ void ml_derp_get_reconnect_diag(uint32_t out[3])
   out[0] = s_diag_derp_reconnects;
   out[1] = s_diag_derp_last_reconnect_ms;
   out[2] = s_diag_derp_worst_reconnect_ms;
+}
+
+static uint32_t s_diag_leg2_sent; /* path-diversity mirrors egressed */
+static uint32_t s_diag_leg2_skipped; /* mirrors skipped (no distinct connected conn) */
+static uint32_t s_diag_rescue_routes; /* primary frames rescued onto any-connected conn */
+
+void ml_derp_get_diversity_diag(uint32_t out[3])
+{
+  out[0] = s_diag_leg2_sent;
+  out[1] = s_diag_leg2_skipped;
+  out[2] = s_diag_rescue_routes;
+}
+
+/* Leg-2 route: a CONNECTED conn DISTINCT from the primary leg's choice.
+ * Preference order: the "other" of {peer-region conn, home conn}, then any
+ * other connected pool conn. NULL = no distinct conn (mirror skipped). */
+static ml_derp_conn_t * derp_route_leg2(microlink_t * ml, ml_derp_conn_t * primary)
+{
+  int hs = ml->derp_home_slot;
+  ml_derp_conn_t * home = &ml->derp[hs];
+  if (primary != home && home->connected) return home;
+  for (int s = 0; s < ML_DERP_MAX_CONNS; s++) {
+    ml_derp_conn_t * c = &ml->derp[s];
+    if (c == primary) continue;
+    if (c->connected) return c;
+  }
+  return NULL;
+}
+
+/* Rescue route: ANY connected conn (replaces the silent drop when the
+ * primary route is down — the peer may hold a pool conn on that region). */
+static ml_derp_conn_t * derp_route_any(microlink_t * ml)
+{
+  int hs = ml->derp_home_slot;
+  if (ml->derp[hs].connected) return &ml->derp[hs];
+  for (int s = 0; s < ML_DERP_MAX_CONNS; s++) {
+    if (ml->derp[s].connected) return &ml->derp[s];
+  }
+  return NULL;
 }
 
 static ml_derp_conn_t * derp_route_conn(microlink_t * ml, uint16_t region_id, uint16_t eff_home)
@@ -1342,12 +1399,28 @@ void ml_derp_tx_task(void * arg)
             break;
           }
           ml_derp_conn_t * c = derp_route_conn(ml, item.region_id, eff_home);
-          if (c == NULL) {
-            /* Chosen conn (home fallback) is down — nothing can carry it now.
-                     * Drop + log rather than block; wg_mgr re-fires safety inits. */
-            ESP_LOGW(TAG, "DERP TX drop: no connected conn for region %u", (unsigned)item.region_id);
-            free(item.data);
-            continue;
+          if (item.leg2) {
+            /* Path-diversity mirror: needs a conn DISTINCT from the primary
+             * leg's route. No distinct conn (or primary itself down) = skip
+             * silently — the mirror is best-effort by design. */
+            c = derp_route_leg2(ml, c);
+            if (c == NULL) {
+              s_diag_leg2_skipped++;
+              free(item.data);
+              continue;
+            }
+            s_diag_leg2_sent++;
+          } else if (c == NULL) {
+            /* Primary route down — rescue onto ANY connected pool conn
+             * (the peer may hold a pool conn on that region too) instead of
+             * the old silent drop; only drop when the whole pool is dark. */
+            c = derp_route_any(ml);
+            if (c == NULL) {
+              ESP_LOGW(TAG, "DERP TX drop: pool dark for region %u", (unsigned)item.region_id);
+              free(item.data);
+              continue;
+            }
+            s_diag_rescue_routes++;
           }
           bool fell_back = (item.region_id != 0 && item.region_id != eff_home && c == home);
           if (fell_back) {

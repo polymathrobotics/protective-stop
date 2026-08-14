@@ -1105,6 +1105,13 @@ static esp_err_t handler_monitor(httpd_req_t * req)
         cJSON_AddNumberToObject(json, "derp_max_iter_ms", it[0]);
         cJSON_AddNumberToObject(json, "derp_rx_poll_gap_worst_ms", it[1]);
         cJSON_AddNumberToObject(json, "wg_max_iter_ms", ml_wg_get_max_iter_ms());
+        {
+          uint32_t dv[3] = {0};
+          ml_derp_get_diversity_diag(dv);
+          cJSON_AddNumberToObject(json, "hb_leg2_sent", dv[0]);
+          cJSON_AddNumberToObject(json, "hb_leg2_skipped", dv[1]);
+          cJSON_AddNumberToObject(json, "hb_rescue_routes", dv[2]);
+        }
       }
       /* Home-DERP reconnect speed (edge-flush fix): worst < ~1500ms confirms
        * the relay is back inside the 2s pstop timeout so green rides it

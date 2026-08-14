@@ -78,7 +78,7 @@ extern "C"
  * frames, drained FIRST by the DERP task so the 5 Hz pstop heartbeat is never
  * stuck behind, or dropped by, a disco relay burst. Small: a handful of safety
  * peers, each 5 Hz. */
-#define ML_DERP_TX_PRIO_DEPTH 12
+#define ML_DERP_TX_PRIO_DEPTH 16 /* headroom for path-diversity leg-2 mirrors */
 #define ML_DISCO_RX_QUEUE_DEPTH 8
 #define ML_WG_RX_QUEUE_DEPTH \
   32 /* carries the 10 Hz pstop heartbeats;
@@ -433,6 +433,9 @@ extern "C"
                          * -> route on the HOME connection (slot 0). Resolved at
                          * enqueue time from the peer table so the DERP task can
                          * egress the frame on the pool conn homed on THIS region. */
+    bool leg2; /* path-diversity mirror (safety frames): route on a CONNECTED
+                * conn DISTINCT from the primary leg's; silently skipped when
+                * no distinct conn exists. Receiver WG anti-replay dedups. */
   } ml_derp_tx_item_t;
 
   /* Received packet (from net_io to disco/wg queues) */
@@ -947,6 +950,9 @@ extern "C"
   void ml_wg_get_pin_diag(uint32_t out[5]);
   /* Stage-0b: worst single wg_mgr loop iteration ms (heartbeat-path stall). */
   uint32_t ml_wg_get_max_iter_ms(void);
+  /* Path-diversity telemetry: out[0]=leg-2 mirrors sent, out[1]=mirrors
+   * skipped (no distinct conn), out[2]=primary frames rescue-routed. */
+  void ml_derp_get_diversity_diag(uint32_t out[3]);
 
   /* Effective home DERP region for slot 0: the runtime override wins, else the
    * learned/rehomed home region. 0 = neither known (caller falls back to
