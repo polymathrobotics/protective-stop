@@ -261,6 +261,7 @@ static void dispatch_derp_frame(
          * this server. Only RecvPacket counts — keepalives/pongs prove the
          * server link, not end-to-end peer reachability. */
         c->rx_pkts++;
+        c->last_relay_rx_ms = ml_get_time_ms();
         ESP_LOGI(
           TAG,
           "DERP RecvPacket: %d bytes from %02x%02x%02x%02x, hdr=%02x",
@@ -549,6 +550,26 @@ static uint32_t s_diag_rx_stale_reaps; /* tx-active conns reaped for rx-silence 
 uint32_t ml_derp_get_rx_stale_reaps(void)
 {
   return s_diag_rx_stale_reaps;
+}
+
+/* Single home-conn identity test (4 call sites). */
+static inline bool derp_conn_is_home(const microlink_t * ml, const ml_derp_conn_t * c)
+{
+  return c == &ml->derp[ml->derp_home_slot];
+}
+
+/* Tear down a live conn and route its recovery: the HOME conn recovers via
+ * the event-driven reconnect (the handler frees TLS then kicks), an aux is
+ * freed NOW so derp_manage_aux can rebuild without re-initing over live
+ * contexts. region_id is preserved for the retry. */
+static void derp_reap_conn(microlink_t * ml, ml_derp_conn_t * c)
+{
+  c->connected = false;
+  if (derp_conn_is_home(ml, c)) {
+    xEventGroupSetBits(ml->events, ML_EVT_DERP_RECONNECT);
+  } else {
+    ml_derp_disconnect(ml, c);
+  }
 }
 
 void ml_derp_get_diversity_diag(uint32_t out[3])
@@ -1424,16 +1445,7 @@ void ml_derp_tx_task(void * arg)
           if (ret < 0) {
             ESP_LOGW(
               TAG, "DERP write failed on %s conn (region %u)", (c == home) ? "home" : "aux", (unsigned)c->region_id);
-            c->connected = false;
-            if (c == home) {
-              /* Home reconnect is event-driven (handler frees TLS then reconnects). */
-              xEventGroupSetBits(ml->events, ML_EVT_DERP_RECONNECT);
-            } else {
-              /* Aux has no event path: tear it down NOW (frees TLS) so the next
-                         * derp_manage_aux reconnect doesn't leak by re-initing over live
-                         * contexts. region_id is preserved for the retry. */
-              ml_derp_disconnect(ml, c);
-            }
+            derp_reap_conn(ml, c);
           } else {
             frames_tx++;
             c->last_used_ms = ml_get_time_ms();
@@ -1476,12 +1488,7 @@ void ml_derp_tx_task(void * arg)
               ret,
               (c == home) ? "home" : "aux",
               (unsigned)c->region_id);
-            c->connected = false;
-            if (c == home) {
-              xEventGroupSetBits(ml->events, ML_EVT_DERP_RECONNECT);
-            } else {
-              ml_derp_disconnect(ml, c); /* free TLS now; manage_aux reconnects */
-            }
+            derp_reap_conn(ml, c);
             break;
           }
         }
@@ -1498,22 +1505,17 @@ void ml_derp_tx_task(void * arg)
       uint64_t rnow = ml_get_time_ms();
       for (int s = 0; s < ML_DERP_MAX_CONNS; s++) {
         ml_derp_conn_t * c = &ml->derp[s];
-        if (!c->connected || c->last_recv_ms == 0) continue;
-        if (rnow - c->last_recv_ms <= ML_DERP_RX_STALE_MS) continue;
+        if (!c->connected || c->last_relay_rx_ms == 0) continue;
+        if (rnow - c->last_relay_rx_ms <= ML_DERP_RX_STALE_MS) continue;
         if (c->last_used_ms == 0 || rnow - c->last_used_ms > ML_DERP_RX_STALE_TX_ACTIVE_MS) continue;
         s_diag_rx_stale_reaps++;
         ESP_LOGW(
           TAG,
-          "DERP conn slot %d (region %u) tx-active but rx-silent %us — reaping",
+          "DERP conn slot %d (region %u) tx-active but relay-rx-silent %us — reaping",
           s,
           (unsigned)c->region_id,
-          (unsigned)((rnow - c->last_recv_ms) / 1000));
-        c->connected = false;
-        if (s == ml->derp_home_slot) {
-          xEventGroupSetBits(ml->events, ML_EVT_DERP_RECONNECT);
-        } else {
-          ml_derp_disconnect(ml, c);
-        }
+          (unsigned)((rnow - c->last_relay_rx_ms) / 1000));
+        derp_reap_conn(ml, c);
       }
     }
 
@@ -1610,11 +1612,6 @@ static inline uint16_t derp_lookup_region(uint16_t region_id)
   return region_id ? region_id : ML_DERP_REGION;
 }
 
-/* Single home-conn identity test (4 call sites). */
-static inline bool derp_conn_is_home(const microlink_t * ml, const ml_derp_conn_t * c)
-{
-  return c == &ml->derp[ml->derp_home_slot];
-}
 
 /* Per-region resolved-address cache: skips blocking DNS on reconnect to the
  * same region (risk #7 in the plan). Invalidated when a connect that used the
@@ -2136,6 +2133,7 @@ complete:
   }
   c->connected = true;
   c->region_id = c->cs_region;
+  c->last_relay_rx_ms = ml_get_time_ms(); /* staleness clock starts at connect */
   {
     derp_dns_cache_t * e = derp_dns_cache_find(derp_lookup_region(c->cs_region));
     if (e) e->post_tcp_fails = 0;

@@ -667,6 +667,10 @@ extern "C"
     mbedtls_ctr_drbg_context ctr_drbg;
     volatile bool connected; /* volatile: wg_mgr/httpd read it cross-task */
     uint64_t last_recv_ms; /* For keepalive watchdog */
+    uint64_t last_relay_rx_ms; /* last RecvPacket (genuine relayed traffic) —
+                                * the rx-staleness reap keys on THIS: server
+                                * keepalives/pongs refresh last_recv_ms even
+                                * while the server denies relaying to us */
 
     /* Multi-region pool bookkeeping (all owned by the DERP I/O task) */
     volatile uint16_t region_id; /* DERP region this conn serves; 0 = free slot.

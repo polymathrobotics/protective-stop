@@ -43,6 +43,9 @@ static const char * TAG = "ml_coord";
 /* Periodic re-registrations executed (coord-task-owned; word-sized cross-task
  * read via ml_coord_get_reregisters for /admin/api/monitor). */
 static uint32_t s_diag_coord_reregisters;
+/* The next successful connect is a scheduled re-register, not a flap: keep it
+ * out of connect_count so ml_reconnects stays a pure flap signal for soaks. */
+static bool s_rereg_skip_count;
 
 uint32_t ml_coord_get_reregisters(void)
 {
@@ -2694,7 +2697,11 @@ void ml_coord_task(void * arg)
 
         state = COORD_LONG_POLL;
         ml->state = ML_STATE_CONNECTED;
-        ml->connect_count++; /* 1 = first connect; >1 = a control-plane reconnect (soak telemetry) */
+        if (s_rereg_skip_count) {
+          s_rereg_skip_count = false; /* scheduled re-register, not a flap */
+        } else {
+          ml->connect_count++; /* 1 = first connect; >1 = a control-plane reconnect (soak telemetry) */
+        }
         reconnect_attempts = 0;
         last_activity_ms = ml_get_time_ms();
 
@@ -2885,6 +2892,7 @@ void ml_coord_task(void * arg)
           if (now - last_rereg_ms > ML_COORD_REREGISTER_MS) {
             last_rereg_ms = now;
             s_diag_coord_reregisters++;
+            s_rereg_skip_count = true;
             ESP_LOGI(TAG, "Periodic coord re-register #%u", (unsigned)s_diag_coord_reregisters);
             state = COORD_RECONNECTING;
             break;

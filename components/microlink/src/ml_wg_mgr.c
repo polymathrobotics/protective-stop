@@ -2601,10 +2601,15 @@ static void process_disco_pong(
       bool had_direct = p->has_direct_path;
       bool is_prio = is_safety_peer(ml, p->vpn_ip);
 
-      /* Any direct pong proves reachability — renew liveness first, regardless
-       * of whether we adopt this specific endpoint below. */
+      /* Any direct pong proves the PEER is reachable — renew general liveness.
+       * But the pong-dead demote stamp requires a pong from the ESTABLISHED
+       * endpoint: one txid fans out to every candidate, and a stray pong from
+       * an alternate endpoint must not vouch for the path WG actually sends
+       * on (best_ip could be dead while a candidate answers). */
       p->has_direct_path = true;
-      p->last_direct_pong_recv_ms = now;
+      if (p->best_ip == 0 || (pkt->src_ip == p->best_ip && pkt->src_port == p->best_port)) {
+        p->last_direct_pong_recv_ms = now;
+      }
       p->trust_until_ms = now + ML_DISCO_TRUST_DURATION_MS;
 
       /* Flap-damping bookkeeping (FIX 2). Timestamp only the genuine false->true
