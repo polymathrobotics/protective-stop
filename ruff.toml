@@ -1,21 +1,17 @@
-# Repo-local Ruff config, mirroring polymath_code_standard v2.1.1 config/ruff.toml.
+# Repo-local Ruff config for the pre-commit `polymath-python` checker.
 #
-# The pre-commit `polymath-python` checker copies its own ruff.toml to a
-# gitignored `.ruff.toml` at runtime and relies on ruff's ancestor-walk
-# discovery. On CI runners that copy is not discovered from the hook's cwd, so
-# ruff silently falls back to its built-in default (quote-style = "double") and
-# rewrites the repo's single-quoted Python — failing every PR on unchanged
-# files. This tracked, non-dot `ruff.toml` is discovered by ruff regardless of
-# cwd, pinning the org standard (single quotes) in CI. When the checker's
-# runtime `.ruff.toml` IS present it takes precedence and is identical, so the
-# two never disagree. Keep in sync with polymath_code_standard.
+# The checker's own config is not reliably discovered on CI runners, so runs
+# fall back to ruff's built-in defaults. quote-style here MUST match that
+# built-in default ("double"): with any other value, config-discovered and
+# config-missed runs rewrite each other's output and the gate ping-pongs on
+# unchanged files (observed 2026-08-14). All repo Python is double-quoted.
 
 line-length = 120
 indent-width = 4
 
 [format]
 preview = true
-quote-style = "single"
+quote-style = "double"
 indent-style = "space"
 skip-magic-trailing-comma = false
 line-ending = "lf"
