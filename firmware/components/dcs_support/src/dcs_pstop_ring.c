@@ -569,8 +569,7 @@ void dcs_pstop_ring_set_brightness(uint8_t pct)
   /* Clamp BOTH bounds: DCS_LED_BRIGHTNESS_MIN keeps the safety colours
    * (RED STOP / GREEN OK / PURPLE MISMATCH) visible — 0%% would blank the
    * whole ring and persist across reboots with no visible way back. */
-  uint32_t v = (pct > 100u) ? 100u : (uint32_t)pct;
-  if (v < DCS_LED_BRIGHTNESS_MIN) v = DCS_LED_BRIGHTNESS_MIN;
+  uint32_t v = dcs_led_brightness_floor((pct > 100u) ? 100u : pct);
   atomic_store(&s_ring_brightness_pct, v);
   /* Next repaint (<=250 ms) — or the next locate/comet frame — picks it up. */
 }

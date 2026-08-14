@@ -1016,9 +1016,7 @@ static esp_err_t api_led_brightness(httpd_req_t * req)
     (void)httpd_resp_set_type(req, "application/json");
     return httpd_resp_sendstr(req, "{\"ok\":false,\"error\":\"pct must be 0..100 (values below 10 floor to 10)\"}");
   }
-  if (pct < DCS_LED_BRIGHTNESS_MIN) {
-    pct = DCS_LED_BRIGHTNESS_MIN; /* floor, not reject: the response reports the effective value */
-  }
+  pct = dcs_led_brightness_floor((uint8_t)pct); /* floor, not reject: response reports the effective value */
   esp_err_t r = dcs_nvs_write_led_brightness((uint8_t)pct);
   if (r == ESP_OK) {
     dcs_pstop_ring_set_brightness((uint8_t)pct); /* live, next repaint */

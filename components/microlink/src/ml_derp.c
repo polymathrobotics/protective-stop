@@ -1513,6 +1513,12 @@ bool microlink_is_derp_paused(void)
  * DERP I/O task; no locking (file-header invariant).
  * ========================================================================== */
 
+/* Single home-conn identity test (4 call sites; PR #95 review). */
+static inline bool derp_conn_is_home(const microlink_t * ml, const ml_derp_conn_t * c)
+{
+  return c == &ml->derp[ml->derp_home_slot];
+}
+
 /* Per-region resolved-address cache: skips blocking DNS on reconnect to the
  * same region (risk #7 in the plan). Invalidated when a connect that used the
  * cached address fails — the next kick does fresh DNS. DERP-task-owned. */
@@ -1598,7 +1604,7 @@ static void derp_cs_fail(microlink_t * ml, ml_derp_conn_t * c, const char * why)
     "DERP connect FAILED (%s) region=%u slot=%s state=%d",
     why,
     (unsigned)c->cs_region,
-    (c == &ml->derp[ml->derp_home_slot]) ? "home" : "aux",
+    derp_conn_is_home(ml, c) ? "home" : "aux",
     (int)c->cstate);
   if (c->tls_inited) {
     mbedtls_ssl_free(&c->ssl);
@@ -1706,7 +1712,7 @@ esp_err_t ml_derp_connect_kick(microlink_t * ml, ml_derp_conn_t * c, uint16_t re
     TAG,
     "DERP connect kicked: region %u slot=%s%s",
     (unsigned)lookup_region,
-    (c == &ml->derp[ml->derp_home_slot]) ? "home" : "aux",
+    derp_conn_is_home(ml, c) ? "home" : "aux",
     c->cs_used_dns_cache ? " (cached addr)" : "");
   return ESP_OK;
 }
@@ -1730,7 +1736,7 @@ int ml_derp_connect_step(microlink_t * ml, ml_derp_conn_t * c)
 {
   if (c->cstate == DERP_CS_IDLE) return c->connected ? 1 : -1;
   s_diag_cs_steps++;
-  bool is_home = (c == &ml->derp[ml->derp_home_slot]);
+  bool is_home = derp_conn_is_home(ml, c);
   uint64_t now = ml_get_time_ms();
 
   /* Whole-connect deadline. Past the ClientInfo send (cs_derp_step >= 3) the
@@ -2051,7 +2057,7 @@ complete:
 
 void ml_derp_disconnect(microlink_t * ml, ml_derp_conn_t * c)
 {
-  bool is_home = (c == &ml->derp[ml->derp_home_slot]);
+  bool is_home = derp_conn_is_home(ml, c);
   c->connected = false;
   if (is_home) {
     /* Only the home connection owns the global "DERP up" bit. */

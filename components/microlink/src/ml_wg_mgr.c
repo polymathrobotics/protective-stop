@@ -1533,12 +1533,19 @@ static void neg_consume_mbb_outcome(microlink_t * ml)
   uint64_t now = ml_get_time_ms();
 
   if (oc == ML_MBB_OUTCOME_COMMITTED) {
-    if (ml->derp_region_override != 0 && region == ml->derp_region_override) {
+    bool pin_commit = (ml->derp_region_override != 0 && region == ml->derp_region_override);
+    if (pin_commit) {
       s_pin_mbb_commits++; /* Stage-1: the pin landed gaplessly */
       s_pin_retry_at_ms = 0;
       s_pin_backoff_ms = 0;
     }
-    neg_note_commit(now);
+    /* The commit ring feeds AUTONEG's switches/hour circuit breaker — operator
+     * pin commits must not count against it, or a few pins in an hour suppress
+     * legitimate autoneg switching for up to an hour after unlock (PR #95
+     * review). The advert tail below is still wanted for pins. */
+    if (!pin_commit) {
+      neg_note_commit(now);
+    }
     /* §6/§7 SWITCH_ADVERT tail: an MBB-committed region is treated exactly
      * like priority_peer_region — it owns the PreferredDERP advert and arms
      * the MapResponse authoritative guard so the server can't revert it. */
