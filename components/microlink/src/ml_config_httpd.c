@@ -645,15 +645,14 @@ static esp_err_t handler_post_settings(httpd_req_t * req)
 
   if (derp_region_changed && ctx->ml != NULL) {
     ctx->ml->derp_region_override = ctx->settings.derp_region;
-    /* Stage-1 (pin->MBB, docs/STAGE1_PIN_MBB_DESIGN.md): do NOT fire
-     * ML_EVT_DERP_RECONNECT here. That path tears the live home conn down and
-     * BLOCKING-reconnects (~1-2 s TLS burst on the DERP I/O task), starving
-     * inbound heartbeat processing past the 2 s machine timeout (~1/5 nuisance
-     * disarm, run-26). The wg_mgr negotiator's pin tick (3 s cadence) now
-     * drives the pin: make-before-break when the home conn is alive (open the
-     * target as an aux, prove, swap the home index — no teardown), and the
-     * DERP task's own home-reconnect path (which connects straight to the
-     * override) when there is no live home to protect. */
+    /* Pin->MBB (docs/STAGE1_PIN_MBB_DESIGN.md): do NOT fire
+     * ML_EVT_DERP_RECONNECT here — tearing down the live home conn starves
+     * inbound heartbeat processing past the 2 s machine timeout. The wg_mgr
+     * negotiator's pin tick (3 s cadence) drives the pin: make-before-break
+     * when the home conn is alive (open the target as an aux, prove, swap the
+     * home index — no teardown), and the DERP task's own home-reconnect path
+     * (which connects straight to the override) when there is no live home
+     * to protect. */
     /* CRITICAL: re-home alone only fixes US. Remote peers still hold the STALE
      * region in their netmap until the coordination server re-populates our
      * Node.HomeDERP — which it only does when we re-advertise PreferredDERP.

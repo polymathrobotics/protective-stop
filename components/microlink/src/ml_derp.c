@@ -678,7 +678,10 @@ static void derp_manage_aux(microlink_t * ml, uint16_t eff_home, int aux_burst[]
     }
     bool wanted = false;
     for (int w = 0; w < nwant; w++) {
-      if (want[w] == c->region_id) {
+      /* Same in-flight visibility as the served/reuse checks below: a
+       * mid-connect slot (region_id still 0) toward a wanted region must
+       * not start the unwanted-reap clock. */
+      if (want[w] == c->region_id || (c->cstate != DERP_CS_IDLE && c->cs_region == want[w])) {
         wanted = true;
         break;
       }

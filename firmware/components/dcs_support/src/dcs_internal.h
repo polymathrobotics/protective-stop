@@ -44,8 +44,8 @@ extern "C"
 #define DCS_LED_BRIGHTNESS_MIN \
   10 /* floor: the ring shows SAFETY state (RED STOP / GREEN OK /
                                    * PURPLE MISMATCH); 0% would blank all of it, persist across
-                                   * reboots, and leave no visible way back (review finding).
-                                   * Mirrors the locate-mode timeout's anti-masking principle. */
+                                   * reboots, and leave no visible way back. Mirrors the
+                                   * locate-mode timeout's anti-masking principle. */
 
   /* Single floor-clamp for the brightness value — used by the NVS read path,
  * the ring setter and the API handler so the three sites cannot drift.

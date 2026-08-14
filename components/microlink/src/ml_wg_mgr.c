@@ -1261,14 +1261,13 @@ static void neg_apply_target(microlink_t * ml, uint16_t target, uint8_t src)
 
   if (ml->derp_region_override != 0) {
     ml->priority_peer_region = target; /* advertised as PreferredDERP (override still wins) */
-    /* Stage-1 (pin->MBB): pin convergence is owned by neg_pin_tick — gapless
-     * MBB while the home conn is alive, the DERP task's own home-reconnect
-     * (straight to the override) when it is not. The legacy teardown +
-     * ML_EVT_DERP_RECONNECT that used to live here is exactly the ~1-2 s
-     * blocking-TLS rx starvation run-26 measured (nuisance disarm ~1/5).
-     * Cancel only a FOREIGN in-flight MBB (autoneg toward some other region —
-     * the old I2 "lock wins instantly" intent); NEVER the pin's own, or the
-     * pin could never complete (this runs every 3 s). */
+    /* Pin->MBB: pin convergence is owned by neg_pin_tick — gapless MBB while
+     * the home conn is alive, the DERP task's own home-reconnect (straight to
+     * the override) when it is not; a teardown here would starve heartbeat rx
+     * (docs/STAGE1_PIN_MBB_DESIGN.md). Cancel only a FOREIGN in-flight MBB
+     * (autoneg toward some other region — the I2 "lock wins instantly"
+     * intent); NEVER the pin's own, or the pin could never complete (this
+     * runs every 3 s). */
     if (ml->mbb_target_region != 0 && ml->mbb_target_region != ml->derp_region_override) {
       neg_cancel_mbb(ml);
     }
@@ -1420,7 +1419,7 @@ void ml_wg_get_pin_diag(uint32_t out[5])
   out[4] = s_pin.absent_resyncs; /* forced coord resyncs for a pinned-but-absent peer */
 }
 
-/* Pin-presence self-heal (f498 EHOSTUNREACH, 2026-08-12): an extra-pinned IP
+/* Pin-presence self-heal: an extra-pinned IP
  * (a configured pstop machine / fleet anchor) that is ABSENT from the peer
  * table can never be reached — and with OmitPeers the control plane will not
  * re-send it unprompted, so the outage is PERMANENT until a lucky reboot.
