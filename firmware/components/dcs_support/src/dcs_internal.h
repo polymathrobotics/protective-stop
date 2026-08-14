@@ -47,13 +47,13 @@ extern "C"
                                    * reboots, and leave no visible way back (PR #94 review + David).
                                    * Mirrors the locate-mode timeout's anti-masking principle. */
 
-/* Single floor-clamp for the brightness value — used by the NVS read path,
+  /* Single floor-clamp for the brightness value — used by the NVS read path,
  * the ring setter and the API handler so the three sites cannot drift
  * (PR #95 review). Sub-floor values clamp UP (never reject/blank). */
-static inline uint8_t dcs_led_brightness_floor(uint8_t pct)
-{
-  return (pct < DCS_LED_BRIGHTNESS_MIN) ? (uint8_t)DCS_LED_BRIGHTNESS_MIN : pct;
-}
+  static inline uint8_t dcs_led_brightness_floor(uint8_t pct)
+  {
+    return (pct < DCS_LED_BRIGHTNESS_MIN) ? (uint8_t)DCS_LED_BRIGHTNESS_MIN : pct;
+  }
 
 #define DCS_RST_HIST_LEN 16
 

@@ -3,7 +3,11 @@
 
 # Heartbeat path diversity — relay-leg mirroring (design + resource analysis)
 
-Status: DESIGN (operator GO 2026-08-14; resource analysis first per operator).
+Status: **IMPLEMENTED (e9a7faa) + field-validated** — run-31: 400+ home-conn
+RSTs absorbed overnight with ZERO disarms and worst heartbeat gap <1 s
+(vs 13 disarms/3 h on the pre-diversity build under lighter storms);
+dedup verified exact (sent==replies, ratio 1.00); rescue-router saved 746
+frames in the first storm hour alone.
 Goal: a heartbeat gap requires MULTIPLE simultaneous path deaths, so false
 protective stops become rare at the EXISTING 2 s failsafe latency (operator
 ceiling: ≤4 s; nothing here changes any timeout).

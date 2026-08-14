@@ -1,5 +1,14 @@
 # Non-Blocking / Async DERP TLS Handshake Refactor — Implementation Plan
 
+> **STATUS 2026-08-14: Stages 0–3 IMPLEMENTED + field-validated on dev.**
+> Stage 1 (pin→MBB): 17/17 forced switches green (runs 27a–d).
+> Stages 0/2/3 (async connect engine, both roles): validated by runs 29–31 —
+> run-31 absorbed **400+ home-conn RSTs in one night with zero disarms**
+> (heartbeat path-diversity compounding it; see
+> `HEARTBEAT_PATH_DIVERSITY_DESIGN.md`). Stage-4 cleanup folded in
+> (blocking connect deleted; pump-home-rx retired). ECP_RESTARTABLE
+> contingency: NOT needed (measured).
+
 Branch: `derp/relay-recovery` (HEAD 24d5ae1) · ESP-IDF 5.5 · target machn (ESP32-S3)
 Scope: `components/microlink` ONLY. **Does NOT touch `pstop_c`** (safety-certified).
 This is a reliability fix (fail-safe nuisance-stop reduction), not a safety change.

@@ -140,7 +140,6 @@ static const uint8_t DISCO_MAGIC[6] = {'T', 'S', 0xf0, 0x9f, 0x92, 0xac};
  * TLS Read/Write Helpers
  * ========================================================================== */
 
-
 /**
  * Write exactly `len` bytes via TLS with WANT_WRITE retry.
  * Returns bytes written on success, -1 on error.
@@ -463,25 +462,27 @@ esp_err_t ml_derp_queue_send(microlink_t * ml, const uint8_t * dest_key, const u
   bool is_priority = is_wg_handshake || ml_wg_is_safety_pubkey(ml, dest_key);
   QueueHandle_t txq = is_priority ? ml->derp_tx_prio_queue : ml->derp_tx_queue;
 
-  /* Path diversity (docs/HEARTBEAT_PATH_DIVERSITY_DESIGN.md): safety frames
-   * (heartbeats, replies, rekeys) get a SECOND DERP leg on a distinct
-   * connected pool conn, so a relay-bound bond no longer has a single point
-   * of failure and the dual-path mirror survives its primary conn being mid-
-   * reconnect. The receiver's WG anti-replay window dedups. Best-effort: a
-   * full queue or no distinct conn just skips the mirror. */
-  if (is_priority) {
-    ml_derp_tx_item_t leg2 = item;
-    leg2.leg2 = true;
-    leg2.data = malloc(len);
-    if (leg2.data) {
-      memcpy(leg2.data, data, len);
-      if (xQueueSend(txq, &leg2, 0) != pdTRUE) {
-        free(leg2.data); /* mirror is best-effort; the primary still goes */
-      }
-    }
-  }
+  /* Path diversity (docs/HEARTBEAT_PATH_DIVERSITY_DESIGN.md): SAFETY-PEER
+   * frames (their heartbeats, replies AND rekey handshakes) get a SECOND
+   * DERP leg on a distinct connected pool conn. Gated on the safety-pubkey
+   * predicate ONLY — is_priority also covers ordinary peers' WG handshakes,
+   * which must NOT be mirrored into the shared prio queue (PR #95 review).
+   * Enqueued AFTER the primary so a nearly-full queue can never let the
+   * mirror displace or evict a real frame (PR #95 review). Best-effort. */
+  bool mirror = ml_wg_is_safety_pubkey(ml, dest_key);
 
   if (xQueueSend(txq, &item, 0) == pdTRUE) {
+    if (mirror) {
+      ml_derp_tx_item_t leg2 = item;
+      leg2.leg2 = true;
+      leg2.data = malloc(len);
+      if (leg2.data) {
+        memcpy(leg2.data, data, len);
+        if (xQueueSend(txq, &leg2, 0) != pdTRUE) {
+          free(leg2.data); /* mirror is best-effort; the primary already went */
+        }
+      }
+    }
     return ESP_OK;
   }
 
@@ -531,7 +532,6 @@ uint32_t ml_derp_get_route_fallbacks(void)
 {
   return s_diag_route_home_fallbacks;
 }
-
 
 /* Home-DERP reconnect telemetry (2026-08-12 edge-flush fix). reconnects =
  * count of successful RST/EOF-triggered home reconnects; last/worst =
@@ -588,7 +588,7 @@ static ml_derp_conn_t * derp_route_any(microlink_t * ml)
   return NULL;
 }
 
-static ml_derp_conn_t * derp_route_conn(microlink_t * ml, uint16_t region_id, uint16_t eff_home)
+static ml_derp_conn_t * derp_route_conn_ex(microlink_t * ml, uint16_t region_id, uint16_t eff_home, bool count_fb)
 {
   int hs = ml->derp_home_slot;
   ml_derp_conn_t * home = &ml->derp[hs];
@@ -599,9 +599,14 @@ static ml_derp_conn_t * derp_route_conn(microlink_t * ml, uint16_t region_id, ui
         return &ml->derp[s];
       }
     }
-    s_diag_route_home_fallbacks++;
+    if (count_fb) s_diag_route_home_fallbacks++; /* leg2 mirrors don't double-count (PR #95 review) */
   }
   return home->connected ? home : NULL;
+}
+
+static ml_derp_conn_t * derp_route_conn(microlink_t * ml, uint16_t region_id, uint16_t eff_home)
+{
+  return derp_route_conn_ex(ml, region_id, eff_home, true);
 }
 
 /* Maintain the auxiliary slots against the CURRENT set of distinct
@@ -1094,8 +1099,12 @@ static void derp_drive_connects(microlink_t * ml, int aux_burst[], uint64_t * co
 {
   int crypto_steps = 0;
   int hs = ml->derp_home_slot;
+  static int s_scan_rotor; /* rotate the non-home scan start so the crypto cap
+                            * can't starve the same trailing slot (PR #95 review) */
+  s_scan_rotor = (s_scan_rotor + 1) % ML_DERP_MAX_CONNS;
   for (int k = 0; k < ML_DERP_MAX_CONNS; k++) {
-    int idx = (k == 0) ? hs : ((k <= hs) ? (k - 1) : k); /* home first, then the rest */
+    int idx = (k == 0) ? hs : ((k - 1 + s_scan_rotor) % ML_DERP_MAX_CONNS); /* home first, rotated rest */
+    if (k != 0 && idx == hs) continue; /* home already served at k==0 */
     ml_derp_conn_t * c = &ml->derp[idx];
     if (c->cstate == DERP_CS_IDLE) continue;
     if (c->cstate == DERP_CS_TLS_HANDSHAKE) {
@@ -1304,7 +1313,7 @@ void ml_derp_tx_task(void * arg)
                 }
               }
               int slot = (any_up || s_rescue_slot >= 0) ? -1 : derp_free_aux_slot(ml);
-              if (slot > 0) {
+              if (slot >= 0) { /* slot 0 is a legit aux once home migrated off it (PR #95 review) */
                 ESP_LOGW(
                   TAG,
                   "DERP home %u unreachable + pool dark; kicking rescue aux slot %d region %u (home retry retained)",
@@ -1398,7 +1407,7 @@ void ml_derp_tx_task(void * arg)
           if (xQueueReceive(txq, &item, 0) != pdTRUE) {
             break;
           }
-          ml_derp_conn_t * c = derp_route_conn(ml, item.region_id, eff_home);
+          ml_derp_conn_t * c = derp_route_conn_ex(ml, item.region_id, eff_home, !item.leg2);
           if (item.leg2) {
             /* Path-diversity mirror: needs a conn DISTINCT from the primary
              * leg's route. No distinct conn (or primary itself down) = skip
@@ -1586,6 +1595,13 @@ bool microlink_is_derp_paused(void)
  * DERP I/O task; no locking (file-header invariant).
  * ========================================================================== */
 
+/* Effective lookup region for a connect: 0 means "the compiled default"
+ * (one definition; 4 former inline copies — PR #95 review). */
+static inline uint16_t derp_lookup_region(uint16_t region_id)
+{
+  return region_id ? region_id : ML_DERP_REGION;
+}
+
 /* Single home-conn identity test (4 call sites; PR #95 review). */
 static inline bool derp_conn_is_home(const microlink_t * ml, const ml_derp_conn_t * c)
 {
@@ -1602,6 +1618,7 @@ typedef struct
   socklen_t addrlen;
   int family;
 } derp_dns_cache_t;
+
 static derp_dns_cache_t s_dns_cache[ML_DERP_MAX_CONNS + 2];
 
 static derp_dns_cache_t * derp_dns_cache_find(uint16_t region)
@@ -1700,7 +1717,7 @@ static void derp_cs_fail(microlink_t * ml, ml_derp_conn_t * c, const char * why)
      * fine, and re-resolving it re-introduces blocking DNS into storm-time
      * reconnects (the >5s reconnect tail = the remaining no-path window for
      * relay-bound remotes; run-29 disarms #1-#3). */
-    derp_dns_cache_t * e = derp_dns_cache_find(c->cs_region ? c->cs_region : ML_DERP_REGION);
+    derp_dns_cache_t * e = derp_dns_cache_find(derp_lookup_region(c->cs_region));
     if (e) e->addrlen = 0;
   }
   c->connected = false;
@@ -1714,15 +1731,10 @@ esp_err_t ml_derp_connect_kick(microlink_t * ml, ml_derp_conn_t * c, uint16_t re
   /* Idempotency guard (2026-05-25 leak class): never re-init over live
    * contexts or a half-done connect. Tear down first. */
   if (c->tls_inited || c->cstate != DERP_CS_IDLE) {
-    ml_derp_disconnect(ml, c);
-    if (c->cs_tx_buf) {
-      free(c->cs_tx_buf);
-      c->cs_tx_buf = NULL;
-    }
-    c->cstate = DERP_CS_IDLE;
+    ml_derp_disconnect(ml, c); /* frees cs_tx_buf + resets cstate itself */
   }
 
-  uint16_t lookup_region = region_id ? region_id : ML_DERP_REGION;
+  uint16_t lookup_region = derp_lookup_region(region_id);
   c->cs_region = region_id;
   c->cs_used_dns_cache = false;
   c->cstate_deadline_ms = ml_get_time_ms() + DERP_CONNECT_TIMEOUT_MS;
@@ -1863,7 +1875,7 @@ int ml_derp_connect_step(microlink_t * ml, ml_derp_conn_t * c)
       {
         const char * host;
         int port;
-        derp_resolve_region_host(ml, c->cs_region ? c->cs_region : ML_DERP_REGION, &host, &port);
+        derp_resolve_region_host(ml, derp_lookup_region(c->cs_region), &host, &port);
         mbedtls_ssl_set_hostname(&c->ssl, host);
       }
       mbedtls_ssl_set_bio(&c->ssl, &c->sockfd, ml_derp_bio_send, NULL, ml_derp_bio_recv_timeout);
@@ -1877,7 +1889,7 @@ int ml_derp_connect_step(microlink_t * ml, ml_derp_conn_t * c)
         /* Build the HTTP upgrade request (sent incrementally next state). */
         const char * host;
         int port;
-        derp_resolve_region_host(ml, c->cs_region ? c->cs_region : ML_DERP_REGION, &host, &port);
+        derp_resolve_region_host(ml, derp_lookup_region(c->cs_region), &host, &port);
         c->cs_tx_buf = malloc(256);
         if (!c->cs_tx_buf) {
           derp_cs_fail(ml, c, "oom");
@@ -1973,8 +1985,9 @@ int ml_derp_connect_step(microlink_t * ml, ml_derp_conn_t * c)
           }
           c->cs_frame_type = c->cs_hdr[0];
           c->cs_frame_len = ((uint32_t)c->cs_hdr[1] << 24) | ((uint32_t)c->cs_hdr[2] << 16) |
-            ((uint32_t)c->cs_hdr[3] << 8) | c->cs_hdr[4];
-          if (c->cs_frame_type != DERP_FRAME_SERVER_KEY || c->cs_frame_len < 40 || c->cs_frame_len > sizeof(c->cs_buf)) {
+                            ((uint32_t)c->cs_hdr[3] << 8) | c->cs_hdr[4];
+          if (c->cs_frame_type != DERP_FRAME_SERVER_KEY || c->cs_frame_len < 40 || c->cs_frame_len > sizeof(c->cs_buf))
+          {
             ESP_LOGE(
               TAG, "Expected ServerKey frame, got 0x%02x len=%lu", c->cs_frame_type, (unsigned long)c->cs_frame_len);
             derp_cs_fail(ml, c, "skey-frame");
@@ -2019,8 +2032,13 @@ int ml_derp_connect_step(microlink_t * ml, ml_derp_conn_t * c)
           memcpy(p + 5, ml->wg_public_key, 32);
           memcpy(p + 5 + 32, nonce, NACL_BOX_NONCEBYTES);
           if (
-            nacl_box(p + 5 + 32 + NACL_BOX_NONCEBYTES, (const uint8_t *)ci_json, json_len, nonce, derp_server_key,
-                     ml->wg_private_key) != 0)
+            nacl_box(
+              p + 5 + 32 + NACL_BOX_NONCEBYTES,
+              (const uint8_t *)ci_json,
+              json_len,
+              nonce,
+              derp_server_key,
+              ml->wg_private_key) != 0)
           {
             derp_cs_fail(ml, c, "naclbox");
             return -1;
@@ -2056,7 +2074,7 @@ int ml_derp_connect_step(microlink_t * ml, ml_derp_conn_t * c)
           }
           c->cs_frame_type = c->cs_hdr[0];
           c->cs_frame_len = ((uint32_t)c->cs_hdr[1] << 24) | ((uint32_t)c->cs_hdr[2] << 16) |
-            ((uint32_t)c->cs_hdr[3] << 8) | c->cs_hdr[4];
+                            ((uint32_t)c->cs_hdr[3] << 8) | c->cs_hdr[4];
           if (c->cs_frame_type != DERP_FRAME_SERVER_INFO || c->cs_frame_len == 0) {
             goto complete; /* something else already streaming — fine */
           }
@@ -2065,7 +2083,13 @@ int ml_derp_connect_step(microlink_t * ml, ml_derp_conn_t * c)
           return 0;
         }
         case 4: { /* ServerInfo payload: read + discard in cs_buf chunks */
+          if (c->cs_frame_len > 16384u) {
+            ESP_LOGW(TAG, "ServerInfo oversized (%lu) — skipping via deadline path", (unsigned long)c->cs_frame_len);
+            goto complete; /* session already usable; don't chew an absurd frame */
+          }
+          int chunks = 0;
           while (c->cs_payload_got < c->cs_frame_len) {
+            if (++chunks > 8) return 0; /* bound per-call work (PR #95 review) */
             uint32_t remain = c->cs_frame_len - c->cs_payload_got;
             uint32_t chunk = remain > sizeof(c->cs_buf) ? (uint32_t)sizeof(c->cs_buf) : remain;
             int n = mbedtls_ssl_read(&c->ssl, c->cs_buf, chunk);
@@ -2124,7 +2148,9 @@ complete:
     "DERP handshake complete, connected (region %u, slot=%s, %llums)",
     (unsigned)c->region_id,
     is_home ? "home" : "aux",
-    (unsigned long long)(DERP_CONNECT_TIMEOUT_MS - (c->cstate_deadline_ms - ml_get_time_ms())));
+    /* elapsed = now - start; start = deadline - TIMEOUT. Signed-safe even
+     * past the deadline (the tolerate-missing-ServerInfo path). */
+    (unsigned long long)(ml_get_time_ms() + DERP_CONNECT_TIMEOUT_MS - c->cstate_deadline_ms));
   return 1;
 }
 

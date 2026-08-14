@@ -1445,6 +1445,7 @@ static void pin_presence_heal(microlink_t * ml)
   uint64_t now = ml_get_time_ms();
   if (absent_ip == 0) {
     s_pin_absent_backoff_ms = 0; /* healthy — reset the backoff ladder */
+    s_pin_absent_next_ms = 0; /* and the gate, so a re-absence heals immediately (PR #95 review) */
     return;
   }
   if (s_pin_absent_next_ms != 0 && now < s_pin_absent_next_ms) {
@@ -1485,6 +1486,12 @@ static void neg_pin_tick(microlink_t * ml)
    * torn/stale read is conservative — worst case we wait one 3 s tick. */
   ml_derp_conn_t * home = &ml->derp[ml->derp_home_slot];
   bool home_alive = home->connected;
+  if (pin != s_pin_last_target) {
+    /* Operator re-pinned to a DIFFERENT region: the old target's backoff must
+     * not delay the new command (PR #95 review — a pin is a command). */
+    s_pin_retry_at_ms = 0;
+    s_pin_backoff_ms = 0;
+  }
   if (home_alive && home->region_id == pin) {
     s_pin_retry_at_ms = 0; /* pin satisfied — clear any backoff */
     s_pin_backoff_ms = 0;
