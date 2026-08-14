@@ -675,7 +675,6 @@ extern "C"
     ml_derp_cstate_t cstate; /* connect progress; IDLE when free or CONNECTED */
     uint64_t cstate_deadline_ms; /* whole-connect deadline (DERP_CONNECT_TIMEOUT_MS) */
     uint16_t cs_region; /* region this in-progress connect targets */
-    bool cs_http_sent; /* HTTP upgrade GET fully written */
     int cs_http_len; /* bytes accumulated in cs_buf during HTTP_UPGRADE */
     uint8_t cs_derp_step; /* 0=ServerKey hdr, 1=ServerKey payload, 2=ClientInfo send,
                            * 3=ServerInfo hdr, 4=ServerInfo payload/skip */

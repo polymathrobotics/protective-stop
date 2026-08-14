@@ -673,7 +673,10 @@ static void derp_manage_aux(microlink_t * ml, uint16_t eff_home, int aux_burst[]
     if (slot < 0) {
       for (int s = 0; s < ML_DERP_MAX_CONNS; s++) {
         if (s == hs) continue;
-        if (!ml->derp[s].connected && !ml->derp[s].tls_inited && ml->derp[s].region_id == 0) {
+        if (
+          !ml->derp[s].connected && !ml->derp[s].tls_inited && ml->derp[s].region_id == 0 &&
+          ml->derp[s].cstate == DERP_CS_IDLE) /* an in-flight TCP-phase connect is NOT free (PR #95 review) */
+        {
           slot = s;
           break;
         }
@@ -749,7 +752,10 @@ static int derp_free_aux_slot(microlink_t * ml)
   int hs = ml->derp_home_slot;
   for (int s = 0; s < ML_DERP_MAX_CONNS; s++) {
     if (s == hs) continue;
-    if (!ml->derp[s].connected && !ml->derp[s].tls_inited && ml->derp[s].region_id == 0) {
+    if (
+      !ml->derp[s].connected && !ml->derp[s].tls_inited && ml->derp[s].region_id == 0 &&
+      ml->derp[s].cstate == DERP_CS_IDLE) /* in-flight TCP-phase connect != free (PR #95 review) */
+    {
       return s;
     }
   }
@@ -1012,6 +1018,7 @@ static void derp_mbb_tick(microlink_t * ml, uint64_t now)
 /* Stage-2/3 driver state (DERP-task-owned). */
 static uint64_t s_reconn_t0; /* RECONNECT-event wall-clock, for the reconnect diag */
 static uint16_t s_home_fb_pending; /* home-fallback region awaiting async completion */
+static int s_rescue_slot = -1; /* rescue-aux slot awaiting completion (counter gates on it) */
 static int s_home_retry_burst; /* consecutive failed home attempts (was block-static) */
 static uint32_t s_diag_max_iter_ms; /* Stage-0 gauge: worst single task iteration */
 static uint32_t s_diag_rx_gap_worst_ms; /* Stage-0 gauge: worst gap between rx polls */
@@ -1061,9 +1068,18 @@ static void derp_drive_connects(microlink_t * ml, int aux_burst[], uint64_t * co
         s_home_fb_pending = 0;
       } else {
         aux_burst[idx] = 0; /* reset fast-retry on success */
+        if (idx == s_rescue_slot) {
+          s_derp_home_unreachable_fallbacks++; /* rescue aux CONFIRMED up (PR #95 review) */
+          s_rescue_slot = -1;
+        }
       }
-    } else if (r == -1 && idx == hs) {
-      s_home_fb_pending = 0; /* a failed fallback attempt must not apply later */
+    } else if (r == -1) {
+      if (idx == hs) {
+        s_home_fb_pending = 0; /* a failed fallback attempt must not apply later */
+      }
+      if (idx == s_rescue_slot) {
+        s_rescue_slot = -1; /* rescue attempt died; a future pass may re-kick */
+      }
     }
   }
 }
@@ -1230,16 +1246,17 @@ void ml_derp_tx_task(void * arg)
                   break;
                 }
               }
-              int slot = any_up ? -1 : derp_free_aux_slot(ml);
+              int slot = (any_up || s_rescue_slot >= 0) ? -1 : derp_free_aux_slot(ml);
               if (slot > 0) {
-                s_derp_home_unreachable_fallbacks++;
                 ESP_LOGW(
                   TAG,
                   "DERP home %u unreachable + pool dark; kicking rescue aux slot %d region %u (home retry retained)",
                   (unsigned)home_region,
                   slot,
                   (unsigned)fb);
-                (void)ml_derp_connect_kick(ml, &ml->derp[slot], fb);
+                if (ml_derp_connect_kick(ml, &ml->derp[slot], fb) == ESP_OK) {
+                  s_rescue_slot = slot; /* counter increments on confirmed completion (PR #95 review) */
+                }
               }
             }
           }
@@ -1625,7 +1642,6 @@ esp_err_t ml_derp_connect_kick(microlink_t * ml, ml_derp_conn_t * c, uint16_t re
   c->cs_region = region_id;
   c->cs_used_dns_cache = false;
   c->cstate_deadline_ms = ml_get_time_ms() + DERP_CONNECT_TIMEOUT_MS;
-  c->cs_http_sent = false;
   c->cs_http_len = 0;
   c->cs_derp_step = 0;
   c->cs_hdr_got = 0;
