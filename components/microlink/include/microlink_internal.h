@@ -624,6 +624,20 @@ extern "C"
  * DERP Connection State
  * ========================================================================== */
 
+  /* Stage-2/3 async connect engine (docs/NONBLOCKING_DERP_TLS_PLAN.md §2): the
+   * monolithic blocking connect is decomposed into a per-conn state machine
+   * advanced ONE bounded step per DERP-task iteration, so a (re)connect can
+   * never starve the rx poll of connected conns or the direct-path heartbeat.
+   * All fields are written ONLY by the DERP I/O task (no-mutex invariant). */
+  typedef enum
+  {
+    DERP_CS_IDLE = 0, /* not connecting: slot free, or fully CONNECTED */
+    DERP_CS_TCP_CONNECT, /* non-blocking connect() in flight (DNS done at kick) */
+    DERP_CS_TLS_HANDSHAKE, /* mbedtls_ssl_handshake() incremental */
+    DERP_CS_HTTP_UPGRADE, /* GET /derp sent; reading the 101 incrementally */
+    DERP_CS_DERP_HS, /* ServerKey -> ClientInfo -> ServerInfo */
+  } ml_derp_cstate_t;
+
   typedef struct
   {
     int sockfd; /* Raw TCP socket */
@@ -656,6 +670,25 @@ extern "C"
     uint64_t connected_at_ms;
     uint64_t last_pong_ms;
     uint32_t rx_pkts;
+
+    /* --- async connect engine (Stage-2/3; DERP-task-owned) ------------------ */
+    ml_derp_cstate_t cstate; /* connect progress; IDLE when free or CONNECTED */
+    uint64_t cstate_deadline_ms; /* whole-connect deadline (DERP_CONNECT_TIMEOUT_MS) */
+    uint16_t cs_region; /* region this in-progress connect targets */
+    bool cs_http_sent; /* HTTP upgrade GET fully written */
+    int cs_http_len; /* bytes accumulated in cs_buf during HTTP_UPGRADE */
+    uint8_t cs_derp_step; /* 0=ServerKey hdr, 1=ServerKey payload, 2=ClientInfo send,
+                           * 3=ServerInfo hdr, 4=ServerInfo payload/skip */
+    uint8_t cs_hdr[5]; /* partial DERP frame header (resumable) */
+    int cs_hdr_got;
+    uint8_t cs_frame_type;
+    uint32_t cs_frame_len;
+    uint32_t cs_payload_got; /* payload bytes consumed so far (resumable) */
+    uint8_t * cs_tx_buf; /* pending outbound (HTTP GET / ClientInfo frame); heap, freed on leave */
+    uint32_t cs_tx_len;
+    uint32_t cs_tx_sent; /* bytes of cs_tx_buf written so far (resumable) */
+    bool cs_used_dns_cache; /* this attempt used the per-region addr cache (invalidate on fail) */
+    uint8_t cs_buf[512]; /* HTTP response / ServerKey+ServerInfo scratch (resumable) */
   } ml_derp_conn_t;
 
   /* ============================================================================
@@ -885,7 +918,13 @@ extern "C"
   /* ml_derp.c */
   void ml_derp_tx_task(void * arg);
   /* Connect a specific pool connection `c` to `region_id`'s DERP node. */
-  esp_err_t ml_derp_connect(microlink_t * ml, ml_derp_conn_t * c, uint16_t region_id);
+  /* Stage-2/3 async connect engine (see ml_derp.c engine header). */
+  esp_err_t ml_derp_connect_kick(microlink_t * ml, ml_derp_conn_t * c, uint16_t region_id);
+  int ml_derp_connect_step(microlink_t * ml, ml_derp_conn_t * c);
+  uint32_t ml_derp_get_connect_steps(void);
+  /* Stage-0 gauges: out[0]=worst single DERP-task iteration ms, out[1]=worst
+   * gap between consecutive rx-poll passes ms (both since boot). */
+  void ml_derp_get_iter_diag(uint32_t out[2]);
   /* Tear down a specific pool connection (frees its mbedTLS contexts + socket). */
   void ml_derp_disconnect(microlink_t * ml, ml_derp_conn_t * c);
   esp_err_t ml_derp_queue_send(microlink_t * ml, const uint8_t * dest_key, const uint8_t * data, size_t len);

@@ -1096,8 +1096,15 @@ static esp_err_t handler_monitor(httpd_req_t * req)
        * so the safety heartbeat relay keeps flowing through a ~1-2s aux TLS
        * handshake (edge-flush fix; replaced the self-deadlocking defer-aux).
        * Climbs while a standby (re)connects; green should hold across it. */
-      extern uint32_t ml_derp_get_home_pumps(void);
-      cJSON_AddNumberToObject(json, "derp_home_pumps", ml_derp_get_home_pumps());
+      /* Stage-2/3: pump-home-rx is retired (async engine); expose the
+       * engine's step counter + the Stage-0 loop gauges instead. */
+      cJSON_AddNumberToObject(json, "derp_connect_steps", ml_derp_get_connect_steps());
+      {
+        uint32_t it[2] = {0};
+        ml_derp_get_iter_diag(it);
+        cJSON_AddNumberToObject(json, "derp_max_iter_ms", it[0]);
+        cJSON_AddNumberToObject(json, "derp_rx_poll_gap_worst_ms", it[1]);
+      }
       /* Home-DERP reconnect speed (edge-flush fix): worst < ~1500ms confirms
        * the relay is back inside the 2s pstop timeout so green rides it
        * through a firewall connection-table flush. */
