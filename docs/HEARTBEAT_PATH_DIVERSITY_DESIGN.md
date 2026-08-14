@@ -34,9 +34,10 @@ run-29/30 disarm ledger against that machinery — the blind spots:
 One change, both roles, entirely in `ml_derp_queue_send()` + `derp_route_conn`
 usage (components/microlink):
 
-For frames whose destination is a SAFETY peer (existing
-`ml_wg_is_safety_pubkey()` predicate at the enqueue path — already used for
-priority-queue selection):
+For frames whose destination is a heartbeat carrier (`ml_wg_tx_class_pubkey()`
+at the enqueue path: mirror = priority OR health-tracked; the fleet pin keeps
+its priority-queue slot but is NOT mirrored — reachability armor, not a
+heartbeat carrier):
 
 1. **Primary leg (today's):** peer-region conn, else effective-home conn.
 2. **NEW second leg:** one ADDITIONAL connected pool conn, chosen as:

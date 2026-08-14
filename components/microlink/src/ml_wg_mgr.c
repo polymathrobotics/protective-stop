@@ -721,8 +721,8 @@ bool ml_wg_is_health_tracked(uint32_t vpn_ip)
  * rekey-in-flight freeze, LRU-evict protection and the reingest sweep — one
  * predicate, so a future criterion change cannot drift across call sites
  * (PR #94 review: 6 hand-inlined copies had accumulated in this file).
- * NOTE: distinct from ml_wg_is_safety_pubkey()'s pinned||health rule — pinned
- * covers reachability armor (fleet anchor etc.), not heartbeat carriage. */
+ * NOTE: distinct from ml_wg_tx_class_pubkey()'s pinned||health prio rule —
+ * pinned covers reachability armor (fleet anchor etc.), not heartbeat carriage. */
 static bool is_safety_peer(microlink_t * ml, uint32_t vpn_ip)
 {
   return (ml->config.priority_peer_ip != 0 && vpn_ip == ml->config.priority_peer_ip) || is_health_tracked(vpn_ip);
@@ -739,20 +739,22 @@ uint16_t ml_wg_region_for_pubkey(microlink_t * ml, const uint8_t * wg_pubkey)
   return ml->peers[idx].derp_region;
 }
 
-/* True when the WG-pubkey peer is one of the few SAFETY peers (pinned OR
- * health-tracked) — the ones exempt from the peer-scaling armor. The DERP TX
- * enqueue path uses this to give the 5 Hz pstop heartbeat frame priority
- * (front-of-queue) and to shield it from disco-burst backpressure. Same-task
- * read when called from wg_mgr; when called from wg_derp_output_cb (TCPIP
- * thread) it shares the existing lock-free tolerance of ml_wg_region_for_pubkey
- * — word-sized reads, worst case a transiently wrong classification. */
-bool ml_wg_is_safety_pubkey(microlink_t * ml, const uint8_t * wg_pubkey)
+/* DERP-egress classification for a destination pubkey, in ONE peer-table walk.
+ * Returns the PRIORITY-queue bit: pinned OR health-tracked (their frames never
+ * sit behind a disco burst). *mirror_out = heartbeat carriers only (priority OR
+ * health-tracked): the fleet pin is reachability armor, not heartbeat carriage,
+ * so its frames are not path-diversity mirrored. Safe from the TCPIP thread
+ * (wg_derp_output_cb): word-sized reads, worst case a transiently wrong
+ * classification, same tolerance as ml_wg_region_for_pubkey. */
+bool ml_wg_tx_class_pubkey(microlink_t * ml, const uint8_t * wg_pubkey, bool * mirror_out)
 {
+  *mirror_out = false;
   if (ml == NULL || wg_pubkey == NULL) return false;
   int idx = find_peer_by_key(ml, wg_pubkey);
   if (idx < 0) return false;
   uint32_t vpn_ip = ml->peers[idx].vpn_ip;
-  return is_pinned_peer(ml, vpn_ip) || is_health_tracked(vpn_ip);
+  *mirror_out = is_safety_peer(ml, vpn_ip);
+  return *mirror_out || is_pinned_peer(ml, vpn_ip);
 }
 
 /* Collect the DISTINCT DERP regions of the safety peers that are exempt from the
@@ -3546,10 +3548,8 @@ static void disco_periodic_probes(microlink_t * ml)
          * Inbound DISCO pings from any peer are still answered (don't break remote). */
     bool peer_allowed = ml_config_peer_is_allowed(ml->config_httpd, p->vpn_ip);
 
-    bool is_priority = (ml->config.priority_peer_ip != 0 && p->vpn_ip == ml->config.priority_peer_ip) ||
-                       is_health_tracked(p->vpn_ip); /* every pstop counterpart gets the
-                            * safety-peer treatment: 3 s disco heartbeats (which also keep
-                            * the path RTT sample fresh on BOTH ends) + pong watchdog. */
+    bool is_priority = is_safety_peer(ml, p->vpn_ip); /* every pstop counterpart gets
+                            * 3 s disco heartbeats (fresh RTT on BOTH ends) + pong watchdog. */
 
     /* EVERY safety peer gets the DERP data+handshake mirror (dual_path) — it
      * was priority-peer-only, so the MACHINE's TX leg to its remotes (data

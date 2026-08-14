@@ -459,17 +459,18 @@ esp_err_t ml_derp_queue_send(microlink_t * ml, const uint8_t * dest_key, const u
    * cross-thread drain, and per-peer frame order is preserved (FIFO within a
    * queue -> no OK-after-STOP reordering). */
   bool is_wg_handshake = (len >= 4 && (data[0] == 0x01 || data[0] == 0x02));
-  bool is_priority = is_wg_handshake || ml_wg_is_safety_pubkey(ml, dest_key);
+  /* One classification walk: prio = pinned||health-tracked (fleet frames must
+   * not sit behind a disco burst), mirror = heartbeat carriers only (priority
+   * ||health-tracked — the fleet pin is reachability armor; doubling its bulk
+   * frames buys no diversity and crowds the prio queue). */
+  bool mirror = false;
+  bool is_priority = is_wg_handshake || ml_wg_tx_class_pubkey(ml, dest_key, &mirror);
   QueueHandle_t txq = is_priority ? ml->derp_tx_prio_queue : ml->derp_tx_queue;
 
-  /* Path diversity (docs/HEARTBEAT_PATH_DIVERSITY_DESIGN.md): SAFETY-PEER
-   * frames (their heartbeats, replies AND rekey handshakes) get a SECOND
-   * DERP leg on a distinct connected pool conn. Gated on the safety-pubkey
-   * predicate ONLY — is_priority also covers ordinary peers' WG handshakes,
-   * which must NOT be mirrored into the shared prio queue (PR #95 review).
+  /* Path diversity (docs/HEARTBEAT_PATH_DIVERSITY_DESIGN.md): heartbeat
+   * carriers get a SECOND DERP leg on a distinct connected pool conn.
    * Enqueued AFTER the primary so a nearly-full queue can never let the
-   * mirror displace or evict a real frame (PR #95 review). Best-effort. */
-  bool mirror = ml_wg_is_safety_pubkey(ml, dest_key);
+   * mirror displace or evict a real frame. Best-effort. */
 
   if (xQueueSend(txq, &item, 0) == pdTRUE) {
     if (mirror) {
@@ -588,25 +589,29 @@ static ml_derp_conn_t * derp_route_any(microlink_t * ml)
   return NULL;
 }
 
-static ml_derp_conn_t * derp_route_conn_ex(microlink_t * ml, uint16_t region_id, uint16_t eff_home, bool count_fb)
+/* Primary route: the conn LIVE on region_id (the home conn's CURRENT region,
+ * not the effective-home override — during a pin/MBB prove window they differ
+ * and comparing the override would black-hole frames for peers already homed
+ * on the target). Falls back to the home conn (counted + warned, primaries
+ * only) when no conn serves the region; NULL = pool dark, caller rescues. */
+static ml_derp_conn_t * derp_route_conn(microlink_t * ml, uint16_t region_id, bool count_fb)
 {
   int hs = ml->derp_home_slot;
   ml_derp_conn_t * home = &ml->derp[hs];
-  if (region_id != 0 && region_id != eff_home) {
+  uint16_t live_home = home->connected ? home->region_id : 0;
+  if (region_id != 0 && region_id != live_home) {
     for (int s = 0; s < ML_DERP_MAX_CONNS; s++) {
       if (s == hs) continue;
       if (ml->derp[s].connected && ml->derp[s].region_id == region_id) {
         return &ml->derp[s];
       }
     }
-    if (count_fb) s_diag_route_home_fallbacks++; /* leg2 mirrors don't double-count (PR #95 review) */
+    if (home->connected && count_fb) {
+      s_diag_route_home_fallbacks++;
+      ESP_LOGW(TAG, "DERP TX: no conn for region %u, relaying via home (frame preserved)", (unsigned)region_id);
+    }
   }
   return home->connected ? home : NULL;
-}
-
-static ml_derp_conn_t * derp_route_conn(microlink_t * ml, uint16_t region_id, uint16_t eff_home)
-{
-  return derp_route_conn_ex(ml, region_id, eff_home, true);
 }
 
 /* Maintain the auxiliary slots against the CURRENT set of distinct
@@ -715,7 +720,14 @@ static void derp_manage_aux(microlink_t * ml, uint16_t eff_home, int aux_burst[]
     bool served = false;
     for (int s = 0; s < ML_DERP_MAX_CONNS; s++) {
       if (s == hs) continue;
-      if (ml->derp[s].connected && ml->derp[s].region_id == rid) {
+      /* An IN-FLIGHT connect toward rid counts as served: region_id is only
+       * written on completion/failure, so without the cs_region check every
+       * pass would kick ANOTHER slot at the same region until the pool
+       * drained (and re-kick a mid-TLS slot, tearing down its handshake). */
+      if (
+        (ml->derp[s].connected && ml->derp[s].region_id == rid) ||
+        (ml->derp[s].cstate != DERP_CS_IDLE && ml->derp[s].cs_region == rid))
+      {
         served = true;
         break;
       }
@@ -723,11 +735,11 @@ static void derp_manage_aux(microlink_t * ml, uint16_t eff_home, int aux_burst[]
     if (served) continue;
 
     /* Reuse a slot already assigned this region (a prior drop/failed attempt),
-     * else grab a free slot. */
+     * else grab a free slot. Never a slot mid-connect toward another region. */
     int slot = -1;
     for (int s = 0; s < ML_DERP_MAX_CONNS; s++) {
       if (s == hs) continue;
-      if (ml->derp[s].region_id == rid) {
+      if (ml->derp[s].cstate == DERP_CS_IDLE && ml->derp[s].region_id == rid) {
         slot = s;
         break;
       }
@@ -1129,8 +1141,14 @@ static void derp_drive_connects(microlink_t * ml, int aux_burst[], uint64_t * co
           ESP_LOGW(TAG, "DERP home reconnected in %ums (async)", (unsigned)s_diag_derp_last_reconnect_ms);
           s_reconn_t0 = 0;
         }
-        if (s_home_fb_pending != 0 && c->region_id == s_home_fb_pending) {
-          ml->derp_home_region = s_home_fb_pending; /* no re-home owner to fight (guarded at kick) */
+        /* Re-validate the kick-time "no re-home owner" guard: wg_mgr/coord may
+         * have learned a priority region (or an operator locked one) during
+         * the async connect — their intent supersedes the fallback. */
+        if (
+          s_home_fb_pending != 0 && c->region_id == s_home_fb_pending && ml->derp_region_override == 0 &&
+          ml->priority_peer_region == 0)
+        {
+          ml->derp_home_region = s_home_fb_pending;
           s_derp_home_unreachable_fallbacks++;
           ESP_LOGW(TAG, "DERP home fell back to reachable region %u", (unsigned)s_home_fb_pending);
         }
@@ -1294,7 +1312,9 @@ void ml_derp_tx_task(void * arg)
               s_home_retry_burst,
               (unsigned)fb);
             s_home_fb_pending = fb; /* applied by derp_drive_connects on completion */
-            (void)ml_derp_connect_kick(ml, home, fb);
+            if (ml_derp_connect_kick(ml, home, fb) != ESP_OK) {
+              s_home_fb_pending = 0; /* sync failure: no step will ever clear it */
+            }
           } else {
             /* Default path: (re)try the INTENDED home. This is what honours an
              * operator LOCK and an active re-home owner — we never abandon
@@ -1354,6 +1374,7 @@ void ml_derp_tx_task(void * arg)
          * re-kick via the periodic-retry cadence. A fresh socket is created
          * by the kick, so no post-disconnect settle delay is needed. */
         s_reconn_t0 = reconn_t0;
+        s_home_fb_pending = 0; /* an external reconnect supersedes the fallback intent */
         (void)ml_derp_connect_kick(ml, home, ml_effective_home_region(ml));
       }
     }
@@ -1396,7 +1417,6 @@ void ml_derp_tx_task(void * arg)
     /* ---- Phase 1: Drain TX queue FIRST (prioritize outgoing), routing each
          *      frame to the pool connection homed on the destination's region. ---- */
     {
-      uint16_t eff_home = ml_effective_home_region(ml);
       /* Drain the PRIORITY (safety/handshake) queue FULLY first, then the disco
        * queue (bounded). Two separate FIFO queues => a 5 Hz safety heartbeat is
        * never stuck behind a disco burst, enqueue stays single-atomic per queue
@@ -1410,7 +1430,7 @@ void ml_derp_tx_task(void * arg)
           if (xQueueReceive(txq, &item, 0) != pdTRUE) {
             break;
           }
-          ml_derp_conn_t * c = derp_route_conn_ex(ml, item.region_id, eff_home, !item.leg2);
+          ml_derp_conn_t * c = derp_route_conn(ml, item.region_id, !item.leg2);
           if (item.leg2) {
             /* Path-diversity mirror: needs a conn DISTINCT from the primary
              * leg's route. No distinct conn (or primary itself down) = skip
@@ -1433,14 +1453,6 @@ void ml_derp_tx_task(void * arg)
               continue;
             }
             s_diag_rescue_routes++;
-          }
-          bool fell_back = (item.region_id != 0 && item.region_id != eff_home && c == home);
-          if (fell_back) {
-            /* Never silently drop a safety peer's frame: aux for its region isn't
-                     * up yet, so relay via home (may still reach if the peer also holds a
-                     * home-region conn) and keep the aux opening in the background. */
-            ESP_LOGW(
-              TAG, "DERP TX: no aux conn for region %u, relaying via home (frame preserved)", (unsigned)item.region_id);
           }
           int ret;
           if (item.frame_type == DERP_FRAME_SEND_PACKET) {
@@ -1620,6 +1632,7 @@ typedef struct
   struct sockaddr_storage addr;
   socklen_t addrlen;
   int family;
+  uint8_t post_tcp_fails; /* consecutive TLS/HTTP/DERP failures on this addr */
 } derp_dns_cache_t;
 
 static derp_dns_cache_t s_dns_cache[ML_DERP_MAX_CONNS + 2];
@@ -1648,6 +1661,7 @@ static void derp_dns_cache_put(uint16_t region, const struct sockaddr * sa, sock
   memcpy(&e->addr, sa, len);
   e->addrlen = len;
   e->family = family;
+  e->post_tcp_fails = 0;
 }
 
 /* §16 stepper telemetry (DERP-task-owned; word-sized cross-task reads). */
@@ -1714,14 +1728,16 @@ static void derp_cs_fail(microlink_t * ml, ml_derp_conn_t * c, const char * why)
     free(c->cs_tx_buf);
     c->cs_tx_buf = NULL;
   }
-  if (c->cs_used_dns_cache && c->cstate <= DERP_CS_TCP_CONNECT) {
-    /* Invalidate the addr cache ONLY when the failure happened at/before TCP
-     * connect — a post-TCP failure (TLS/HTTP/DERP) proves the ADDRESS was
-     * fine, and re-resolving it re-introduces blocking DNS into storm-time
-     * reconnects (the >5s reconnect tail = the remaining no-path window for
-     * relay-bound remotes; run-29 disarms #1-#3). */
+  if (c->cs_used_dns_cache) {
+    /* At/before TCP connect: the address itself failed — invalidate now.
+     * Post-TCP (TLS/HTTP/DERP): the address was reachable, so keep it —
+     * re-resolving would put blocking DNS back into storm-time reconnects —
+     * EXCEPT after 3 consecutive post-TCP failures: a re-IP'd server can
+     * accept TCP and fail TLS forever, so force one fresh resolve. */
     derp_dns_cache_t * e = derp_dns_cache_find(derp_lookup_region(c->cs_region));
-    if (e) e->addrlen = 0;
+    if (e) {
+      if (c->cstate <= DERP_CS_TCP_CONNECT || ++e->post_tcp_fails >= 3) e->addrlen = 0;
+    }
   }
   c->connected = false;
   c->region_id = c->cs_region; /* keep the slot's target so retries find it (old aux semantics) */
@@ -2130,8 +2146,11 @@ complete:
     mbedtls_ssl_conf_read_timeout(&c->ssl_conf, 200);
   }
   c->connected = true;
-  c->tls_inited = true;
   c->region_id = c->cs_region;
+  {
+    derp_dns_cache_t * e = derp_dns_cache_find(derp_lookup_region(c->cs_region));
+    if (e) e->post_tcp_fails = 0;
+  }
   c->last_recv_ms = ml_get_time_ms();
   c->last_used_ms = c->last_recv_ms;
   /* §7 PROVING inputs: fresh stability clock + zeroed proof evidence. */

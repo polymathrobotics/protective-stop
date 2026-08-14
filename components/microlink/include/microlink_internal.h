@@ -973,12 +973,11 @@ extern "C"
    * 0 = peer unknown or region not yet learned. Called from the enqueue path
    * (same wg_mgr task that owns the peer table) to tag each relayed frame. */
   uint16_t ml_wg_region_for_pubkey(microlink_t * ml, const uint8_t * wg_pubkey);
-  /* True if the peer identified by its 32-byte WG public key is a SAFETY peer
-   * (pinned incl. priority/fleet/app-pin, OR health-tracked). Used by the DERP
-   * TX enqueue path to front-queue and protect the safety heartbeat frame from
-   * disco backpressure. Same cross-task read profile as ml_wg_region_for_pubkey:
-   * word-sized reads of the peer table, worst case a transiently stale answer. */
-  bool ml_wg_is_safety_pubkey(microlink_t * ml, const uint8_t * wg_pubkey);
+  /* DERP-egress classification for a destination pubkey. Returns the priority-
+   * queue bit (pinned OR health-tracked); *mirror_out = heartbeat carriers only
+   * (priority OR health-tracked — excludes the fleet pin). Same cross-task read
+   * profile as ml_wg_region_for_pubkey. */
+  bool ml_wg_tx_class_pubkey(microlink_t * ml, const uint8_t * wg_pubkey, bool * mirror_out);
   /* Collect the DISTINCT DERP regions of the safety peers exempt from the
    * peer-scaling armor (pinned OR priority OR health-tracked). Writes up to
    * `max` region ids into `out`, returns the count. Used by the DERP task to
