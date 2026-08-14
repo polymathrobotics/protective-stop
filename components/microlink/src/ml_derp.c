@@ -1102,8 +1102,11 @@ static void derp_drive_connects(microlink_t * ml, int aux_burst[], uint64_t * co
   static int s_scan_rotor; /* rotate the non-home scan start so the crypto cap
                             * can't starve the same trailing slot (PR #95 review) */
   s_scan_rotor = (s_scan_rotor + 1) % ML_DERP_MAX_CONNS;
-  for (int k = 0; k < ML_DERP_MAX_CONNS; k++) {
-    int idx = (k == 0) ? hs : ((k - 1 + s_scan_rotor) % ML_DERP_MAX_CONNS); /* home first, rotated rest */
+  /* home first (k==0), then ALL SIX rotated residues (k=1..6) — k-1+rotor for
+   * k<6 only yields 5 consecutive residues, silently skipping one non-home
+   * slot most passes (PR #95 review). hs is deduped when it appears. */
+  for (int k = 0; k <= ML_DERP_MAX_CONNS; k++) {
+    int idx = (k == 0) ? hs : ((k - 1 + s_scan_rotor) % ML_DERP_MAX_CONNS);
     if (k != 0 && idx == hs) continue; /* home already served at k==0 */
     ml_derp_conn_t * c = &ml->derp[idx];
     if (c->cstate == DERP_CS_IDLE) continue;
