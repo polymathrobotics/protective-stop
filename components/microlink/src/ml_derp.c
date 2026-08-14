@@ -1433,47 +1433,47 @@ void ml_derp_tx_task(void * arg)
       /* Stage-0 gauge: gap between consecutive rx-poll passes (the quantity the
        * async engine exists to bound). Tracked only while home is connected. */
       {
-      static uint64_t s_last_rx_poll_ms = 0;
-      uint64_t rx_now = ml_get_time_ms();
-      if (home->connected && s_last_rx_poll_ms != 0) {
-        uint32_t gap = (uint32_t)(rx_now - s_last_rx_poll_ms);
-        if (gap > s_diag_rx_gap_worst_ms) s_diag_rx_gap_worst_ms = gap;
+        static uint64_t s_last_rx_poll_ms = 0;
+        uint64_t rx_now = ml_get_time_ms();
+        if (home->connected && s_last_rx_poll_ms != 0) {
+          uint32_t gap = (uint32_t)(rx_now - s_last_rx_poll_ms);
+          if (gap > s_diag_rx_gap_worst_ms) s_diag_rx_gap_worst_ms = gap;
+        }
+        s_last_rx_poll_ms = rx_now;
       }
-      s_last_rx_poll_ms = rx_now;
-    }
 
-    /* ---- Phase 2: Poll for incoming DERP frames from ALL connected conns,
+      /* ---- Phase 2: Poll for incoming DERP frames from ALL connected conns,
          *      HOME first/most so the safety path stays prompt. Iteration starts
          *      at the home INDEX (not slot 0) since the MBB refactor. Sockets
          *      are O_NONBLOCK so each idle poll returns immediately. ---- */
-    for (int k = 0; k < ML_DERP_MAX_CONNS; k++) {
-      int s = (ml->derp_home_slot + k) % ML_DERP_MAX_CONNS;
-      ml_derp_conn_t * c = &ml->derp[s];
-      if (!c->connected) continue;
-      for (int burst = 0; burst < 4; burst++) {
-        int ret = poll_derp_read(ml, c);
-        if (ret > 0) {
-          frames_rx++;
-          c->last_recv_ms = ml_get_time_ms();
-        } else if (ret == 0) {
-          break; /* No more data / timeout */
-        } else {
-          ESP_LOGW(
-            TAG,
-            "DERP read error %d on %s conn (region %u)",
-            ret,
-            (c == home) ? "home" : "aux",
-            (unsigned)c->region_id);
-          c->connected = false;
-          if (c == home) {
-            xEventGroupSetBits(ml->events, ML_EVT_DERP_RECONNECT);
+      for (int k = 0; k < ML_DERP_MAX_CONNS; k++) {
+        int s = (ml->derp_home_slot + k) % ML_DERP_MAX_CONNS;
+        ml_derp_conn_t * c = &ml->derp[s];
+        if (!c->connected) continue;
+        for (int burst = 0; burst < 4; burst++) {
+          int ret = poll_derp_read(ml, c);
+          if (ret > 0) {
+            frames_rx++;
+            c->last_recv_ms = ml_get_time_ms();
+          } else if (ret == 0) {
+            break; /* No more data / timeout */
           } else {
-            ml_derp_disconnect(ml, c); /* free TLS now; manage_aux reconnects */
+            ESP_LOGW(
+              TAG,
+              "DERP read error %d on %s conn (region %u)",
+              ret,
+              (c == home) ? "home" : "aux",
+              (unsigned)c->region_id);
+            c->connected = false;
+            if (c == home) {
+              xEventGroupSetBits(ml->events, ML_EVT_DERP_RECONNECT);
+            } else {
+              ml_derp_disconnect(ml, c); /* free TLS now; manage_aux reconnects */
+            }
+            break;
           }
-          break;
         }
       }
-    }
     } /* any_connected: Phase 1 + rx-gap gauge + Phase 2 */
 
     /* ---- Aux pool management at the TAIL: home is already serviced this
