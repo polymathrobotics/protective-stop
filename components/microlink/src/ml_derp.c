@@ -1615,7 +1615,12 @@ static void derp_cs_fail(microlink_t * ml, ml_derp_conn_t * c, const char * why)
     free(c->cs_tx_buf);
     c->cs_tx_buf = NULL;
   }
-  if (c->cs_used_dns_cache) {
+  if (c->cs_used_dns_cache && c->cstate <= DERP_CS_TCP_CONNECT) {
+    /* Invalidate the addr cache ONLY when the failure happened at/before TCP
+     * connect — a post-TCP failure (TLS/HTTP/DERP) proves the ADDRESS was
+     * fine, and re-resolving it re-introduces blocking DNS into storm-time
+     * reconnects (the >5s reconnect tail = the remaining no-path window for
+     * relay-bound remotes; run-29 disarms #1-#3). */
     derp_dns_cache_t * e = derp_dns_cache_find(c->cs_region ? c->cs_region : ML_DERP_REGION);
     if (e) e->addrlen = 0;
   }
