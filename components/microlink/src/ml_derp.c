@@ -3,23 +3,11 @@
 
 /**
  * @file ml_derp.c
- * @brief Unified DERP I/O Task + Connection Management
+ * @brief DERP relay client: multi-region connection pool + single I/O task.
  *
- * Single task handles BOTH reading and writing to DERP TLS connection.
- * This eliminates the need for a TLS mutex since only one task touches
- * the SSL context. Matches v1's single-threaded DERP model.
- *
- * Architecture:
- * - Poll for incoming DERP frames (TLS read) every iteration
- * - Drain TX queue between reads (TLS write)
- * - No mutex needed — single task owns the SSL context exclusively
- *
- * Backpressure strategy (from tailscaled):
- * When queue is full, dequeue oldest packet and retry up to 3 times.
- * If still full, drop the new packet.
- *
- * Reference: tailscale/wgengine/magicsock/derp.go (runDerpWriter)
- *            tailscale/derp/derphttp/derphttp_client.go
+ * Invariant: the DERP I/O task is the ONLY task that touches the pool's
+ * sockets, TLS contexts and connect state — no mutex by construction.
+ * Cross-task readers use word-sized volatile fields only.
  */
 
 #include <errno.h>
@@ -706,15 +694,10 @@ static void derp_manage_aux(microlink_t * ml, uint16_t eff_home, int aux_burst[]
     }
   }
 
-  /* 2) Ensure a conn for each wanted region. Stage-2: connects are ASYNC —
-   *    this function only KICKS a connect (bounded; the stepper in the task
-   *    loop advances it ~one syscall per iteration), so aux work can no longer
-   *    stall the home read / safety path at all. One new kick per call bounds
-   *    concurrent handshake crypto. */
-
-  /* (History: a defer-aux guard, then a pump-home-rx workaround lived here.
-   * Both are retired by the Stage-2 async engine — connects never block the
-   * loop, so the home conn's rx is serviced every iteration by construction.) */
+  /* 2) Ensure a conn for each wanted region. Connects are async: this only
+   *    KICKS (the task-loop stepper advances ~one syscall per iteration), so
+   *    aux work can never stall the home read / safety path. One new kick per
+   *    call bounds concurrent handshake crypto. */
   for (int w = 0; w < nwant; w++) {
     uint16_t rid = want[w];
     bool served = false;
@@ -749,7 +732,7 @@ static void derp_manage_aux(microlink_t * ml, uint16_t eff_home, int aux_burst[]
         if (s == hs) continue;
         if (
           !ml->derp[s].connected && !ml->derp[s].tls_inited && ml->derp[s].region_id == 0 &&
-          ml->derp[s].cstate == DERP_CS_IDLE) /* an in-flight TCP-phase connect is NOT free (PR #95 review) */
+          ml->derp[s].cstate == DERP_CS_IDLE) /* an in-flight TCP-phase connect is NOT free */
         {
           slot = s;
           break;
@@ -828,7 +811,7 @@ static int derp_free_aux_slot(microlink_t * ml)
     if (s == hs) continue;
     if (
       !ml->derp[s].connected && !ml->derp[s].tls_inited && ml->derp[s].region_id == 0 &&
-      ml->derp[s].cstate == DERP_CS_IDLE) /* in-flight TCP-phase connect != free (PR #95 review) */
+      ml->derp[s].cstate == DERP_CS_IDLE) /* in-flight TCP-phase connect != free */
     {
       return s;
     }
@@ -1112,11 +1095,11 @@ static void derp_drive_connects(microlink_t * ml, int aux_burst[])
   int crypto_steps = 0;
   int hs = ml->derp_home_slot;
   static int s_scan_rotor; /* rotate the non-home scan start so the crypto cap
-                            * can't starve the same trailing slot (PR #95 review) */
+                            * can't starve the same trailing slot */
   s_scan_rotor = (s_scan_rotor + 1) % ML_DERP_MAX_CONNS;
   /* home first (k==0), then ALL SIX rotated residues (k=1..6) — k-1+rotor for
    * k<6 only yields 5 consecutive residues, silently skipping one non-home
-   * slot most passes (PR #95 review). hs is deduped when it appears. */
+   * slot most passes. hs is deduped when it appears. */
   for (int k = 0; k <= ML_DERP_MAX_CONNS; k++) {
     int idx = (k == 0) ? hs : ((k - 1 + s_scan_rotor) % ML_DERP_MAX_CONNS);
     if (k != 0 && idx == hs) continue; /* home already served at k==0 */
@@ -1154,7 +1137,7 @@ static void derp_drive_connects(microlink_t * ml, int aux_burst[])
       } else {
         aux_burst[idx] = 0; /* reset fast-retry on success */
         if (idx == s_rescue_slot) {
-          s_derp_home_unreachable_fallbacks++; /* rescue aux CONFIRMED up (PR #95 review) */
+          s_derp_home_unreachable_fallbacks++; /* rescue aux CONFIRMED up */
           s_rescue_slot = -1;
         }
       }
@@ -1277,18 +1260,11 @@ void ml_derp_tx_task(void * arg)
             s_home_retry_burst++;
           }
 
-          /* ---- DERP design-review finding (2026-08): home-region unreachable ----
-           * Historically this block retried ml_effective_home_region() FOREVER.
-           * If that region's DERP server is genuinely TCP-unreachable (a transient
-           * regional outage, or a bad advised/locked region) slot 0 — the chip's
-           * inbound-reachability + relay conn — stayed down permanently. On a
-           * remote it is masked (the safety peer's region drives an event-driven
-           * re-home onto a reachable region), but a chip with no re-home driver
-           * (priority_peer_region==0) had NO recovery path. Fix: after N
-           * consecutive failed home attempts, fall back to a PROVEN-reachable
-           * region. The multi-region aux pool already holds live conns to other
-           * regions, so we lean on that as the reachability oracle. Bounded work,
-           * no reconnect storm; a LOCK is never silently abandoned. */
+          /* Home-region-unreachable escape: a chip with no re-home driver
+           * (priority_peer_region==0) would otherwise retry a TCP-dead region
+           * forever. After N consecutive failures, fall back to a PROVEN-
+           * reachable region (a live aux conn is the reachability oracle).
+           * A LOCK is never silently abandoned. */
           uint16_t home_region = ml_effective_home_region(ml);
           bool locked = (ml->derp_region_override != 0);
           bool try_fallback = (s_home_retry_burst >= ML_DERP_HOME_FALLBACK_AFTER);
@@ -1332,7 +1308,7 @@ void ml_derp_tx_task(void * arg)
                 }
               }
               int slot = (any_up || s_rescue_slot >= 0) ? -1 : derp_free_aux_slot(ml);
-              if (slot >= 0) { /* slot 0 is a legit aux once home migrated off it (PR #95 review) */
+              if (slot >= 0) { /* slot 0 is a legit aux once home migrated off it */
                 ESP_LOGW(
                   TAG,
                   "DERP home %u unreachable + pool dark; kicking rescue aux slot %d region %u (home retry retained)",
@@ -1340,7 +1316,7 @@ void ml_derp_tx_task(void * arg)
                   slot,
                   (unsigned)fb);
                 if (ml_derp_connect_kick(ml, &ml->derp[slot], fb) == ESP_OK) {
-                  s_rescue_slot = slot; /* counter increments on confirmed completion (PR #95 review) */
+                  s_rescue_slot = slot; /* counter increments on confirmed completion */
                 }
               }
             }
@@ -1352,22 +1328,11 @@ void ml_derp_tx_task(void * arg)
         ESP_LOGW(TAG, "DERP reconnect requested (home was %s)", home->connected ? "connected" : "disconnected");
         uint64_t reconn_t0 = ml_get_time_ms();
         ml_derp_disconnect(ml, home);
-        /* IMMEDIATE first reconnect (run-20/21/22 root cause, 2026-08-12
-         * DUT-host wire+journal evidence): an RST/EOF here is almost always a
-         * middlebox connection-table FLUSH (the office edge firewall RSTs
-         * long-lived DERP TCP across regions and rebinds NAT in the same
-         * instant), NOT a down server. The old unconditional 1000 ms pre-delay
-         * + TLS handshake pushed relay recovery past the 2 s pstop timeout —
-         * and because the same flush kills the direct hairpin simultaneously,
-         * the heartbeat had NO path for those seconds -> green drop. tailscaled
-         * recovers in <1 s (connGen++); match it: try NOW, back off (2 s) only
-         * on CONSECUTIVE failures (a genuinely-down server). A short yield lets
-         * ml_derp_disconnect's socket close settle without stalling recovery. */
-        /* Stage-3: immediate ASYNC kick (the run-20/21/22 immediate-reconnect
-         * fix, now non-blocking). The stepper drives it every iteration; the
-         * reconnect diag is recorded on completion (s_reconn_t0); failures
-         * re-kick via the periodic-retry cadence. A fresh socket is created
-         * by the kick, so no post-disconnect settle delay is needed. */
+        /* An RST/EOF here is usually a middlebox conn-table flush, not a down
+         * server, and the same flush kills the direct path — so kick an async
+         * reconnect IMMEDIATELY (any pre-delay eats into the 2 s pstop
+         * timeout). Failures re-kick via the periodic 5s/10s/60s cadence;
+         * reconnect diag is recorded on completion via s_reconn_t0. */
         s_reconn_t0 = reconn_t0;
         s_home_fb_pending = 0; /* an external reconnect supersedes the fallback intent */
         (void)ml_derp_connect_kick(ml, home, ml_effective_home_region(ml));
@@ -1598,13 +1563,13 @@ bool microlink_is_derp_paused(void)
  * ========================================================================== */
 
 /* Effective lookup region for a connect: 0 means "the compiled default"
- * (one definition; 4 former inline copies — PR #95 review). */
+ * (one definition, formerly inlined). */
 static inline uint16_t derp_lookup_region(uint16_t region_id)
 {
   return region_id ? region_id : ML_DERP_REGION;
 }
 
-/* Single home-conn identity test (4 call sites; PR #95 review). */
+/* Single home-conn identity test (4 call sites). */
 static inline bool derp_conn_is_home(const microlink_t * ml, const ml_derp_conn_t * c)
 {
   return c == &ml->derp[ml->derp_home_slot];
@@ -2091,7 +2056,7 @@ int ml_derp_connect_step(microlink_t * ml, ml_derp_conn_t * c)
           }
           int chunks = 0;
           while (c->cs_payload_got < c->cs_frame_len) {
-            if (++chunks > 8) return 0; /* bound per-call work (PR #95 review) */
+            if (++chunks > 8) return 0; /* bound per-call work */
             uint32_t remain = c->cs_frame_len - c->cs_payload_got;
             uint32_t chunk = remain > sizeof(c->cs_buf) ? (uint32_t)sizeof(c->cs_buf) : remain;
             int n = mbedtls_ssl_read(&c->ssl, c->cs_buf, chunk);

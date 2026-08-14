@@ -44,12 +44,12 @@ extern "C"
 #define DCS_LED_BRIGHTNESS_MIN \
   10 /* floor: the ring shows SAFETY state (RED STOP / GREEN OK /
                                    * PURPLE MISMATCH); 0% would blank all of it, persist across
-                                   * reboots, and leave no visible way back (PR #94 review + David).
+                                   * reboots, and leave no visible way back (review finding).
                                    * Mirrors the locate-mode timeout's anti-masking principle. */
 
   /* Single floor-clamp for the brightness value — used by the NVS read path,
- * the ring setter and the API handler so the three sites cannot drift
- * (PR #95 review). Sub-floor values clamp UP (never reject/blank). */
+ * the ring setter and the API handler so the three sites cannot drift.
+ * Sub-floor values clamp UP (never reject/blank). */
   static inline uint8_t dcs_led_brightness_floor(uint8_t pct)
   {
     return (pct < DCS_LED_BRIGHTNESS_MIN) ? (uint8_t)DCS_LED_BRIGHTNESS_MIN : pct;

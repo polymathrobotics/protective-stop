@@ -353,7 +353,7 @@ esp_err_t dcs_nvs_write_pstop_peers(const dcs_pstop_peer_rec_t recs[DCS_PSTOP_MA
      * (old image reads only ps_ip/ps_port) tracks slot 0 exactly — including a
      * CLEAR (ip=0/port=0 when unconfigured). Gating on configured left stale
      * legacy keys behind /api/pstop_peer?clear=1, silently resurrecting the
-     * cleared peer after a rollback (PR #95 review). */
+     * cleared peer after a rollback. */
     r = nvs_set_u32(h, DCS_NVS_KEY_PSTOP_IP, recs[0].configured ? recs[0].ip : 0u);
     if (r == ESP_OK) {
       r = nvs_set_u16(h, DCS_NVS_KEY_PSTOP_PORT, recs[0].configured ? recs[0].port : 0u);

@@ -720,7 +720,7 @@ bool ml_wg_is_health_tracked(uint32_t vpn_ip)
  * health-tracked peer. Used by teardown vetoes, session diagnostics, the
  * rekey-in-flight freeze, LRU-evict protection and the reingest sweep — one
  * predicate, so a future criterion change cannot drift across call sites
- * (PR #94 review: 6 hand-inlined copies had accumulated in this file).
+ * (6 hand-inlined copies had accumulated before it existed).
  * NOTE: distinct from ml_wg_tx_class_pubkey()'s pinned||health prio rule —
  * pinned covers reachability armor (fleet anchor etc.), not heartbeat carriage. */
 static bool is_safety_peer(microlink_t * ml, uint32_t vpn_ip)
@@ -1450,7 +1450,7 @@ static void pin_presence_heal(microlink_t * ml)
   uint64_t now = ml_get_time_ms();
   if (absent_ip == 0) {
     s_pin.absent_backoff_ms = 0; /* healthy — reset the backoff ladder */
-    s_pin.absent_next_ms = 0; /* and the gate, so a re-absence heals immediately (PR #95 review) */
+    s_pin.absent_next_ms = 0; /* and the gate, so a re-absence heals immediately */
     return;
   }
   if (s_pin.absent_next_ms != 0 && now < s_pin.absent_next_ms) {
@@ -1493,7 +1493,7 @@ static void neg_pin_tick(microlink_t * ml)
   bool home_alive = home->connected;
   if (pin != s_pin.last_target) {
     /* Operator re-pinned to a DIFFERENT region: the old target's backoff must
-     * not delay the new command (PR #95 review — a pin is a command). */
+     * not delay the new command. */
     s_pin.retry_at_ms = 0;
     s_pin.backoff_ms = 0;
   }
@@ -1520,7 +1520,7 @@ static void neg_pin_tick(microlink_t * ml)
    * a command; the mbb_target dedupe above is the only rate limit needed. */
   s_neg_pending_source = MICROLINK_REGION_SRC_LOCKED;
   s_pin.retry_at_ms = 0; /* leaving backoff: the re-issued MBB is in flight, not waiting —
-                          * keeps pin_backoff_pending telemetry truthful (PR #95 review) */
+                          * keeps pin_backoff_pending telemetry truthful */
   ml->mbb_target_region = pin;
   ml->mbb_generation++;
   s_pin.last_target = pin;
@@ -1553,8 +1553,8 @@ static void neg_consume_mbb_outcome(microlink_t * ml)
     }
     /* The commit ring feeds AUTONEG's switches/hour circuit breaker — operator
      * pin commits must not count against it, or a few pins in an hour suppress
-     * legitimate autoneg switching for up to an hour after unlock (PR #95
-     * review). The advert tail below is still wanted for pins. */
+     * legitimate autoneg switching for up to an hour after unlock. The advert
+     * tail below is still wanted for pins. */
     if (!pin_commit) {
       neg_note_commit(now);
     }
