@@ -273,6 +273,12 @@ extern "C"
  * window, diagnostics-only — newest entries are always intact). */
 #define ML_STALL_RING_LEN 8
 #define ML_STALL_THRESH_MS 1000
+/* §7b: cap on how long an ingest-busy signal may defer the peer-cache flash
+ * flush — durability (boot preseed) must survive sustained storms. */
+#define ML_PEER_NVS_FLUSH_MAX_DEFER_MS 30000
+/* §7c: learned-region stash TTL — a fleet that MOVED regions while its peer
+ * entry was absent must not pin a stale region indefinitely. */
+#define ML_REGION_STASH_TTL_MS 1800000
 
   typedef struct
   {
@@ -284,6 +290,8 @@ extern "C"
     uint16_t disco_opens; /* unknown-key box-opens this pass */
     uint16_t periodic_ms; /* wireguardif_periodic duration this pass */
     uint16_t disco_probe_ms; /* disco_periodic_probes duration this pass */
+    uint16_t cmm_sends; /* CallMeMaybe seals this pass (~30 ms each) */
+    uint16_t nvs_flush_ms; /* peer-cache flash-flush wall-clock this pass */
   } ml_wg_stall_event_t;
 
   typedef struct
@@ -992,6 +1000,8 @@ extern "C"
   /* Handshake-budget diag: out[0]=deferred (requeued), out[1]=dropped (cap/full). */
   void ml_wg_get_hs_budget_diag(uint32_t out[2]);
   bool ml_wg_fleet_configured(microlink_t * ml);
+  /* §7a/§7c diag: out[0]=unchanged re-adds skipped, out[1]=region stash restores. */
+  void ml_wg_get_ingest_diag(uint32_t out[2]);
   /* wg_rx edge drops at each producer (queue-full sheds, previously silent). */
   uint32_t ml_net_io_get_wg_rx_drops(void);
   uint32_t ml_derp_get_wg_rx_drops(void);
@@ -1164,7 +1174,9 @@ extern "C"
   int ml_peer_nvs_load_all(ml_peer_t * peers, int max_peers);
   /* Deferred flash flush of the peer cache (writes are debounced: saves only
  * update the PSRAM working copy; call this ~once per wg_mgr pass). */
-  esp_err_t ml_peer_nvs_flush_if_due(uint64_t now_ms);
+  esp_err_t ml_peer_nvs_flush_if_due(uint64_t now_ms, bool ingest_busy);
+  /* Flush timing diag: out[0]=last ms, out[1]=max ms, out[2]=count. */
+  void ml_peer_nvs_get_flush_diag(uint32_t out[3]);
   /* Mark a peer (by VPN IP, host order) as never-LRU-evicted from the cache.
  * Bounded set (priority peer, fleet server, app-pinned operator remotes):
  * these keys feed the boot-time WG preseed that answers cold inbound

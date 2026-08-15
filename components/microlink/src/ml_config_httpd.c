@@ -1109,6 +1109,17 @@ static esp_err_t handler_monitor(httpd_req_t * req)
         cJSON_AddNumberToObject(json, "wg_hs_dropped", hs[1]);
         cJSON_AddNumberToObject(json, "wg_rx_drops_netio", ml_net_io_get_wg_rx_drops());
         cJSON_AddNumberToObject(json, "wg_rx_drops_derp", ml_derp_get_wg_rx_drops());
+        {
+          uint32_t ig[2] = {0};
+          ml_wg_get_ingest_diag(ig);
+          cJSON_AddNumberToObject(json, "peer_readds_skipped", ig[0]);
+          cJSON_AddNumberToObject(json, "region_stash_restores", ig[1]);
+          uint32_t fl[3] = {0};
+          ml_peer_nvs_get_flush_diag(fl);
+          cJSON_AddNumberToObject(json, "nvs_flush_last_ms", fl[0]);
+          cJSON_AddNumberToObject(json, "nvs_flush_max_ms", fl[1]);
+          cJSON_AddNumberToObject(json, "nvs_flush_count", fl[2]);
+        }
         ml_wg_stall_event_t we[ML_STALL_RING_LEN];
         int wn = ml_wg_get_stall_events(we, ML_STALL_RING_LEN);
         cJSON * wa = cJSON_AddArrayToObject(json, "wg_stall_events");
@@ -1122,6 +1133,8 @@ static esp_err_t handler_monitor(httpd_req_t * req)
           cJSON_AddNumberToObject(e, "opens", we[i].disco_opens);
           cJSON_AddNumberToObject(e, "periodic_ms", we[i].periodic_ms);
           cJSON_AddNumberToObject(e, "probe_ms", we[i].disco_probe_ms);
+          cJSON_AddNumberToObject(e, "cmm", we[i].cmm_sends);
+          cJSON_AddNumberToObject(e, "flush_ms", we[i].nvs_flush_ms);
           cJSON_AddItemToArray(wa, e);
         }
         ml_derp_stall_event_t de[ML_STALL_RING_LEN];
@@ -1170,6 +1183,7 @@ static esp_err_t handler_monitor(httpd_req_t * req)
        * rx gap from a safety peer. ~2000 during a flush = a ~2s inbound stall on
        * THIS node = the disarm cause, even with derp_reconnects=0. */
       cJSON_AddNumberToObject(json, "rx_worst_gap_ms", sd[3]);
+      cJSON_AddNumberToObject(json, "rx_worst_gap_at_s", sd[4] / 1000);
 
       /* Same-LAN direct-path diagnostics for the priority peer (the machine):
        * what LAN endpoint we advertise, which candidate endpoints we hold for

@@ -528,7 +528,10 @@ static void wireguardif_process_data_message(struct wireguard_device *device, st
 					// direct->relay handover (2026-08-12 edge-flush investigation).
 					if (peer->last_rx != 0) {
 						uint32_t gap = now - peer->last_rx;
-						if (gap > peer->worst_rx_gap) peer->worst_rx_gap = gap;
+						if (gap > peer->worst_rx_gap) {
+							peer->worst_rx_gap = gap;
+							peer->worst_rx_gap_at_ms = now;
+						}
 					}
 					keypair->last_rx = now;
 					peer->last_rx = now;
@@ -1111,6 +1114,13 @@ err_t wireguardif_peer_worst_rx_gap(struct netif *netif, u8_t peer_index, u32_t 
 	struct wireguard_peer *peer;
 	err_t result = wireguardif_lookup_peer(netif, peer_index, &peer);
 	if (result == ERR_OK && worst_gap_ms) *worst_gap_ms = peer->worst_rx_gap;
+	return result;
+}
+
+err_t wireguardif_peer_worst_rx_gap_at(struct netif *netif, u8_t peer_index, u32_t *at_ms) {
+	struct wireguard_peer *peer;
+	err_t result = wireguardif_lookup_peer(netif, peer_index, &peer);
+	if (result == ERR_OK && at_ms) *at_ms = peer->worst_rx_gap_at_ms;
 	return result;
 }
 

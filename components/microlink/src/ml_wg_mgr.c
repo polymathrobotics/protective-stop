@@ -69,6 +69,8 @@ static uint16_t s_pass_peer_adds;
 static uint16_t s_pass_disco_opens;
 static uint16_t s_pass_periodic_ms;
 static uint16_t s_pass_probe_ms;
+static uint16_t s_pass_cmm_sends; /* counted in disco_send_call_me_maybe (6 call sites) */
+static uint16_t s_pass_nvs_flush_ms; /* flash-flush wall-clock this pass */
 
 /* Stall-event ring: wg_mgr-owned writer; entries published via a
  * release-stored index so httpd never reads a torn published entry. */
@@ -921,7 +923,7 @@ void ml_wg_get_session_diag(microlink_t * ml, uint32_t out[5])
   out[1] = 0; /* max safety keypair age ms (0xFFFFFFFF = a peer has NO valid key) */
   out[2] = 0; /* max safety handshake-init TX age ms */
   out[3] = 0; /* max safety worst any-path rx gap ms (edge-flush receive-stall metric) */
-  out[4] = 0; /* reserved */
+  out[4] = 0; /* WHEN out[3]'s max was recorded (sys_now ms) — dates the gauge */
   if (ml == NULL || ml->wg_netif == NULL) return;
   for (int i = 0; i < ml->peer_count; i++) {
     ml_peer_t * p = &ml->peers[i];
@@ -942,6 +944,10 @@ void ml_wg_get_session_diag(microlink_t * ml, uint32_t out[5])
       rx_worst > out[3])
     {
       out[3] = rx_worst;
+      u32_t at = 0;
+      if (wireguardif_peer_worst_rx_gap_at((struct netif *)ml->wg_netif, (u8_t)p->wg_peer_index, &at) == ERR_OK) {
+        out[4] = at;
+      }
     }
   }
 }
@@ -1798,7 +1804,72 @@ static void wg_install_iface_peer(microlink_t * ml, int idx)
   }
 }
 
-static int add_peer(microlink_t * ml, const ml_peer_update_t * update)
+/* §7c learned-region stash: REMOVE→re-ADD of a pinned peer lands in a fresh
+ * (or reused) slot with nothing to preserve, and machn's map omits the fleet
+ * node's region — so the learned region died on every re-ingest cycle and
+ * mirror diversity silently followed. Keyed by vpn_ip (pin identity is
+ * IP-keyed; also survives key rotation), TTL-bounded so a fleet that MOVED
+ * regions while absent cannot pin a stale one indefinitely. wg_mgr-task-owned. */
+typedef struct
+{
+  uint32_t vpn_ip;
+  uint16_t region;
+  uint64_t stamp_ms;
+} region_stash_t;
+
+static region_stash_t s_region_stash[4];
+static uint32_t s_diag_region_stash_restores;
+static uint32_t s_diag_readds_skipped;
+
+void ml_wg_get_ingest_diag(uint32_t out[2])
+{
+  out[0] = s_diag_readds_skipped;
+  out[1] = s_diag_region_stash_restores;
+}
+
+static void region_stash_put(uint32_t vpn_ip, uint16_t region)
+{
+  int slot = 0;
+  for (int i = 0; i < 4; i++) {
+    if (s_region_stash[i].vpn_ip == vpn_ip) {
+      slot = i;
+      break;
+    }
+    if (s_region_stash[i].stamp_ms < s_region_stash[slot].stamp_ms) slot = i;
+  }
+  s_region_stash[slot].vpn_ip = vpn_ip;
+  s_region_stash[slot].region = region;
+  s_region_stash[slot].stamp_ms = ml_get_time_ms();
+}
+
+static uint16_t region_stash_lookup(uint32_t vpn_ip)
+{
+  uint64_t now = ml_get_time_ms();
+  for (int i = 0; i < 4; i++) {
+    if (s_region_stash[i].vpn_ip == vpn_ip && now - s_region_stash[i].stamp_ms < ML_REGION_STASH_TTL_MS) {
+      return s_region_stash[i].region;
+    }
+  }
+  return 0;
+}
+
+/* §7a: does this re-add carry endpoints identical to the stored set (or none)? */
+static bool readd_endpoints_unchanged(const ml_peer_t * p, const ml_peer_update_t * u)
+{
+  if (u->endpoint_count == 0) return true;
+  if (u->endpoint_count != p->endpoint_count) return false;
+  for (int i = 0; i < u->endpoint_count && i < ML_MAX_ENDPOINTS; i++) {
+    if (
+      u->endpoints[i].ip != p->endpoints[i].ip || u->endpoints[i].port != p->endpoints[i].port ||
+      u->endpoints[i].is_ipv6 != p->endpoints[i].is_ipv6)
+    {
+      return false;
+    }
+  }
+  return true;
+}
+
+static int add_peer(microlink_t * ml, const ml_peer_update_t * update, bool * skipped)
 {
   /* Peer allowlist filter: don't waste WG slots on non-allowed peers.
      * Still process updates for existing peers (they may become allowed later). */
@@ -1924,6 +1995,39 @@ static int add_peer(microlink_t * ml, const ml_peer_update_t * update)
   }
 
   ml_peer_t * p = &ml->peers[idx];
+
+  /* §7a skip-unchanged re-add: full re-ingests re-ADD every peer each
+   * re-register; when nothing material changed, the only consequential
+   * effect below is ml_peer_nvs_save() dirtying the peer cache — whose
+   * debounced FLASH flush suspends both cores (the run-34 stall clusters).
+   * Skip everything except the two load-bearing RAM-only side effects:
+   * LRU protection (rebuilt each boot) and the relay-retry re-arm. Any
+   * material change — dropped WG slot, IP/disco-key/hostname/region/
+   * endpoint delta — takes the full path. Hostname compared in stored-
+   * truncation space so an over-long name cannot defeat the skip forever. */
+  if (
+    existing && p->wg_peer_index >= 0 && update->vpn_ip == p->vpn_ip &&
+    memcmp(update->disco_key, p->disco_key, 32) == 0 &&
+    strncmp(update->hostname, p->hostname, sizeof(p->hostname) - 1) == 0 &&
+    (update->derp_region == 0 || update->derp_region == p->derp_region) && readd_endpoints_unchanged(p, update))
+  {
+    if (
+      is_pinned_peer(ml, p->vpn_ip) ||
+      (ml->peer_wanted_cb != NULL && ml->peer_wanted_cb(ml->peer_wanted_ctx, p->hostname, p->vpn_ip)))
+    {
+      ml_peer_nvs_set_protected(p->vpn_ip); /* protected set is RAM-only */
+    }
+    if (
+      update->endpoint_count > 0 && !p->has_direct_path &&
+      (is_pinned_peer(ml, p->vpn_ip) || is_health_tracked(p->vpn_ip)))
+    {
+      p->relay_retry_next_ms = 1; /* identical endpoints still re-arm the sweep */
+    }
+    s_diag_readds_skipped++;
+    if (skipped) *skipped = true;
+    return idx;
+  }
+
   p->vpn_ip = update->vpn_ip;
   memcpy(p->public_key, update->public_key, 32);
   memcpy(p->disco_key, update->disco_key, 32);
@@ -1938,6 +2042,14 @@ static int add_peer(microlink_t * ml, const ml_peer_update_t * update)
      * region. */
   if (update->derp_region != 0) {
     p->derp_region = update->derp_region;
+  } else if (!existing) {
+    /* Fresh (or reused) slot: nothing to preserve — a reused slot's leftover
+     * region from a PREVIOUS occupant must not leak in (slot contamination
+     * feeds maybe_rehome + the aux want-set). Consult the pinned-peer stash
+     * instead: a re-added pin recovers its learned region across the
+     * REMOVE→ADD cycle that re-ingests otherwise lose (task #42). */
+    p->derp_region = region_stash_lookup(update->vpn_ip);
+    if (p->derp_region != 0) s_diag_region_stash_restores++;
   }
   p->active = true;
   maybe_rehome_to_priority(ml, p);
@@ -1965,6 +2077,9 @@ static int add_peer(microlink_t * ml, const ml_peer_update_t * update)
     if (existing && !p->has_direct_path && (is_pinned_peer(ml, p->vpn_ip) || is_health_tracked(p->vpn_ip))) {
       p->relay_retry_next_ms = 1;
     }
+  } else if (!existing) {
+    p->endpoint_count = 0; /* fresh/reused slot: never inherit a previous
+                            * occupant's endpoints (slot contamination) */
   }
 
   /* Initialize DISCO/direct-path state — ONLY for a genuinely new peer.
@@ -2109,6 +2224,12 @@ static void remove_peer(microlink_t * ml, const ml_peer_update_t * update)
   microlink_ip_to_str(ml->peers[idx].vpn_ip, ip_str);
   ESP_LOGI(TAG, "Peer removed: %s (%s)", ml->peers[idx].hostname, ip_str);
 
+  /* §7c: a pinned peer's learned region survives the REMOVE→re-ADD cycle
+   * full re-ingests produce (the re-ADD often carries region 0). */
+  if (is_pinned_peer(ml, ml->peers[idx].vpn_ip) && ml->peers[idx].derp_region != 0) {
+    region_stash_put(ml->peers[idx].vpn_ip, ml->peers[idx].derp_region);
+  }
+
   ml->peers[idx].active = false;
 
   /* Compact peer_count */
@@ -2125,22 +2246,25 @@ static void process_peer_updates(microlink_t * ml)
   while (!paced_out && (xQueueReceive(ml->peer_update_queue, &update, 0) == pdTRUE)) {
     if (!update) continue;
     switch (update->action) {
-      case ML_PEER_ADD:
-        add_peer(ml, update);
+      case ML_PEER_ADD: {
+        bool skipped = false;
+        add_peer(ml, update, &skipped);
         /* Interleave any pending safety-heartbeat decrypt between the heavy
-             * X25519 peer-adds so a 10 Hz heartbeat is never starved behind a
+             * X25519 peer-adds so a heartbeat is never starved behind a
              * netmap-resync burst. */
         wg_mgr_drain_wg_rx(ml);
-        /* Each add costs an X25519 (~30 ms). Ingesting a 100-peer
-             * MapResponse in one pass stalled the loop for ~10 s while the
-             * pstop RX queue overflowed — pace it and let the 10 ms loop
-             * come back for the rest. */
-        adds_this_pass++;
-        s_pass_peer_adds++;
-        if (adds_this_pass >= ML_PEER_ADDS_PER_PASS) {
-          paced_out = true;
+        /* Each REAL add costs an X25519 (~30 ms) — pace those. A skipped
+             * unchanged re-add is ~µs and consumes no pacing slot, so a full
+             * unchanged-map re-ingest drains in a couple of passes. */
+        if (!skipped) {
+          adds_this_pass++;
+          s_pass_peer_adds++;
+          if (adds_this_pass >= ML_PEER_ADDS_PER_PASS) {
+            paced_out = true;
+          }
         }
         break;
+      }
       case ML_PEER_REMOVE:
         remove_peer(ml, update);
         break;
@@ -3334,6 +3458,8 @@ static void disco_send_call_me_maybe(microlink_t * ml, int peer_idx)
   }
 
   /* Build plaintext: [type(1)][version(1)][endpoints(N * 18)] */
+  s_pass_cmm_sends++; /* ring attribution: each CMM ends in a ~30 ms NaCl seal
+                       * (rare no-endpoint bail below over-counts by one) */
   uint8_t plaintext[2 + 3 * 18]; /* Up to 3 endpoints */
   int pt_len = 0;
   int ep_count = 0;
@@ -4108,13 +4234,20 @@ void ml_wg_mgr_task(void * arg)
     s_pass_disco_opens = 0;
     s_pass_periodic_ms = 0;
     s_pass_probe_ms = 0;
+    s_pass_cmm_sends = 0;
+    s_pass_nvs_flush_ms = 0;
     wg_mgr_drain_wg_rx(ml);
 
     /* Process peer updates from coord task (paced) */
     process_peer_updates(ml);
 
     /* Debounced peer-cache flash flush (see ml_peer_nvs.c). */
-    (void)ml_peer_nvs_flush_if_due(ml_get_time_ms());
+    {
+      uint64_t f0 = ml_get_time_ms();
+      (void)ml_peer_nvs_flush_if_due(f0, uxQueueMessagesWaiting(ml->peer_update_queue) > 0);
+      uint64_t fd = ml_get_time_ms() - f0;
+      s_pass_nvs_flush_ms = (fd > 0xFFFF) ? 0xFFFF : (uint16_t)fd;
+    }
 
     /* Track DERP connection state for DISCO.
          * Note: We DON'T re-initiate WG handshakes on DERP connect because
@@ -4260,6 +4393,8 @@ void ml_wg_mgr_task(void * arg)
         e->disco_opens = s_pass_disco_opens;
         e->periodic_ms = s_pass_periodic_ms;
         e->disco_probe_ms = s_pass_probe_ms;
+        e->cmm_sends = s_pass_cmm_sends;
+        e->nvs_flush_ms = s_pass_nvs_flush_ms;
         __atomic_store_n(&s_wg_stall_widx, w + 1, __ATOMIC_RELEASE);
         ESP_LOGW(
           TAG,

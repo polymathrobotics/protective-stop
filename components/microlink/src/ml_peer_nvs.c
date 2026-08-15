@@ -20,6 +20,7 @@
 #include <string.h>
 
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "microlink_internal.h"
 #include "nvs.h"
 #include "nvs_flash.h"
@@ -245,7 +246,21 @@ void ml_peer_nvs_set_protected(uint32_t vpn_ip)
   s_protected_ips[s_protected_count++] = vpn_ip;
 }
 
-esp_err_t ml_peer_nvs_flush_if_due(uint64_t now_ms)
+/* Flush timing diag (§7 R6): the flash commit suspends flash-resident
+ * execution on BOTH cores — these gauges make that cost measurable and the
+ * fix falsifiable (flush_count flat in steady state = §7a working). */
+static uint32_t s_diag_flush_last_ms;
+static uint32_t s_diag_flush_max_ms;
+static uint32_t s_diag_flush_count;
+
+void ml_peer_nvs_get_flush_diag(uint32_t out[3])
+{
+  out[0] = s_diag_flush_last_ms;
+  out[1] = s_diag_flush_max_ms;
+  out[2] = s_diag_flush_count;
+}
+
+esp_err_t ml_peer_nvs_flush_if_due(uint64_t now_ms, bool ingest_busy)
 {
   if (!s_initialized || !s_dirty) {
     return ESP_OK;
@@ -253,9 +268,24 @@ esp_err_t ml_peer_nvs_flush_if_due(uint64_t now_ms)
   if ((now_ms - s_last_flush_ms) < PEER_NVS_FLUSH_INTERVAL_MS) {
     return ESP_OK;
   }
+  /* §7b quiet-gate: an ingest burst is the worst moment to suspend the
+   * cores for a flash commit — defer while updates are pending, CAPPED so
+   * a sustained storm cannot starve durability (the boot preseed for the
+   * cold-bond far-side gap depends on this cache). */
+  if (ingest_busy && (now_ms - s_last_flush_ms) < ML_PEER_NVS_FLUSH_MAX_DEFER_MS) {
+    return ESP_OK;
+  }
+  int64_t t0 = esp_timer_get_time();
+  esp_err_t r = flush_table();
+  uint32_t dur = (uint32_t)((esp_timer_get_time() - t0) / 1000);
+  s_diag_flush_last_ms = dur;
+  if (dur > s_diag_flush_max_ms) s_diag_flush_max_ms = dur;
+  s_diag_flush_count++;
   s_last_flush_ms = now_ms;
-  s_dirty = false;
-  return flush_table();
+  if (r == ESP_OK) {
+    s_dirty = false; /* keep the dirt on a failed flush */
+  }
+  return r;
 }
 
 int ml_peer_nvs_load_all(ml_peer_t * peers, int max_peers)
