@@ -2675,6 +2675,11 @@ static void process_disco_pong(
 
       p->best_ip = pkt->src_ip;
       p->best_port = pkt->src_port;
+      /* The pong that CAUSES an adoption is judged against the pre-update
+       * best_ip above and misses the liveness stamp — stamp here too, or a
+       * freshly promoted path is pong_dead'd against a stale timestamp on
+       * the next probe tick (spurious re-demote of a just-proven path). */
+      p->last_direct_pong_recv_ms = now;
 
       /* Update WireGuard endpoint to direct path.
              * Always update the stored endpoint. Only force a handshake if we

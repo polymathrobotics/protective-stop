@@ -1612,7 +1612,6 @@ static inline uint16_t derp_lookup_region(uint16_t region_id)
   return region_id ? region_id : ML_DERP_REGION;
 }
 
-
 /* Per-region resolved-address cache: skips blocking DNS on reconnect to the
  * same region (risk #7 in the plan). Invalidated when a connect that used the
  * cached address fails — the next kick does fresh DNS. DERP-task-owned. */
