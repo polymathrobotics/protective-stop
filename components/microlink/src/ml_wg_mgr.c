@@ -1816,7 +1816,7 @@ typedef struct
   uint64_t stamp_ms;
 } region_stash_t;
 
-static region_stash_t s_region_stash[4];
+static region_stash_t s_region_stash[ML_REGION_STASH_SLOTS];
 static uint32_t s_diag_region_stash_restores;
 static uint32_t s_diag_readds_skipped;
 
@@ -1829,7 +1829,7 @@ void ml_wg_get_ingest_diag(uint32_t out[2])
 static void region_stash_put(uint32_t vpn_ip, uint16_t region)
 {
   int slot = 0;
-  for (int i = 0; i < 4; i++) {
+  for (int i = 0; i < ML_REGION_STASH_SLOTS; i++) {
     if (s_region_stash[i].vpn_ip == vpn_ip) {
       slot = i;
       break;
@@ -1844,7 +1844,7 @@ static void region_stash_put(uint32_t vpn_ip, uint16_t region)
 static uint16_t region_stash_lookup(uint32_t vpn_ip)
 {
   uint64_t now = ml_get_time_ms();
-  for (int i = 0; i < 4; i++) {
+  for (int i = 0; i < ML_REGION_STASH_SLOTS; i++) {
     if (s_region_stash[i].vpn_ip == vpn_ip && now - s_region_stash[i].stamp_ms < ML_REGION_STASH_TTL_MS) {
       return s_region_stash[i].region;
     }

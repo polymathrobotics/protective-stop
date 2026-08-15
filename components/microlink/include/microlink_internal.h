@@ -279,6 +279,11 @@ extern "C"
 /* §7c: learned-region stash TTL — a fleet that MOVED regions while its peer
  * entry was absent must not pin a stale region indefinitely. */
 #define ML_REGION_STASH_TTL_MS 1800000
+/* Stash capacity = the NVS protected-pin bound (ML_NVS_MAX_PROTECTED): the
+ * stash only ever holds pinned peers' regions, so at this size a bulk
+ * remove-then-readd of every pin cannot LRU-evict an entry before its
+ * re-ADD consumes it. */
+#define ML_REGION_STASH_SLOTS 18
 
   typedef struct
   {

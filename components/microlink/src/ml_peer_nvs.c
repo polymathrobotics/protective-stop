@@ -75,6 +75,9 @@ static uint64_t s_last_flush_ms = 0;
  * eviction only ever happens inside runtime saves, when the pin sources are
  * live to re-mark them. Bounded; sized to ML_EXTRA_PINS + priority + fleet. */
 #define ML_NVS_MAX_PROTECTED 18
+/* The region stash serves exactly the protected-pin population; undersizing
+ * it re-opens the task-#42 silent region loss on a bulk pin re-ingest. */
+_Static_assert(ML_REGION_STASH_SLOTS >= ML_NVS_MAX_PROTECTED, "region stash must cover every protected pin");
 static uint32_t s_protected_ips[ML_NVS_MAX_PROTECTED];
 static int s_protected_count = 0;
 #define PEER_NVS_FLUSH_INTERVAL_MS 5000u
