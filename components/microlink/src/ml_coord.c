@@ -44,8 +44,13 @@ static const char * TAG = "ml_coord";
  * read via ml_coord_get_reregisters for /admin/api/monitor). */
 static uint32_t s_diag_coord_reregisters;
 /* The next successful connect is a scheduled re-register, not a flap: keep it
- * out of connect_count so ml_reconnects stays a pure flap signal for soaks. */
+ * out of connect_count so ml_reconnects stays a pure flap signal for soaks.
+ * Any GENUINE reconnect trigger clears it so a real flap is never masked. */
 static bool s_rereg_skip_count;
+/* Last re-registration, scheduled or not: EVERY successful connect
+ * re-registers, so the periodic timer restarts from it (no redundant cycle
+ * seconds after a genuine reconnect). */
+static uint64_t s_last_rereg_ms;
 
 uint32_t ml_coord_get_reregisters(void)
 {
@@ -2534,6 +2539,7 @@ void ml_coord_task(void * arg)
           ml->state = ML_STATE_IDLE;
           break;
         case ML_CMD_FORCE_RECONNECT:
+          s_rereg_skip_count = false; /* genuine trigger: count the reconnect */
           state = COORD_RECONNECTING;
           break;
         case ML_CMD_UPDATE_ENDPOINTS:
@@ -2702,6 +2708,7 @@ void ml_coord_task(void * arg)
         } else {
           ml->connect_count++; /* 1 = first connect; >1 = a control-plane reconnect (soak telemetry) */
         }
+        s_last_rereg_ms = ml_get_time_ms(); /* every connect re-registers */
         reconnect_attempts = 0;
         last_activity_ms = ml_get_time_ms();
 
@@ -2887,10 +2894,9 @@ void ml_coord_task(void * arg)
          * re-registers hitlessly (peers/WG preserved, map re-ingest is
          * hitless), so run it on a timer as the standing cure. */
         {
-          static uint64_t last_rereg_ms = 0;
-          if (last_rereg_ms == 0) last_rereg_ms = now;
-          if (now - last_rereg_ms > ML_COORD_REREGISTER_MS) {
-            last_rereg_ms = now;
+          if (s_last_rereg_ms == 0) s_last_rereg_ms = now;
+          if (now - s_last_rereg_ms > ML_COORD_REREGISTER_MS) {
+            s_last_rereg_ms = now;
             s_diag_coord_reregisters++;
             s_rereg_skip_count = true;
             ESP_LOGI(TAG, "Periodic coord re-register #%u", (unsigned)s_diag_coord_reregisters);
@@ -2907,6 +2913,7 @@ void ml_coord_task(void * arg)
             if (ml->key_expired) {
               if (ml->config.auth_key) {
                 ESP_LOGW(TAG, "Key expired, re-registering with auth_key...");
+                s_rereg_skip_count = false; /* genuine trigger: count it */
                 state = COORD_RECONNECTING;
                 break;
               } else {
