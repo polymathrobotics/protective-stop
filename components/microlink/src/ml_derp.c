@@ -1488,6 +1488,9 @@ void ml_derp_tx_task(void * arg)
           uint32_t gap = (uint32_t)(rx_now - s_last_rx_poll_ms);
           if (gap > s_diag_rx_gap_worst_ms) s_diag_rx_gap_worst_ms = gap;
           s_pass_rx_gap = (gap > 0xFFFF) ? 0xFFFF : (uint16_t)gap;
+        } else {
+          s_pass_rx_gap = 0; /* not measured this pass — a pool-dark stall
+                              * event must not carry a pre-disconnect gap */
         }
         s_last_rx_poll_ms = rx_now;
       }

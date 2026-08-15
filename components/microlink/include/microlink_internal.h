@@ -262,10 +262,15 @@ extern "C"
  * budget shared across every wg_rx drain site; excess defers (requeue to
  * tail, capped), then drops — a late rekey fails SAFE. */
 #define ML_WG_HANDSHAKES_PER_PASS 3
-#define ML_WG_HS_REQUEUE_MAX 3
+/* Requeue cap counts POPS WHILE STARVED (a pass has up to 10 drain calls),
+ * so it must exceed one pass's worth of pops for a deferral to be
+ * guaranteed to reach the next pass's fresh budget; drops are reserved for
+ * sustained multi-pass starvation. */
+#define ML_WG_HS_REQUEUE_MAX 12
 /* Stall-event rings: per-event attribution (high-water gauges are blind
- * under their own mark). Task-owned writer, release-stored index, httpd
- * reads published entries only. */
+ * under their own mark). Task-owned writer, release-stored index; on wrap
+ * the OLDEST entry a reader copies can race the writer's next event (µs
+ * window, diagnostics-only — newest entries are always intact). */
 #define ML_STALL_RING_LEN 8
 #define ML_STALL_THRESH_MS 1000
 
