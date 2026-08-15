@@ -472,7 +472,7 @@ esp_err_t ml_derp_queue_send(microlink_t * ml, const uint8_t * dest_key, const u
    * (wg_mgr disco + the TCPIP-thread heartbeat via wg_derp_output_cb) with NO
    * cross-thread drain, and per-peer frame order is preserved (FIFO within a
    * queue -> no OK-after-STOP reordering). */
-  bool is_wg_handshake = (len >= 4 && (data[0] == 0x01 || data[0] == 0x02));
+  bool is_wg_handshake = ml_wg_is_handshake_frame(data, len);
   /* One classification walk: prio = pinned||health-tracked (fleet frames must
    * not sit behind a disco burst), mirror = heartbeat carriers only (priority
    * ||health-tracked — the fleet pin is reachability armor; doubling its bulk
@@ -1523,28 +1523,34 @@ void ml_derp_tx_task(void * arg)
         }
       }
     } /* any_connected: Phase 1 + rx-gap gauge + Phase 2 */
+    else
+    {
+      s_pass_rx_gap = 0; /* pool dark: a stall event recorded this pass must not
+                          * carry the last connected pass's gap */
+    }
 
-    /* rx-staleness reap: a conn we actively egress into that has returned
-     * NOTHING for ML_DERP_RX_STALE_MS is server-side black-holed or a
-     * half-dead TCP (a quiet registration loss TX'd replies into a denying
-     * server for 25 min with every local gauge clean). Cycle it; the
-     * reconnect re-auths against the (re-registered) control plane. Idle
-     * conns are exempt — nothing is owed back on them. */
+    /* rx-staleness reap, HOME conn only: a conn we actively egress into that
+     * has returned NOTHING for ML_DERP_RX_STALE_MS is server-side black-holed
+     * or a half-dead TCP (a quiet registration loss TX'd replies into a
+     * denying server for 25 min with every local gauge clean). Cycle it; the
+     * reconnect re-auths against the (re-registered) control plane. Aux conns
+     * are exempt — they are egress-only by construction (peers reply toward
+     * OUR home region; dual_path mirrors keep an aux tx-fresh with no rx ever
+     * owed), so this test would reap a healthy aux every ~150 s. Idle conns
+     * are exempt — nothing is owed back on them. */
     {
       uint64_t rnow = ml_get_time_ms();
-      for (int s = 0; s < ML_DERP_MAX_CONNS; s++) {
-        ml_derp_conn_t * c = &ml->derp[s];
-        if (!c->connected || c->last_relay_rx_ms == 0) continue;
-        if (rnow - c->last_relay_rx_ms <= ML_DERP_RX_STALE_MS) continue;
-        if (c->last_used_ms == 0 || rnow - c->last_used_ms > ML_DERP_RX_STALE_TX_ACTIVE_MS) continue;
+      if (
+        home->connected && home->last_relay_rx_ms != 0 && rnow - home->last_relay_rx_ms > ML_DERP_RX_STALE_MS &&
+        home->last_used_ms != 0 && rnow - home->last_used_ms <= ML_DERP_RX_STALE_TX_ACTIVE_MS)
+      {
         s_diag_rx_stale_reaps++;
         ESP_LOGW(
           TAG,
-          "DERP conn slot %d (region %u) tx-active but relay-rx-silent %us — reaping",
-          s,
-          (unsigned)c->region_id,
-          (unsigned)((rnow - c->last_relay_rx_ms) / 1000));
-        derp_reap_conn(ml, c);
+          "DERP home conn (region %u) tx-active but relay-rx-silent %us — reaping",
+          (unsigned)home->region_id,
+          (unsigned)((rnow - home->last_relay_rx_ms) / 1000));
+        derp_reap_conn(ml, home);
       }
     }
 

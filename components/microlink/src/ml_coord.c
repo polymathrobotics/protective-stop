@@ -3010,6 +3010,8 @@ void ml_coord_task(void * arg)
         ml_coord_cmd_t wake_cmd;
         if (xQueueReceive(ml->coord_cmd_queue, &wake_cmd, pdMS_TO_TICKS(backoff_ms)) == pdTRUE) {
           if (wake_cmd == ML_CMD_DISCONNECT) {
+            s_rereg_skip_count = false; /* abandoned re-register: a later genuine
+                                         * connect must count (mirrors top-of-loop) */
             state = COORD_IDLE;
             ml->state = ML_STATE_IDLE;
             break;

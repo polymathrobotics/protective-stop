@@ -53,6 +53,13 @@ ONE budgeted drain helper replaces ALL FIVE wg_rx processing sites (a
 single shared per-pass budget — a handshake deferred at one site must not
 be processed unbudgeted at another):
 
+> Scope caveat: "all five sites" covers the `wg_rx_queue` ingestion model
+> only. With `CONFIG_ML_ZERO_COPY_WG=y` (default n, no in-tree config
+> enables it), direct-UDP WG packets bypass the queue — `zc_pcb_recv_cb`
+> calls `wireguardif_network_rx()` inline on tcpip_thread — so a handshake
+> wave on that path runs unbudgeted under LOCK_TCPIP_CORE. Thread the same
+> budget into `ml_zerocopy.c` before enabling zero-copy.
+
 - Drain is SNAPSHOT-BOUNDED: `uxQueueMessagesWaiting()` at entry caps the
   pops this call — a requeued handshake cannot be re-popped in the same
   pass (the naive while-loop would livelock spinning on its own requeue).

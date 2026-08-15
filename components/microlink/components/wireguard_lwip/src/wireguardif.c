@@ -1110,17 +1110,15 @@ err_t wireguardif_peer_direct_rx_age(struct netif *netif, u8_t peer_index, u32_t
 // Worst inter-frame rx gap (any path) for this peer — the "received nothing"
 // window that maps to a heartbeat-timeout disarm. ~2000 during an edge flush
 // pinpoints a ~2s inbound stall on THIS node even if its DERP conn stayed up.
-err_t wireguardif_peer_worst_rx_gap(struct netif *netif, u8_t peer_index, u32_t *worst_gap_ms) {
+err_t wireguardif_peer_worst_rx_gap(struct netif *netif, u8_t peer_index, u32_t *worst_gap_ms, u32_t *at_ms) {
 	struct wireguard_peer *peer;
 	err_t result = wireguardif_lookup_peer(netif, peer_index, &peer);
-	if (result == ERR_OK && worst_gap_ms) *worst_gap_ms = peer->worst_rx_gap;
-	return result;
-}
-
-err_t wireguardif_peer_worst_rx_gap_at(struct netif *netif, u8_t peer_index, u32_t *at_ms) {
-	struct wireguard_peer *peer;
-	err_t result = wireguardif_lookup_peer(netif, peer_index, &peer);
-	if (result == ERR_OK && at_ms) *at_ms = peer->worst_rx_gap_at_ms;
+	if (result == ERR_OK) {
+		// One lookup for both fields: fetched separately, a new record landing
+		// between the calls paired the old gap with the new timestamp.
+		if (worst_gap_ms) *worst_gap_ms = peer->worst_rx_gap;
+		if (at_ms) *at_ms = peer->worst_rx_gap_at_ms;
+	}
 	return result;
 }
 

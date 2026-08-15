@@ -1050,6 +1050,14 @@ extern "C"
     return ov ? ov : ml->derp_home_region;
   }
 
+  /* WG handshake frame (Initiation 0x01 / Response 0x02). The DERP tx priority
+   * router and the wg-rx handshake budget must classify identically — one
+   * predicate, not two hand-synced copies. */
+  static inline bool ml_wg_is_handshake_frame(const uint8_t * data, size_t len)
+  {
+    return len >= 4 && (data[0] == 0x01 || data[0] == 0x02);
+  }
+
   /* ml_coord.c */
   void ml_coord_task(void * arg);
 

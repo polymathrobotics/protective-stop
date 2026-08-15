@@ -939,15 +939,14 @@ void ml_wg_get_session_diag(microlink_t * ml, uint32_t out[5])
       if (init_age != 0xFFFFFFFFu && init_age > out[2]) out[2] = init_age;
     }
     u32_t rx_worst = 0;
+    u32_t rx_worst_at = 0;
     if (
-      wireguardif_peer_worst_rx_gap((struct netif *)ml->wg_netif, (u8_t)p->wg_peer_index, &rx_worst) == ERR_OK &&
+      wireguardif_peer_worst_rx_gap((struct netif *)ml->wg_netif, (u8_t)p->wg_peer_index, &rx_worst, &rx_worst_at) ==
+        ERR_OK &&
       rx_worst > out[3])
     {
       out[3] = rx_worst;
-      u32_t at = 0;
-      if (wireguardif_peer_worst_rx_gap_at((struct netif *)ml->wg_netif, (u8_t)p->wg_peer_index, &at) == ERR_OK) {
-        out[4] = at;
-      }
+      out[4] = rx_worst_at;
     }
   }
 }
@@ -2256,14 +2255,15 @@ static void process_peer_updates(microlink_t * ml)
       case ML_PEER_ADD: {
         bool skipped = false;
         add_peer(ml, update, &skipped);
-        /* Interleave any pending safety-heartbeat decrypt between the heavy
-             * X25519 peer-adds so a heartbeat is never starved behind a
-             * netmap-resync burst. */
-        wg_mgr_drain_wg_rx(ml);
-        /* Each REAL add costs an X25519 (~30 ms) — pace those. A skipped
-             * unchanged re-add is ~µs and consumes no pacing slot, so a full
-             * unchanged-map re-ingest drains in a couple of passes. */
+        /* Each REAL add costs an X25519 (~30 ms) — pace those, and interleave
+             * a wg-rx drain after each so a heartbeat is never starved behind a
+             * netmap-resync burst. A skipped unchanged re-add is ~µs: no pacing
+             * slot and no drain — ML_WG_HS_REQUEUE_MAX sizing assumes at most
+             * ML_PEER_ADDS_PER_PASS drains per pass, and a long all-unchanged
+             * re-ingest must not pop a budget-deferred handshake to its requeue
+             * cap within a single pass. */
         if (!skipped) {
+          wg_mgr_drain_wg_rx(ml);
           adds_this_pass++;
           s_pass_peer_adds++;
           if (adds_this_pass >= ML_PEER_ADDS_PER_PASS) {
@@ -3377,7 +3377,7 @@ static void wg_mgr_drain_wg_rx(microlink_t * ml)
   UBaseType_t pops = uxQueueMessagesWaiting(ml->wg_rx_queue);
   ml_rx_packet_t pkt;
   while (pops-- > 0 && xQueueReceive(ml->wg_rx_queue, &pkt, 0) == pdTRUE) {
-    bool hs = pkt.len >= 4 && (pkt.data[0] == 0x01 || pkt.data[0] == 0x02);
+    bool hs = ml_wg_is_handshake_frame(pkt.data, pkt.len);
     if (hs && s_wg_hs_budget <= 0) {
       if (pkt.requeues < ML_WG_HS_REQUEUE_MAX) {
         pkt.requeues++;
