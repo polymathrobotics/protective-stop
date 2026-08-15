@@ -59,6 +59,22 @@ static inline bool ml_lwip_core_lock_needed(void)
 static void disco_send_call_me_maybe(microlink_t * ml, int peer_idx);
 static void wg_mgr_drain_wg_rx(microlink_t * ml);
 
+static int s_wg_hs_budget; /* reset each wg_mgr pass */
+static uint32_t s_diag_wg_hs_deferred;
+static uint32_t s_diag_wg_hs_dropped;
+/* Per-pass work counters — inputs to the stall-event ring. */
+static uint16_t s_pass_wg_pkts;
+static uint16_t s_pass_wg_handshakes;
+static uint16_t s_pass_peer_adds;
+static uint16_t s_pass_disco_opens;
+static uint16_t s_pass_periodic_ms;
+static uint16_t s_pass_probe_ms;
+
+/* Stall-event ring: wg_mgr-owned writer; entries published via a
+ * release-stored index so httpd never reads a torn published entry. */
+static ml_wg_stall_event_t s_wg_stall_ring[ML_STALL_RING_LEN];
+static volatile uint32_t s_wg_stall_widx; /* total events; entry i at i%LEN */
+
 /* v15.22 — WG data-packet dedup ring.
  *
  * Tailscale's host-side tailscaled sends every transport-data packet via
@@ -2120,6 +2136,7 @@ static void process_peer_updates(microlink_t * ml)
              * pstop RX queue overflowed — pace it and let the 10 ms loop
              * come back for the rest. */
         adds_this_pass++;
+        s_pass_peer_adds++;
         if (adds_this_pass >= ML_PEER_ADDS_PER_PASS) {
           paced_out = true;
         }
@@ -3184,16 +3201,63 @@ static void process_wg_packet(microlink_t * ml, const ml_rx_packet_t * pkt)
   }
 }
 
-/* Drain pending inbound WG packets now, so a 10 Hz safety heartbeat decrypt is
- * never queued behind a burst of netmap-resync X25519 work. Bounded: returns
- * when the queue is empty; an established session's data decrypt is sub-ms.
- * Only makes the EXISTING decrypt run sooner via the EXISTING core-lock in
- * process_wg_packet — no reordering (replay window + dedup still apply), no drop. */
+/* THE wg_rx drain — every processing site uses it (docs/
+ * STALL_EVENT_CLOSURE_DESIGN.md §2). Data packets (heartbeat decrypt is
+ * sub-ms) flow freely; HANDSHAKES (~45 ms of X25519 each, under
+ * LOCK_TCPIP_CORE) share one per-pass budget across all call sites so a
+ * wave can never stall heartbeat processing. Snapshot-bounded: a deferred
+ * handshake requeued to the tail cannot be re-popped in the same call.
+ * Deferral fails SAFE: initiators retransmit at 5 s with ~60 s of session
+ * margin; worst case is the existing rekey-late nuisance stop. */
+
+int ml_wg_get_stall_events(ml_wg_stall_event_t * out, int max)
+{
+  uint32_t w = __atomic_load_n(&s_wg_stall_widx, __ATOMIC_ACQUIRE);
+  int n = (w < (uint32_t)ML_STALL_RING_LEN) ? (int)w : ML_STALL_RING_LEN;
+  if (n > max) n = max;
+  for (int i = 0; i < n; i++) {
+    out[i] = s_wg_stall_ring[(w - n + i) % ML_STALL_RING_LEN];
+  }
+  return n;
+}
+
+void ml_wg_get_hs_budget_diag(uint32_t out[2])
+{
+  out[0] = s_diag_wg_hs_deferred;
+  out[1] = s_diag_wg_hs_dropped;
+}
+
+/* True when a fleet server is configured (its learned region may still be 0
+ * — that combination is the task-#42 silent-diversity-loss signature). */
+bool ml_wg_fleet_configured(microlink_t * ml)
+{
+  return fleet_server_ip_cached() != 0;
+}
+
 static void wg_mgr_drain_wg_rx(microlink_t * ml)
 {
-  ml_rx_packet_t wg_pkt;
-  while (xQueueReceive(ml->wg_rx_queue, &wg_pkt, 0) == pdTRUE) {
-    process_wg_packet(ml, &wg_pkt);
+  UBaseType_t pops = uxQueueMessagesWaiting(ml->wg_rx_queue);
+  ml_rx_packet_t pkt;
+  while (pops-- > 0 && xQueueReceive(ml->wg_rx_queue, &pkt, 0) == pdTRUE) {
+    bool hs = pkt.len >= 4 && (pkt.data[0] == 0x01 || pkt.data[0] == 0x02);
+    if (hs && s_wg_hs_budget <= 0) {
+      if (pkt.requeues < ML_WG_HS_REQUEUE_MAX) {
+        pkt.requeues++;
+        if (xQueueSend(ml->wg_rx_queue, &pkt, 0) == pdTRUE) {
+          s_diag_wg_hs_deferred++;
+          continue;
+        }
+      }
+      free(pkt.data); /* cap hit or queue refilled: shed the handshake */
+      s_diag_wg_hs_dropped++;
+      continue;
+    }
+    if (hs) {
+      s_wg_hs_budget--;
+      s_pass_wg_handshakes++;
+    }
+    s_pass_wg_pkts++;
+    process_wg_packet(ml, &pkt);
   }
 }
 
@@ -4001,10 +4065,8 @@ void ml_wg_mgr_task(void * arg)
       break;
     }
     if (wg_up_early) {
-      ml_rx_packet_t pre_pkt;
-      while (xQueueReceive(ml->wg_rx_queue, &pre_pkt, 0) == pdTRUE) {
-        process_wg_packet(ml, &pre_pkt);
-      }
+      s_wg_hs_budget = ML_WG_HANDSHAKES_PER_PASS; /* own pass in this wait loop */
+      wg_mgr_drain_wg_rx(ml);
     }
   }
 
@@ -4035,16 +4097,17 @@ void ml_wg_mgr_task(void * arg)
 
   while (!(xEventGroupGetBits(ml->events) & ML_EVT_SHUTDOWN_REQUEST)) {
     uint64_t wg_iter_t0 = ml_get_time_ms(); /* Stage-0b gauge */
-    /* WG packets FIRST: this queue carries the 10 Hz pstop heartbeats.
-         * It used to be drained after all disco crypto and peer ingestion,
-         * so any burst of ~30 ms box-opens delayed (or overflowed) the
-         * safety traffic. */
-    {
-      ml_rx_packet_t wg_pkt_first;
-      while (xQueueReceive(ml->wg_rx_queue, &wg_pkt_first, 0) == pdTRUE) {
-        process_wg_packet(ml, &wg_pkt_first);
-      }
-    }
+    /* WG packets FIRST: this queue carries the pstop heartbeats. Budget and
+     * per-pass ring counters reset here; every drain site this pass shares
+     * the same handshake budget. */
+    s_wg_hs_budget = ML_WG_HANDSHAKES_PER_PASS;
+    s_pass_wg_pkts = 0;
+    s_pass_wg_handshakes = 0;
+    s_pass_peer_adds = 0;
+    s_pass_disco_opens = 0;
+    s_pass_periodic_ms = 0;
+    s_pass_probe_ms = 0;
+    wg_mgr_drain_wg_rx(ml);
 
     /* Process peer updates from coord task (paced) */
     process_peer_updates(ml);
@@ -4139,13 +4202,11 @@ void ml_wg_mgr_task(void * arg)
         wg_mgr_drain_wg_rx(ml);
       }
     }
+    s_pass_disco_opens = (uint16_t)(ML_DISCO_OPENS_PER_PASS - disco_budget);
 
     /* WG packets again — a full disco budget may have taken ~120 ms;
          * don't make fresh heartbeats wait for the periodics below. */
-    ml_rx_packet_t wg_pkt;
-    while (xQueueReceive(ml->wg_rx_queue, &wg_pkt, 0) == pdTRUE) {
-      process_wg_packet(ml, &wg_pkt);
-    }
+    wg_mgr_drain_wg_rx(ml);
 
     /* Run WireGuard periodic processing (handshakes, keepalives, rekeys).
          * This runs on OUR task stack (8KB) instead of the lwIP TCPIP thread (3-8KB),
@@ -4158,6 +4219,7 @@ void ml_wg_mgr_task(void * arg)
       uint64_t dt = ml_get_time_ms() - t0;
       last_wg_periodic_ms = now;
       ESP_LOGI(TAG, "wireguardif_periodic: %llu ms", (unsigned long long)dt);
+      s_pass_periodic_ms = (dt > 0xFFFF) ? 0xFFFF : (uint16_t)dt;
     }
 
     /* Periodic DISCO probes (every 1s check) */
@@ -4168,6 +4230,7 @@ void ml_wg_mgr_task(void * arg)
       uint64_t dt = ml_get_time_ms() - t0;
       last_disco_probe_ms = now;
       ESP_LOGI(TAG, "disco_periodic_probes: %llu ms", (unsigned long long)dt);
+      s_pass_probe_ms = (dt > 0xFFFF) ? 0xFFFF : (uint16_t)dt;
     }
 
     /* Self-heal the DERP home region every 3s: if a pinned peer's region is
@@ -4179,10 +4242,33 @@ void ml_wg_mgr_task(void * arg)
       last_rehome_check_ms = now;
     }
 
-    /* Stage-0b gauge: worst single iteration (heartbeat-path stall detector). */
+    /* Stage-0b gauge: worst single iteration (heartbeat-path stall detector),
+     * plus a per-EVENT ring entry so a stall self-attributes to the work
+     * that caused it (the high-water gauge is blind under its own mark). */
     {
       uint32_t wg_iter_ms = (uint32_t)(ml_get_time_ms() - wg_iter_t0);
       if (wg_iter_ms > s_diag_wg_max_iter_ms) s_diag_wg_max_iter_ms = wg_iter_ms;
+      if (wg_iter_ms > ML_STALL_THRESH_MS) {
+        uint32_t w = s_wg_stall_widx;
+        ml_wg_stall_event_t * e = &s_wg_stall_ring[w % ML_STALL_RING_LEN];
+        e->at_s = (uint32_t)(wg_iter_t0 / 1000);
+        e->dur_ms = wg_iter_ms;
+        e->wg_pkts = s_pass_wg_pkts;
+        e->handshakes = s_pass_wg_handshakes;
+        e->peer_adds = s_pass_peer_adds;
+        e->disco_opens = s_pass_disco_opens;
+        e->periodic_ms = s_pass_periodic_ms;
+        e->disco_probe_ms = s_pass_probe_ms;
+        __atomic_store_n(&s_wg_stall_widx, w + 1, __ATOMIC_RELEASE);
+        ESP_LOGW(
+          TAG,
+          "WG loop stall %ums (hs=%u adds=%u opens=%u periodic=%ums)",
+          (unsigned)wg_iter_ms,
+          e->handshakes,
+          e->peer_adds,
+          e->disco_opens,
+          e->periodic_ms);
+      }
     }
 
     /* Yield - 10ms loop rate for minimum packet processing latency.

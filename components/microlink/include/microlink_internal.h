@@ -255,6 +255,41 @@ extern "C"
  * reaped — nothing is owed back on them. */
 #define ML_DERP_RX_STALE_MS 150000
 #define ML_DERP_RX_STALE_TX_ACTIVE_MS 30000
+/* WG-rx handshake budget (docs/STALL_EVENT_CLOSURE_DESIGN.md): an inbound
+ * WG INITIATION costs ~4 X25519 ≈ 45 ms measured and is processed holding
+ * LOCK_TCPIP_CORE — an unbounded wave stalls heartbeat processing, the DERP
+ * task's sockets and local egress at once. Handshakes consume a per-pass
+ * budget shared across every wg_rx drain site; excess defers (requeue to
+ * tail, capped), then drops — a late rekey fails SAFE. */
+#define ML_WG_HANDSHAKES_PER_PASS 3
+#define ML_WG_HS_REQUEUE_MAX 3
+/* Stall-event rings: per-event attribution (high-water gauges are blind
+ * under their own mark). Task-owned writer, release-stored index, httpd
+ * reads published entries only. */
+#define ML_STALL_RING_LEN 8
+#define ML_STALL_THRESH_MS 1000
+
+  typedef struct
+  {
+    uint32_t at_s; /* boot-relative seconds */
+    uint32_t dur_ms; /* iteration wall-clock */
+    uint16_t wg_pkts; /* wg_rx packets processed this pass */
+    uint16_t handshakes; /* budget consumed this pass */
+    uint16_t peer_adds; /* netmap adds this pass */
+    uint16_t disco_opens; /* unknown-key box-opens this pass */
+    uint16_t periodic_ms; /* wireguardif_periodic duration this pass */
+    uint16_t disco_probe_ms; /* disco_periodic_probes duration this pass */
+  } ml_wg_stall_event_t;
+
+  typedef struct
+  {
+    uint32_t at_s;
+    uint32_t dur_ms;
+    uint8_t home_cstate; /* DERP_CS_* at event: separates DNS from rx backlog */
+    uint16_t last_dns_ms; /* most recent blocking DNS resolve duration */
+    uint16_t rx_gap_ms; /* rx-poll gap measured this pass */
+  } ml_derp_stall_event_t;
+
 /* Hitless re-ingest (run-20 green drop, 2026-08-11): a coord/netmap teardown
  * (re-key retire, REMOVE) of a safety peer is VETOED while the WG session
  * shows authenticated data rx (any path) within this window — an immediate
@@ -459,6 +494,7 @@ extern "C"
     uint16_t src_port; /* Source port (for UDP packets) */
     uint8_t src_pubkey[32]; /* Source peer key (for DERP packets) */
     bool via_derp; /* true if received via DERP, false if direct UDP */
+    uint8_t requeues; /* budgeted-drain deferrals so far (handshakes only) */
   } ml_rx_packet_t;
 
   /* Coordination command */
@@ -948,6 +984,15 @@ extern "C"
   uint32_t ml_derp_get_connect_steps(void);
   /* Pool conns reaped for tx-active rx-silence (server-side black-hole). */
   uint32_t ml_derp_get_rx_stale_reaps(void);
+  /* Handshake-budget diag: out[0]=deferred (requeued), out[1]=dropped (cap/full). */
+  void ml_wg_get_hs_budget_diag(uint32_t out[2]);
+  bool ml_wg_fleet_configured(microlink_t * ml);
+  /* wg_rx edge drops at each producer (queue-full sheds, previously silent). */
+  uint32_t ml_net_io_get_wg_rx_drops(void);
+  uint32_t ml_derp_get_wg_rx_drops(void);
+  /* Stall-event rings: copies up to `max` published entries, returns count. */
+  int ml_wg_get_stall_events(ml_wg_stall_event_t * out, int max);
+  int ml_derp_get_stall_events(ml_derp_stall_event_t * out, int max);
   /* Periodic idempotent coord re-registrations executed. */
   uint32_t ml_coord_get_reregisters(void);
   /* Stage-0 gauges: out[0]=worst single DERP-task iteration ms, out[1]=worst

@@ -39,6 +39,30 @@ static atomic_int s_derp_paused = 0;
 
 static const char * TAG = "ml_derp";
 
+static uint32_t s_diag_wg_rx_drops; /* wg_rx_queue full at THIS producer (edge shed) */
+static uint16_t s_diag_last_dns_ms; /* most recent blocking DNS resolve duration */
+static uint16_t s_pass_rx_gap; /* rx-poll gap measured this pass (ring input) */
+
+uint32_t ml_derp_get_wg_rx_drops(void)
+{
+  return s_diag_wg_rx_drops;
+}
+
+/* DERP-task stall-event ring (same pattern as the wg_mgr ring). */
+static ml_derp_stall_event_t s_derp_stall_ring[ML_STALL_RING_LEN];
+static volatile uint32_t s_derp_stall_widx;
+
+int ml_derp_get_stall_events(ml_derp_stall_event_t * out, int max)
+{
+  uint32_t w = __atomic_load_n(&s_derp_stall_widx, __ATOMIC_ACQUIRE);
+  int n = (w < (uint32_t)ML_STALL_RING_LEN) ? (int)w : ML_STALL_RING_LEN;
+  if (n > max) n = max;
+  for (int i = 0; i < n; i++) {
+    out[i] = s_derp_stall_ring[(w - n + i) % ML_STALL_RING_LEN];
+  }
+  return n;
+}
+
 /* Timeout for DERP connection handshake operations */
 #define DERP_CONNECT_TIMEOUT_MS 20000 /* bumped 10s -> 20s 2026-05-25: DERP servers occasionally take >10s under load */
 
@@ -246,6 +270,7 @@ static void route_derp_packet(microlink_t * ml, uint8_t * data, size_t len, cons
 
   QueueHandle_t target = (type == PKT_DISCO) ? ml->disco_rx_queue : ml->wg_rx_queue;
   if (xQueueSend(target, &pkt, 0) != pdTRUE) {
+    if (target == ml->wg_rx_queue) s_diag_wg_rx_drops++; /* edge shed, was silent */
     free(data);
   }
 }
@@ -1462,6 +1487,7 @@ void ml_derp_tx_task(void * arg)
         if (home->connected && s_last_rx_poll_ms != 0) {
           uint32_t gap = (uint32_t)(rx_now - s_last_rx_poll_ms);
           if (gap > s_diag_rx_gap_worst_ms) s_diag_rx_gap_worst_ms = gap;
+          s_pass_rx_gap = (gap > 0xFFFF) ? 0xFFFF : (uint16_t)gap;
         }
         s_last_rx_poll_ms = rx_now;
       }
@@ -1529,10 +1555,28 @@ void ml_derp_tx_task(void * arg)
          *      every blocking connect above is already capped, MBB adds none. ---- */
     derp_mbb_tick(ml, ml_get_time_ms());
 
-    /* Stage-0 gauge: worst single iteration wall-clock. */
+    /* Stage-0 gauge: worst single iteration wall-clock + per-EVENT ring
+     * entry (home conn phase separates blocking-DNS from rx backlog). */
     {
       uint32_t iter_ms = (uint32_t)(ml_get_time_ms() - loop_start);
       if (iter_ms > s_diag_max_iter_ms) s_diag_max_iter_ms = iter_ms;
+      if (iter_ms > ML_STALL_THRESH_MS) {
+        uint32_t w = s_derp_stall_widx;
+        ml_derp_stall_event_t * e = &s_derp_stall_ring[w % ML_STALL_RING_LEN];
+        e->at_s = (uint32_t)(loop_start / 1000);
+        e->dur_ms = iter_ms;
+        e->home_cstate = (uint8_t)ml->derp[ml->derp_home_slot].cstate;
+        e->last_dns_ms = s_diag_last_dns_ms;
+        e->rx_gap_ms = s_pass_rx_gap;
+        __atomic_store_n(&s_derp_stall_widx, w + 1, __ATOMIC_RELEASE);
+        ESP_LOGW(
+          TAG,
+          "DERP loop stall %ums (cstate=%u dns=%ums rx_gap=%ums)",
+          (unsigned)iter_ms,
+          e->home_cstate,
+          e->last_dns_ms,
+          e->rx_gap_ms);
+      }
     }
 
     /* Yield briefly (runtime-tunable via microlink_set_derp_loop_delay_ms).
@@ -1777,6 +1821,10 @@ esp_err_t ml_derp_connect_kick(microlink_t * ml, ml_derp_conn_t * c, uint16_t re
       return ESP_FAIL;
     }
     ESP_LOGI(TAG, "[TIMING-DERP] DNS: %lld ms (host=%s)", (esp_timer_get_time() - t0) / 1000, derp_host);
+    {
+      int64_t dns_ms = (esp_timer_get_time() - t0) / 1000;
+      s_diag_last_dns_ms = (dns_ms > 0xFFFF) ? 0xFFFF : (uint16_t)dns_ms;
+    }
     memcpy(&addr, res->ai_addr, res->ai_addrlen);
     addrlen = res->ai_addrlen;
     family = res->ai_family;

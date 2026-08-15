@@ -1010,6 +1010,7 @@ static esp_err_t handler_monitor(httpd_req_t * req)
       uint16_t fr = 0, pr = 0;
       ml_wg_get_derp_diag(ml, &fr, &pr);
       cJSON_AddNumberToObject(json, "fleet_peer_region", fr);
+      cJSON_AddBoolToObject(json, "fleet_region_missing", ml_wg_fleet_configured(ml) && fr == 0);
       cJSON_AddNumberToObject(json, "priority_peer_learned_region", pr);
       /* Re-home counters: selfheal_calls, rehome_calls, ret_region0,
        * ret_notpinned, body, applied. Tells us whether the re-home runs and
@@ -1100,6 +1101,42 @@ static esp_err_t handler_monitor(httpd_req_t * req)
       cJSON_AddNumberToObject(json, "derp_connect_steps", ml_derp_get_connect_steps());
       cJSON_AddNumberToObject(json, "derp_rx_stale_reaps", ml_derp_get_rx_stale_reaps());
       cJSON_AddNumberToObject(json, "coord_reregisters", ml_coord_get_reregisters());
+      {
+        /* Stall-class closure telemetry (docs/STALL_EVENT_CLOSURE_DESIGN.md) */
+        uint32_t hs[2] = {0};
+        ml_wg_get_hs_budget_diag(hs);
+        cJSON_AddNumberToObject(json, "wg_hs_deferred", hs[0]);
+        cJSON_AddNumberToObject(json, "wg_hs_dropped", hs[1]);
+        cJSON_AddNumberToObject(json, "wg_rx_drops_netio", ml_net_io_get_wg_rx_drops());
+        cJSON_AddNumberToObject(json, "wg_rx_drops_derp", ml_derp_get_wg_rx_drops());
+        ml_wg_stall_event_t we[ML_STALL_RING_LEN];
+        int wn = ml_wg_get_stall_events(we, ML_STALL_RING_LEN);
+        cJSON * wa = cJSON_AddArrayToObject(json, "wg_stall_events");
+        for (int i = 0; i < wn; i++) {
+          cJSON * e = cJSON_CreateObject();
+          cJSON_AddNumberToObject(e, "at_s", we[i].at_s);
+          cJSON_AddNumberToObject(e, "dur_ms", we[i].dur_ms);
+          cJSON_AddNumberToObject(e, "wg_pkts", we[i].wg_pkts);
+          cJSON_AddNumberToObject(e, "hs", we[i].handshakes);
+          cJSON_AddNumberToObject(e, "adds", we[i].peer_adds);
+          cJSON_AddNumberToObject(e, "opens", we[i].disco_opens);
+          cJSON_AddNumberToObject(e, "periodic_ms", we[i].periodic_ms);
+          cJSON_AddNumberToObject(e, "probe_ms", we[i].disco_probe_ms);
+          cJSON_AddItemToArray(wa, e);
+        }
+        ml_derp_stall_event_t de[ML_STALL_RING_LEN];
+        int dn = ml_derp_get_stall_events(de, ML_STALL_RING_LEN);
+        cJSON * da = cJSON_AddArrayToObject(json, "derp_stall_events");
+        for (int i = 0; i < dn; i++) {
+          cJSON * e = cJSON_CreateObject();
+          cJSON_AddNumberToObject(e, "at_s", de[i].at_s);
+          cJSON_AddNumberToObject(e, "dur_ms", de[i].dur_ms);
+          cJSON_AddNumberToObject(e, "cstate", de[i].home_cstate);
+          cJSON_AddNumberToObject(e, "dns_ms", de[i].last_dns_ms);
+          cJSON_AddNumberToObject(e, "rx_gap_ms", de[i].rx_gap_ms);
+          cJSON_AddItemToArray(da, e);
+        }
+      }
       {
         uint32_t it[2] = {0};
         ml_derp_get_iter_diag(it);
