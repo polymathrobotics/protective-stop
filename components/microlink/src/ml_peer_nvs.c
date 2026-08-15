@@ -252,6 +252,7 @@ void ml_peer_nvs_set_protected(uint32_t vpn_ip)
 static uint32_t s_diag_flush_last_ms;
 static uint32_t s_diag_flush_max_ms;
 static uint32_t s_diag_flush_count;
+static uint64_t s_defer_start_ms; /* nonzero while an ingest-busy deferral runs */
 
 void ml_peer_nvs_get_flush_diag(uint32_t out[3])
 {
@@ -272,9 +273,17 @@ esp_err_t ml_peer_nvs_flush_if_due(uint64_t now_ms, bool ingest_busy)
    * cores for a flash commit — defer while updates are pending, CAPPED so
    * a sustained storm cannot starve durability (the boot preseed for the
    * cold-bond far-side gap depends on this cache). */
-  if (ingest_busy && (now_ms - s_last_flush_ms) < ML_PEER_NVS_FLUSH_MAX_DEFER_MS) {
-    return ESP_OK;
+  if (ingest_busy) {
+    /* C1: the defer cap must clock from when deferral STARTED, not from the
+     * last flush — in §7a steady state flushes are hours apart, and clocking
+     * from s_last_flush_ms would let the first dirtying pass of a burst
+     * flush mid-burst (the exact compounding §7b exists to avoid). */
+    if (s_defer_start_ms == 0) s_defer_start_ms = now_ms;
+    if ((now_ms - s_defer_start_ms) < ML_PEER_NVS_FLUSH_MAX_DEFER_MS) {
+      return ESP_OK;
+    }
   }
+  s_defer_start_ms = 0;
   int64_t t0 = esp_timer_get_time();
   esp_err_t r = flush_table();
   uint32_t dur = (uint32_t)((esp_timer_get_time() - t0) / 1000);

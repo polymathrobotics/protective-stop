@@ -1920,6 +1920,13 @@ static int add_peer(microlink_t * ml, const ml_peer_update_t * update, bool * sk
       if (ml->peers[idx].wg_peer_index >= 0 && ml->wg_netif) {
         wireguardif_remove_peer((struct netif *)ml->wg_netif, (u8_t)ml->peers[idx].wg_peer_index);
       }
+      /* §7c: retire is the second door a pinned peer's learned region exits
+       * through (a fleet tailscaled restart rotates the key; retire is not
+       * vetoed for pinned-but-not-safety peers). Stash it — the re-add with
+       * the NEW key consumes it in this same call. */
+      if (is_pinned_peer(ml, ml->peers[idx].vpn_ip) && ml->peers[idx].derp_region != 0) {
+        region_stash_put(ml->peers[idx].vpn_ip, ml->peers[idx].derp_region);
+      }
       ml->peers[idx].active = false;
     }
 
@@ -2285,6 +2292,12 @@ static void process_peer_updates(microlink_t * ml)
             if (update->derp_region > 0) {
               p->derp_region = update->derp_region;
               maybe_rehome_to_priority(ml, p);
+            }
+            /* Patches are genuine deltas: persist them. With §7a, unchanged
+             * full re-adds no longer save, so this is now the ONLY route by
+             * which patch-learned endpoints/regions reach the boot preseed. */
+            if (update->endpoint_count > 0 || update->derp_region > 0) {
+              ml_peer_nvs_save(p);
             }
             ESP_LOGI(TAG, "Peer patched: %s (eps=%d derp=%d)", p->hostname, p->endpoint_count, p->derp_region);
           }
@@ -3458,8 +3471,10 @@ static void disco_send_call_me_maybe(microlink_t * ml, int peer_idx)
   }
 
   /* Build plaintext: [type(1)][version(1)][endpoints(N * 18)] */
-  s_pass_cmm_sends++; /* ring attribution: each CMM ends in a ~30 ms NaCl seal
-                       * (rare no-endpoint bail below over-counts by one) */
+  s_pass_cmm_sends++; /* ring attribution: each CMM ends in a ~30 ms NaCl seal.
+                       * Known noise, accepted (diag-only): the rare no-endpoint
+                       * bail over-counts by one, and the ml_wg_mgr_send_cmm
+                       * wrapper runs on app tasks (unsynchronized u16 bump). */
   uint8_t plaintext[2 + 3 * 18]; /* Up to 3 endpoints */
   int pt_len = 0;
   int ep_count = 0;
