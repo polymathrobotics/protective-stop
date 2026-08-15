@@ -70,7 +70,8 @@ be processed unbudgeted at another):
   measured 45 ms); excess handshakes REQUEUE to the tail with a per-packet
   attempt counter (new u8 in ml_rx_packet_t padding). On requeue FAILURE
   (queue refilled by a concurrent producer) or attempt cap
-  (`ML_WG_HS_REQUEUE_MAX`, default 3): free(pkt.data) + count
+  (`ML_WG_HS_REQUEUE_MAX`, default 12 — must exceed one pass's worth of
+  pops so a deferral survives to the next pass's budget): free(pkt.data) + count
   (`wg_hs_dropped`) — never leak, never spin. Deferrals count
   (`wg_hs_deferred`).
 - Fail-safe direction: a deferred/dropped handshake can only delay a

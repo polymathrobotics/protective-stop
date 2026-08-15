@@ -1102,6 +1102,10 @@ static void derp_mbb_tick(microlink_t * ml, uint64_t now)
       (void)derp_write_frame(ml, c, DERP_FRAME_NOTE_PREFERRED, &pref1, 1);
       ml->derp_home_slot = s_mbb.prove_slot; /* THE swap — index only, no conn state moves */
       ml->derp_home_region = s_mbb.target; /* routing + eff-home follow immediately */
+      c->last_relay_rx_ms = ml_get_time_ms(); /* fresh reap grace: a weak-proof commit
+                                               * (server PONG, no RecvPacket) would
+                                               * otherwise carry the aux-connect stamp
+                                               * into the home-only rx-staleness reap */
       oldc->aux_unwanted_since_ms = 0; /* old home starts life as a WANTED-until-proven-otherwise aux */
       s_mbb_proofs_ok++;
       s_mbb_commits++;
