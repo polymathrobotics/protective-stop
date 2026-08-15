@@ -2535,6 +2535,8 @@ void ml_coord_task(void * arg)
             ml_close_sock(ml->coord_sock);
             ml->coord_sock = -1;
           }
+          s_rereg_skip_count = false; /* abandoned re-register: the next
+                                       * connect is a genuine (re)connect */
           state = COORD_IDLE;
           ml->state = ML_STATE_IDLE;
           break;

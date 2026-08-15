@@ -125,3 +125,58 @@ does exactly this) and rings populate on induced stalls. Then the operator
 gate: 8 h zero-exclusion soak, normal protection (hourly reports, disarm
 class diagnosis via the new rings, HIL gesture rearm, driver preflight).
 Success: 0 drops, or any drop fully self-attributed by the rings.
+
+## 7. Phase 2 (2026-08-15): re-ingest quiescence + region stash + ring v2
+
+Status: DRAFT for review. Evidence: run-34 rings (steady-state 1.0-2.0 s
+stall clusters, every entry adds=4 with ~70-90% of the duration
+unaccounted) and the post-run storm (2,998 ms cluster during flush
+recovery, compounding losses). Root chain, source-verified: the 5-min
+re-register re-ADDs every peer; existing-peer re-adds already skip the
+WG reinstall (hitless re-ingest), but each one still calls
+ml_peer_nvs_save() → dirties the peer cache → the 5 s-debounced
+ml_peer_nvs_flush_if_due() commits to FLASH in-loop — and a flash write
+suspends flash-resident execution on BOTH cores, stalling wg_mgr, the
+DERP task and ICMP egress at once (the "unaccounted" time; also the
+likely body of run-33's 2-4 s event and run-34's forensic 2.7 s gap).
+
+### 7a. Skip-unchanged re-adds (fix 3 core, ~20 LOC)
+In add_peer(), for an EXISTING peer, compare the material fields
+(public_key match is given; disco_key, hostname, vpn_ip, and the update's
+carried region/endpoints vs stored) and RETURN EARLY when nothing
+changed: no memcpys, no maybe_rehome, no ml_peer_nvs_save (⇒ no dirt ⇒
+no flash flush), no pacing slot consumed (adds_this_pass unchanged —
+skipped re-adds are ~µs). Counter: peer_readds_skipped. Effect: a
+5-min re-register of an unchanged map becomes telemetry-free and
+flash-free; re-ingest clusters only occur when the map genuinely changed.
+
+### 7b. Flush quiet-gate (fix 3 belt, ~6 LOC)
+ml_peer_nvs_flush_if_due() additionally defers while
+uxQueueMessagesWaiting(peer_update_queue) > 0 (an ingest burst is in
+progress — the worst moment to suspend the cores). Flash writes then land
+in genuinely quiet passes. The existing 5 s debounce stays.
+
+### 7c. Learned-region stash (fix 4 / task #42, ~18 LOC)
+Both existing region writes already preserve-on-zero; the wipe is
+REMOVE→re-ADD: the fleet peer is pinned but NOT is_safety_peer, so the
+hitless-reingest remove-veto does not protect it, and a fresh slot has
+nothing to preserve. Minimal fix that changes no remove/veto semantics:
+a 4-entry {pubkey, region} stash written when a PINNED peer with a
+nonzero learned region is removed; add_peer consults it when the incoming
+update carries region 0. Counter: region_stash_restores. (The
+server-side question — why machn's map omits the fleet region — stays
+open in #42.)
+
+### 7d. Ring v2 + soak-driver self-audit (fix 5, ~15 LOC + ops)
+- wg ring entries gain cmm_sends (site exists at the CMM pacing loop).
+- wireguardif stamps worst_rx_gap_at_ms when the per-peer worst updates
+  (one field + one line in wireguardif.c, accessor alongside the existing
+  one) — makes cumulative-gauge events datable (run-34's 2,720 ms and the
+  DUT's 19.6 s reconcile become decidable).
+- ops driver: hourly line gains machn pstop-side rebond totals and
+  rx_worst_gap(+at) so blind-window drops self-audit.
+
+### 7e. Explicitly out of scope (unchanged)
+Timeouts; pstop_c; wireguardif_periodic bounding (rings show ≤62 ms all
+night — exonerated); moving flush to another task (flash suspension is
+core-global — the fix is writing less and at quiet times, not elsewhere).

@@ -2624,7 +2624,8 @@ static void process_disco_pong(
        * an alternate endpoint must not vouch for the path WG actually sends
        * on (best_ip could be dead while a candidate answers). */
       p->has_direct_path = true;
-      if (p->best_ip == 0 || (pkt->src_ip == p->best_ip && pkt->src_port == p->best_port)) {
+      bool same_ep = (pkt->src_ip == p->best_ip && pkt->src_port == p->best_port);
+      if (p->best_ip == 0 || same_ep) {
         p->last_direct_pong_recv_ms = now;
       }
       p->trust_until_ms = now + ML_DISCO_TRUST_DURATION_MS;
@@ -2651,8 +2652,8 @@ static void process_disco_pong(
         p->direct_flap_count = 0;
       }
 
-      bool same_ep = (pkt->src_ip == p->best_ip && pkt->src_port == p->best_port);
-      /* A move from a WAN/STUN address to a LAN address is a genuine upgrade
+      /* same_ep computed above (best_ip/best_port unchanged since). A move
+       * from a WAN/STUN address to a LAN address is a genuine upgrade
        * (lower latency, no hairpin) and IS allowed to switch even for pinned peers. */
       bool genuine_upgrade = is_lan_ip(pkt->src_ip) && !is_lan_ip(p->best_ip);
 
