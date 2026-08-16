@@ -2037,13 +2037,20 @@ static int add_peer(microlink_t * ml, const ml_peer_update_t * update, bool * sk
    * pins' adds=4 persisted after the endpoint subset fix — attribute the
    * defeat with data, not hypotheses). */
   int skipfail = -1;
-  if (!existing) skipfail = 0;
-  else if (p->wg_peer_index < 0) skipfail = 1;
-  else if (update->vpn_ip != p->vpn_ip) skipfail = 2;
-  else if (memcmp(update->disco_key, p->disco_key, 32) != 0) skipfail = 3;
-  else if (strncmp(update->hostname, p->hostname, sizeof(p->hostname) - 1) != 0) skipfail = 4;
-  else if (update->derp_region != 0 && update->derp_region != p->derp_region) skipfail = 5;
-  else if (!readd_endpoints_unchanged(p, update)) skipfail = 6;
+  if (!existing)
+    skipfail = 0;
+  else if (p->wg_peer_index < 0)
+    skipfail = 1;
+  else if (update->vpn_ip != p->vpn_ip)
+    skipfail = 2;
+  else if (memcmp(update->disco_key, p->disco_key, 32) != 0)
+    skipfail = 3;
+  else if (strncmp(update->hostname, p->hostname, sizeof(p->hostname) - 1) != 0)
+    skipfail = 4;
+  else if (update->derp_region != 0 && update->derp_region != p->derp_region)
+    skipfail = 5;
+  else if (!readd_endpoints_unchanged(p, update))
+    skipfail = 6;
   if (skipfail >= 0 && skipfail <= 6) s_diag_skipfail[skipfail]++;
 
   if (skipfail < 0) {
