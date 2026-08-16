@@ -1802,9 +1802,16 @@ uint32_t ml_derp_get_kicks_spaced(void)
 esp_err_t ml_derp_connect_kick(microlink_t * ml, ml_derp_conn_t * c, uint16_t region_id)
 {
   /* Flush-storm spacing (see ML_DERP_CONNECT_SPACING_MS): refuse BEFORE the
-   * teardown so a live conn is never sacrificed for a kick we won't start. */
+   * teardown so a live conn is never sacrificed for a kick we won't start.
+   * The HOME slot is exempt from refusal — ML_EVT_DERP_RECONNECT re-kicks it
+   * immediately to beat the 2 s heartbeat timeout, and a silent refusal there
+   * would defer the safety path 5-60 s (review 🔴). Home kicks still stamp
+   * the window so aux kicks cannot stack TLS work right behind home's. */
   uint64_t know = ml_get_time_ms();
-  if (s_last_connect_kick_ms != 0 && know - s_last_connect_kick_ms < ML_DERP_CONNECT_SPACING_MS) {
+  bool kick_is_home = derp_conn_is_home(ml, c);
+  if (
+    !kick_is_home && s_last_connect_kick_ms != 0 && know - s_last_connect_kick_ms < ML_DERP_CONNECT_SPACING_MS)
+  {
     s_diag_kicks_spaced++;
     return ESP_ERR_NOT_FINISHED;
   }
