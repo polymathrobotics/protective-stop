@@ -1852,6 +1852,19 @@ static uint16_t region_stash_lookup(uint32_t vpn_ip)
   return 0;
 }
 
+/* Single membership test for the peer candidate table — the learn-from-ping
+ * check, the alt-candidate dedup and the §7a re-add compare must all agree on
+ * what "already holds this endpoint" means (they had drifted on is_ipv6). */
+static bool peer_has_endpoint(const ml_peer_t * p, uint32_t ip, uint16_t port, bool is_ipv6)
+{
+  for (int i = 0; i < p->endpoint_count && i < ML_MAX_ENDPOINTS; i++) {
+    if (p->endpoints[i].ip == ip && p->endpoints[i].port == port && p->endpoints[i].is_ipv6 == is_ipv6) {
+      return true;
+    }
+  }
+  return false;
+}
+
 /* §7a: does this re-add carry any endpoint we don't already hold? Subset test,
  * order-insensitive: learn-from-ping appends locally-learned endpoints that a
  * coord re-add never carries, so exact-list equality was defeated FOREVER for
@@ -1862,17 +1875,9 @@ static uint16_t region_stash_lookup(uint32_t vpn_ip)
 static bool readd_endpoints_unchanged(const ml_peer_t * p, const ml_peer_update_t * u)
 {
   for (int i = 0; i < u->endpoint_count && i < ML_MAX_ENDPOINTS; i++) {
-    bool known = false;
-    for (int j = 0; j < p->endpoint_count && j < ML_MAX_ENDPOINTS; j++) {
-      if (
-        u->endpoints[i].ip == p->endpoints[j].ip && u->endpoints[i].port == p->endpoints[j].port &&
-        u->endpoints[i].is_ipv6 == p->endpoints[j].is_ipv6)
-      {
-        known = true;
-        break;
-      }
+    if (!peer_has_endpoint(p, u->endpoints[i].ip, u->endpoints[i].port, u->endpoints[i].is_ipv6)) {
+      return false;
     }
-    if (!known) return false;
   }
   return true;
 }
@@ -2673,13 +2678,7 @@ static void process_disco_ping(
      * list is empty (netmap endpoints missed or wiped) stays DERP-only
      * forever even while the peer pings it directly every few seconds. */
   if (!pkt->via_derp && pkt->src_ip != 0 && pkt->src_port != 0 && !p->has_direct_path) {
-    bool known = false;
-    for (int i = 0; i < p->endpoint_count; i++) {
-      if (!p->endpoints[i].is_ipv6 && p->endpoints[i].ip == pkt->src_ip && p->endpoints[i].port == pkt->src_port) {
-        known = true;
-        break;
-      }
-    }
+    bool known = peer_has_endpoint(p, pkt->src_ip, pkt->src_port, false);
     if (!known) {
       if (p->endpoint_count < ML_MAX_ENDPOINTS) {
         p->endpoints[p->endpoint_count].ip = pkt->src_ip;
@@ -2807,13 +2806,7 @@ static void process_disco_pong(
         /* Keep the established direct path. Remember the alternate endpoint as
          * a candidate (dedup; bounded by ML_MAX_ENDPOINTS) so a later probe can
          * still find it if the current path actually fails. */
-        bool present = false;
-        for (int e = 0; e < p->endpoint_count && e < ML_MAX_ENDPOINTS; e++) {
-          if (p->endpoints[e].ip == pkt->src_ip && p->endpoints[e].port == pkt->src_port) {
-            present = true;
-            break;
-          }
-        }
+        bool present = peer_has_endpoint(p, pkt->src_ip, pkt->src_port, false);
         if (!present && p->endpoint_count < ML_MAX_ENDPOINTS) {
           p->endpoints[p->endpoint_count].ip = pkt->src_ip;
           p->endpoints[p->endpoint_count].port = pkt->src_port;
