@@ -1809,9 +1809,7 @@ esp_err_t ml_derp_connect_kick(microlink_t * ml, ml_derp_conn_t * c, uint16_t re
    * the window so aux kicks cannot stack TLS work right behind home's. */
   uint64_t know = ml_get_time_ms();
   bool kick_is_home = derp_conn_is_home(ml, c);
-  if (
-    !kick_is_home && s_last_connect_kick_ms != 0 && know - s_last_connect_kick_ms < ML_DERP_CONNECT_SPACING_MS)
-  {
+  if (!kick_is_home && s_last_connect_kick_ms != 0 && know - s_last_connect_kick_ms < ML_DERP_CONNECT_SPACING_MS) {
     s_diag_kicks_spaced++;
     return ESP_ERR_NOT_FINISHED;
   }
