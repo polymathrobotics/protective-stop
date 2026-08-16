@@ -1852,18 +1852,27 @@ static uint16_t region_stash_lookup(uint32_t vpn_ip)
   return 0;
 }
 
-/* §7a: does this re-add carry endpoints identical to the stored set (or none)? */
+/* §7a: does this re-add carry any endpoint we don't already hold? Subset test,
+ * order-insensitive: learn-from-ping appends locally-learned endpoints that a
+ * coord re-add never carries, so exact-list equality was defeated FOREVER for
+ * every peer with active disco — the pinned peers took the full re-add path on
+ * each re-ingest, and under re-bond churn those X25519 storms stalled the WG
+ * and DERP tasks together (run-36 disarm cascade). Only a genuinely NEW
+ * endpoint is a material change. */
 static bool readd_endpoints_unchanged(const ml_peer_t * p, const ml_peer_update_t * u)
 {
-  if (u->endpoint_count == 0) return true;
-  if (u->endpoint_count != p->endpoint_count) return false;
   for (int i = 0; i < u->endpoint_count && i < ML_MAX_ENDPOINTS; i++) {
-    if (
-      u->endpoints[i].ip != p->endpoints[i].ip || u->endpoints[i].port != p->endpoints[i].port ||
-      u->endpoints[i].is_ipv6 != p->endpoints[i].is_ipv6)
-    {
-      return false;
+    bool known = false;
+    for (int j = 0; j < p->endpoint_count && j < ML_MAX_ENDPOINTS; j++) {
+      if (
+        u->endpoints[i].ip == p->endpoints[j].ip && u->endpoints[i].port == p->endpoints[j].port &&
+        u->endpoints[i].is_ipv6 == p->endpoints[j].is_ipv6)
+      {
+        known = true;
+        break;
+      }
     }
+    if (!known) return false;
   }
   return true;
 }
