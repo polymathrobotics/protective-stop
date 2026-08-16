@@ -141,9 +141,12 @@ esp_err_t dcs_nvs_write_pstop_peer(uint32_t ip, uint16_t port)
 void dcs_nvs_set_ctrl_reset_cause(uint8_t cause)
 {
   nvs_handle_t h;
-  if (nvs_open(DCS_NVS_NS, NVS_READWRITE, &h) != ESP_OK) return;
-  if (nvs_set_u8(h, DCS_NVS_KEY_CTRL_RST, cause) == ESP_OK) {
-    (void)nvs_commit(h);
+  if (nvs_open(DCS_NVS_NS, NVS_READWRITE, &h) != ESP_OK) {
+    ESP_LOGW(TAG, "ctrl-reset crumb open failed (cause %u will be lost)", (unsigned)cause);
+    return;
+  }
+  if (nvs_set_u8(h, DCS_NVS_KEY_CTRL_RST, cause) != ESP_OK || nvs_commit(h) != ESP_OK) {
+    ESP_LOGW(TAG, "ctrl-reset crumb write failed (cause %u will be lost)", (unsigned)cause);
   }
   nvs_close(h);
 }

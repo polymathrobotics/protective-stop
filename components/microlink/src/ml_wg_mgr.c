@@ -710,26 +710,32 @@ void microlink_pin_peer_ip(microlink_t * ml, uint32_t vpn_ip, bool pin)
  * (other module, no ml handle) can exempt every pin — set at wg task start. */
 static uint32_t s_priority_pin_ip;
 
-bool ml_wg_ip_is_pinned(uint32_t vpn_ip)
+/* One extra-pins membership scan shared by both pin checks below. */
+static bool extra_pin_contains(uint32_t vpn_ip)
 {
-  if (vpn_ip == 0) return false;
-  if (s_priority_pin_ip != 0 && vpn_ip == s_priority_pin_ip) return true;
   for (int i = 0; i < ML_EXTRA_PINS; i++) {
     if (s_extra_pins[i] != 0 && vpn_ip == s_extra_pins[i]) return true;
   }
   return false;
 }
 
+bool ml_wg_ip_is_pinned(uint32_t vpn_ip)
+{
+  if (vpn_ip == 0) return false;
+  if (s_priority_pin_ip != 0 && vpn_ip == s_priority_pin_ip) return true;
+  return extra_pin_contains(vpn_ip);
+}
+
 static bool is_pinned_peer(microlink_t * ml, uint32_t vpn_ip)
 {
   if (vpn_ip == 0) return false;
+  /* Live ml->config read (not the s_priority_pin_ip cache): valid before the
+   * wg task start that populates the cache for the cross-module variant. */
   if (ml->config.priority_peer_ip != 0 && vpn_ip == ml->config.priority_peer_ip) {
     return true;
   }
-  for (int i = 0; i < ML_EXTRA_PINS; i++) {
-    if (s_extra_pins[i] != 0 && vpn_ip == s_extra_pins[i]) {
-      return true;
-    }
+  if (extra_pin_contains(vpn_ip)) {
+    return true;
   }
   uint32_t fip = fleet_server_ip_cached();
   return (fip != 0 && vpn_ip == fip);
@@ -1926,7 +1932,11 @@ static bool peer_has_endpoint(const ml_peer_t * p, uint32_t ip, uint16_t port, b
  * hostname_short[7]) — a stored non-empty PREFIX of the update's name is
  * display drift, not a rename (identity is already pinned by public key +
  * vpn_ip + disco key at this point). Without this, EVERY preseeded peer took
- * one full X25519 re-add per boot (~128 needless adds = the boot storm). */
+ * one full X25519 re-add per boot (~128 needless adds = the boot storm).
+ * Deliberate looseness: a REAL rename to a longer name sharing the stored
+ * prefix also matches — hostname is display metadata only, and the skip
+ * path's RAM refresh still adopts the new name, so nothing user-visible or
+ * identity-relevant is lost. */
 static bool readd_hostname_unchanged(const ml_peer_t * p, const ml_peer_update_t * u)
 {
   if (strncmp(u->hostname, p->hostname, sizeof(p->hostname) - 1) == 0) return true;
