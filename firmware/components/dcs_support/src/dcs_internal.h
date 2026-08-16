@@ -33,6 +33,7 @@ extern "C"
 #define DCS_NVS_KEY_PSTOP_PORT "ps_port"
 #define DCS_NVS_KEY_TS_BOOT_EN "ts_boot"
 #define DCS_NVS_KEY_RST_HIST "rst_hist" /* ring of recent esp_reset_reason() */
+#define DCS_NVS_KEY_CTRL_RST "ctrl_rst" /* one-shot controlled-reset cause crumb */
 #define DCS_NVS_KEY_PSTOP_NUM "ps_num" /* USB "PSTOPxx" unit number (0=auto) */
 #define DCS_NVS_KEY_RING_OFF "ring_off" /* ring rotation: physical index of LED 1 */
 #define DCS_NVS_KEY_PSTOP_PEERS "ps_peers" /* multi-machine peer table (blob, see dcs_nvs.c) */

@@ -1008,7 +1008,8 @@ extern "C"
   /* Handshake-budget diag: out[0]=deferred (requeued), out[1]=dropped (cap/full). */
   void ml_wg_get_hs_budget_diag(uint32_t out[2]);
   bool ml_wg_fleet_configured(microlink_t * ml);
-  /* §7a/§7c diag: out[0]=unchanged re-adds skipped, out[1]=region stash restores. */
+  /* §7a/§7c diag: out[0]=unchanged re-adds skipped, out[1]=region stash restores,
+ * out[2]=allowlist rejects (near-zero-cost updates exempt from ingest pacing). */
   void ml_wg_get_ingest_diag(uint32_t out[3]);
   void ml_wg_get_skipfail_diag(uint32_t out[7]); /* first-failing §7a clause counts */
   /* wg_rx edge drops at each producer (queue-full sheds, previously silent). */

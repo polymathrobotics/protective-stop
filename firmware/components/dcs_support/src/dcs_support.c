@@ -520,6 +520,7 @@ dcs_boot_state_t dcs_support_init(void)
     .derp_only_mode = g_dcs.derp_only_mode,
     .boot_count = g_dcs.boot_count,
     .reset_reason = g_dcs.reset_reason,
+    .ctrl_reset_cause = g_dcs.ctrl_reset_cause,
     .ml_handle = g_dcs.ml_handle,
     .app = g_dcs.app,
   };
