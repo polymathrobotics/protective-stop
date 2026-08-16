@@ -308,6 +308,14 @@ bool ml_config_peer_is_allowed(const ml_config_ctx_t * ctx, uint32_t vpn_ip)
   uint32_t fleet_ip = ml_config_fleet_server_ip();
   if (fleet_ip != 0u && vpn_ip == fleet_ip) return true;
 
+  /* Every PINNED peer (configured machine slots / operators) is always
+   * allowed. Centralized here so all five call sites — admission, both disco
+   * ping gates, periodic probes, boot preseed — inherit the exemption: f498's
+   * own allowlist blocked its configured machine and a one-site fix left the
+   * peer admitted but disco-dead and never preseeded. The allowlist governs
+   * strangers; arming authority stays machine-side (operator list). */
+  if (ml_wg_ip_is_pinned(vpn_ip)) return true;
+
   /* Fast path: filter disabled → allow all */
   if (!ctx->filter_enabled) return true;
 

@@ -1051,6 +1051,9 @@ extern "C"
   /* One-shot: the next long-poll MapRequest sends OmitPeers=false so the
    * control plane re-delivers the FULL peer list (pin-absent heal fallback). */
   void ml_coord_request_full_peers(void);
+  /* True when vpn_ip is the priority peer or an extra pin — consumed by
+   * ml_config_peer_is_allowed()'s centralized pin exemption. */
+  bool ml_wg_ip_is_pinned(uint32_t vpn_ip);
   /* Stage-0b: worst single wg_mgr loop iteration ms (heartbeat-path stall). */
   uint32_t ml_wg_get_max_iter_ms(void);
   /* Path-diversity telemetry: out[0]=leg-2 mirrors sent, out[1]=mirrors

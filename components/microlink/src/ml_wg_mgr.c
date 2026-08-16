@@ -706,6 +706,20 @@ void microlink_pin_peer_ip(microlink_t * ml, uint32_t vpn_ip, bool pin)
   }
 }
 
+/* Cached copy of ml->config.priority_peer_ip so ml_config_peer_is_allowed()
+ * (other module, no ml handle) can exempt every pin — set at wg task start. */
+static uint32_t s_priority_pin_ip;
+
+bool ml_wg_ip_is_pinned(uint32_t vpn_ip)
+{
+  if (vpn_ip == 0) return false;
+  if (s_priority_pin_ip != 0 && vpn_ip == s_priority_pin_ip) return true;
+  for (int i = 0; i < ML_EXTRA_PINS; i++) {
+    if (s_extra_pins[i] != 0 && vpn_ip == s_extra_pins[i]) return true;
+  }
+  return false;
+}
+
 static bool is_pinned_peer(microlink_t * ml, uint32_t vpn_ip)
 {
   if (vpn_ip == 0) return false;
@@ -1944,13 +1958,9 @@ static int add_peer(microlink_t * ml, const ml_peer_update_t * update, bool * sk
      * Counts as SKIPPED: near-zero work, so it must not consume an ingest
      * pacing slot or trigger a wg-rx drain (run-39: rejects saturated the
      * pacing cap uncounted, stretching re-ingests over dozens of passes).
-     * PINNED peers bypass the gate: the configured machine / fleet anchor must
-     * never be allowlist-blocked — f498 sat heartbeat-dead for days because
-     * its own machine was rejected here, upstream of the pinned-admission
-     * path, and every heal (NVS synthesis, full redelivery) funnels through
-     * this same gate. The allowlist governs strangers; arming authority is
-     * enforced machine-side by ITS operator list. */
-  if (!ml_config_peer_is_allowed(ml->config_httpd, update->vpn_ip) && !is_pinned_peer(ml, update->vpn_ip)) {
+     * Pins are exempt INSIDE ml_config_peer_is_allowed() — centralized there
+     * so the disco/probe/preseed gates inherit it too (f498 root cause). */
+  if (!ml_config_peer_is_allowed(ml->config_httpd, update->vpn_ip)) {
     s_diag_allowlist_rejects++;
     if (skipped) *skipped = true;
     return -1;
@@ -4241,6 +4251,8 @@ void ml_wg_mgr_task(void * arg)
 {
   microlink_t * ml = (microlink_t *)arg;
   ESP_LOGI(TAG, "WG Manager task started (Core %d)", xPortGetCoreID());
+  s_priority_pin_ip = ml->config.priority_peer_ip; /* cache for the cross-module
+                                                    * allowlist pin exemption */
 
   /* Initialize probe tracking */
   memset(pending_probes, 0, sizeof(pending_probes));
