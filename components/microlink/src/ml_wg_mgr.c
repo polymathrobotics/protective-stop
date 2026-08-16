@@ -1936,8 +1936,14 @@ static int add_peer(microlink_t * ml, const ml_peer_update_t * update, bool * sk
      * Still process updates for existing peers (they may become allowed later).
      * Counts as SKIPPED: near-zero work, so it must not consume an ingest
      * pacing slot or trigger a wg-rx drain (run-39: rejects saturated the
-     * pacing cap uncounted, stretching re-ingests over dozens of passes). */
-  if (!ml_config_peer_is_allowed(ml->config_httpd, update->vpn_ip)) {
+     * pacing cap uncounted, stretching re-ingests over dozens of passes).
+     * PINNED peers bypass the gate: the configured machine / fleet anchor must
+     * never be allowlist-blocked — f498 sat heartbeat-dead for days because
+     * its own machine was rejected here, upstream of the pinned-admission
+     * path, and every heal (NVS synthesis, full redelivery) funnels through
+     * this same gate. The allowlist governs strangers; arming authority is
+     * enforced machine-side by ITS operator list. */
+  if (!ml_config_peer_is_allowed(ml->config_httpd, update->vpn_ip) && !is_pinned_peer(ml, update->vpn_ip)) {
     s_diag_allowlist_rejects++;
     if (skipped) *skipped = true;
     return -1;
