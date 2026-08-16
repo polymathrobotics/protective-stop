@@ -243,6 +243,71 @@ extern "C"
  * and let the demote proceed (DERP fallback + re-probe is the safer state;
  * see ml_peer_t.demote_veto_ticks). */
 #define ML_DEMOTE_VETO_MAX_TICKS 10
+/* Periodic idempotent coord re-registration: cures a QUIET registration loss
+ * (control plane forgot the node; DERP servers deny relaying to it — 100%
+ * inbound relay black-hole, invisible to local gauges) within one period.
+ * The reconnect flow is hitless (peers/WG preserved, map re-ingest). */
+#define ML_COORD_REREGISTER_MS 300000
+/* Reap a CONNECTED pool conn that we actively egress into but that has
+ * returned NOTHING for this long: in the safety topology every used conn
+ * carries return traffic (replies/mirrors), so tx-active + rx-silent means a
+ * server-side black-hole or half-dead TCP. Idle conns (no recent tx) are NOT
+ * reaped — nothing is owed back on them. */
+#define ML_DERP_RX_STALE_MS 150000
+#define ML_DERP_RX_STALE_TX_ACTIVE_MS 30000
+/* WG-rx handshake budget (docs/STALL_EVENT_CLOSURE_DESIGN.md): an inbound
+ * WG INITIATION costs ~4 X25519 ≈ 45 ms measured and is processed holding
+ * LOCK_TCPIP_CORE — an unbounded wave stalls heartbeat processing, the DERP
+ * task's sockets and local egress at once. Handshakes consume a per-pass
+ * budget shared across every wg_rx drain site; excess defers (requeue to
+ * tail, capped), then drops — a late rekey fails SAFE. */
+#define ML_WG_HANDSHAKES_PER_PASS 3
+/* Requeue cap counts POPS WHILE STARVED (a pass has up to 10 drain calls),
+ * so it must exceed one pass's worth of pops for a deferral to be
+ * guaranteed to reach the next pass's fresh budget; drops are reserved for
+ * sustained multi-pass starvation. */
+#define ML_WG_HS_REQUEUE_MAX 12
+/* Stall-event rings: per-event attribution (high-water gauges are blind
+ * under their own mark). Task-owned writer, release-stored index; on wrap
+ * the OLDEST entry a reader copies can race the writer's next event (µs
+ * window, diagnostics-only — newest entries are always intact). */
+#define ML_STALL_RING_LEN 8
+#define ML_STALL_THRESH_MS 1000
+/* §7b: cap on how long an ingest-busy signal may defer the peer-cache flash
+ * flush — durability (boot preseed) must survive sustained storms. */
+#define ML_PEER_NVS_FLUSH_MAX_DEFER_MS 30000
+/* §7c: learned-region stash TTL — a fleet that MOVED regions while its peer
+ * entry was absent must not pin a stale region indefinitely. */
+#define ML_REGION_STASH_TTL_MS 1800000
+/* Stash capacity = the NVS protected-pin bound (ML_NVS_MAX_PROTECTED): the
+ * stash only ever holds pinned peers' regions, so at this size a bulk
+ * remove-then-readd of every pin cannot LRU-evict an entry before its
+ * re-ADD consumes it. */
+#define ML_REGION_STASH_SLOTS 18
+
+  typedef struct
+  {
+    uint32_t at_s; /* boot-relative seconds */
+    uint32_t dur_ms; /* iteration wall-clock */
+    uint16_t wg_pkts; /* wg_rx packets processed this pass */
+    uint16_t handshakes; /* budget consumed this pass */
+    uint16_t peer_adds; /* netmap adds this pass */
+    uint16_t disco_opens; /* unknown-key box-opens this pass */
+    uint16_t periodic_ms; /* wireguardif_periodic duration this pass */
+    uint16_t disco_probe_ms; /* disco_periodic_probes duration this pass */
+    uint16_t cmm_sends; /* CallMeMaybe seals this pass (~30 ms each) */
+    uint16_t nvs_flush_ms; /* peer-cache flash-flush wall-clock this pass */
+  } ml_wg_stall_event_t;
+
+  typedef struct
+  {
+    uint32_t at_s;
+    uint32_t dur_ms;
+    uint8_t home_cstate; /* DERP_CS_* at event: separates DNS from rx backlog */
+    uint16_t last_dns_ms; /* most recent blocking DNS resolve duration */
+    uint16_t rx_gap_ms; /* rx-poll gap measured this pass */
+  } ml_derp_stall_event_t;
+
 /* Hitless re-ingest (run-20 green drop, 2026-08-11): a coord/netmap teardown
  * (re-key retire, REMOVE) of a safety peer is VETOED while the WG session
  * shows authenticated data rx (any path) within this window — an immediate
@@ -447,6 +512,7 @@ extern "C"
     uint16_t src_port; /* Source port (for UDP packets) */
     uint8_t src_pubkey[32]; /* Source peer key (for DERP packets) */
     bool via_derp; /* true if received via DERP, false if direct UDP */
+    uint8_t requeues; /* budgeted-drain deferrals so far (handshakes only) */
   } ml_rx_packet_t;
 
   /* Coordination command */
@@ -511,7 +577,12 @@ extern "C"
 
     /* DISCO state (rate limiting) */
     uint64_t last_ping_sent_ms; /* Last DISCO ping we sent */
-    uint64_t last_pong_recv_ms; /* Last DISCO pong we received */
+    uint64_t last_pong_recv_ms; /* Last DISCO pong we received (any path) */
+    uint64_t last_direct_pong_recv_ms; /* Last pong received DIRECT — the
+                                        * pong-dead demote trigger keys on
+                                        * this, not the path-blind stamp: a
+                                        * relay-carried pong must not hold a
+                                        * dead direct path out of demotion */
     uint32_t disco_rtt_ms; /* txid-matched ping->pong RTT (true path metric) */
     bool disco_rtt_direct; /* the measured pong came direct (not via DERP) */
     uint64_t trust_until_ms; /* Direct path trusted until */
@@ -650,6 +721,10 @@ extern "C"
     mbedtls_ctr_drbg_context ctr_drbg;
     volatile bool connected; /* volatile: wg_mgr/httpd read it cross-task */
     uint64_t last_recv_ms; /* For keepalive watchdog */
+    uint64_t last_relay_rx_ms; /* last RecvPacket (genuine relayed traffic) —
+                                * the rx-staleness reap keys on THIS: server
+                                * keepalives/pongs refresh last_recv_ms even
+                                * while the server denies relaying to us */
 
     /* Multi-region pool bookkeeping (all owned by the DERP I/O task) */
     volatile uint16_t region_id; /* DERP region this conn serves; 0 = free slot.
@@ -925,6 +1000,21 @@ extern "C"
   esp_err_t ml_derp_connect_kick(microlink_t * ml, ml_derp_conn_t * c, uint16_t region_id);
   int ml_derp_connect_step(microlink_t * ml, ml_derp_conn_t * c);
   uint32_t ml_derp_get_connect_steps(void);
+  /* Pool conns reaped for tx-active rx-silence (server-side black-hole). */
+  uint32_t ml_derp_get_rx_stale_reaps(void);
+  /* Handshake-budget diag: out[0]=deferred (requeued), out[1]=dropped (cap/full). */
+  void ml_wg_get_hs_budget_diag(uint32_t out[2]);
+  bool ml_wg_fleet_configured(microlink_t * ml);
+  /* §7a/§7c diag: out[0]=unchanged re-adds skipped, out[1]=region stash restores. */
+  void ml_wg_get_ingest_diag(uint32_t out[2]);
+  /* wg_rx edge drops at each producer (queue-full sheds, previously silent). */
+  uint32_t ml_net_io_get_wg_rx_drops(void);
+  uint32_t ml_derp_get_wg_rx_drops(void);
+  /* Stall-event rings: copies up to `max` published entries, returns count. */
+  int ml_wg_get_stall_events(ml_wg_stall_event_t * out, int max);
+  int ml_derp_get_stall_events(ml_derp_stall_event_t * out, int max);
+  /* Periodic idempotent coord re-registrations executed. */
+  uint32_t ml_coord_get_reregisters(void);
   /* Stage-0 gauges: out[0]=worst single DERP-task iteration ms, out[1]=worst
    * gap between consecutive rx-poll passes ms (both since boot). */
   void ml_derp_get_iter_diag(uint32_t out[2]);
@@ -963,6 +1053,14 @@ extern "C"
   {
     uint16_t ov = ml->derp_region_override;
     return ov ? ov : ml->derp_home_region;
+  }
+
+  /* WG handshake frame (Initiation 0x01 / Response 0x02). The DERP tx priority
+   * router and the wg-rx handshake budget must classify identically — one
+   * predicate, not two hand-synced copies. */
+  static inline bool ml_wg_is_handshake_frame(const uint8_t * data, size_t len)
+  {
+    return len >= 4 && (data[0] == 0x01 || data[0] == 0x02);
   }
 
   /* ml_coord.c */
@@ -1089,7 +1187,9 @@ extern "C"
   int ml_peer_nvs_load_all(ml_peer_t * peers, int max_peers);
   /* Deferred flash flush of the peer cache (writes are debounced: saves only
  * update the PSRAM working copy; call this ~once per wg_mgr pass). */
-  esp_err_t ml_peer_nvs_flush_if_due(uint64_t now_ms);
+  esp_err_t ml_peer_nvs_flush_if_due(uint64_t now_ms, bool ingest_busy);
+  /* Flush timing diag: out[0]=last ms, out[1]=max ms, out[2]=count. */
+  void ml_peer_nvs_get_flush_diag(uint32_t out[3]);
   /* Mark a peer (by VPN IP, host order) as never-LRU-evicted from the cache.
  * Bounded set (priority peer, fleet server, app-pinned operator remotes):
  * these keys feed the boot-time WG preseed that answers cold inbound

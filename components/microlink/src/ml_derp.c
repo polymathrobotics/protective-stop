@@ -39,6 +39,30 @@ static atomic_int s_derp_paused = 0;
 
 static const char * TAG = "ml_derp";
 
+static uint32_t s_diag_wg_rx_drops; /* wg_rx_queue full at THIS producer (edge shed) */
+static uint16_t s_diag_last_dns_ms; /* most recent blocking DNS resolve duration */
+static uint16_t s_pass_rx_gap; /* rx-poll gap measured this pass (ring input) */
+
+uint32_t ml_derp_get_wg_rx_drops(void)
+{
+  return s_diag_wg_rx_drops;
+}
+
+/* DERP-task stall-event ring (same pattern as the wg_mgr ring). */
+static ml_derp_stall_event_t s_derp_stall_ring[ML_STALL_RING_LEN];
+static volatile uint32_t s_derp_stall_widx;
+
+int ml_derp_get_stall_events(ml_derp_stall_event_t * out, int max)
+{
+  uint32_t w = __atomic_load_n(&s_derp_stall_widx, __ATOMIC_ACQUIRE);
+  int n = (w < (uint32_t)ML_STALL_RING_LEN) ? (int)w : ML_STALL_RING_LEN;
+  if (n > max) n = max;
+  for (int i = 0; i < n; i++) {
+    out[i] = s_derp_stall_ring[(w - n + i) % ML_STALL_RING_LEN];
+  }
+  return n;
+}
+
 /* Timeout for DERP connection handshake operations */
 #define DERP_CONNECT_TIMEOUT_MS 20000 /* bumped 10s -> 20s 2026-05-25: DERP servers occasionally take >10s under load */
 
@@ -246,6 +270,7 @@ static void route_derp_packet(microlink_t * ml, uint8_t * data, size_t len, cons
 
   QueueHandle_t target = (type == PKT_DISCO) ? ml->disco_rx_queue : ml->wg_rx_queue;
   if (xQueueSend(target, &pkt, 0) != pdTRUE) {
+    if (target == ml->wg_rx_queue) s_diag_wg_rx_drops++; /* edge shed, was silent */
     free(data);
   }
 }
@@ -261,6 +286,7 @@ static void dispatch_derp_frame(
          * this server. Only RecvPacket counts — keepalives/pongs prove the
          * server link, not end-to-end peer reachability. */
         c->rx_pkts++;
+        c->last_relay_rx_ms = ml_get_time_ms();
         ESP_LOGI(
           TAG,
           "DERP RecvPacket: %d bytes from %02x%02x%02x%02x, hdr=%02x",
@@ -446,7 +472,7 @@ esp_err_t ml_derp_queue_send(microlink_t * ml, const uint8_t * dest_key, const u
    * (wg_mgr disco + the TCPIP-thread heartbeat via wg_derp_output_cb) with NO
    * cross-thread drain, and per-peer frame order is preserved (FIFO within a
    * queue -> no OK-after-STOP reordering). */
-  bool is_wg_handshake = (len >= 4 && (data[0] == 0x01 || data[0] == 0x02));
+  bool is_wg_handshake = ml_wg_is_handshake_frame(data, len);
   /* One classification walk: prio = pinned||health-tracked (fleet frames must
    * not sit behind a disco burst), mirror = heartbeat carriers only (priority
    * ||health-tracked — the fleet pin is reachability armor; doubling its bulk
@@ -544,6 +570,32 @@ void ml_derp_get_reconnect_diag(uint32_t out[3])
 static uint32_t s_diag_leg2_sent; /* path-diversity mirrors egressed */
 static uint32_t s_diag_leg2_skipped; /* mirrors skipped (no distinct connected conn) */
 static uint32_t s_diag_rescue_routes; /* primary frames rescued onto any-connected conn */
+static uint32_t s_diag_rx_stale_reaps; /* tx-active conns reaped for rx-silence */
+
+uint32_t ml_derp_get_rx_stale_reaps(void)
+{
+  return s_diag_rx_stale_reaps;
+}
+
+/* Single home-conn identity test (4 call sites). */
+static inline bool derp_conn_is_home(const microlink_t * ml, const ml_derp_conn_t * c)
+{
+  return c == &ml->derp[ml->derp_home_slot];
+}
+
+/* Tear down a live conn and route its recovery: the HOME conn recovers via
+ * the event-driven reconnect (the handler frees TLS then kicks), an aux is
+ * freed NOW so derp_manage_aux can rebuild without re-initing over live
+ * contexts. region_id is preserved for the retry. */
+static void derp_reap_conn(microlink_t * ml, ml_derp_conn_t * c)
+{
+  c->connected = false;
+  if (derp_conn_is_home(ml, c)) {
+    xEventGroupSetBits(ml->events, ML_EVT_DERP_RECONNECT);
+  } else {
+    ml_derp_disconnect(ml, c);
+  }
+}
 
 void ml_derp_get_diversity_diag(uint32_t out[3])
 {
@@ -1050,6 +1102,10 @@ static void derp_mbb_tick(microlink_t * ml, uint64_t now)
       (void)derp_write_frame(ml, c, DERP_FRAME_NOTE_PREFERRED, &pref1, 1);
       ml->derp_home_slot = s_mbb.prove_slot; /* THE swap — index only, no conn state moves */
       ml->derp_home_region = s_mbb.target; /* routing + eff-home follow immediately */
+      c->last_relay_rx_ms = ml_get_time_ms(); /* fresh reap grace: a weak-proof commit
+                                               * (server PONG, no RecvPacket) would
+                                               * otherwise carry the aux-connect stamp
+                                               * into the home-only rx-staleness reap */
       oldc->aux_unwanted_since_ms = 0; /* old home starts life as a WANTED-until-proven-otherwise aux */
       s_mbb_proofs_ok++;
       s_mbb_commits++;
@@ -1418,16 +1474,7 @@ void ml_derp_tx_task(void * arg)
           if (ret < 0) {
             ESP_LOGW(
               TAG, "DERP write failed on %s conn (region %u)", (c == home) ? "home" : "aux", (unsigned)c->region_id);
-            c->connected = false;
-            if (c == home) {
-              /* Home reconnect is event-driven (handler frees TLS then reconnects). */
-              xEventGroupSetBits(ml->events, ML_EVT_DERP_RECONNECT);
-            } else {
-              /* Aux has no event path: tear it down NOW (frees TLS) so the next
-                         * derp_manage_aux reconnect doesn't leak by re-initing over live
-                         * contexts. region_id is preserved for the retry. */
-              ml_derp_disconnect(ml, c);
-            }
+            derp_reap_conn(ml, c);
           } else {
             frames_tx++;
             c->last_used_ms = ml_get_time_ms();
@@ -1444,6 +1491,10 @@ void ml_derp_tx_task(void * arg)
         if (home->connected && s_last_rx_poll_ms != 0) {
           uint32_t gap = (uint32_t)(rx_now - s_last_rx_poll_ms);
           if (gap > s_diag_rx_gap_worst_ms) s_diag_rx_gap_worst_ms = gap;
+          s_pass_rx_gap = (gap > 0xFFFF) ? 0xFFFF : (uint16_t)gap;
+        } else {
+          s_pass_rx_gap = 0; /* not measured this pass — a pool-dark stall
+                              * event must not carry a pre-disconnect gap */
         }
         s_last_rx_poll_ms = rx_now;
       }
@@ -1470,17 +1521,42 @@ void ml_derp_tx_task(void * arg)
               ret,
               (c == home) ? "home" : "aux",
               (unsigned)c->region_id);
-            c->connected = false;
-            if (c == home) {
-              xEventGroupSetBits(ml->events, ML_EVT_DERP_RECONNECT);
-            } else {
-              ml_derp_disconnect(ml, c); /* free TLS now; manage_aux reconnects */
-            }
+            derp_reap_conn(ml, c);
             break;
           }
         }
       }
     } /* any_connected: Phase 1 + rx-gap gauge + Phase 2 */
+    else
+    {
+      s_pass_rx_gap = 0; /* pool dark: a stall event recorded this pass must not
+                          * carry the last connected pass's gap */
+    }
+
+    /* rx-staleness reap, HOME conn only: a conn we actively egress into that
+     * has returned NOTHING for ML_DERP_RX_STALE_MS is server-side black-holed
+     * or a half-dead TCP (a quiet registration loss TX'd replies into a
+     * denying server for 25 min with every local gauge clean). Cycle it; the
+     * reconnect re-auths against the (re-registered) control plane. Aux conns
+     * are exempt — they are egress-only by construction (peers reply toward
+     * OUR home region; dual_path mirrors keep an aux tx-fresh with no rx ever
+     * owed), so this test would reap a healthy aux every ~150 s. Idle conns
+     * are exempt — nothing is owed back on them. */
+    {
+      uint64_t rnow = ml_get_time_ms();
+      if (
+        home->connected && home->last_relay_rx_ms != 0 && rnow - home->last_relay_rx_ms > ML_DERP_RX_STALE_MS &&
+        home->last_used_ms != 0 && rnow - home->last_used_ms <= ML_DERP_RX_STALE_TX_ACTIVE_MS)
+      {
+        s_diag_rx_stale_reaps++;
+        ESP_LOGW(
+          TAG,
+          "DERP home conn (region %u) tx-active but relay-rx-silent %us — reaping",
+          (unsigned)home->region_id,
+          (unsigned)((rnow - home->last_relay_rx_ms) / 1000));
+        derp_reap_conn(ml, home);
+      }
+    }
 
     /* ---- Aux pool management at the TAIL: home is already serviced this
          *      iteration, so an aux connect kicked here can't starve the home
@@ -1492,10 +1568,28 @@ void ml_derp_tx_task(void * arg)
          *      every blocking connect above is already capped, MBB adds none. ---- */
     derp_mbb_tick(ml, ml_get_time_ms());
 
-    /* Stage-0 gauge: worst single iteration wall-clock. */
+    /* Stage-0 gauge: worst single iteration wall-clock + per-EVENT ring
+     * entry (home conn phase separates blocking-DNS from rx backlog). */
     {
       uint32_t iter_ms = (uint32_t)(ml_get_time_ms() - loop_start);
       if (iter_ms > s_diag_max_iter_ms) s_diag_max_iter_ms = iter_ms;
+      if (iter_ms > ML_STALL_THRESH_MS) {
+        uint32_t w = s_derp_stall_widx;
+        ml_derp_stall_event_t * e = &s_derp_stall_ring[w % ML_STALL_RING_LEN];
+        e->at_s = (uint32_t)(loop_start / 1000);
+        e->dur_ms = iter_ms;
+        e->home_cstate = (uint8_t)ml->derp[ml->derp_home_slot].cstate;
+        e->last_dns_ms = s_diag_last_dns_ms;
+        e->rx_gap_ms = s_pass_rx_gap;
+        __atomic_store_n(&s_derp_stall_widx, w + 1, __ATOMIC_RELEASE);
+        ESP_LOGW(
+          TAG,
+          "DERP loop stall %ums (cstate=%u dns=%ums rx_gap=%ums)",
+          (unsigned)iter_ms,
+          e->home_cstate,
+          e->last_dns_ms,
+          e->rx_gap_ms);
+      }
     }
 
     /* Yield briefly (runtime-tunable via microlink_set_derp_loop_delay_ms).
@@ -1573,12 +1667,6 @@ bool microlink_is_derp_paused(void)
 static inline uint16_t derp_lookup_region(uint16_t region_id)
 {
   return region_id ? region_id : ML_DERP_REGION;
-}
-
-/* Single home-conn identity test (4 call sites). */
-static inline bool derp_conn_is_home(const microlink_t * ml, const ml_derp_conn_t * c)
-{
-  return c == &ml->derp[ml->derp_home_slot];
 }
 
 /* Per-region resolved-address cache: skips blocking DNS on reconnect to the
@@ -1746,6 +1834,10 @@ esp_err_t ml_derp_connect_kick(microlink_t * ml, ml_derp_conn_t * c, uint16_t re
       return ESP_FAIL;
     }
     ESP_LOGI(TAG, "[TIMING-DERP] DNS: %lld ms (host=%s)", (esp_timer_get_time() - t0) / 1000, derp_host);
+    {
+      int64_t dns_ms = (esp_timer_get_time() - t0) / 1000;
+      s_diag_last_dns_ms = (dns_ms > 0xFFFF) ? 0xFFFF : (uint16_t)dns_ms;
+    }
     memcpy(&addr, res->ai_addr, res->ai_addrlen);
     addrlen = res->ai_addrlen;
     family = res->ai_family;
@@ -2101,6 +2193,7 @@ complete:
   }
   c->connected = true;
   c->region_id = c->cs_region;
+  c->last_relay_rx_ms = ml_get_time_ms(); /* staleness clock starts at connect */
   {
     derp_dns_cache_t * e = derp_dns_cache_find(derp_lookup_region(c->cs_region));
     if (e) e->post_tcp_fails = 0;

@@ -40,6 +40,23 @@
 
 static const char * TAG = "ml_coord";
 
+/* Periodic re-registrations executed (coord-task-owned; word-sized cross-task
+ * read via ml_coord_get_reregisters for /admin/api/monitor). */
+static uint32_t s_diag_coord_reregisters;
+/* The next successful connect is a scheduled re-register, not a flap: keep it
+ * out of connect_count so ml_reconnects stays a pure flap signal for soaks.
+ * Any GENUINE reconnect trigger clears it so a real flap is never masked. */
+static bool s_rereg_skip_count;
+/* Last re-registration, scheduled or not: EVERY successful connect
+ * re-registers, so the periodic timer restarts from it (no redundant cycle
+ * seconds after a genuine reconnect). */
+static uint64_t s_last_rereg_ms;
+
+uint32_t ml_coord_get_reregisters(void)
+{
+  return s_diag_coord_reregisters;
+}
+
 /* Effective control plane host: NVS override or compiled default */
 #define CTRL_HOST(ml) ((ml)->ctrl_host[0] ? (ml)->ctrl_host : ML_CTRL_HOST)
 
@@ -2518,10 +2535,13 @@ void ml_coord_task(void * arg)
             ml_close_sock(ml->coord_sock);
             ml->coord_sock = -1;
           }
+          s_rereg_skip_count = false; /* abandoned re-register: the next
+                                       * connect is a genuine (re)connect */
           state = COORD_IDLE;
           ml->state = ML_STATE_IDLE;
           break;
         case ML_CMD_FORCE_RECONNECT:
+          s_rereg_skip_count = false; /* genuine trigger: count the reconnect */
           state = COORD_RECONNECTING;
           break;
         case ML_CMD_UPDATE_ENDPOINTS:
@@ -2685,7 +2705,12 @@ void ml_coord_task(void * arg)
 
         state = COORD_LONG_POLL;
         ml->state = ML_STATE_CONNECTED;
-        ml->connect_count++; /* 1 = first connect; >1 = a control-plane reconnect (soak telemetry) */
+        if (s_rereg_skip_count) {
+          s_rereg_skip_count = false; /* scheduled re-register, not a flap */
+        } else {
+          ml->connect_count++; /* 1 = first connect; >1 = a control-plane reconnect (soak telemetry) */
+        }
+        s_last_rereg_ms = ml_get_time_ms(); /* every connect re-registers */
         reconnect_attempts = 0;
         last_activity_ms = ml_get_time_ms();
 
@@ -2864,6 +2889,24 @@ void ml_coord_task(void * arg)
           last_derp_keepalive_ms = now;
         }
 
+        /* Periodic idempotent re-registration: a QUIET registration loss
+         * (control plane forgets this node; DERP servers then DENY relaying
+         * to it) is invisible from the chip — inbound relay traffic just
+         * stops while local gauges stay clean. The normal reconnect flow
+         * re-registers hitlessly (peers/WG preserved, map re-ingest is
+         * hitless), so run it on a timer as the standing cure. */
+        {
+          if (s_last_rereg_ms == 0) s_last_rereg_ms = now;
+          if (now - s_last_rereg_ms > ML_COORD_REREGISTER_MS) {
+            s_last_rereg_ms = now;
+            s_diag_coord_reregisters++;
+            s_rereg_skip_count = true;
+            ESP_LOGI(TAG, "Periodic coord re-register #%u", (unsigned)s_diag_coord_reregisters);
+            state = COORD_RECONNECTING;
+            break;
+          }
+        }
+
         /* Key expiry check (every 60s) — re-register if expired */
         if (ml->key_expiry_epoch > 0 || ml->key_expired) {
           static uint64_t last_expiry_check_ms = 0;
@@ -2872,6 +2915,7 @@ void ml_coord_task(void * arg)
             if (ml->key_expired) {
               if (ml->config.auth_key) {
                 ESP_LOGW(TAG, "Key expired, re-registering with auth_key...");
+                s_rereg_skip_count = false; /* genuine trigger: count it */
                 state = COORD_RECONNECTING;
                 break;
               } else {
@@ -2966,6 +3010,8 @@ void ml_coord_task(void * arg)
         ml_coord_cmd_t wake_cmd;
         if (xQueueReceive(ml->coord_cmd_queue, &wake_cmd, pdMS_TO_TICKS(backoff_ms)) == pdTRUE) {
           if (wake_cmd == ML_CMD_DISCONNECT) {
+            s_rereg_skip_count = false; /* abandoned re-register: a later genuine
+                                         * connect must count (mirrors top-of-loop) */
             state = COORD_IDLE;
             ml->state = ML_STATE_IDLE;
             break;

@@ -528,7 +528,10 @@ static void wireguardif_process_data_message(struct wireguard_device *device, st
 					// direct->relay handover (2026-08-12 edge-flush investigation).
 					if (peer->last_rx != 0) {
 						uint32_t gap = now - peer->last_rx;
-						if (gap > peer->worst_rx_gap) peer->worst_rx_gap = gap;
+						if (gap > peer->worst_rx_gap) {
+							peer->worst_rx_gap = gap;
+							peer->worst_rx_gap_at_ms = now;
+						}
 					}
 					keypair->last_rx = now;
 					peer->last_rx = now;
@@ -1107,10 +1110,15 @@ err_t wireguardif_peer_direct_rx_age(struct netif *netif, u8_t peer_index, u32_t
 // Worst inter-frame rx gap (any path) for this peer — the "received nothing"
 // window that maps to a heartbeat-timeout disarm. ~2000 during an edge flush
 // pinpoints a ~2s inbound stall on THIS node even if its DERP conn stayed up.
-err_t wireguardif_peer_worst_rx_gap(struct netif *netif, u8_t peer_index, u32_t *worst_gap_ms) {
+err_t wireguardif_peer_worst_rx_gap(struct netif *netif, u8_t peer_index, u32_t *worst_gap_ms, u32_t *at_ms) {
 	struct wireguard_peer *peer;
 	err_t result = wireguardif_lookup_peer(netif, peer_index, &peer);
-	if (result == ERR_OK && worst_gap_ms) *worst_gap_ms = peer->worst_rx_gap;
+	if (result == ERR_OK) {
+		// One lookup for both fields: fetched separately, a new record landing
+		// between the calls paired the old gap with the new timestamp.
+		if (worst_gap_ms) *worst_gap_ms = peer->worst_rx_gap;
+		if (at_ms) *at_ms = peer->worst_rx_gap_at_ms;
+	}
 	return result;
 }
 

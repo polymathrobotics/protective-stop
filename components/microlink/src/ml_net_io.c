@@ -26,6 +26,14 @@
 
 static const char * TAG = "ml_net_io";
 
+/* wg_rx_queue full at THIS producer (edge shed; net_io-task-owned). */
+static uint32_t s_diag_wg_rx_drops;
+
+uint32_t ml_net_io_get_wg_rx_drops(void)
+{
+  return s_diag_wg_rx_drops;
+}
+
 /* DISCO magic bytes: "TS" + sparkles emoji UTF-8 */
 static const uint8_t DISCO_MAGIC[6] = {'T', 'S', 0xf0, 0x9f, 0x92, 0xac};
 
@@ -96,6 +104,7 @@ static void route_udp_packet(microlink_t * ml, uint8_t * data, size_t len, uint3
       break;
     case PKT_WIREGUARD:
       if (xQueueSend(ml->wg_rx_queue, &pkt, 0) != pdTRUE) {
+        s_diag_wg_rx_drops++; /* edge shed, was silent */
         free(data);
       }
       break;

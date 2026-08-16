@@ -20,6 +20,7 @@
 #include <string.h>
 
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "microlink_internal.h"
 #include "nvs.h"
 #include "nvs_flash.h"
@@ -74,6 +75,9 @@ static uint64_t s_last_flush_ms = 0;
  * eviction only ever happens inside runtime saves, when the pin sources are
  * live to re-mark them. Bounded; sized to ML_EXTRA_PINS + priority + fleet. */
 #define ML_NVS_MAX_PROTECTED 18
+/* The region stash serves exactly the protected-pin population; undersizing
+ * it re-opens the task-#42 silent region loss on a bulk pin re-ingest. */
+_Static_assert(ML_REGION_STASH_SLOTS >= ML_NVS_MAX_PROTECTED, "region stash must cover every protected pin");
 static uint32_t s_protected_ips[ML_NVS_MAX_PROTECTED];
 static int s_protected_count = 0;
 #define PEER_NVS_FLUSH_INTERVAL_MS 5000u
@@ -245,7 +249,22 @@ void ml_peer_nvs_set_protected(uint32_t vpn_ip)
   s_protected_ips[s_protected_count++] = vpn_ip;
 }
 
-esp_err_t ml_peer_nvs_flush_if_due(uint64_t now_ms)
+/* Flush timing diag (§7 R6): the flash commit suspends flash-resident
+ * execution on BOTH cores — these gauges make that cost measurable and the
+ * fix falsifiable (flush_count flat in steady state = §7a working). */
+static uint32_t s_diag_flush_last_ms;
+static uint32_t s_diag_flush_max_ms;
+static uint32_t s_diag_flush_count;
+static uint64_t s_defer_start_ms; /* nonzero while an ingest-busy deferral runs */
+
+void ml_peer_nvs_get_flush_diag(uint32_t out[3])
+{
+  out[0] = s_diag_flush_last_ms;
+  out[1] = s_diag_flush_max_ms;
+  out[2] = s_diag_flush_count;
+}
+
+esp_err_t ml_peer_nvs_flush_if_due(uint64_t now_ms, bool ingest_busy)
 {
   if (!s_initialized || !s_dirty) {
     return ESP_OK;
@@ -253,9 +272,32 @@ esp_err_t ml_peer_nvs_flush_if_due(uint64_t now_ms)
   if ((now_ms - s_last_flush_ms) < PEER_NVS_FLUSH_INTERVAL_MS) {
     return ESP_OK;
   }
+  /* §7b quiet-gate: an ingest burst is the worst moment to suspend the
+   * cores for a flash commit — defer while updates are pending, CAPPED so
+   * a sustained storm cannot starve durability (the boot preseed for the
+   * cold-bond far-side gap depends on this cache). */
+  if (ingest_busy) {
+    /* C1: the defer cap must clock from when deferral STARTED, not from the
+     * last flush — in §7a steady state flushes are hours apart, and clocking
+     * from s_last_flush_ms would let the first dirtying pass of a burst
+     * flush mid-burst (the exact compounding §7b exists to avoid). */
+    if (s_defer_start_ms == 0) s_defer_start_ms = now_ms;
+    if ((now_ms - s_defer_start_ms) < ML_PEER_NVS_FLUSH_MAX_DEFER_MS) {
+      return ESP_OK;
+    }
+  }
+  s_defer_start_ms = 0;
+  int64_t t0 = esp_timer_get_time();
+  esp_err_t r = flush_table();
+  uint32_t dur = (uint32_t)((esp_timer_get_time() - t0) / 1000);
+  s_diag_flush_last_ms = dur;
+  if (dur > s_diag_flush_max_ms) s_diag_flush_max_ms = dur;
+  s_diag_flush_count++;
   s_last_flush_ms = now_ms;
-  s_dirty = false;
-  return flush_table();
+  if (r == ESP_OK) {
+    s_dirty = false; /* keep the dirt on a failed flush */
+  }
+  return r;
 }
 
 int ml_peer_nvs_load_all(ml_peer_t * peers, int max_peers)

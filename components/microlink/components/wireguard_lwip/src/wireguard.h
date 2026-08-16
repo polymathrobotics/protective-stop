@@ -190,6 +190,9 @@ struct wireguard_peer {
 	// Worst inter-frame gap across ANY path — the "received nothing" window
 	// that maps to a heartbeat-timeout disarm (2026-08-12 edge-flush metric).
 	uint32_t worst_rx_gap;
+	// When the worst gap was RECORDED (sys_now ms, wraps ~49.7d) — makes the
+	// cumulative gauge datable (boot-window vs armed-window events).
+	uint32_t worst_rx_gap_at_ms;
 
 	// We set this flag on RX/TX of packets if we think that we should initiate a new handshake
 	bool send_handshake;
