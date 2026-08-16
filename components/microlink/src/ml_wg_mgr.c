@@ -1497,7 +1497,14 @@ static void pin_presence_heal(microlink_t * ml)
   ml_peer_update_t cached;
   if (ml_peer_nvs_lookup_update(absent_ip, &cached)) {
     bool skipped = false;
-    if (add_peer(ml, &cached, &skipped) >= 0) {
+    uint64_t a0 = ml_get_time_ms();
+    int aidx = add_peer(ml, &cached, &skipped);
+    /* Attribute this out-of-ingest add to the pass gauges — a stall event
+     * must never carry unattributed restore work (stall-decomposition rule). */
+    uint32_t am = (uint32_t)s_pass_ingest_ms + (uint32_t)(ml_get_time_ms() - a0);
+    s_pass_ingest_ms = (am > 0xFFFF) ? 0xFFFF : (uint16_t)am;
+    if (aidx >= 0) {
+      s_pass_peer_adds++;
       s_pin.absent_nvs_restores++;
       ESP_LOGW(
         TAG, "Pinned peer %s ABSENT — restored from NVS cache (#%u)", ipstr, (unsigned)s_pin.absent_nvs_restores);

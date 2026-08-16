@@ -2443,8 +2443,10 @@ static int poll_map_update(microlink_t * ml, ml_noise_state_t * noise)
     /* Only the map long-poll stream ended (RST_STREAM / END_STREAM / trailers)
      * — routine ~90 min expiry — while the TCP+Noise connection stays healthy.
      * Return -2 so the caller does a soft refresh (re-issue the streaming
-     * MapRequest on a fresh stream id with OmitPeers=true) instead of a full
-     * reconnect that would re-download all peers. Any DATA in this batch is
+     * MapRequest on a fresh stream id with OmitPeers=true — unless the
+     * pin-absent heal has s_want_full_peers pending, which makes the next
+     * request a deliberate full redelivery) instead of a full reconnect
+     * that would re-download all peers. Any DATA in this batch is
      * stale — discard it. */
     free(frame_buf);
     return -2;
@@ -3000,7 +3002,9 @@ void ml_coord_task(void * arg)
           /* Routine map-stream expiry, TCP+Noise connection still healthy:
            * soft-refresh the long-poll on a fresh stream id instead of a full
            * reconnect. do_start_long_poll() sends OmitPeers=true, so this does
-           * NOT re-download the ~128 peers (the rebond flood we are removing). */
+           * NOT re-download the ~128 peers (the rebond flood we are removing) —
+           * EXCEPT when the pin-absent heal's s_want_full_peers one-shot is
+           * pending, which turns exactly one refresh into a full redelivery. */
           ESP_LOGI(TAG, "Map long-poll stream refresh (connection preserved)");
           if (do_start_long_poll(ml, &noise) < 0) {
             state = COORD_RECONNECTING;
