@@ -53,6 +53,7 @@ void ml_coord_request_full_peers(void)
 {
   s_want_full_peers = true;
 }
+
 /* The next successful connect is a scheduled re-register, not a flap: keep it
  * out of connect_count so ml_reconnects stays a pure flap signal for soaks.
  * Any GENUINE reconnect trigger clears it so a real flap is never masked. */
