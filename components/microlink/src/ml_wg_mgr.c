@@ -1508,10 +1508,12 @@ static void pin_presence_heal(microlink_t * ml)
   s_pin.absent_resyncs++;
   ESP_LOGW(
     TAG,
-    "Pinned peer %s ABSENT from peer table (no NVS cache entry) — forcing coord resync #%u (next retry in %us)",
+    "Pinned peer %s ABSENT from peer table (no NVS cache entry) — forcing FULL coord resync #%u (next retry in %us)",
     ipstr,
     (unsigned)s_pin.absent_resyncs,
     (unsigned)(s_pin.absent_backoff_ms / 1000));
+  ml_coord_request_full_peers(); /* the default OmitPeers=true reconnect never
+                                  * re-delivers the missing peer (f498 evidence) */
   ml_coord_cmd_t cmd = ML_CMD_FORCE_RECONNECT;
   (void)xQueueSend(ml->coord_cmd_queue, &cmd, 0); /* full = one already pending */
 }

@@ -1047,6 +1047,9 @@ extern "C"
   /* Lookup a peer in the NVS cache by VPN IP into an update struct (pin-absent
    * self-heal synthesis path). Returns false when uncached/uninitialized. */
   bool ml_peer_nvs_lookup_update(uint32_t vpn_ip, ml_peer_update_t * out);
+  /* One-shot: the next long-poll MapRequest sends OmitPeers=false so the
+   * control plane re-delivers the FULL peer list (pin-absent heal fallback). */
+  void ml_coord_request_full_peers(void);
   /* Stage-0b: worst single wg_mgr loop iteration ms (heartbeat-path stall). */
   uint32_t ml_wg_get_max_iter_ms(void);
   /* Path-diversity telemetry: out[0]=leg-2 mirrors sent, out[1]=mirrors

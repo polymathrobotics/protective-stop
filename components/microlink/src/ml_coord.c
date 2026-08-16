@@ -43,6 +43,16 @@ static const char * TAG = "ml_coord";
 /* Periodic re-registrations executed (coord-task-owned; word-sized cross-task
  * read via ml_coord_get_reregisters for /admin/api/monitor). */
 static uint32_t s_diag_coord_reregisters;
+/* One-shot: next long-poll MapRequest sends OmitPeers=false (full peer
+ * redelivery). Set by the pin-absent heal when NVS synthesis has nothing to
+ * work from — the default OmitPeers=true reconnect provably never re-delivers
+ * a peer the server believes we hold (f498, 2026-08-16). */
+static volatile bool s_want_full_peers;
+
+void ml_coord_request_full_peers(void)
+{
+  s_want_full_peers = true;
+}
 /* The next successful connect is a scheduled re-register, not a flap: keep it
  * out of connect_count so ml_reconnects stays a pure flap signal for soaks.
  * Any GENUINE reconnect trigger clears it so a real flap is never masked. */
@@ -2084,7 +2094,14 @@ static int do_start_long_poll(microlink_t * ml, ml_noise_state_t * noise)
   cJSON_AddBoolToObject(root, "Stream", true);
   cJSON_AddBoolToObject(root, "KeepAlive", true);
   cJSON_AddStringToObject(root, "Compress", ""); /* Disable compression */
-  cJSON_AddBoolToObject(root, "OmitPeers", true); /* Already have peers */
+  {
+    /* Default: peers arrive via patches. One-shot false = full redelivery,
+     * requested by the pin-absent heal (see s_want_full_peers). */
+    bool omit = !s_want_full_peers;
+    s_want_full_peers = false;
+    cJSON_AddBoolToObject(root, "OmitPeers", omit);
+    if (!omit) ESP_LOGW(TAG, "MapRequest with OmitPeers=false (full peer redelivery requested)");
+  }
 
   /* NOTE: With Version >= 68, the control plane IGNORES Endpoints and
      * Hostinfo in Stream=true MapRequests. Endpoints are sent via separate
