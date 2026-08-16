@@ -154,10 +154,12 @@ uint8_t dcs_nvs_take_ctrl_reset_cause(void)
   if (nvs_open(DCS_NVS_NS, NVS_READWRITE, &h) != ESP_OK) return 0;
   uint8_t v = 0;
   if (nvs_get_u8(h, DCS_NVS_KEY_CTRL_RST, &v) == ESP_OK) {
-    (void)nvs_erase_key(h, DCS_NVS_KEY_CTRL_RST); /* one-shot: stale crumbs must
-                                                    * not mislabel a later
-                                                    * POWERON/panic */
-    (void)nvs_commit(h);
+    /* One-shot: a stale crumb must not mislabel a later POWERON/panic. The
+     * caller additionally gates on reset_reason==SW as the backstop for a
+     * failed erase here. */
+    if (nvs_erase_key(h, DCS_NVS_KEY_CTRL_RST) != ESP_OK || nvs_commit(h) != ESP_OK) {
+      ESP_LOGW(TAG, "ctrl-reset crumb erase failed (stale value may persist)");
+    }
   }
   nvs_close(h);
   return v;

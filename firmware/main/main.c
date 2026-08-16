@@ -1096,10 +1096,11 @@ static void comparator_task(void * arg)
          *     both IN pads ~once per second; if the input-direction/pull-down
          *     integrity is lost (an open loop could then float to a false-OK),
          *     latch a sticky fault. React the same way as the clock cross-check:
-         *     send NOTHING to any machine so every heartbeat times out to STOP.
-         *     No reset — a lost pull-down is a hardware fault a reboot cannot
-         *     fix (estop_init would re-enable it, transiently masking a real
-         *     silicon fault), so the device stays safely silent until serviced. */
+         *     send NOTHING to any machine so every heartbeat times out to STOP,
+         *     hold that silence for ESTOP_PADCFG_RESET_GRACE_MS, then take a
+         *     controlled reset — estop_init's re-init recovers an SEU-corrupted
+         *     pad config; a persistent silicon fault re-trips the check on the
+         *     next boot and the unit cycles silent-STOP again (never false-OK). */
     if (++padcfg_tick >= ESTOP_PADCFG_REVERIFY_TICKS) {
       padcfg_tick = 0;
       (void)estop_padcfg_reverify();

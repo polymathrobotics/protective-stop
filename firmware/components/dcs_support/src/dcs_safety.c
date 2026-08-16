@@ -46,6 +46,10 @@ void dcs_safety_account_boot(void)
   g_dcs.boot_count = dcs_nvs_read_boot_count();
   dcs_nvs_push_reset_reason(g_dcs.reset_reason); /* crash-pattern history */
   g_dcs.ctrl_reset_cause = dcs_nvs_take_ctrl_reset_cause(); /* one-shot crumb */
+  if (g_dcs.reset_reason != (uint8_t)ESP_RST_SW) {
+    g_dcs.ctrl_reset_cause = 0; /* crumb only labels an esp_restart() boot — a
+                                 * failed erase must not mislabel POWERON/panic */
+  }
 
   /* Was the last reboot a DELIBERATE net_liveness wedge-recovery abort? It
      * uses abort() (so the panic backtrace is captured) but a network/upstream
