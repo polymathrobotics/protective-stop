@@ -354,7 +354,9 @@ int ml_peer_nvs_load_all(ml_peer_t * peers, int max_peers)
     strlcpy(p->hostname, u.hostname, sizeof(p->hostname));
     p->endpoint_count = u.endpoint_count;
     for (int j = 0; j < u.endpoint_count && j < 2; j++) {
-      p->endpoints[j] = u.endpoints[j];
+      p->endpoints[j].ip = u.endpoints[j].ip;
+      p->endpoints[j].port = u.endpoints[j].port;
+      p->endpoints[j].is_ipv6 = u.endpoints[j].is_ipv6;
     }
     p->active = true;
     p->wg_peer_index = -1;
