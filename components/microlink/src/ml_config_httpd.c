@@ -1191,6 +1191,7 @@ static esp_err_t handler_monitor(httpd_req_t * req)
       uint32_t rc[3] = {0};
       ml_derp_get_reconnect_diag(rc);
       cJSON_AddNumberToObject(json, "derp_reconnects", rc[0]);
+      cJSON_AddNumberToObject(json, "derp_kicks_spaced", ml_derp_get_kicks_spaced());
       cJSON_AddNumberToObject(json, "derp_reconnect_last_ms", rc[1]);
       cJSON_AddNumberToObject(json, "derp_reconnect_worst_ms", rc[2]);
       extern void ml_wg_get_session_diag(microlink_t *, uint32_t[5]);

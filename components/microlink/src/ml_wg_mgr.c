@@ -1515,7 +1515,8 @@ static void pin_presence_heal(microlink_t * ml)
    * self-correcting — the next coord update rekey-retires it. We run on the
    * wg_mgr task, so calling add_peer directly is single-writer-safe. */
   ml_peer_update_t cached;
-  if (ml_peer_nvs_lookup_update(absent_ip, &cached)) {
+  bool have_cached = ml_peer_nvs_lookup_update(absent_ip, &cached);
+  if (have_cached) {
     bool skipped = false;
     uint64_t a0 = ml_get_time_ms();
     int aidx = add_peer(ml, &cached, &skipped);
@@ -1535,8 +1536,9 @@ static void pin_presence_heal(microlink_t * ml)
   s_pin.absent_resyncs++;
   ESP_LOGW(
     TAG,
-    "Pinned peer %s ABSENT from peer table (no NVS cache entry) — forcing FULL coord resync #%u (next retry in %us)",
+    "Pinned peer %s ABSENT (%s) — forcing FULL coord resync #%u (next retry in %us)",
     ipstr,
+    have_cached ? "NVS cache entry found but add failed" : "no NVS cache entry",
     (unsigned)s_pin.absent_resyncs,
     (unsigned)(s_pin.absent_backoff_ms / 1000));
   ml_coord_request_full_peers(); /* the default OmitPeers=true reconnect never

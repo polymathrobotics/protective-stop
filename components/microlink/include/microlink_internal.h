@@ -254,6 +254,12 @@ extern "C"
  * server-side black-hole or half-dead TCP. Idle conns (no recent tx) are NOT
  * reaped — nothing is owed back on them. */
 #define ML_DERP_RX_STALE_MS 150000
+/* Global floor between DERP connect STARTS. A control-plane flush kills every
+ * conn at once; back-to-back TLS connect work then starves DIRECT heartbeat
+ * rx (run-26 switch drop-gap; run-43: 52 reconnects rode the flush, both
+ * disarms inside the burst). Callers all retry on their own cadence, so a
+ * refused kick just lands next tick. */
+#define ML_DERP_CONNECT_SPACING_MS 1500
 #define ML_DERP_RX_STALE_TX_ACTIVE_MS 30000
 /* WG-rx handshake budget (docs/STALL_EVENT_CLOSURE_DESIGN.md): an inbound
  * WG INITIATION costs ~4 X25519 ≈ 45 ms measured and is processed holding
@@ -1054,6 +1060,7 @@ extern "C"
   /* True when vpn_ip is the priority peer or an extra pin — consumed by
    * ml_config_peer_is_allowed()'s centralized pin exemption. */
   bool ml_wg_ip_is_pinned(uint32_t vpn_ip);
+  uint32_t ml_derp_get_kicks_spaced(void); /* connect kicks refused by the spacing gate */
   /* Stage-0b: worst single wg_mgr loop iteration ms (heartbeat-path stall). */
   uint32_t ml_wg_get_max_iter_ms(void);
   /* Path-diversity telemetry: out[0]=leg-2 mirrors sent, out[1]=mirrors
