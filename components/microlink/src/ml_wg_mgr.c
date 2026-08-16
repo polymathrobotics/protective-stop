@@ -58,6 +58,7 @@ static inline bool ml_lwip_core_lock_needed(void)
 /* Forward declarations */
 static void disco_send_call_me_maybe(microlink_t * ml, int peer_idx);
 static void wg_mgr_drain_wg_rx(microlink_t * ml);
+static int add_peer(microlink_t * ml, const ml_peer_update_t * update, bool * skipped);
 
 static int s_wg_hs_budget; /* reset each wg_mgr pass */
 static uint32_t s_diag_wg_hs_deferred;
@@ -1418,6 +1419,7 @@ static struct
   uint32_t backoff_ms; /* current backoff step */
   uint16_t last_target; /* region of the pin MBB we issued (edge 4: cancel-on-clear) */
   uint32_t absent_resyncs; /* coord full-resyncs forced by an absent pinned peer (cumulative) */
+  uint32_t absent_nvs_restores; /* absent pins re-synthesized from the NVS peer cache */
   uint64_t absent_next_ms; /* pin-presence heal backoff gate */
   uint32_t absent_backoff_ms;
 } s_pin; /* never bulk-reset: counters are cumulative, reset sites clear differing subsets */
@@ -1433,13 +1435,14 @@ uint32_t ml_wg_get_max_iter_ms(void)
   return s_diag_wg_max_iter_ms;
 }
 
-void ml_wg_get_pin_diag(uint32_t out[5])
+void ml_wg_get_pin_diag(uint32_t out[6])
 {
   out[0] = s_pin.mbb_requests;
   out[1] = s_pin.mbb_commits;
   out[2] = s_pin.mbb_retries;
   out[3] = (s_pin.retry_at_ms != 0) ? 1u : 0u; /* backoff currently pending */
   out[4] = s_pin.absent_resyncs; /* forced coord resyncs for a pinned-but-absent peer */
+  out[5] = s_pin.absent_nvs_restores; /* absent pins restored from the NVS cache */
 }
 
 /* Pin-presence self-heal: an extra-pinned IP
@@ -1481,12 +1484,31 @@ static void pin_presence_heal(microlink_t * ml)
   s_pin.absent_backoff_ms =
     (s_pin.absent_backoff_ms == 0) ? 60000 : (s_pin.absent_backoff_ms >= 300000 ? 600000 : s_pin.absent_backoff_ms * 5);
   s_pin.absent_next_ms = now + s_pin.absent_backoff_ms;
-  s_pin.absent_resyncs++;
   char ipstr[16];
   microlink_ip_to_str(absent_ip, ipstr);
+
+  /* First choice: re-synthesize the peer from the NVS cache (key + disco key +
+   * endpoints survive there). The coord-resync fallback below is empirically
+   * insufficient: with OmitPeers the re-fetch does not re-deliver a peer the
+   * server believes we hold (f498 reproducer, 2026-08-16: absent_resyncs
+   * climbing while errno-118 route-fails persisted). A stale cached key is
+   * self-correcting — the next coord update rekey-retires it. We run on the
+   * wg_mgr task, so calling add_peer directly is single-writer-safe. */
+  ml_peer_update_t cached;
+  if (ml_peer_nvs_lookup_update(absent_ip, &cached)) {
+    bool skipped = false;
+    if (add_peer(ml, &cached, &skipped) >= 0) {
+      s_pin.absent_nvs_restores++;
+      ESP_LOGW(
+        TAG, "Pinned peer %s ABSENT — restored from NVS cache (#%u)", ipstr, (unsigned)s_pin.absent_nvs_restores);
+      return;
+    }
+  }
+
+  s_pin.absent_resyncs++;
   ESP_LOGW(
     TAG,
-    "Pinned peer %s ABSENT from peer table — forcing coord resync #%u (next retry in %us)",
+    "Pinned peer %s ABSENT from peer table (no NVS cache entry) — forcing coord resync #%u (next retry in %us)",
     ipstr,
     (unsigned)s_pin.absent_resyncs,
     (unsigned)(s_pin.absent_backoff_ms / 1000));

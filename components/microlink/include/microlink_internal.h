@@ -1043,7 +1043,10 @@ extern "C"
    * retry-forever), out[3]=backoff currently pending (0/1), out[4]=coord
    * full-resyncs forced by a pinned-but-absent peer (f498 heal). Owned by
    * the wg_mgr task; word-sized cross-task reads. */
-  void ml_wg_get_pin_diag(uint32_t out[5]);
+  void ml_wg_get_pin_diag(uint32_t out[6]);
+  /* Lookup a peer in the NVS cache by VPN IP into an update struct (pin-absent
+   * self-heal synthesis path). Returns false when uncached/uninitialized. */
+  bool ml_peer_nvs_lookup_update(uint32_t vpn_ip, ml_peer_update_t * out);
   /* Stage-0b: worst single wg_mgr loop iteration ms (heartbeat-path stall). */
   uint32_t ml_wg_get_max_iter_ms(void);
   /* Path-diversity telemetry: out[0]=leg-2 mirrors sent, out[1]=mirrors

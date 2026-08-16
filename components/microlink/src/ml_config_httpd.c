@@ -965,7 +965,7 @@ static esp_err_t handler_monitor(httpd_req_t * req)
        * effective-home == the override from the instant it is set, so the
        * eff alias can't tell whether the conn has moved yet. */
       {
-        uint32_t pd[5] = {0};
+        uint32_t pd[6] = {0};
         ml_wg_get_pin_diag(pd);
         ml_derp_conn_t * homec = &ml->derp[ml->derp_home_slot];
         bool pin_ok =
@@ -976,6 +976,7 @@ static esp_err_t handler_monitor(httpd_req_t * req)
         cJSON_AddNumberToObject(json, "pin_mbb_retries", pd[2]);
         cJSON_AddNumberToObject(json, "pin_backoff_pending", pd[3]);
         cJSON_AddNumberToObject(json, "pin_absent_resyncs", pd[4]);
+        cJSON_AddNumberToObject(json, "pin_absent_nvs_restores", pd[5]);
       }
     }
     /* Home-region-unreachable fallback telemetry (DERP design-review finding):

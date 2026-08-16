@@ -300,6 +300,30 @@ esp_err_t ml_peer_nvs_flush_if_due(uint64_t now_ms, bool ingest_busy)
   return r;
 }
 
+bool ml_peer_nvs_lookup_update(uint32_t vpn_ip, ml_peer_update_t * out)
+{
+  if (!s_initialized || !s_table || !out || vpn_ip == 0) return false;
+  for (int i = 0; i < s_table->count; i++) {
+    peer_nvs_entry_t * e = &s_table->entries[i];
+    if (e->vpn_ip != vpn_ip) continue;
+    memset(out, 0, sizeof(*out));
+    out->vpn_ip = e->vpn_ip;
+    memcpy(out->public_key, e->public_key, 32);
+    memcpy(out->disco_key, e->disco_key, 32);
+    out->derp_region = e->derp_region;
+    out->endpoint_count = e->endpoint_count;
+    for (int j = 0; j < e->endpoint_count && j < 2; j++) {
+      out->endpoints[j].ip = e->endpoints[j].ip;
+      out->endpoints[j].port = e->endpoints[j].port;
+      out->endpoints[j].is_ipv6 = false;
+    }
+    memcpy(out->hostname, e->hostname_short, sizeof(e->hostname_short));
+    out->hostname[sizeof(e->hostname_short)] = '\0';
+    return true;
+  }
+  return false;
+}
+
 int ml_peer_nvs_load_all(ml_peer_t * peers, int max_peers)
 {
   if (!s_initialized || !peers || !s_table) return 0;
