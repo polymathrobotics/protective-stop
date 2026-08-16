@@ -1086,8 +1086,7 @@ static void comparator_task(void * arg)
       dcs_publish_xcheck(xc_fault, (uint32_t)atomic_load(&g_xcheck_hb[0]), (uint32_t)atomic_load(&g_xcheck_hb[1]));
       if ((TickType_t)(xTaskGetTickCount() - xc_fault_tick) >= pdMS_TO_TICKS(XCHECK_RESET_GRACE_MS)) {
         ESP_LOGE(TAG, "XCHECK: controlled reset now");
-        vTaskDelay(pdMS_TO_TICKS(20)); /* flush the log line */
-        esp_restart();
+        dcs_controlled_reset(DCS_CTRL_RST_XCHECK); /* crumb + flush + restart */
       }
       vTaskDelayUntil(&next, TICK_PERIOD);
       continue; /* send nothing this tick */
@@ -1119,8 +1118,7 @@ static void comparator_task(void * arg)
       }
       if ((TickType_t)(xTaskGetTickCount() - padcfg_fault_tick) >= pdMS_TO_TICKS(ESTOP_PADCFG_RESET_GRACE_MS)) {
         ESP_LOGE(TAG, "GPIO PADCFG FAULT: controlled reset now (re-init recovers an SEU; a persistent fault re-trips)");
-        vTaskDelay(pdMS_TO_TICKS(20)); /* flush the log line */
-        esp_restart();
+        dcs_controlled_reset(DCS_CTRL_RST_PADCFG); /* crumb + flush + restart */
       }
       vTaskDelayUntil(&next, TICK_PERIOD);
       continue; /* fail-safe: send nothing -> machines STOP */

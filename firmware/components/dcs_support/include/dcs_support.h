@@ -41,6 +41,10 @@ extern "C"
     bool derp_only_mode; /* boot_count == 1 ladder — DISCO+STUN suppressed */
     uint16_t boot_count; /* CRASH-class boots since last age-out (Layer 2) */
     uint8_t reset_reason; /* esp_reset_reason() value at boot */
+    uint8_t ctrl_reset_cause; /* which controlled-reset path caused the PREVIOUS
+                               * boot's SW reset (DCS_CTRL_RST_*, 0 = none/
+                               * uninstrumented) — reset_reason=SW alone cannot
+                               * distinguish XCHECK from PADCFG from OTA */
     microlink_t * ml_handle; /* For main.c to query ml state if needed */
     ml_app_t * app; /* For main.c to ml_app_add_page() additional URIs */
   } dcs_boot_state_t;
@@ -123,6 +127,15 @@ extern "C"
  * @param hb1   core 1's last published heartbeat counter.
  */
   void dcs_publish_xcheck(uint32_t fault, uint32_t hb0, uint32_t hb1);
+
+/* Controlled-reset breadcrumb: reset_reason=SW alone cannot attribute a
+ * mid-run self-reset (XCHECK vs PADCFG vs clock fault look identical after
+ * RAM is wiped — two un-attributable remote resets on 2026-08-16). Persists
+ * one NVS byte, flushes the log line, then esp_restart(). Never returns. */
+#define DCS_CTRL_RST_CLOCK_FAULT 1u
+#define DCS_CTRL_RST_XCHECK 2u
+#define DCS_CTRL_RST_PADCFG 3u
+  void dcs_controlled_reset(uint8_t cause) __attribute__((noreturn));
 
   /**
  * @brief Publish the E-stop GPIO pad-config re-verification state (SR-R-09 /

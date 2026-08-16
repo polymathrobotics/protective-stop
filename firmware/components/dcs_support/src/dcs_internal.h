@@ -108,6 +108,7 @@ extern "C"
     bool derp_only_mode;
     uint16_t boot_count;
     uint8_t reset_reason;
+    uint8_t ctrl_reset_cause; /* one-shot crumb taken at boot (DCS_CTRL_RST_*) */
     microlink_t * ml_handle;
     ml_app_t * app;
   } dcs_state_t;
@@ -303,6 +304,8 @@ extern "C"
  * shifted out); read fills out[] newest-last and returns the count. Lets a crash
  * pattern be seen remotely via /state.json even across later clean reboots. */
   void dcs_nvs_push_reset_reason(uint8_t reason);
+  void dcs_nvs_set_ctrl_reset_cause(uint8_t cause);
+  uint8_t dcs_nvs_take_ctrl_reset_cause(void);
   int dcs_nvs_read_reset_history(uint8_t * out, int max);
   uint8_t dcs_nvs_read_pstop_unit_num(void); /* 0 = auto (chip-ID derived) */
   esp_err_t dcs_nvs_write_pstop_unit_num(uint8_t n);

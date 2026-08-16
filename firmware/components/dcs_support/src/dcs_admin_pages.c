@@ -254,7 +254,7 @@ static esp_err_t page_state(httpd_req_t * req)
     "\"rgb_cycles\":%lu,\"uptime_ms\":%llu,"
     "\"derp_paused\":%d,\"derp_delay_ms\":%d,\"wg_paused\":%d,"
     "\"usb_enabled\":%d,\"ts_boot_en\":%d,\"derp_only\":%d,"
-    "\"boot_count\":%u,\"reset_reason\":%u,"
+    "\"boot_count\":%u,\"reset_reason\":%u,\"ctrl_reset_cause\":%u,"
     "\"fw_ver\":\"%s\",\"fw_sha\":\"%s\","
     "\"ml_state\":%d,\"ml_reconnects\":%lu,\"vpn_ip\":%lu,\"public_ip\":%lu,\"derp_region\":%d,"
     "\"derp_region_locked\":%d,"
@@ -321,6 +321,7 @@ static esp_err_t page_state(httpd_req_t * req)
     g_dcs.derp_only_mode ? 1 : 0,
     (unsigned int)g_dcs.boot_count,
     (unsigned int)g_dcs.reset_reason,
+    (unsigned int)g_dcs.ctrl_reset_cause,
     (app_desc != NULL) ? app_desc->version : "",
     fw_sha,
     ml_state,

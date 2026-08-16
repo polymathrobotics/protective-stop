@@ -71,6 +71,8 @@ static uint16_t s_pass_periodic_ms;
 static uint16_t s_pass_probe_ms;
 static uint16_t s_pass_cmm_sends; /* counted in disco_send_call_me_maybe (6 call sites) */
 static uint16_t s_pass_nvs_flush_ms; /* flash-flush wall-clock this pass */
+static uint16_t s_pass_ingest_ms; /* process_peer_updates wall-clock this pass */
+static uint16_t s_pass_drain_ms; /* cumulative wg-rx drain wall-clock this pass */
 
 /* Stall-event ring: wg_mgr-owned writer; entries published via a
  * release-stored index so httpd never reads a torn published entry. */
@@ -1819,14 +1821,16 @@ typedef struct
 static region_stash_t s_region_stash[ML_REGION_STASH_SLOTS];
 static uint32_t s_diag_region_stash_restores;
 static uint32_t s_diag_readds_skipped;
+static uint32_t s_diag_allowlist_rejects;
 /* Indexed by first-failing §7a skip clause: 0=!existing 1=no-wg-slot 2=vpn_ip
  * 3=disco_key 4=hostname 5=region 6=endpoints. */
 static uint32_t s_diag_skipfail[7];
 
-void ml_wg_get_ingest_diag(uint32_t out[2])
+void ml_wg_get_ingest_diag(uint32_t out[3])
 {
   out[0] = s_diag_readds_skipped;
   out[1] = s_diag_region_stash_restores;
+  out[2] = s_diag_allowlist_rejects;
 }
 
 void ml_wg_get_skipfail_diag(uint32_t out[7])
@@ -1873,6 +1877,18 @@ static bool peer_has_endpoint(const ml_peer_t * p, uint32_t ip, uint16_t port, b
   return false;
 }
 
+/* Boot NVS preseed stores only a truncated hostname (ml_peer_nvs
+ * hostname_short[7]) — a stored non-empty PREFIX of the update's name is
+ * display drift, not a rename (identity is already pinned by public key +
+ * vpn_ip + disco key at this point). Without this, EVERY preseeded peer took
+ * one full X25519 re-add per boot (~128 needless adds = the boot storm). */
+static bool readd_hostname_unchanged(const ml_peer_t * p, const ml_peer_update_t * u)
+{
+  if (strncmp(u->hostname, p->hostname, sizeof(p->hostname) - 1) == 0) return true;
+  size_t sl = strnlen(p->hostname, sizeof(p->hostname) - 1);
+  return sl > 0 && strncmp(u->hostname, p->hostname, sl) == 0;
+}
+
 /* §7a: does this re-add carry any endpoint we don't already hold? Subset test,
  * order-insensitive: learn-from-ping appends locally-learned endpoints that a
  * coord re-add never carries, so exact-list equality was defeated FOREVER for
@@ -1893,9 +1909,14 @@ static bool readd_endpoints_unchanged(const ml_peer_t * p, const ml_peer_update_
 static int add_peer(microlink_t * ml, const ml_peer_update_t * update, bool * skipped)
 {
   /* Peer allowlist filter: don't waste WG slots on non-allowed peers.
-     * Still process updates for existing peers (they may become allowed later). */
+     * Still process updates for existing peers (they may become allowed later).
+     * Counts as SKIPPED: near-zero work, so it must not consume an ingest
+     * pacing slot or trigger a wg-rx drain (run-39: rejects saturated the
+     * pacing cap uncounted, stretching re-ingests over dozens of passes). */
   if (!ml_config_peer_is_allowed(ml->config_httpd, update->vpn_ip)) {
-    return -1; /* Silently skip — peer not in allowlist */
+    s_diag_allowlist_rejects++;
+    if (skipped) *skipped = true;
+    return -1;
   }
 
   /* Check if peer already exists */
@@ -1934,6 +1955,7 @@ static int add_peer(microlink_t * ml, const ml_peer_update_t * update, bool * sk
         s_diag_rekey_retire_vetoes++;
         ESP_LOGW(
           TAG, "IGNORING re-key retire for %s: session still passing authenticated data (deferred)", update->hostname);
+        if (skipped) *skipped = true; /* deferred, no add work — no pacing slot */
         return -1;
       }
       s_diag_rekey_retires++;
@@ -2045,7 +2067,7 @@ static int add_peer(microlink_t * ml, const ml_peer_update_t * update, bool * sk
     skipfail = 2;
   else if (memcmp(update->disco_key, p->disco_key, 32) != 0)
     skipfail = 3;
-  else if (strncmp(update->hostname, p->hostname, sizeof(p->hostname) - 1) != 0)
+  else if (!readd_hostname_unchanged(p, update))
     skipfail = 4;
   else if (update->derp_region != 0 && update->derp_region != p->derp_region)
     skipfail = 5;
@@ -2065,6 +2087,11 @@ static int add_peer(microlink_t * ml, const ml_peer_update_t * update, bool * sk
       (is_pinned_peer(ml, p->vpn_ip) || is_health_tracked(p->vpn_ip)))
     {
       p->relay_retry_next_ms = 1; /* identical endpoints still re-arm the sweep */
+    }
+    if (strncmp(update->hostname, p->hostname, sizeof(p->hostname) - 1) != 0) {
+      /* Truncated-preseed prefix matched: recover the full display name.
+       * RAM-only — the next NVS save re-truncates regardless. */
+      strlcpy(p->hostname, update->hostname, sizeof(p->hostname));
     }
     s_diag_readds_skipped++;
     if (skipped) *skipped = true;
@@ -3399,6 +3426,7 @@ bool ml_wg_fleet_configured(microlink_t * ml)
 
 static void wg_mgr_drain_wg_rx(microlink_t * ml)
 {
+  uint64_t drain_t0 = ml_get_time_ms();
   UBaseType_t pops = uxQueueMessagesWaiting(ml->wg_rx_queue);
   ml_rx_packet_t pkt;
   while (pops-- > 0 && xQueueReceive(ml->wg_rx_queue, &pkt, 0) == pdTRUE) {
@@ -3421,6 +3449,10 @@ static void wg_mgr_drain_wg_rx(microlink_t * ml)
     }
     s_pass_wg_pkts++;
     process_wg_packet(ml, &pkt);
+  }
+  {
+    uint32_t dm = (uint32_t)s_pass_drain_ms + (uint32_t)(ml_get_time_ms() - drain_t0);
+    s_pass_drain_ms = (dm > 0xFFFF) ? 0xFFFF : (uint16_t)dm;
   }
 }
 
@@ -4276,10 +4308,17 @@ void ml_wg_mgr_task(void * arg)
     s_pass_probe_ms = 0;
     s_pass_cmm_sends = 0;
     s_pass_nvs_flush_ms = 0;
+    s_pass_ingest_ms = 0;
+    s_pass_drain_ms = 0;
     wg_mgr_drain_wg_rx(ml);
 
     /* Process peer updates from coord task (paced) */
-    process_peer_updates(ml);
+    {
+      uint64_t i0 = ml_get_time_ms();
+      process_peer_updates(ml);
+      uint64_t id = ml_get_time_ms() - i0;
+      s_pass_ingest_ms = (id > 0xFFFF) ? 0xFFFF : (uint16_t)id;
+    }
 
     /* Debounced peer-cache flash flush (see ml_peer_nvs.c). */
     {
@@ -4435,6 +4474,8 @@ void ml_wg_mgr_task(void * arg)
         e->disco_probe_ms = s_pass_probe_ms;
         e->cmm_sends = s_pass_cmm_sends;
         e->nvs_flush_ms = s_pass_nvs_flush_ms;
+        e->ingest_ms = s_pass_ingest_ms;
+        e->drain_ms = s_pass_drain_ms;
         __atomic_store_n(&s_wg_stall_widx, w + 1, __ATOMIC_RELEASE);
         ESP_LOGW(
           TAG,

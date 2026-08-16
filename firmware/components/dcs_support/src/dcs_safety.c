@@ -33,11 +33,19 @@ void dcs_safety_mark_liveness_abort(void)
   s_liveness_abort_flag = DCS_LIVENESS_ABORT_MAGIC;
 }
 
+void dcs_controlled_reset(uint8_t cause)
+{
+  dcs_nvs_set_ctrl_reset_cause(cause); /* survives the reset; taken next boot */
+  vTaskDelay(pdMS_TO_TICKS(20)); /* flush the caller's log line */
+  esp_restart();
+}
+
 void dcs_safety_account_boot(void)
 {
   g_dcs.reset_reason = (uint8_t)esp_reset_reason();
   g_dcs.boot_count = dcs_nvs_read_boot_count();
   dcs_nvs_push_reset_reason(g_dcs.reset_reason); /* crash-pattern history */
+  g_dcs.ctrl_reset_cause = dcs_nvs_take_ctrl_reset_cause(); /* one-shot crumb */
 
   /* Was the last reboot a DELIBERATE net_liveness wedge-recovery abort? It
      * uses abort() (so the panic backtrace is captured) but a network/upstream

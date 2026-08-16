@@ -137,6 +137,30 @@ esp_err_t dcs_nvs_write_pstop_peer(uint32_t ip, uint16_t port)
   return r;
 }
 
+void dcs_nvs_set_ctrl_reset_cause(uint8_t cause)
+{
+  nvs_handle_t h;
+  if (nvs_open(DCS_NVS_NS, NVS_READWRITE, &h) != ESP_OK) return;
+  if (nvs_set_u8(h, "ctrl_rst", cause) == ESP_OK) {
+    (void)nvs_commit(h);
+  }
+  nvs_close(h);
+}
+
+uint8_t dcs_nvs_take_ctrl_reset_cause(void)
+{
+  nvs_handle_t h;
+  if (nvs_open(DCS_NVS_NS, NVS_READWRITE, &h) != ESP_OK) return 0;
+  uint8_t v = 0;
+  if (nvs_get_u8(h, "ctrl_rst", &v) == ESP_OK) {
+    (void)nvs_erase_key(h, "ctrl_rst"); /* one-shot: stale crumbs must not
+                                         * mislabel a later POWERON/panic */
+    (void)nvs_commit(h);
+  }
+  nvs_close(h);
+  return v;
+}
+
 void dcs_nvs_push_reset_reason(uint8_t reason)
 {
   nvs_handle_t h;

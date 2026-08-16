@@ -1110,10 +1110,11 @@ static esp_err_t handler_monitor(httpd_req_t * req)
         cJSON_AddNumberToObject(json, "wg_rx_drops_netio", ml_net_io_get_wg_rx_drops());
         cJSON_AddNumberToObject(json, "wg_rx_drops_derp", ml_derp_get_wg_rx_drops());
         {
-          uint32_t ig[2] = {0};
+          uint32_t ig[3] = {0};
           ml_wg_get_ingest_diag(ig);
           cJSON_AddNumberToObject(json, "peer_readds_skipped", ig[0]);
           cJSON_AddNumberToObject(json, "region_stash_restores", ig[1]);
+          cJSON_AddNumberToObject(json, "peer_allowlist_rejects", ig[2]);
           uint32_t sf[7] = {0};
           ml_wg_get_skipfail_diag(sf);
           cJSON * sfa = cJSON_AddArrayToObject(json, "readd_skipfail");
@@ -1143,6 +1144,8 @@ static esp_err_t handler_monitor(httpd_req_t * req)
           cJSON_AddNumberToObject(e, "probe_ms", we[i].disco_probe_ms);
           cJSON_AddNumberToObject(e, "cmm", we[i].cmm_sends);
           cJSON_AddNumberToObject(e, "flush_ms", we[i].nvs_flush_ms);
+          cJSON_AddNumberToObject(e, "ingest_ms", we[i].ingest_ms);
+          cJSON_AddNumberToObject(e, "drain_ms", we[i].drain_ms);
           cJSON_AddItemToArray(wa, e);
         }
         ml_derp_stall_event_t de[ML_STALL_RING_LEN];
