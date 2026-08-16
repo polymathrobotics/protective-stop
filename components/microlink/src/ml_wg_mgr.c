@@ -1819,11 +1819,19 @@ typedef struct
 static region_stash_t s_region_stash[ML_REGION_STASH_SLOTS];
 static uint32_t s_diag_region_stash_restores;
 static uint32_t s_diag_readds_skipped;
+/* Indexed by first-failing §7a skip clause: 0=!existing 1=no-wg-slot 2=vpn_ip
+ * 3=disco_key 4=hostname 5=region 6=endpoints. */
+static uint32_t s_diag_skipfail[7];
 
 void ml_wg_get_ingest_diag(uint32_t out[2])
 {
   out[0] = s_diag_readds_skipped;
   out[1] = s_diag_region_stash_restores;
+}
+
+void ml_wg_get_skipfail_diag(uint32_t out[7])
+{
+  for (int i = 0; i < 7; i++) out[i] = s_diag_skipfail[i];
 }
 
 static void region_stash_put(uint32_t vpn_ip, uint16_t region)
@@ -2024,13 +2032,21 @@ static int add_peer(microlink_t * ml, const ml_peer_update_t * update, bool * sk
    * LRU protection (rebuilt each boot) and the relay-retry re-arm. Any
    * material change — dropped WG slot, IP/disco-key/hostname/region/
    * endpoint delta — takes the full path. Hostname compared in stored-
-   * truncation space so an over-long name cannot defeat the skip forever. */
-  if (
-    existing && p->wg_peer_index >= 0 && update->vpn_ip == p->vpn_ip &&
-    memcmp(update->disco_key, p->disco_key, 32) == 0 &&
-    strncmp(update->hostname, p->hostname, sizeof(p->hostname) - 1) == 0 &&
-    (update->derp_region == 0 || update->derp_region == p->derp_region) && readd_endpoints_unchanged(p, update))
-  {
+   * truncation space so an over-long name cannot defeat the skip forever.
+   * skipfail = FIRST failing clause, counted per clause (run-38: the
+   * pins' adds=4 persisted after the endpoint subset fix — attribute the
+   * defeat with data, not hypotheses). */
+  int skipfail = -1;
+  if (!existing) skipfail = 0;
+  else if (p->wg_peer_index < 0) skipfail = 1;
+  else if (update->vpn_ip != p->vpn_ip) skipfail = 2;
+  else if (memcmp(update->disco_key, p->disco_key, 32) != 0) skipfail = 3;
+  else if (strncmp(update->hostname, p->hostname, sizeof(p->hostname) - 1) != 0) skipfail = 4;
+  else if (update->derp_region != 0 && update->derp_region != p->derp_region) skipfail = 5;
+  else if (!readd_endpoints_unchanged(p, update)) skipfail = 6;
+  if (skipfail >= 0 && skipfail <= 6) s_diag_skipfail[skipfail]++;
+
+  if (skipfail < 0) {
     if (
       is_pinned_peer(ml, p->vpn_ip) ||
       (ml->peer_wanted_cb != NULL && ml->peer_wanted_cb(ml->peer_wanted_ctx, p->hostname, p->vpn_ip)))

@@ -1007,6 +1007,7 @@ extern "C"
   bool ml_wg_fleet_configured(microlink_t * ml);
   /* §7a/§7c diag: out[0]=unchanged re-adds skipped, out[1]=region stash restores. */
   void ml_wg_get_ingest_diag(uint32_t out[2]);
+  void ml_wg_get_skipfail_diag(uint32_t out[7]); /* first-failing §7a clause counts */
   /* wg_rx edge drops at each producer (queue-full sheds, previously silent). */
   uint32_t ml_net_io_get_wg_rx_drops(void);
   uint32_t ml_derp_get_wg_rx_drops(void);

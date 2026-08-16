@@ -1114,6 +1114,14 @@ static esp_err_t handler_monitor(httpd_req_t * req)
           ml_wg_get_ingest_diag(ig);
           cJSON_AddNumberToObject(json, "peer_readds_skipped", ig[0]);
           cJSON_AddNumberToObject(json, "region_stash_restores", ig[1]);
+          uint32_t sf[7] = {0};
+          ml_wg_get_skipfail_diag(sf);
+          cJSON * sfa = cJSON_AddArrayToObject(json, "readd_skipfail");
+          if (sfa) {
+            /* index = first failing §7a clause: 0=!existing 1=no-wg-slot
+             * 2=vpn_ip 3=disco_key 4=hostname 5=region 6=endpoints */
+            for (int i = 0; i < 7; i++) cJSON_AddItemToArray(sfa, cJSON_CreateNumber(sf[i]));
+          }
           uint32_t fl[3] = {0};
           ml_peer_nvs_get_flush_diag(fl);
           cJSON_AddNumberToObject(json, "nvs_flush_last_ms", fl[0]);
