@@ -193,6 +193,11 @@ struct wireguard_peer {
 	// When the worst gap was RECORDED (sys_now ms, wraps ~49.7d) — makes the
 	// cumulative gauge datable (boot-window vs armed-window events).
 	uint32_t worst_rx_gap_at_ms;
+	// TX twin of the pair above: the machine is a pure replier, so its
+	// outbound gap to a peer tracks the inbound gap during an edge flush —
+	// the replier-silence half of the 2026-08-16 flush mechanism.
+	uint32_t worst_tx_gap;
+	uint32_t worst_tx_gap_at_ms;
 
 	// We set this flag on RX/TX of packets if we think that we should initiate a new handshake
 	bool send_handshake;

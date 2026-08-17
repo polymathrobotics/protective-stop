@@ -131,9 +131,14 @@ bool panic_log_has_snapshot(void)
  * reboot, the snapshot held over from this boot will end with the panic text.
  */
 extern void __real_panic_print_char(const char c);
-void __wrap_panic_print_char(const char c);
+void IRAM_ATTR __wrap_panic_print_char(const char c);
 
-void __wrap_panic_print_char(const char c)
+/* IRAM: an INT_WDT can fire inside a flash-cache-disabled window (NVS commit,
+ * OTA write). A flash-resident capture path can't execute there — the
+ * second-stage hardware reset then fires with NOTHING written, which matches
+ * the un-attributable 2026-08-16 reset_reason=5 (no ring text, no core).
+ * Pairs with CONFIG_ESP_PANIC_HANDLER_IRAM=y; s_pl is RTC memory (cache-safe). */
+void IRAM_ATTR __wrap_panic_print_char(const char c)
 {
   /* Append to ringbuffer. No locking — we're in panic context, all other
      * tasks are frozen and interrupts are off. */

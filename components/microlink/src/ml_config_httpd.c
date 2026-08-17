@@ -308,16 +308,18 @@ bool ml_config_peer_is_allowed(const ml_config_ctx_t * ctx, uint32_t vpn_ip)
   uint32_t fleet_ip = ml_config_fleet_server_ip();
   if (fleet_ip != 0u && vpn_ip == fleet_ip) return true;
 
+  /* Fast path: filter disabled → allow all */
+  if (!ctx->filter_enabled) return true;
+
   /* Every PINNED peer (configured machine slots / operators) is always
    * allowed. Centralized here so all five call sites — admission, both disco
    * ping gates, periodic probes, boot preseed — inherit the exemption: f498's
    * own allowlist blocked its configured machine and a one-site fix left the
    * peer admitted but disco-dead and never preseeded. The allowlist governs
-   * strangers; arming authority stays machine-side (operator list). */
+   * strangers; arming authority stays machine-side (operator list). Sits
+   * after the filter-disabled fast path (the exemption only matters when the
+   * filter can reject) and strictly before the mutex slow path. */
   if (ml_wg_ip_is_pinned(vpn_ip)) return true;
-
-  /* Fast path: filter disabled → allow all */
-  if (!ctx->filter_enabled) return true;
 
   /* Slow path: check allowlist under mutex */
   bool allowed = false;
@@ -1194,8 +1196,8 @@ static esp_err_t handler_monitor(httpd_req_t * req)
       cJSON_AddNumberToObject(json, "derp_kicks_spaced", ml_derp_get_kicks_spaced());
       cJSON_AddNumberToObject(json, "derp_reconnect_last_ms", rc[1]);
       cJSON_AddNumberToObject(json, "derp_reconnect_worst_ms", rc[2]);
-      extern void ml_wg_get_session_diag(microlink_t *, uint32_t[5]);
-      uint32_t sd[5] = {0};
+      extern void ml_wg_get_session_diag(microlink_t *, uint32_t[7]);
+      uint32_t sd[7] = {0};
       ml_wg_get_session_diag(ml, sd);
       cJSON_AddNumberToObject(json, "ep_learn_evictions", sd[0]);
       cJSON_AddNumberToObject(json, "wg_kp_age_max", sd[1]);
@@ -1205,6 +1207,17 @@ static esp_err_t handler_monitor(httpd_req_t * req)
        * THIS node = the disarm cause, even with derp_reconnects=0. */
       cJSON_AddNumberToObject(json, "rx_worst_gap_ms", sd[3]);
       cJSON_AddNumberToObject(json, "rx_worst_gap_at_s", sd[4] / 1000);
+      /* TX twin (replier-silence half of the flush mechanism) + the
+       * flush-recovery silence-ping verification trio. */
+      cJSON_AddNumberToObject(json, "tx_worst_gap_ms", sd[5]);
+      cJSON_AddNumberToObject(json, "tx_worst_gap_at_s", sd[6] / 1000);
+      {
+        uint32_t sil[3] = {0};
+        ml_wg_get_silence_diag(sil);
+        cJSON_AddNumberToObject(json, "disco_silence_pings", sil[0]);
+        cJSON_AddNumberToObject(json, "silence_resume_last_ms", sil[1]);
+        cJSON_AddNumberToObject(json, "silence_resume_worst_ms", sil[2]);
+      }
 
       /* Same-LAN direct-path diagnostics for the priority peer (the machine):
        * what LAN endpoint we advertise, which candidate endpoints we hold for

@@ -898,6 +898,14 @@ static uint32_t s_diag_relay_disco_resets; /* per-peer from-scratch disco resets
 static uint32_t s_diag_ep_learn_evictions; /* learn-from-ping ring-evictions on a full endpoint table —
                                             * nonzero = the B-1 wedge trigger occurred and was absorbed */
 
+/* Flush-recovery silence-ping state (see disco_silence_ping): pairing slot +
+ * counters shared between the ping site and the pong-resume site. */
+static uint32_t s_diag_silence_pings;
+static int s_silence_ping_peer = -1; /* pairing: last silence-ping peer idx */
+static uint64_t s_silence_ping_ms;
+static uint32_t s_diag_silence_resume_last_ms;
+static uint32_t s_diag_silence_resume_worst_ms;
+
 /* DISCO observability counters — the 2026-08-09 regains-oscillation root cause
  * rested on CALCULATED probe-table/CMM dynamics; these measure them instead.
  * Same counters-not-logs pattern as the diag blocks above; read via
@@ -940,13 +948,15 @@ void ml_wg_get_reingest_diag(uint32_t out[6])
  * the WORST safety-peer keypair/init ages. wg_kp_age_max steadily ~<120000
  * (rekey cadence) = healthy; climbing past 120000 = a rekey is starving; a
  * green drop then follows ~60 s later when REJECT_AFTER_TIME kills the key. */
-void ml_wg_get_session_diag(microlink_t * ml, uint32_t out[5])
+void ml_wg_get_session_diag(microlink_t * ml, uint32_t out[7])
 {
   out[0] = s_diag_ep_learn_evictions;
   out[1] = 0; /* max safety keypair age ms (0xFFFFFFFF = a peer has NO valid key) */
   out[2] = 0; /* max safety handshake-init TX age ms */
   out[3] = 0; /* max safety worst any-path rx gap ms (edge-flush receive-stall metric) */
   out[4] = 0; /* WHEN out[3]'s max was recorded (sys_now ms) — dates the gauge */
+  out[5] = 0; /* max safety worst tx gap ms (replier-silence half of a flush) */
+  out[6] = 0; /* WHEN out[5]'s max was recorded */
   if (ml == NULL || ml->wg_netif == NULL) return;
   for (int i = 0; i < ml->peer_count; i++) {
     ml_peer_t * p = &ml->peers[i];
@@ -970,6 +980,16 @@ void ml_wg_get_session_diag(microlink_t * ml, uint32_t out[5])
     {
       out[3] = rx_worst;
       out[4] = rx_worst_at;
+    }
+    u32_t tx_worst = 0;
+    u32_t tx_worst_at = 0;
+    if (
+      wireguardif_peer_worst_tx_gap((struct netif *)ml->wg_netif, (u8_t)p->wg_peer_index, &tx_worst, &tx_worst_at) ==
+        ERR_OK &&
+      tx_worst > out[5])
+    {
+      out[5] = tx_worst;
+      out[6] = tx_worst_at;
     }
   }
 }
@@ -2562,6 +2582,11 @@ static void disco_build_pong(
   *out_len = pos;
 }
 
+/* When set, the next disco_send_ping_to_peer skips the 2 s pending-probe
+ * dedup: the rx-silence path pings at ~1 Hz DURING an outage, where the dedup
+ * would suppress exactly the punch that ends it. wg-task-only (single writer). */
+static bool s_disco_ping_skip_dedup;
+
 static void disco_send_ping_to_peer(microlink_t * ml, int peer_idx, bool force)
 {
   ml_peer_t * p = &ml->peers[peer_idx];
@@ -2578,7 +2603,7 @@ static void disco_send_ping_to_peer(microlink_t * ml, int peer_idx, bool force)
    * 2 s, a fresh one is pure redundancy — skip it. The 2 s floor is well under
    * the 3 s liveness/heartbeat cadence (which also spaces last_ping_sent_ms by
    * >= 3 s), so a genuine liveness ping is never suppressed. */
-  for (int pi = 0; pi < MAX_PENDING_PROBES; pi++) {
+  for (int pi = 0; !s_disco_ping_skip_dedup && pi < MAX_PENDING_PROBES; pi++) {
     if (
       pending_probes[pi].active && pending_probes[pi].peer_index == peer_idx && now - pending_probes[pi].sent_ms < 2000)
     {
@@ -2883,6 +2908,17 @@ static void process_disco_pong(
         p->last_direct_pong_recv_ms = now;
       }
       p->trust_until_ms = now + ML_DISCO_TRUST_DURATION_MS;
+
+      /* Silence-ping pairing (flush-mechanism verification): first direct pong
+       * from the peer we last silence-pinged dates the outage-to-resume delta.
+       * Prediction if the mechanism holds: resume ≈ ping + RTT, not random. */
+      if (s_silence_ping_peer == (int)(p - ml->peers) && s_silence_ping_ms != 0) {
+        uint32_t d = (uint32_t)(now - s_silence_ping_ms);
+        s_diag_silence_resume_last_ms = d;
+        if (d > s_diag_silence_resume_worst_ms) s_diag_silence_resume_worst_ms = d;
+        s_silence_ping_peer = -1;
+        s_silence_ping_ms = 0;
+      }
 
       /* Flap-damping bookkeeping (FIX 2). Timestamp only the genuine false->true
        * promotion edge (NOT every heartbeat pong, else the path never looks
@@ -3837,6 +3873,40 @@ static void disco_wake_peer(microlink_t * ml, uint32_t vpn_ip, bool link_healthy
   }
 }
 
+/* Flush-recovery silence ping (see ML_DISCO_SILENCE_PING_MS): a direct safety
+ * peer whose direct rx has gone silent gets an immediate punch-restoring ping
+ * (~1 Hz while silent, dedup bypassed) plus one CallMeMaybe (own throttle) so
+ * the far side probes back once its mapping re-binds. Additive-only: never
+ * fires while 5 Hz rx is flowing, never for relay-bound peers, touches no
+ * session or teardown state. Statics live with the diag block near the top. */
+void ml_wg_get_silence_diag(uint32_t out[3])
+{
+  out[0] = s_diag_silence_pings;
+  out[1] = s_diag_silence_resume_last_ms;
+  out[2] = s_diag_silence_resume_worst_ms;
+}
+
+static void disco_silence_ping(microlink_t * ml, uint32_t vpn_ip)
+{
+  if (vpn_ip == 0 || ml->wg_netif == NULL) return;
+  int pidx = find_peer_by_ip(ml, vpn_ip);
+  if (pidx < 0) return;
+  ml_peer_t * p = &ml->peers[pidx];
+  if (!p->has_direct_path || p->wg_peer_index < 0) return;
+  u32_t age = 0;
+  if (wireguardif_peer_direct_rx_age((struct netif *)ml->wg_netif, (u8_t)p->wg_peer_index, &age) != ERR_OK) return;
+  if (age < ML_DISCO_SILENCE_PING_MS) return;
+  uint64_t nowp = ml_get_time_ms();
+  if (nowp - p->last_ping_sent_ms < 900) return; /* ~1 Hz while silent */
+  s_diag_silence_pings++;
+  s_silence_ping_peer = pidx;
+  s_silence_ping_ms = nowp;
+  s_disco_ping_skip_dedup = true;
+  disco_send_ping_to_peer(ml, pidx, true);
+  s_disco_ping_skip_dedup = false;
+  disco_send_call_me_maybe(ml, pidx); /* own ML_DISCO_CMM_MIN_INTERVAL_MS throttle */
+}
+
 static void disco_periodic_probes(microlink_t * ml)
 {
   /* Pinned-peer session wakes — run BEFORE the enable_disco gate so
@@ -3851,6 +3921,15 @@ static void disco_periodic_probes(microlink_t * ml)
   for (int hp = 0; hp < ML_EXTRA_PINS; hp++) {
     if ((s_health_peers[hp].ip != 0) && (s_health_peers[hp].ip != ml->config.priority_peer_ip)) {
       disco_wake_peer(ml, s_health_peers[hp].ip, s_health_peers[hp].healthy);
+    }
+  }
+
+  /* Flush-recovery silence pings for the same safety set — also ahead of the
+     * enable_disco gate: these ARE the safety path's punch restoration. */
+  disco_silence_ping(ml, ml->config.priority_peer_ip);
+  for (int hp = 0; hp < ML_EXTRA_PINS; hp++) {
+    if ((s_health_peers[hp].ip != 0) && (s_health_peers[hp].ip != ml->config.priority_peer_ip)) {
+      disco_silence_ping(ml, s_health_peers[hp].ip);
     }
   }
 

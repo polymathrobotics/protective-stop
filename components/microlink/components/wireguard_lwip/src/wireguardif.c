@@ -333,6 +333,13 @@ static err_t wireguardif_output_to_peer(struct netif *netif, struct pbuf *q, con
 
 				if (result == ERR_OK) {
 					now = wireguard_sys_now();
+					if (peer->last_tx != 0) {
+						uint32_t txgap = now - peer->last_tx;
+						if (txgap > peer->worst_tx_gap) {
+							peer->worst_tx_gap = txgap;
+							peer->worst_tx_gap_at_ms = now;
+						}
+					}
 					peer->last_tx = now;
 					keypair->last_tx = now;
 				}
@@ -1118,6 +1125,16 @@ err_t wireguardif_peer_worst_rx_gap(struct netif *netif, u8_t peer_index, u32_t 
 		// between the calls paired the old gap with the new timestamp.
 		if (worst_gap_ms) *worst_gap_ms = peer->worst_rx_gap;
 		if (at_ms) *at_ms = peer->worst_rx_gap_at_ms;
+	}
+	return result;
+}
+
+err_t wireguardif_peer_worst_tx_gap(struct netif *netif, u8_t peer_index, u32_t *worst_gap_ms, u32_t *at_ms) {
+	struct wireguard_peer *peer;
+	err_t result = wireguardif_lookup_peer(netif, peer_index, &peer);
+	if (result == ERR_OK) {
+		if (worst_gap_ms) *worst_gap_ms = peer->worst_tx_gap;
+		if (at_ms) *at_ms = peer->worst_tx_gap_at_ms;
 	}
 	return result;
 }

@@ -234,3 +234,6 @@ CONFIG_LWIP_DHCP_RESTORE_LAST_IP=y
 # restore feedback on hardware that supports it (re-verify SENSE pins / divider
 # ratios / RELAY_FEEDBACK_MS first). See docs/RELAY_FEEDBACK_DESCOPE.md.
 CONFIG_MACHN_RELAY_FEEDBACK=n
+
+# INT_WDT visibility (2026-08-16): panic handler in IRAM (see firmware note).
+CONFIG_ESP_PANIC_HANDLER_IRAM=y

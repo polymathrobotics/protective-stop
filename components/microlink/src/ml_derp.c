@@ -807,14 +807,19 @@ static void derp_manage_aux(microlink_t * ml, uint16_t eff_home, int aux_burst[]
      * down region server isn't hammered — mirrors the home retry cadence. */
     uint64_t gap = (aux_burst[slot] < 2) ? 5000u : (aux_burst[slot] < 3) ? 10000u : 60000u;
     if (c->last_connect_attempt_ms != 0 && (now - c->last_connect_attempt_ms) < gap) continue;
-    c->last_connect_attempt_ms = now;
-    if (aux_burst[slot] < 100) aux_burst[slot]++;
-    ESP_LOGI(TAG, "Opening aux DERP conn slot %d for region %u", slot, (unsigned)rid);
     /* Stage-2: KICK the async connect; the task loop's stepper advances it a
      * bounded action per iteration (aux_burst resets on completion there).
      * kick() failing == immediate DNS/socket error; the slot keeps the region
-     * (derp_cs_fail assigns it) and the per-slot backoff above retries. */
-    (void)ml_derp_connect_kick(ml, c, rid);
+     * (derp_cs_fail assigns it) and the per-slot backoff retries. A spacing-
+     * gate REFUSAL is not an attempt: stamp/bump only for real outcomes, or a
+     * flush would burn the 5s→10s→60s ladder on kicks that never happened
+     * (review finding). */
+    if (ml_derp_connect_kick(ml, c, rid) == ESP_ERR_NOT_FINISHED) {
+      return; /* window closed this pass for all non-home kicks anyway */
+    }
+    c->last_connect_attempt_ms = now;
+    if (aux_burst[slot] < 100) aux_burst[slot]++;
+    ESP_LOGI(TAG, "Opening aux DERP conn slot %d for region %u", slot, (unsigned)rid);
     /* One new kick per call keeps handshake crypto bursts bounded. */
     return;
   }

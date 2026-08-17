@@ -219,6 +219,15 @@ extern "C"
  * the 60 s trust lease), and a faster direct re-probe while demoted. Only
  * the priority peer — the 16-peer tailnet load profile is unchanged. */
 #define ML_DISCO_PRIORITY_HB_MS 3000
+/* Flush recovery (2026-08-16 mechanism): a middlebox conn-state flush kills
+ * the router-crossing direct NAT entries AND the DERP relay lattice in the
+ * same instant. The machine is a pure replier, so its only path-restoring
+ * packet was the 3 s-cadence disco heartbeat — recovery was cadence-bound at
+ * 3.0-3.3 s > the 2.0 s heartbeat timeout (one disarm per flush wave, three
+ * events measured). When a direct safety peer's rx goes silent past this
+ * threshold, ping IMMEDIATELY (~1 Hz while silent) so the punch is re-created
+ * inside the timeout window. Additive probes only; never fires at 5 Hz rx. */
+#define ML_DISCO_SILENCE_PING_MS 700
 #define ML_DISCO_PRIORITY_PATH_DEAD_MS \
   4000 /* was 8000: bound autonomous
                                                 * direct->DERP failover to <5s.
@@ -1061,6 +1070,9 @@ extern "C"
    * ml_config_peer_is_allowed()'s centralized pin exemption. */
   bool ml_wg_ip_is_pinned(uint32_t vpn_ip);
   uint32_t ml_derp_get_kicks_spaced(void); /* connect kicks refused by the spacing gate */
+  /* Flush-recovery silence-ping diag: out[0]=pings sent, out[1]=last
+   * ping→direct-pong resume delta ms, out[2]=worst resume delta ms. */
+  void ml_wg_get_silence_diag(uint32_t out[3]);
   /* Stage-0b: worst single wg_mgr loop iteration ms (heartbeat-path stall). */
   uint32_t ml_wg_get_max_iter_ms(void);
   /* Path-diversity telemetry: out[0]=leg-2 mirrors sent, out[1]=mirrors

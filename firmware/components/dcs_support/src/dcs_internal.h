@@ -110,6 +110,9 @@ extern "C"
     uint16_t boot_count;
     uint8_t reset_reason;
     uint8_t ctrl_reset_cause; /* one-shot crumb taken at boot (DCS_CTRL_RST_*) */
+    bool crash_present; /* a coredump image sits in flash (cleared only by the next crash) */
+    uint32_t crash_pc; /* coredump summary: exception PC */
+    char crash_task[16]; /* coredump summary: crashing task name */
     microlink_t * ml_handle;
     ml_app_t * app;
   } dcs_state_t;
