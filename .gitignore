@@ -58,3 +58,4 @@ firmware/test/coverage-summary.json
 build/
 install/
 log/
+tools/fleet.env
