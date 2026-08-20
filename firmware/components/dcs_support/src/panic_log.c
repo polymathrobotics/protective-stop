@@ -61,8 +61,8 @@ static vprintf_like_t s_chain_vprintf = NULL;
 #define PANIC_LOG_CONSOLE_BUDGET 40u
 static uint32_t s_rate_win_start_s;
 static uint32_t s_rate_win_count; /* lines this second (all) */
-static uint32_t s_rate_last;      /* lines/s of the last full second */
-static uint32_t s_rate_peak;      /* worst lines/s since boot */
+static uint32_t s_rate_last; /* lines/s of the last full second */
+static uint32_t s_rate_peak; /* worst lines/s since boot */
 static uint32_t s_console_skipped; /* chained-console lines dropped by budget */
 static uint32_t s_chained_this_win;
 

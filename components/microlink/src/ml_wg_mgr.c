@@ -910,10 +910,11 @@ static uint64_t s_peer_table_full_log_ms; /* last time the warn was actually emi
  * silenced several safety peers at once: run-46 measured a bogus 72 s "resume"
  * from exactly that overwrite). One slot per safety peer, keyed by peer idx. */
 #define SILENCE_PAIR_SLOTS 8
-static struct {
-  int peer_idx; /* -1 = free */
-  uint64_t ping_ms;
-} s_silence_pairs[SILENCE_PAIR_SLOTS] = {[0 ... SILENCE_PAIR_SLOTS - 1] = {-1, 0}};
+typedef struct {
+  int peer_idx;
+  uint64_t ping_ms; /* 0 = slot free (zero-init); nonzero = pairing armed */
+} silence_pair_t;
+static silence_pair_t s_silence_pairs[SILENCE_PAIR_SLOTS];
 static uint32_t s_diag_silence_pings;
 static uint32_t s_diag_silence_resume_last_ms;
 static uint32_t s_diag_silence_resume_worst_ms;
@@ -2560,10 +2561,15 @@ static void disco_build_ping(microlink_t * ml, int peer_idx, uint8_t * out, size
     }
   }
   if (!registered) {
-    /* No free slot = occupancy is the table size — record the saturation
-     * (the exhaustion case the 2026-08-09 oscillation hinged on). */
-    s_diag_probe_tbl_hw = MAX_PENDING_PROBES;
-    ESP_LOGW(TAG, "DISCO probe table full (%d slots), pong will be unmatched", MAX_PENDING_PROBES);
+    /* Record the saturation at the size of the REGION that overflowed — a
+     * general-peer refusal with the safety reserve empty must not peg the
+     * high-water at 64 and masquerade as true exhaustion (review 🟡). */
+    if ((uint32_t)scan_limit > s_diag_probe_tbl_hw) s_diag_probe_tbl_hw = (uint32_t)scan_limit;
+    ESP_LOGW(
+      TAG,
+      "DISCO probe table %s region full (%d slots), pong will be unmatched",
+      probe_safety ? "FULL (incl safety reserve)" : "general",
+      scan_limit);
   }
 }
 
@@ -2953,8 +2959,7 @@ static void process_disco_pong(
           s_diag_silence_resume_last_ms = d;
           if (d > s_diag_silence_resume_worst_ms) s_diag_silence_resume_worst_ms = d;
           s_diag_silence_resume_at_s = (uint32_t)(now / 1000u);
-          s_silence_pairs[si].peer_idx = -1;
-          s_silence_pairs[si].ping_ms = 0;
+          s_silence_pairs[si].ping_ms = 0; /* slot free */
           break;
         }
       }
@@ -3946,11 +3951,11 @@ static void disco_silence_ping(microlink_t * ml, uint32_t vpn_ip)
   {
     int slot = -1, oldest = 0;
     for (int si = 0; si < SILENCE_PAIR_SLOTS; si++) {
-      if (s_silence_pairs[si].peer_idx == pidx) {
+      if (s_silence_pairs[si].ping_ms != 0 && s_silence_pairs[si].peer_idx == pidx) {
         slot = si;
         break;
       }
-      if (s_silence_pairs[si].peer_idx < 0 && slot < 0) slot = si;
+      if (s_silence_pairs[si].ping_ms == 0 && slot < 0) slot = si;
       if (s_silence_pairs[si].ping_ms < s_silence_pairs[oldest].ping_ms) oldest = si;
     }
     if (slot < 0) slot = oldest;

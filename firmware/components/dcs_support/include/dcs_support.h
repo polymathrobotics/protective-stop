@@ -134,11 +134,11 @@ extern "C"
  * one NVS byte, flushes the log line, then esp_restart(). Never returns. */
 #define DCS_CTRL_RST_CLOCK_FAULT 1u
 #define DCS_CTRL_RST_XCHECK 2u
-
-/* One-shot XCHECK detail crumb, (code<<4)|stalled_core — written by main.c at
- * fault announce, surfaced next boot as state.json xcheck_last_detail. */
-void dcs_nvs_set_xcheck_detail(uint8_t detail);
 #define DCS_CTRL_RST_PADCFG 3u
+
+/* One-shot XCHECK detail crumb, (code<<4)|stalled_core — written by main.c
+ * at fault announce, surfaced next boot as state.json xcheck_last_detail. */
+void dcs_nvs_set_xcheck_detail(uint8_t detail);
   void dcs_controlled_reset(uint8_t cause) __attribute__((noreturn));
 
   /**

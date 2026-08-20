@@ -41,6 +41,8 @@
 #include "dcs_admin_html.h"
 #include "dcs_internal.h"
 #include "dcs_support.h"
+#include "esp_core_dump.h"
+#include "esp_flash.h"
 #include "esp_heap_caps.h"
 #include "esp_http_server.h"
 #include "esp_log.h"
@@ -54,8 +56,6 @@
 #include "microlink.h"
 #include "ml_app.h"
 #include "panic_log.h"
-#include "esp_flash.h"
-#include "esp_core_dump.h"
 #include "soc/rtc_cntl_reg.h"
 #include "wireguardif.h"
 
@@ -221,7 +221,10 @@ static esp_err_t page_state(httpd_req_t * req)
   }
 
   /* Build into a PSRAM buffer (off the httpd task stack, and off the
-     * internal heap which runs tight on this build). */
+     * internal heap which runs tight on this build).  Crash/xcheck/log-rate surfacing (2026-08-19: ctrl_reset_cause,
+   * crash_present/pc/task/sha, xcheck_last_detail, log_lines_s/peak/skipped)
+   * adds <= ~250 B worst case — still inside the 4096 cap with margin.
+   */
   enum
   {
     JSON_CAP = 4096 /* eth-watchdog fields + bonded-remote stop_only + operator list
