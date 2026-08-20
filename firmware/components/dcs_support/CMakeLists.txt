@@ -22,6 +22,7 @@ idf_component_register(
     PRIV_INCLUDE_DIRS
         "src"
     REQUIRES espcoredump
+        spi_flash
         microlink
         ml_dev_tether
         pstop

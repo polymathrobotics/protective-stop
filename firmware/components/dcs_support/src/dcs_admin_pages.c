@@ -54,6 +54,8 @@
 #include "microlink.h"
 #include "ml_app.h"
 #include "panic_log.h"
+#include "esp_flash.h"
+#include "esp_core_dump.h"
 #include "soc/rtc_cntl_reg.h"
 #include "wireguardif.h"
 
@@ -98,6 +100,8 @@ static uint32_t netif_ip_by_key(const char * key)
 
 static esp_err_t page_state(httpd_req_t * req)
 {
+  uint32_t lograte[3] = {0};
+  panic_log_get_rate_diag(lograte);
   dcs_task_breakdown_t snap;
   dcs_telemetry_snapshot(&snap);
 
@@ -255,7 +259,8 @@ static esp_err_t page_state(httpd_req_t * req)
     "\"derp_paused\":%d,\"derp_delay_ms\":%d,\"wg_paused\":%d,"
     "\"usb_enabled\":%d,\"ts_boot_en\":%d,\"derp_only\":%d,"
     "\"boot_count\":%u,\"reset_reason\":%u,\"ctrl_reset_cause\":%u,"
-    "\"crash_present\":%d,\"crash_pc\":%lu,"
+    "\"crash_present\":%d,\"crash_pc\":%lu,\"crash_task\":\"%s\",\"crash_sha\":\"%s\","
+    "\"xcheck_last_detail\":%u,\"log_lines_s\":%lu,\"log_lines_s_peak\":%lu,\"log_console_skipped\":%lu,"
     "\"fw_ver\":\"%s\",\"fw_sha\":\"%s\","
     "\"ml_state\":%d,\"ml_reconnects\":%lu,\"vpn_ip\":%lu,\"public_ip\":%lu,\"derp_region\":%d,"
     "\"derp_region_locked\":%d,"
@@ -325,6 +330,12 @@ static esp_err_t page_state(httpd_req_t * req)
     (unsigned int)g_dcs.ctrl_reset_cause,
     g_dcs.crash_present ? 1 : 0,
     (unsigned long)g_dcs.crash_pc,
+    g_dcs.crash_task,
+    g_dcs.crash_sha,
+    (unsigned int)g_dcs.xcheck_detail,
+    (unsigned long)lograte[0],
+    (unsigned long)lograte[1],
+    (unsigned long)lograte[2],
     (app_desc != NULL) ? app_desc->version : "",
     fw_sha,
     ml_state,
@@ -822,6 +833,39 @@ static esp_err_t page_perf(httpd_req_t * req)
 }
 
 /* === GET /api/last_log =================================================== */
+/* GET /api/coredump — stream the raw coredump image from flash (task #57/#60:
+ * full espcoredump decode without bench esptool access). 404 when none. The
+ * image persists until the next crash, so this is idempotent and read-only. */
+static esp_err_t api_coredump(httpd_req_t * req)
+{
+#if CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH
+  size_t cd_addr = 0;
+  size_t cd_size = 0;
+  if ((esp_core_dump_image_get(&cd_addr, &cd_size) != ESP_OK) || (cd_size == 0u)) {
+    (void)httpd_resp_set_status(req, "404 Not Found");
+    return httpd_resp_sendstr(req, "no coredump in flash");
+  }
+  (void)httpd_resp_set_type(req, "application/octet-stream");
+  char * buf = malloc(1024);
+  if (buf == NULL) {
+    (void)httpd_resp_set_status(req, "500 Internal Server Error");
+    return httpd_resp_sendstr(req, "oom");
+  }
+  size_t off = 0;
+  while (off < cd_size) {
+    size_t n = ((cd_size - off) > 1024u) ? 1024u : (cd_size - off);
+    if (esp_flash_read(NULL, buf, cd_addr + off, n) != ESP_OK) break;
+    if (httpd_resp_send_chunk(req, buf, (ssize_t)n) != ESP_OK) break;
+    off += n;
+  }
+  free(buf);
+  return httpd_resp_send_chunk(req, NULL, 0);
+#else
+  (void)httpd_resp_set_status(req, "404 Not Found");
+  return httpd_resp_sendstr(req, "coredump-to-flash not enabled");
+#endif
+}
+
 static esp_err_t api_last_log(httpd_req_t * req)
 {
   (void)httpd_resp_set_type(req, "text/plain");
@@ -1176,6 +1220,7 @@ void dcs_admin_pages_register(ml_app_t * app)
   (void)ml_app_add_page(app, "/api/pstop_peer", HTTP_POST, api_pstop_peer);
   (void)ml_app_add_page(app, "/api/pstop_peers", HTTP_POST, api_pstop_peers);
   (void)ml_app_add_page(app, "/api/last_log", HTTP_GET, api_last_log);
+  (void)ml_app_add_page(app, "/api/coredump", HTTP_GET, api_coredump);
   (void)ml_app_add_page(app, "/api/iface/eth", HTTP_POST, api_iface_eth);
   (void)ml_app_add_page(app, "/api/iface/wifi", HTTP_POST, api_iface_wifi);
   (void)ml_app_add_page(app, "/api/iface/usb", HTTP_POST, api_iface_usb);

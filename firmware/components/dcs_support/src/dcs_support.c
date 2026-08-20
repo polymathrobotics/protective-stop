@@ -717,6 +717,20 @@ esp_err_t dcs_pstop_set_peer_slot(int slot, bool configured, uint32_t ip, uint16
   /* ...then persist the whole table (read-modify-write of the blob). */
   dcs_pstop_peer_rec_t peers[DCS_PSTOP_MAX_MACHINES];
   dcs_nvs_read_pstop_peers(peers);
+  /* run-47 shakeout: writing slot N>0 on a device whose machine target came
+   * from the legacy key / compiled default (blob slot 0 unconfigured) must
+   * not strand that ACTIVE target — once a blob exists it is authoritative,
+   * so an unseeded slot 0 silently drops the live machine bond on the next
+   * reload. Seed slot 0 from the live atomics before persisting. */
+  if ((slot != 0) && !peers[0].configured) {
+    uint64_t ep0 = (uint64_t)atomic_load(&g_dcs_pstop_slot_ep[0]);
+    if ((ep0 & PSTOP_EP_CONFIGURED) != 0ULL) {
+      peers[0].configured = true;
+      peers[0].ip = (uint32_t)((ep0 >> 16) & 0xFFFFFFFFULL);
+      peers[0].port = (uint16_t)(ep0 & 0xFFFFULL);
+      peers[0].machine_id = (uint32_t)atomic_load(&g_dcs_pstop_slot_id[0]);
+    }
+  }
   peers[slot].configured = configured;
   peers[slot].ip = ip;
   peers[slot].port = port;

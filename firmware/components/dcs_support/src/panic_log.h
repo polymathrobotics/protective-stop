@@ -15,6 +15,11 @@ void panic_log_init(void);
  * the previous boot's log available. */
 bool panic_log_has_snapshot(void);
 
+/* Log-rate diagnostics (task #60): out[0]=lines/s last full second,
+ * out[1]=peak lines/s since boot, out[2]=console lines dropped by the
+ * per-second chain budget (RTC ring always gets every line). */
+void panic_log_get_rate_diag(uint32_t out[3]);
+
 /* Copy the snapshot into `out` (NUL-terminated, truncated at out_size).
  * Returns bytes written, excluding the terminating NUL. */
 size_t panic_log_copy_snapshot(char * out, size_t out_size);

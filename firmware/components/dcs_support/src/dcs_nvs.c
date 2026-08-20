@@ -138,6 +138,35 @@ esp_err_t dcs_nvs_write_pstop_peer(uint32_t ip, uint16_t port)
   return r;
 }
 
+/* xc_det: one-shot XCHECK detail crumb, (code<<4)|stalled_core. Same lifecycle
+ * as ctrl_rst — written at fault announce, taken (and erased) at next boot. */
+void dcs_nvs_set_xcheck_detail(uint8_t detail)
+{
+  nvs_handle_t h;
+  if (nvs_open(DCS_NVS_NS, NVS_READWRITE, &h) != ESP_OK) {
+    ESP_LOGW(TAG, "xc_det: nvs_open failed");
+    return;
+  }
+  if (nvs_set_u8(h, "xc_det", detail) != ESP_OK || nvs_commit(h) != ESP_OK) {
+    ESP_LOGW(TAG, "xc_det: write failed");
+  }
+  nvs_close(h);
+}
+
+uint8_t dcs_nvs_take_xcheck_detail(void)
+{
+  nvs_handle_t h;
+  uint8_t v = 0;
+  if (nvs_open(DCS_NVS_NS, NVS_READWRITE, &h) != ESP_OK) return 0;
+  if (nvs_get_u8(h, "xc_det", &v) == ESP_OK) {
+    if (nvs_erase_key(h, "xc_det") != ESP_OK || nvs_commit(h) != ESP_OK) {
+      ESP_LOGW(TAG, "xc_det: erase failed");
+    }
+  }
+  nvs_close(h);
+  return v;
+}
+
 void dcs_nvs_set_ctrl_reset_cause(uint8_t cause)
 {
   nvs_handle_t h;

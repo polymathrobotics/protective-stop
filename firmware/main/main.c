@@ -452,10 +452,15 @@ static TickType_t s_xc_hb_tick[2];
 static TickType_t s_xc_clk_tick[2];
 static bool s_xc_init[2];
 
+static _Atomic uint32_t g_xcheck_detail; /* (code<<4)|stalled_core — persisted as the
+                                           * one-shot xc_det crumb so the post-reset boot
+                                           * can attribute WHICH core stalled (task #60) */
+
 static void xcheck_raise(uint32_t code, int core_id, int peer, uint32_t peer_hb, uint64_t peer_us)
 {
   uint32_t expect = XCHECK_FAULT_NONE;
   if (atomic_compare_exchange_strong(&g_xcheck_fault, &expect, code)) {
+    atomic_store(&g_xcheck_detail, (code << 4) | ((uint32_t)peer & 0xFu));
     ESP_LOGE(
       TAG,
       "XCHECK core%d: peer core%d %s (hb=%lu clk=%llu us) — FAIL-SAFE STOP + reset",
@@ -1077,6 +1082,7 @@ static void comparator_task(void * arg)
       if (!xc_announced) {
         xc_announced = true;
         xc_fault_tick = xTaskGetTickCount();
+        dcs_nvs_set_xcheck_detail((uint8_t)atomic_load(&g_xcheck_detail));
         ESP_LOGE(
           TAG,
           "XCHECK FAULT %lu — halting all pstop TX (machines will STOP); controlled reset in %lu ms",
