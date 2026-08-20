@@ -24,6 +24,8 @@ Config (TOML — repo config convention):
   criterion = "any"                        # "any" | "all"
   age_limit_ms = 2000
   rearm_cmd = "python3 rearm_gesture.py"  # optional; run when disarmed+settled
+  machine_id = 33686276                    # optional; scopes REBOND counting to
+                                           # this machine's slot on each remote
   [remotes.PS]
   device_id = "01d7eed0"                   # hex id as published by the machine
   admin_url = "http://10.0.0.2"            # remote's own HTTP (mismatch polls)
@@ -142,15 +144,17 @@ def main():
 
     events = {name: {'AGE': 0, 'REBOND': 0, 'MISMATCH': 0} for name in remotes}
     last_rebonds = {}
+    # MISMATCH baselines lazily on the first SUCCESSFUL poll (same first-sample
+    # guard REBOND uses): an unreachable-at-start remote with a pre-existing
+    # nonzero counter must not get charged its history as run events (review 🟡).
     last_mismatch = {}
     in_age = {name: False for name in remotes}
-    for name, rc in remotes.items():
-        state = http_json(rc['admin_url'] + '/state.json') or {}
-        last_mismatch[name] = state.get('pstop_mismatch') or 0
+    seen = set()  # remotes actually observed at least once — an unobserved
+    # remote must not masquerade as clean (review 🟡)
 
     log(
-        '%s START (%.1fh per-remote gate, criterion=%s, age_limit=%dms) | mismatch baseline=%s'
-        % (args.name, args.duration_h, criterion, age_limit, last_mismatch)
+        '%s START (%.1fh per-remote gate, criterion=%s, age_limit=%dms)'
+        % (args.name, args.duration_h, criterion, age_limit)
     )
 
     t0 = time.time()
@@ -175,6 +179,7 @@ def main():
             name = by_id.get(dev_id)
             if name is None:
                 continue
+            seen.add(name)
             if age > age_limit and not in_age[name]:
                 in_age[name] = True
                 events[name]['AGE'] += 1
@@ -188,22 +193,32 @@ def main():
                 state = http_json(rc['admin_url'] + '/state.json', timeout=4)
                 if state is None:
                     continue
+                seen.add(name)
                 mm = state.get('pstop_mismatch') or 0
-                if mm > last_mismatch.get(name, 0):
+                if name in last_mismatch and mm > last_mismatch[name]:
                     events[name]['MISMATCH'] += mm - last_mismatch[name]
                     log('STOP-EVENT %s MISMATCH #%d +%dm' % (name, events[name]['MISMATCH'], (now - t0) // 60))
                 last_mismatch[name] = mm
                 # Rebonds from the remote's own machine-slot records (summed
                 # over configured slots): bonded_remotes[] on the machine side
                 # has no rebond counter (review red).
-                rb = sum(slot.get('rebonds', 0) for slot in state.get('pstop_machines', []) if slot.get('cfg'))
+                machine_id = cfg.get('machine_id')  # optional: only charge the machine under soak
+                rb = sum(
+                    slot.get('rebonds', 0)
+                    for slot in state.get('pstop_machines', [])
+                    if slot.get('cfg') and (machine_id is None or slot.get('id') == machine_id)
+                )
                 if name in last_rebonds and rb > last_rebonds[name]:
                     events[name]['REBOND'] += rb - last_rebonds[name]
                     log('STOP-EVENT %s REBOND #%d +%dm' % (name, events[name]['REBOND'], (now - t0) // 60))
                 last_rebonds[name] = rb
 
         if not armed and cfg.get('rearm_cmd') and (now - last_rearm) > 90:
-            if ages and all(age < age_limit * 0.75 for age in ages.values()):
+            # Settle-check scoped to THIS run's remotes (review 🟡: a stale
+            # unrelated bonded remote could pin it False forever), and every
+            # configured remote must be present and fresh.
+            tracked = {by_id[dev]: age for dev, age in ages.items() if dev in by_id}
+            if len(tracked) == len(remotes) and all(age < age_limit * 0.75 for age in tracked.values()):
                 last_rearm = now
                 subprocess.Popen(shlex.split(cfg['rearm_cmd']))
                 log('rearm attempt')
@@ -212,7 +227,10 @@ def main():
             next_hour += 3600
             log('HOURLY +%dm armed=%s | events=%s' % ((now - t0) // 60, armed, events))
 
-    clean = [name for name, ev in events.items() if sum(ev.values()) == 0]
+    unobserved = [name for name in remotes if name not in seen]
+    if unobserved:
+        log('WARNING: never observed: %s (excluded from clean set)' % unobserved)
+    clean = [name for name, ev in events.items() if sum(ev.values()) == 0 and name in seen]
     ok = bool(clean) if criterion == 'any' else len(clean) == len(remotes)
     log(
         '%s %s: clean_remotes=%s | events=%s (criterion=%s)'

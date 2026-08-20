@@ -48,12 +48,11 @@ def build_binding_request():
     return struct.pack('!HHI12s', 0x0001, 0, STUN_MAGIC, txid), txid
 
 
-def parse_mapped_address(data, txid):
-    """Return 'ip:port' from a Binding Response, or None."""
+def parse_mapped_address(data):
+    """Return (txid, 'ip:port') from a Binding Response, or (None, None)."""
     if len(data) < 20 or struct.unpack('!H', data[0:2])[0] != 0x0101:
-        return None
-    if data[8:20] != txid:
-        return None
+        return None, None
+    txid = data[8:20]
     pos = 20
     while pos + 4 <= len(data):
         atype, alen = struct.unpack('!HH', data[pos : pos + 4])
@@ -62,12 +61,12 @@ def parse_mapped_address(data, txid):
             port = struct.unpack('!H', aval[2:4])[0] ^ (STUN_MAGIC >> 16)
             raw = struct.unpack('!I', aval[4:8])[0] ^ STUN_MAGIC
             ip = socket.inet_ntoa(struct.pack('!I', raw))
-            return '%s:%d' % (ip, port)
+            return txid, '%s:%d' % (ip, port)
         if atype == 0x0001 and len(aval) >= 8:  # MAPPED-ADDRESS (fallback)
             port = struct.unpack('!H', aval[2:4])[0]
-            return '%s:%d' % (socket.inet_ntoa(aval[4:8]), port)
+            return txid, '%s:%d' % (socket.inet_ntoa(aval[4:8]), port)
         pos += 4 + alen + ((4 - alen % 4) % 4)
-    return None
+    return txid, None
 
 
 def main():
@@ -104,31 +103,48 @@ def main():
     idx = 0
     log('CANARY_START port=%d servers=%s' % (args.port, [server for server, _ in resolved]))
 
+    # Outstanding probes by txid: a reply arriving later than its own
+    # iteration's recv window must still match (review red: a single late
+    # reply otherwise desynced the lockstep recv forever — every iteration
+    # consumed the PREVIOUS reply, txids never matched, and a permanent
+    # false CANARY_GAP_OPEN resulted on a healthy network).
+    outstanding = {}
+
     while True:
         req, txid = build_binding_request()
         name, addr = resolved[idx % len(resolved)]
         idx += 1
         try:
             sock.sendto(req, addr)
-            data, _ = sock.recvfrom(1024)
-            got = parse_mapped_address(data, txid)
-            if got:
+            outstanding[txid] = (name, time.monotonic())
+            # Drain EVERY queued reply, matching each by its own txid.
+            while True:
+                try:
+                    data, _ = sock.recvfrom(1024)
+                except socket.timeout:
+                    break
+                rx_txid, got = parse_mapped_address(data)
+                sent = outstanding.pop(rx_txid, None)
+                if sent is None or got is None:
+                    continue  # stale/foreign packet — ignore, do not desync
+                src_name = sent[0]
                 now = time.monotonic()
                 if gap_open_at is not None:
                     log('CANARY_GAP_CLOSE after %.3fs' % (now - gap_open_at))
                     gap_open_at = None
                 last_rx = now
-                if name not in mapped:
-                    mapped[name] = got
-                    log('CANARY_BASELINE %s (via %s)' % (got, name))
-                elif got != mapped[name]:
-                    log('CANARY_REBIND %s -> %s (via %s)' % (mapped[name], got, name))
-                    mapped[name] = got
-        except socket.timeout:
-            pass
+                if src_name not in mapped:
+                    mapped[src_name] = got
+                    log('CANARY_BASELINE %s (via %s)' % (got, src_name))
+                elif got != mapped[src_name]:
+                    log('CANARY_REBIND %s -> %s (via %s)' % (mapped[src_name], got, src_name))
+                    mapped[src_name] = got
         except OSError as exc:
             log('CANARY_SOCKET_ERR %s' % exc)
             time.sleep(1)
+        stale = time.monotonic() - 5.0
+        for key in [key for key, (_, at) in outstanding.items() if at < stale]:
+            del outstanding[key]
         if gap_open_at is None and time.monotonic() - last_rx > args.gap_s:
             gap_open_at = last_rx
             log('CANARY_GAP_OPEN silence > %.1fs' % args.gap_s)
