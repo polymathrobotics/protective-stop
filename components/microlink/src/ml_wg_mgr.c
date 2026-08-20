@@ -910,10 +910,13 @@ static uint64_t s_peer_table_full_log_ms; /* last time the warn was actually emi
  * silenced several safety peers at once: run-46 measured a bogus 72 s "resume"
  * from exactly that overwrite). One slot per safety peer, keyed by peer idx. */
 #define SILENCE_PAIR_SLOTS 8
-typedef struct {
+
+typedef struct
+{
   int peer_idx;
   uint64_t ping_ms; /* 0 = slot free (zero-init); nonzero = pairing armed */
 } silence_pair_t;
+
 static silence_pair_t s_silence_pairs[SILENCE_PAIR_SLOTS];
 static uint32_t s_diag_silence_pings;
 static uint32_t s_diag_silence_resume_last_ms;
