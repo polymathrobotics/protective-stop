@@ -58,6 +58,7 @@ static inline bool ml_lwip_core_lock_needed(void)
 /* Forward declarations */
 static void disco_send_call_me_maybe(microlink_t * ml, int peer_idx);
 static void wg_mgr_drain_wg_rx(microlink_t * ml);
+static int add_peer(microlink_t * ml, const ml_peer_update_t * update, bool * skipped);
 
 static int s_wg_hs_budget; /* reset each wg_mgr pass */
 static uint32_t s_diag_wg_hs_deferred;
@@ -71,6 +72,8 @@ static uint16_t s_pass_periodic_ms;
 static uint16_t s_pass_probe_ms;
 static uint16_t s_pass_cmm_sends; /* counted in disco_send_call_me_maybe (6 call sites) */
 static uint16_t s_pass_nvs_flush_ms; /* flash-flush wall-clock this pass */
+static uint16_t s_pass_ingest_ms; /* process_peer_updates wall-clock this pass */
+static uint16_t s_pass_drain_ms; /* cumulative wg-rx drain wall-clock this pass */
 
 /* Stall-event ring: wg_mgr-owned writer; entries published via a
  * release-stored index so httpd never reads a torn published entry. */
@@ -172,6 +175,9 @@ typedef struct
   uint64_t derp_match_ms;
   int peer_index;
   bool active;
+  bool safety; /* probe to a safety peer: may use the reserved slot tail and
+                * stays matchable ML_DISCO_SAFETY_PROBE_TTL_MS (late pongs
+                * behind a far-end DERP reconnect must still learn endpoints) */
 } disco_probe_t;
 
 #define MAX_PENDING_PROBES 64
@@ -703,16 +709,36 @@ void microlink_pin_peer_ip(microlink_t * ml, uint32_t vpn_ip, bool pin)
   }
 }
 
+/* Cached copy of ml->config.priority_peer_ip so ml_config_peer_is_allowed()
+ * (other module, no ml handle) can exempt every pin — set at wg task start. */
+static uint32_t s_priority_pin_ip;
+
+/* One extra-pins membership scan shared by both pin checks below. */
+static bool extra_pin_contains(uint32_t vpn_ip)
+{
+  for (int i = 0; i < ML_EXTRA_PINS; i++) {
+    if (s_extra_pins[i] != 0 && vpn_ip == s_extra_pins[i]) return true;
+  }
+  return false;
+}
+
+bool ml_wg_ip_is_pinned(uint32_t vpn_ip)
+{
+  if (vpn_ip == 0) return false;
+  if (s_priority_pin_ip != 0 && vpn_ip == s_priority_pin_ip) return true;
+  return extra_pin_contains(vpn_ip);
+}
+
 static bool is_pinned_peer(microlink_t * ml, uint32_t vpn_ip)
 {
   if (vpn_ip == 0) return false;
+  /* Live ml->config read (not the s_priority_pin_ip cache): valid before the
+   * wg task start that populates the cache for the cross-module variant. */
   if (ml->config.priority_peer_ip != 0 && vpn_ip == ml->config.priority_peer_ip) {
     return true;
   }
-  for (int i = 0; i < ML_EXTRA_PINS; i++) {
-    if (s_extra_pins[i] != 0 && vpn_ip == s_extra_pins[i]) {
-      return true;
-    }
+  if (extra_pin_contains(vpn_ip)) {
+    return true;
   }
   uint32_t fip = fleet_server_ip_cached();
   return (fip != 0 && vpn_ip == fip);
@@ -874,6 +900,29 @@ static uint32_t s_diag_relay_disco_resets; /* per-peer from-scratch disco resets
                                             * (v2: rate-limited per-peer via p->disco_reset_next_ms) */
 static uint32_t s_diag_ep_learn_evictions; /* learn-from-ping ring-evictions on a full endpoint table —
                                             * nonzero = the B-1 wedge trigger occurred and was absorbed */
+static uint32_t s_diag_peer_table_full; /* over-cap add refusals; the LOG is rate-limited (task #60: the
+                                         * un-limited warn ran at 147 lines/s at a core-stall, and every
+                                         * ESP_LOG line pays the RTC-ring + console-chain tax) */
+static uint64_t s_peer_table_full_log_ms; /* last time the warn was actually emitted */
+
+/* Flush-recovery silence-ping state (see disco_silence_ping): PER-PEER pairing
+ * slots (review 3793497415 — the single slot lost pairings whenever a flush
+ * silenced several safety peers at once: run-46 measured a bogus 72 s "resume"
+ * from exactly that overwrite). One slot per safety peer, keyed by peer idx. */
+#define SILENCE_PAIR_SLOTS 8
+
+typedef struct
+{
+  int peer_idx;
+  uint64_t ping_ms; /* 0 = slot free (zero-init); nonzero = pairing armed */
+} silence_pair_t;
+
+static silence_pair_t s_silence_pairs[SILENCE_PAIR_SLOTS];
+static uint32_t s_diag_silence_pings;
+static uint32_t s_diag_silence_resume_last_ms;
+static uint32_t s_diag_silence_resume_worst_ms;
+static uint32_t s_diag_silence_resume_at_s; /* uptime s of the last resume record —
+                                             * dates the gauge (boot-window vs live) */
 
 /* DISCO observability counters — the 2026-08-09 regains-oscillation root cause
  * rested on CALCULATED probe-table/CMM dynamics; these measure them instead.
@@ -917,13 +966,15 @@ void ml_wg_get_reingest_diag(uint32_t out[6])
  * the WORST safety-peer keypair/init ages. wg_kp_age_max steadily ~<120000
  * (rekey cadence) = healthy; climbing past 120000 = a rekey is starving; a
  * green drop then follows ~60 s later when REJECT_AFTER_TIME kills the key. */
-void ml_wg_get_session_diag(microlink_t * ml, uint32_t out[5])
+void ml_wg_get_session_diag(microlink_t * ml, uint32_t out[7])
 {
   out[0] = s_diag_ep_learn_evictions;
   out[1] = 0; /* max safety keypair age ms (0xFFFFFFFF = a peer has NO valid key) */
   out[2] = 0; /* max safety handshake-init TX age ms */
   out[3] = 0; /* max safety worst any-path rx gap ms (edge-flush receive-stall metric) */
   out[4] = 0; /* WHEN out[3]'s max was recorded (sys_now ms) — dates the gauge */
+  out[5] = 0; /* max safety worst tx gap ms (replier-silence half of a flush) */
+  out[6] = 0; /* WHEN out[5]'s max was recorded */
   if (ml == NULL || ml->wg_netif == NULL) return;
   for (int i = 0; i < ml->peer_count; i++) {
     ml_peer_t * p = &ml->peers[i];
@@ -947,6 +998,16 @@ void ml_wg_get_session_diag(microlink_t * ml, uint32_t out[5])
     {
       out[3] = rx_worst;
       out[4] = rx_worst_at;
+    }
+    u32_t tx_worst = 0;
+    u32_t tx_worst_at = 0;
+    if (
+      wireguardif_peer_worst_tx_gap((struct netif *)ml->wg_netif, (u8_t)p->wg_peer_index, &tx_worst, &tx_worst_at) ==
+        ERR_OK &&
+      tx_worst > out[5])
+    {
+      out[5] = tx_worst;
+      out[6] = tx_worst_at;
     }
   }
 }
@@ -1321,6 +1382,7 @@ static void neg_apply_target(microlink_t * ml, uint16_t target, uint8_t src)
       (unsigned)target,
       microlink_region_source_str(src));
     ml->derp_home_region = target;
+    ml_derp_note_reconnect_cause(4); /* cause 4 = region rehome (legacy immediate path) */
     xEventGroupSetBits(ml->events, ML_EVT_DERP_RECONNECT);
     neg_note_auto_apply(ml, target, src, now);
     if (src == MICROLINK_REGION_SRC_AUTO_FLEET) {
@@ -1416,6 +1478,7 @@ static struct
   uint32_t backoff_ms; /* current backoff step */
   uint16_t last_target; /* region of the pin MBB we issued (edge 4: cancel-on-clear) */
   uint32_t absent_resyncs; /* coord full-resyncs forced by an absent pinned peer (cumulative) */
+  uint32_t absent_nvs_restores; /* absent pins re-synthesized from the NVS peer cache */
   uint64_t absent_next_ms; /* pin-presence heal backoff gate */
   uint32_t absent_backoff_ms;
 } s_pin; /* never bulk-reset: counters are cumulative, reset sites clear differing subsets */
@@ -1431,13 +1494,14 @@ uint32_t ml_wg_get_max_iter_ms(void)
   return s_diag_wg_max_iter_ms;
 }
 
-void ml_wg_get_pin_diag(uint32_t out[5])
+void ml_wg_get_pin_diag(uint32_t out[6])
 {
   out[0] = s_pin.mbb_requests;
   out[1] = s_pin.mbb_commits;
   out[2] = s_pin.mbb_retries;
   out[3] = (s_pin.retry_at_ms != 0) ? 1u : 0u; /* backoff currently pending */
   out[4] = s_pin.absent_resyncs; /* forced coord resyncs for a pinned-but-absent peer */
+  out[5] = s_pin.absent_nvs_restores; /* absent pins restored from the NVS cache */
 }
 
 /* Pin-presence self-heal: an extra-pinned IP
@@ -1479,15 +1543,45 @@ static void pin_presence_heal(microlink_t * ml)
   s_pin.absent_backoff_ms =
     (s_pin.absent_backoff_ms == 0) ? 60000 : (s_pin.absent_backoff_ms >= 300000 ? 600000 : s_pin.absent_backoff_ms * 5);
   s_pin.absent_next_ms = now + s_pin.absent_backoff_ms;
-  s_pin.absent_resyncs++;
   char ipstr[16];
   microlink_ip_to_str(absent_ip, ipstr);
+
+  /* First choice: re-synthesize the peer from the NVS cache (key + disco key +
+   * endpoints survive there). The coord-resync fallback below is empirically
+   * insufficient: with OmitPeers the re-fetch does not re-deliver a peer the
+   * server believes we hold (f498 reproducer, 2026-08-16: absent_resyncs
+   * climbing while errno-118 route-fails persisted). A stale cached key is
+   * self-correcting — the next coord update rekey-retires it. We run on the
+   * wg_mgr task, so calling add_peer directly is single-writer-safe. */
+  ml_peer_update_t cached;
+  bool have_cached = ml_peer_nvs_lookup_update(absent_ip, &cached);
+  if (have_cached) {
+    bool skipped = false;
+    uint64_t a0 = ml_get_time_ms();
+    int aidx = add_peer(ml, &cached, &skipped);
+    /* Attribute this out-of-ingest add to the pass gauges — a stall event
+     * must never carry unattributed restore work (stall-decomposition rule). */
+    uint32_t am = (uint32_t)s_pass_ingest_ms + (uint32_t)(ml_get_time_ms() - a0);
+    s_pass_ingest_ms = (am > 0xFFFF) ? 0xFFFF : (uint16_t)am;
+    if (aidx >= 0) {
+      s_pass_peer_adds++;
+      s_pin.absent_nvs_restores++;
+      ESP_LOGW(
+        TAG, "Pinned peer %s ABSENT — restored from NVS cache (#%u)", ipstr, (unsigned)s_pin.absent_nvs_restores);
+      return;
+    }
+  }
+
+  s_pin.absent_resyncs++;
   ESP_LOGW(
     TAG,
-    "Pinned peer %s ABSENT from peer table — forcing coord resync #%u (next retry in %us)",
+    "Pinned peer %s ABSENT (%s) — forcing FULL coord resync #%u (next retry in %us)",
     ipstr,
+    have_cached ? "NVS cache entry found but add failed" : "no NVS cache entry",
     (unsigned)s_pin.absent_resyncs,
     (unsigned)(s_pin.absent_backoff_ms / 1000));
+  ml_coord_request_full_peers(); /* the default OmitPeers=true reconnect never
+                                  * re-delivers the missing peer (f498 evidence) */
   ml_coord_cmd_t cmd = ML_CMD_FORCE_RECONNECT;
   (void)xQueueSend(ml->coord_cmd_queue, &cmd, 0); /* full = one already pending */
 }
@@ -1819,11 +1913,21 @@ typedef struct
 static region_stash_t s_region_stash[ML_REGION_STASH_SLOTS];
 static uint32_t s_diag_region_stash_restores;
 static uint32_t s_diag_readds_skipped;
+static uint32_t s_diag_allowlist_rejects;
+/* Indexed by first-failing §7a skip clause: 0=!existing 1=no-wg-slot 2=vpn_ip
+ * 3=disco_key 4=hostname 5=region 6=endpoints. */
+static uint32_t s_diag_skipfail[7];
 
-void ml_wg_get_ingest_diag(uint32_t out[2])
+void ml_wg_get_ingest_diag(uint32_t out[3])
 {
   out[0] = s_diag_readds_skipped;
   out[1] = s_diag_region_stash_restores;
+  out[2] = s_diag_allowlist_rejects;
+}
+
+void ml_wg_get_skipfail_diag(uint32_t out[7])
+{
+  for (int i = 0; i < 7; i++) out[i] = s_diag_skipfail[i];
 }
 
 static void region_stash_put(uint32_t vpn_ip, uint16_t region)
@@ -1852,16 +1956,46 @@ static uint16_t region_stash_lookup(uint32_t vpn_ip)
   return 0;
 }
 
-/* §7a: does this re-add carry endpoints identical to the stored set (or none)? */
+/* Single membership test for the peer candidate table — the learn-from-ping
+ * check, the alt-candidate dedup and the §7a re-add compare must all agree on
+ * what "already holds this endpoint" means (they had drifted on is_ipv6). */
+static bool peer_has_endpoint(const ml_peer_t * p, uint32_t ip, uint16_t port, bool is_ipv6)
+{
+  for (int i = 0; i < p->endpoint_count && i < ML_MAX_ENDPOINTS; i++) {
+    if (p->endpoints[i].ip == ip && p->endpoints[i].port == port && p->endpoints[i].is_ipv6 == is_ipv6) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/* Boot NVS preseed stores only a truncated hostname (ml_peer_nvs
+ * hostname_short[7]) — a stored non-empty PREFIX of the update's name is
+ * display drift, not a rename (identity is already pinned by public key +
+ * vpn_ip + disco key at this point). Without this, EVERY preseeded peer took
+ * one full X25519 re-add per boot (~128 needless adds = the boot storm).
+ * Deliberate looseness: a REAL rename to a longer name sharing the stored
+ * prefix also matches — hostname is display metadata only, and the skip
+ * path's RAM refresh still adopts the new name, so nothing user-visible or
+ * identity-relevant is lost. */
+static bool readd_hostname_unchanged(const ml_peer_t * p, const ml_peer_update_t * u)
+{
+  if (strncmp(u->hostname, p->hostname, sizeof(p->hostname) - 1) == 0) return true;
+  size_t sl = strnlen(p->hostname, sizeof(p->hostname) - 1);
+  return sl > 0 && strncmp(u->hostname, p->hostname, sl) == 0;
+}
+
+/* §7a: does this re-add carry any endpoint we don't already hold? Subset test,
+ * order-insensitive: learn-from-ping appends locally-learned endpoints that a
+ * coord re-add never carries, so exact-list equality was defeated FOREVER for
+ * every peer with active disco — the pinned peers took the full re-add path on
+ * each re-ingest, and under re-bond churn those X25519 storms stalled the WG
+ * and DERP tasks together (run-36 disarm cascade). Only a genuinely NEW
+ * endpoint is a material change. */
 static bool readd_endpoints_unchanged(const ml_peer_t * p, const ml_peer_update_t * u)
 {
-  if (u->endpoint_count == 0) return true;
-  if (u->endpoint_count != p->endpoint_count) return false;
   for (int i = 0; i < u->endpoint_count && i < ML_MAX_ENDPOINTS; i++) {
-    if (
-      u->endpoints[i].ip != p->endpoints[i].ip || u->endpoints[i].port != p->endpoints[i].port ||
-      u->endpoints[i].is_ipv6 != p->endpoints[i].is_ipv6)
-    {
+    if (!peer_has_endpoint(p, u->endpoints[i].ip, u->endpoints[i].port, u->endpoints[i].is_ipv6)) {
       return false;
     }
   }
@@ -1871,9 +2005,16 @@ static bool readd_endpoints_unchanged(const ml_peer_t * p, const ml_peer_update_
 static int add_peer(microlink_t * ml, const ml_peer_update_t * update, bool * skipped)
 {
   /* Peer allowlist filter: don't waste WG slots on non-allowed peers.
-     * Still process updates for existing peers (they may become allowed later). */
+     * Still process updates for existing peers (they may become allowed later).
+     * Counts as SKIPPED: near-zero work, so it must not consume an ingest
+     * pacing slot or trigger a wg-rx drain (run-39: rejects saturated the
+     * pacing cap uncounted, stretching re-ingests over dozens of passes).
+     * Pins are exempt INSIDE ml_config_peer_is_allowed() — centralized there
+     * so the disco/probe/preseed gates inherit it too (f498 root cause). */
   if (!ml_config_peer_is_allowed(ml->config_httpd, update->vpn_ip)) {
-    return -1; /* Silently skip — peer not in allowlist */
+    s_diag_allowlist_rejects++;
+    if (skipped) *skipped = true;
+    return -1;
   }
 
   /* Check if peer already exists */
@@ -1912,6 +2053,7 @@ static int add_peer(microlink_t * ml, const ml_peer_update_t * update, bool * sk
         s_diag_rekey_retire_vetoes++;
         ESP_LOGW(
           TAG, "IGNORING re-key retire for %s: session still passing authenticated data (deferred)", update->hostname);
+        if (skipped) *skipped = true; /* deferred, no add work — no pacing slot */
         return -1;
       }
       s_diag_rekey_retires++;
@@ -1992,7 +2134,21 @@ static int add_peer(microlink_t * ml, const ml_peer_update_t * update, bool * sk
     }
 
     if (idx < 0) {
-      ESP_LOGW(TAG, "Peer table full (%d slots), cannot add %s", ML_MAX_PEERS, update->hostname);
+      /* On a 130+-node tailnet this fires per rejected patch entry — a steady
+       * log storm (147 lines/s measured at a DUT core-stall). Count always,
+       * log at most once per 10 s with the count folded in. */
+      s_diag_peer_table_full++;
+      if (skipped) *skipped = true; /* zero-work refusal — must not burn a pacing slot (review 🟡) */
+      uint64_t now_ms = esp_timer_get_time() / 1000ULL;
+      if (now_ms - s_peer_table_full_log_ms >= 10000ULL) {
+        s_peer_table_full_log_ms = now_ms;
+        ESP_LOGW(
+          TAG,
+          "Peer table full (%d slots), cannot add %s (%lu refusals total, log rate-limited)",
+          ML_MAX_PEERS,
+          update->hostname,
+          (unsigned long)s_diag_peer_table_full);
+      }
       return -1;
     }
     if (idx >= ml->peer_count) {
@@ -2010,13 +2166,28 @@ static int add_peer(microlink_t * ml, const ml_peer_update_t * update, bool * sk
    * LRU protection (rebuilt each boot) and the relay-retry re-arm. Any
    * material change — dropped WG slot, IP/disco-key/hostname/region/
    * endpoint delta — takes the full path. Hostname compared in stored-
-   * truncation space so an over-long name cannot defeat the skip forever. */
-  if (
-    existing && p->wg_peer_index >= 0 && update->vpn_ip == p->vpn_ip &&
-    memcmp(update->disco_key, p->disco_key, 32) == 0 &&
-    strncmp(update->hostname, p->hostname, sizeof(p->hostname) - 1) == 0 &&
-    (update->derp_region == 0 || update->derp_region == p->derp_region) && readd_endpoints_unchanged(p, update))
-  {
+   * truncation space so an over-long name cannot defeat the skip forever.
+   * skipfail = FIRST failing clause, counted per clause (run-38: the
+   * pins' adds=4 persisted after the endpoint subset fix — attribute the
+   * defeat with data, not hypotheses). */
+  int skipfail = -1;
+  if (!existing)
+    skipfail = 0;
+  else if (p->wg_peer_index < 0)
+    skipfail = 1;
+  else if (update->vpn_ip != p->vpn_ip)
+    skipfail = 2;
+  else if (memcmp(update->disco_key, p->disco_key, 32) != 0)
+    skipfail = 3;
+  else if (!readd_hostname_unchanged(p, update))
+    skipfail = 4;
+  else if (update->derp_region != 0 && update->derp_region != p->derp_region)
+    skipfail = 5;
+  else if (!readd_endpoints_unchanged(p, update))
+    skipfail = 6;
+  if (skipfail >= 0 && skipfail <= 6) s_diag_skipfail[skipfail]++;
+
+  if (skipfail < 0) {
     if (
       is_pinned_peer(ml, p->vpn_ip) ||
       (ml->peer_wanted_cb != NULL && ml->peer_wanted_cb(ml->peer_wanted_ctx, p->hostname, p->vpn_ip)))
@@ -2028,6 +2199,11 @@ static int add_peer(microlink_t * ml, const ml_peer_update_t * update, bool * sk
       (is_pinned_peer(ml, p->vpn_ip) || is_health_tracked(p->vpn_ip)))
     {
       p->relay_retry_next_ms = 1; /* identical endpoints still re-arm the sweep */
+    }
+    if (strncmp(update->hostname, p->hostname, sizeof(p->hostname) - 1) != 0) {
+      /* Truncated-preseed prefix matched: recover the full display name.
+       * RAM-only — the next NVS save re-truncates regardless. */
+      strlcpy(p->hostname, update->hostname, sizeof(p->hostname));
     }
     s_diag_readds_skipped++;
     if (skipped) *skipped = true;
@@ -2347,14 +2523,20 @@ static void disco_build_ping(microlink_t * ml, int peer_idx, uint8_t * out, size
   pos += sizeof(ciphertext);
   *out_len = pos;
 
-  /* Track pending probe */
+  /* Track pending probe. General peers may only use the head of the table;
+   * the ML_DISCO_PROBE_RESERVE_SLOTS tail is safety-peer-only, so tailnet
+   * churn can never leave a safety ping unregistered (unmatched pong = no
+   * endpoint learn = the run-46 wedge). */
+  bool probe_safety = is_safety_peer(ml, p->vpn_ip);
+  int scan_limit = probe_safety ? MAX_PENDING_PROBES : (MAX_PENDING_PROBES - ML_DISCO_PROBE_RESERVE_SLOTS);
   bool registered = false;
-  for (int i = 0; i < MAX_PENDING_PROBES; i++) {
+  for (int i = 0; i < scan_limit; i++) {
     if (!pending_probes[i].active) {
       memcpy(pending_probes[i].txid, txid, DISCO_TXID_LEN);
       pending_probes[i].peer_index = peer_idx;
       pending_probes[i].sent_ms = ml_get_time_ms();
       pending_probes[i].derp_match_ms = 0;
+      pending_probes[i].safety = probe_safety;
       pending_probes[i].active = true;
       registered = true;
       /* Track the table's occupancy high water (probe_tbl_hw). Registration is
@@ -2382,10 +2564,15 @@ static void disco_build_ping(microlink_t * ml, int peer_idx, uint8_t * out, size
     }
   }
   if (!registered) {
-    /* No free slot = occupancy is the table size — record the saturation
-     * (the exhaustion case the 2026-08-09 oscillation hinged on). */
-    s_diag_probe_tbl_hw = MAX_PENDING_PROBES;
-    ESP_LOGW(TAG, "DISCO probe table full (%d slots), pong will be unmatched", MAX_PENDING_PROBES);
+    /* Record the saturation at the size of the REGION that overflowed — a
+     * general-peer refusal with the safety reserve empty must not peg the
+     * high-water at 64 and masquerade as true exhaustion (review 🟡). */
+    if ((uint32_t)scan_limit > s_diag_probe_tbl_hw) s_diag_probe_tbl_hw = (uint32_t)scan_limit;
+    ESP_LOGW(
+      TAG,
+      "DISCO probe table %s region full (%d slots), pong will be unmatched",
+      probe_safety ? "FULL (incl safety reserve)" : "general",
+      scan_limit);
   }
 }
 
@@ -2439,6 +2626,11 @@ static void disco_build_pong(
   *out_len = pos;
 }
 
+/* When set, the next disco_send_ping_to_peer skips the 2 s pending-probe
+ * dedup: the rx-silence path pings at ~1 Hz DURING an outage, where the dedup
+ * would suppress exactly the punch that ends it. wg-task-only (single writer). */
+static bool s_disco_ping_skip_dedup;
+
 static void disco_send_ping_to_peer(microlink_t * ml, int peer_idx, bool force)
 {
   ml_peer_t * p = &ml->peers[peer_idx];
@@ -2455,7 +2647,7 @@ static void disco_send_ping_to_peer(microlink_t * ml, int peer_idx, bool force)
    * 2 s, a fresh one is pure redundancy — skip it. The 2 s floor is well under
    * the 3 s liveness/heartbeat cadence (which also spaces last_ping_sent_ms by
    * >= 3 s), so a genuine liveness ping is never suppressed. */
-  for (int pi = 0; pi < MAX_PENDING_PROBES; pi++) {
+  for (int pi = 0; !s_disco_ping_skip_dedup && pi < MAX_PENDING_PROBES; pi++) {
     if (
       pending_probes[pi].active && pending_probes[pi].peer_index == peer_idx && now - pending_probes[pi].sent_ms < 2000)
     {
@@ -2664,13 +2856,7 @@ static void process_disco_ping(
      * list is empty (netmap endpoints missed or wiped) stays DERP-only
      * forever even while the peer pings it directly every few seconds. */
   if (!pkt->via_derp && pkt->src_ip != 0 && pkt->src_port != 0 && !p->has_direct_path) {
-    bool known = false;
-    for (int i = 0; i < p->endpoint_count; i++) {
-      if (!p->endpoints[i].is_ipv6 && p->endpoints[i].ip == pkt->src_ip && p->endpoints[i].port == pkt->src_port) {
-        known = true;
-        break;
-      }
-    }
+    bool known = peer_has_endpoint(p, pkt->src_ip, pkt->src_port, false);
     if (!known) {
       if (p->endpoint_count < ML_MAX_ENDPOINTS) {
         p->endpoints[p->endpoint_count].ip = pkt->src_ip;
@@ -2767,6 +2953,20 @@ static void process_disco_pong(
       }
       p->trust_until_ms = now + ML_DISCO_TRUST_DURATION_MS;
 
+      /* Silence-ping pairing (flush-mechanism verification): first direct pong
+       * from the peer we last silence-pinged dates the outage-to-resume delta.
+       * Prediction if the mechanism holds: resume ≈ ping + RTT, not random. */
+      for (int si = 0; si < SILENCE_PAIR_SLOTS; si++) {
+        if (s_silence_pairs[si].peer_idx == (int)(p - ml->peers) && s_silence_pairs[si].ping_ms != 0) {
+          uint32_t d = (uint32_t)(now - s_silence_pairs[si].ping_ms);
+          s_diag_silence_resume_last_ms = d;
+          if (d > s_diag_silence_resume_worst_ms) s_diag_silence_resume_worst_ms = d;
+          s_diag_silence_resume_at_s = (uint32_t)(now / 1000u);
+          s_silence_pairs[si].ping_ms = 0; /* slot free */
+          break;
+        }
+      }
+
       /* Flap-damping bookkeeping (FIX 2). Timestamp only the genuine false->true
        * promotion edge (NOT every heartbeat pong, else the path never looks
        * "established"). Once a path survives past 15 s, clear the flap counter so
@@ -2798,13 +2998,7 @@ static void process_disco_pong(
         /* Keep the established direct path. Remember the alternate endpoint as
          * a candidate (dedup; bounded by ML_MAX_ENDPOINTS) so a later probe can
          * still find it if the current path actually fails. */
-        bool present = false;
-        for (int e = 0; e < p->endpoint_count && e < ML_MAX_ENDPOINTS; e++) {
-          if (p->endpoints[e].ip == pkt->src_ip && p->endpoints[e].port == pkt->src_port) {
-            present = true;
-            break;
-          }
-        }
+        bool present = peer_has_endpoint(p, pkt->src_ip, pkt->src_port, false);
         if (!present && p->endpoint_count < ML_MAX_ENDPOINTS) {
           p->endpoints[p->endpoint_count].ip = pkt->src_ip;
           p->endpoints[p->endpoint_count].port = pkt->src_port;
@@ -3374,6 +3568,7 @@ bool ml_wg_fleet_configured(microlink_t * ml)
 
 static void wg_mgr_drain_wg_rx(microlink_t * ml)
 {
+  uint64_t drain_t0 = ml_get_time_ms();
   UBaseType_t pops = uxQueueMessagesWaiting(ml->wg_rx_queue);
   ml_rx_packet_t pkt;
   while (pops-- > 0 && xQueueReceive(ml->wg_rx_queue, &pkt, 0) == pdTRUE) {
@@ -3396,6 +3591,10 @@ static void wg_mgr_drain_wg_rx(microlink_t * ml)
     }
     s_pass_wg_pkts++;
     process_wg_packet(ml, &pkt);
+  }
+  {
+    uint32_t dm = (uint32_t)s_pass_drain_ms + (uint32_t)(ml_get_time_ms() - drain_t0);
+    s_pass_drain_ms = (dm > 0xFFFF) ? 0xFFFF : (uint16_t)dm;
   }
 }
 
@@ -3721,6 +3920,57 @@ static void disco_wake_peer(microlink_t * ml, uint32_t vpn_ip, bool link_healthy
   }
 }
 
+/* Flush-recovery silence ping (see ML_DISCO_SILENCE_PING_MS): a direct safety
+ * peer whose direct rx has gone silent gets an immediate punch-restoring ping
+ * (~1 Hz while silent, dedup bypassed) plus one CallMeMaybe (own throttle) so
+ * the far side probes back once its mapping re-binds. Additive-only: never
+ * fires while 5 Hz rx is flowing, never for relay-bound peers, touches no
+ * session or teardown state. Statics live with the diag block near the top. */
+void ml_wg_get_silence_diag(uint32_t out[5])
+{
+  out[0] = s_diag_silence_pings;
+  out[1] = s_diag_silence_resume_last_ms;
+  out[2] = s_diag_silence_resume_worst_ms;
+  out[3] = s_diag_silence_resume_at_s;
+  out[4] = s_diag_peer_table_full;
+}
+
+static void disco_silence_ping(microlink_t * ml, uint32_t vpn_ip)
+{
+  if (vpn_ip == 0 || ml->wg_netif == NULL) return;
+  int pidx = find_peer_by_ip(ml, vpn_ip);
+  if (pidx < 0) return;
+  ml_peer_t * p = &ml->peers[pidx];
+  if (!p->has_direct_path || p->wg_peer_index < 0) return;
+  u32_t age = 0;
+  if (wireguardif_peer_direct_rx_age((struct netif *)ml->wg_netif, (u8_t)p->wg_peer_index, &age) != ERR_OK) return;
+  if (age < ML_DISCO_SILENCE_PING_MS) return;
+  uint64_t nowp = ml_get_time_ms();
+  if (nowp - p->last_ping_sent_ms < 900) return; /* ~1 Hz while silent */
+  s_diag_silence_pings++;
+  /* Upsert this peer's pairing slot (refresh = resume measures from the LAST
+   * ping, i.e. ≈ RTT when the mechanism works). No free slot: overwrite the
+   * oldest — better to lose the stalest pairing than the newest. */
+  {
+    int slot = -1, oldest = 0;
+    for (int si = 0; si < SILENCE_PAIR_SLOTS; si++) {
+      if (s_silence_pairs[si].ping_ms != 0 && s_silence_pairs[si].peer_idx == pidx) {
+        slot = si;
+        break;
+      }
+      if (s_silence_pairs[si].ping_ms == 0 && slot < 0) slot = si;
+      if (s_silence_pairs[si].ping_ms < s_silence_pairs[oldest].ping_ms) oldest = si;
+    }
+    if (slot < 0) slot = oldest;
+    s_silence_pairs[slot].peer_idx = pidx;
+    s_silence_pairs[slot].ping_ms = nowp;
+  }
+  s_disco_ping_skip_dedup = true;
+  disco_send_ping_to_peer(ml, pidx, true);
+  s_disco_ping_skip_dedup = false;
+  disco_send_call_me_maybe(ml, pidx); /* own ML_DISCO_CMM_MIN_INTERVAL_MS throttle */
+}
+
 static void disco_periodic_probes(microlink_t * ml)
 {
   /* Pinned-peer session wakes — run BEFORE the enable_disco gate so
@@ -3735,6 +3985,15 @@ static void disco_periodic_probes(microlink_t * ml)
   for (int hp = 0; hp < ML_EXTRA_PINS; hp++) {
     if ((s_health_peers[hp].ip != 0) && (s_health_peers[hp].ip != ml->config.priority_peer_ip)) {
       disco_wake_peer(ml, s_health_peers[hp].ip, s_health_peers[hp].healthy);
+    }
+  }
+
+  /* Flush-recovery silence pings for the same safety set — also ahead of the
+     * enable_disco gate: these ARE the safety path's punch restoration. */
+  disco_silence_ping(ml, ml->config.priority_peer_ip);
+  for (int hp = 0; hp < ML_EXTRA_PINS; hp++) {
+    if ((s_health_peers[hp].ip != 0) && (s_health_peers[hp].ip != ml->config.priority_peer_ip)) {
+      disco_silence_ping(ml, s_health_peers[hp].ip);
     }
   }
 
@@ -3937,8 +4196,9 @@ static void disco_periodic_probes(microlink_t * ml)
         relay_retry_fired = true; /* bounded: one NaCl seal + one sweep per tick */
         disco_send_call_me_maybe(ml, i);
         disco_send_ping_to_peer(ml, i, true);
-        /* Backoff after round N: 30 s << (N-1), capped at 300 s. With the
-         * 5 s first round that gives 5 -> 30 -> 60 -> 120 -> 240 -> 300 cap. */
+        /* Backoff after round N: 30 s << (N-1), CAPPED AT 30 s (run-46: the
+         * grown cap became the wedge's outage period) — effectively 5 s first
+         * round then a steady 30 s cadence for as long as the peer is relay-bound. */
         if (p->relay_retry_count < 5u) {
           p->relay_retry_count++;
         }
@@ -4076,7 +4336,8 @@ static void disco_periodic_probes(microlink_t * ml)
   now = ml_get_time_ms();
   for (int i = 0; i < MAX_PENDING_PROBES; i++) {
     if (!pending_probes[i].active) continue;
-    bool timed_out = now - pending_probes[i].sent_ms > ML_DISCO_PING_TIMEOUT_MS;
+    uint64_t ttl_ms = pending_probes[i].safety ? ML_DISCO_SAFETY_PROBE_TTL_MS : ML_DISCO_PING_TIMEOUT_MS;
+    bool timed_out = now - pending_probes[i].sent_ms > ttl_ms;
     /* Bounded post-DERP-match window (see disco_probe_t.derp_match_ms): a
      * via-DERP-answered probe waits only ML_DISCO_DERP_MATCH_GRACE_MS for its
      * slower direct twin, not the full 5 s timeout — unbounded lifetimes here
@@ -4147,6 +4408,8 @@ void ml_wg_mgr_task(void * arg)
 {
   microlink_t * ml = (microlink_t *)arg;
   ESP_LOGI(TAG, "WG Manager task started (Core %d)", xPortGetCoreID());
+  s_priority_pin_ip = ml->config.priority_peer_ip; /* cache for the cross-module
+                                                    * allowlist pin exemption */
 
   /* Initialize probe tracking */
   memset(pending_probes, 0, sizeof(pending_probes));
@@ -4251,10 +4514,17 @@ void ml_wg_mgr_task(void * arg)
     s_pass_probe_ms = 0;
     s_pass_cmm_sends = 0;
     s_pass_nvs_flush_ms = 0;
+    s_pass_ingest_ms = 0;
+    s_pass_drain_ms = 0;
     wg_mgr_drain_wg_rx(ml);
 
     /* Process peer updates from coord task (paced) */
-    process_peer_updates(ml);
+    {
+      uint64_t i0 = ml_get_time_ms();
+      process_peer_updates(ml);
+      uint64_t id = ml_get_time_ms() - i0;
+      s_pass_ingest_ms = (id > 0xFFFF) ? 0xFFFF : (uint16_t)id;
+    }
 
     /* Debounced peer-cache flash flush (see ml_peer_nvs.c). */
     {
@@ -4410,6 +4680,8 @@ void ml_wg_mgr_task(void * arg)
         e->disco_probe_ms = s_pass_probe_ms;
         e->cmm_sends = s_pass_cmm_sends;
         e->nvs_flush_ms = s_pass_nvs_flush_ms;
+        e->ingest_ms = s_pass_ingest_ms;
+        e->drain_ms = s_pass_drain_ms;
         __atomic_store_n(&s_wg_stall_widx, w + 1, __ATOMIC_RELEASE);
         ESP_LOGW(
           TAG,

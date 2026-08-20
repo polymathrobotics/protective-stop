@@ -33,6 +33,7 @@ extern "C"
 #define DCS_NVS_KEY_PSTOP_PORT "ps_port"
 #define DCS_NVS_KEY_TS_BOOT_EN "ts_boot"
 #define DCS_NVS_KEY_RST_HIST "rst_hist" /* ring of recent esp_reset_reason() */
+#define DCS_NVS_KEY_CTRL_RST "ctrl_rst" /* one-shot controlled-reset cause crumb */
 #define DCS_NVS_KEY_PSTOP_NUM "ps_num" /* USB "PSTOPxx" unit number (0=auto) */
 #define DCS_NVS_KEY_RING_OFF "ring_off" /* ring rotation: physical index of LED 1 */
 #define DCS_NVS_KEY_PSTOP_PEERS "ps_peers" /* multi-machine peer table (blob, see dcs_nvs.c) */
@@ -108,6 +109,14 @@ extern "C"
     bool derp_only_mode;
     uint16_t boot_count;
     uint8_t reset_reason;
+    uint8_t ctrl_reset_cause; /* one-shot crumb taken at boot (DCS_CTRL_RST_*) */
+    bool crash_present; /* a coredump image sits in flash (cleared only by the next crash) */
+    uint32_t crash_pc; /* coredump summary: exception PC */
+    char crash_task[16]; /* coredump summary: crashing task name */
+    char crash_sha[17]; /* coredump summary: first 16 hex chars of the crashing
+                         * app's ELF SHA — dates the core to an exact build */
+    uint8_t xcheck_detail; /* one-shot xc_det crumb: (code<<4)|stalled_core,
+                            * nonzero only when ctrl_reset_cause==XCHECK */
     microlink_t * ml_handle;
     ml_app_t * app;
   } dcs_state_t;
@@ -303,6 +312,10 @@ extern "C"
  * shifted out); read fills out[] newest-last and returns the count. Lets a crash
  * pattern be seen remotely via /state.json even across later clean reboots. */
   void dcs_nvs_push_reset_reason(uint8_t reason);
+  void dcs_nvs_set_ctrl_reset_cause(uint8_t cause);
+  void dcs_nvs_set_xcheck_detail(uint8_t detail);
+  uint8_t dcs_nvs_take_xcheck_detail(void);
+  uint8_t dcs_nvs_take_ctrl_reset_cause(void);
   int dcs_nvs_read_reset_history(uint8_t * out, int max);
   uint8_t dcs_nvs_read_pstop_unit_num(void); /* 0 = auto (chip-ID derived) */
   esp_err_t dcs_nvs_write_pstop_unit_num(uint8_t n);

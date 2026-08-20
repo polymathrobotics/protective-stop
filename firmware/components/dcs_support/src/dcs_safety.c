@@ -10,6 +10,7 @@
 
 #include "dcs_internal.h"
 #include "esp_attr.h"
+#include "esp_core_dump.h"
 #include "esp_log.h"
 #include "esp_ota_ops.h"
 #include "esp_partition.h"
@@ -33,11 +34,49 @@ void dcs_safety_mark_liveness_abort(void)
   s_liveness_abort_flag = DCS_LIVENESS_ABORT_MAGIC;
 }
 
+void dcs_controlled_reset(uint8_t cause)
+{
+  dcs_nvs_set_ctrl_reset_cause(cause); /* survives the reset; taken next boot */
+  vTaskDelay(pdMS_TO_TICKS(20)); /* flush the caller's log line */
+  esp_restart();
+}
+
 void dcs_safety_account_boot(void)
 {
   g_dcs.reset_reason = (uint8_t)esp_reset_reason();
   g_dcs.boot_count = dcs_nvs_read_boot_count();
   dcs_nvs_push_reset_reason(g_dcs.reset_reason); /* crash-pattern history */
+  g_dcs.ctrl_reset_cause = dcs_nvs_take_ctrl_reset_cause(); /* one-shot crumb */
+  g_dcs.xcheck_detail = dcs_nvs_take_xcheck_detail(); /* one-shot, XCHECK-only */
+  if (g_dcs.reset_reason != (uint8_t)ESP_RST_SW) {
+    g_dcs.ctrl_reset_cause = 0; /* crumb only labels an esp_restart() boot — a
+                                 * failed erase must not mislabel POWERON/panic */
+  }
+  if (g_dcs.ctrl_reset_cause != DCS_CTRL_RST_XCHECK) {
+    g_dcs.xcheck_detail = 0; /* detail rides only on an XCHECK-labeled boot */
+  }
+
+#if CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH && CONFIG_ESP_COREDUMP_DATA_FORMAT_ELF
+  /* Crash visibility (2026-08-16 INT_WDT with no persisted trace): a coredump
+   * in flash survives every reboot until the NEXT crash overwrites it, but
+   * nothing surfaced it — /api/last_log's RTC ring is one-boot-deep. Summarize
+   * at boot into /state.json so the soak monitor sees every crash. */
+  if (esp_core_dump_image_check() == ESP_OK) {
+    esp_core_dump_summary_t * cs = calloc(1, sizeof(*cs));
+    if (cs != NULL && esp_core_dump_get_summary(cs) == ESP_OK) {
+      g_dcs.crash_present = true;
+      g_dcs.crash_pc = cs->exc_pc;
+      strlcpy(g_dcs.crash_task, cs->exc_task, sizeof(g_dcs.crash_task));
+      strlcpy(g_dcs.crash_sha, (const char *)cs->app_elf_sha256, sizeof(g_dcs.crash_sha));
+      ESP_LOGE(
+        TAG,
+        "COREDUMP in flash: task=%s pc=0x%08lx (persists until the next crash)",
+        g_dcs.crash_task,
+        (unsigned long)g_dcs.crash_pc);
+    }
+    free(cs);
+  }
+#endif
 
   /* Was the last reboot a DELIBERATE net_liveness wedge-recovery abort? It
      * uses abort() (so the panic backtrace is captured) but a network/upstream

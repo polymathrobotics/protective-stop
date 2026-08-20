@@ -147,6 +147,7 @@ err_t wireguardif_peer_rx_age(struct netif *netif, u8_t peer_index, u32_t *age_m
 // Worst inter-frame rx gap (any path) — the "received nothing" window that
 // maps to a heartbeat-timeout disarm (edge-flush receive-stall metric).
 err_t wireguardif_peer_worst_rx_gap(struct netif *netif, u8_t peer_index, u32_t *worst_gap_ms, u32_t *at_ms);
+err_t wireguardif_peer_worst_tx_gap(struct netif *netif, u8_t peer_index, u32_t *worst_gap_ms, u32_t *at_ms);
 
 // Session-key freshness: curr-keypair age (0xFFFFFFFF = none valid, sends are
 // failing ENOTCONN) and last handshake-initiation TX age. Diag + the

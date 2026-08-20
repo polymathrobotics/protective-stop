@@ -559,6 +559,30 @@ uint32_t ml_derp_get_route_fallbacks(void)
 static uint32_t s_diag_derp_reconnects;
 static uint32_t s_diag_derp_last_reconnect_ms;
 static uint32_t s_diag_derp_worst_reconnect_ms;
+/* HOME-reconnect cause attribution (run-46: machn churned ~50-64 home
+ * reconnects/hr with no way to tell why). Indices: 0=tx write failed,
+ * 1=rx read error (RST/EOF), 2=tx-active-rx-silent staleness reap,
+ * 3=interface rebind (microlink.c network-change path),
+ * 4=region rehome (negotiator legacy immediate path, ml_wg_mgr.c). */
+static uint32_t s_reconn_causes[5];
+
+/* One-shot spacing-gate bypass for the pool-dark rescue-aux kick (review 🔴):
+ * the home kick stamps the shared window microseconds earlier in the SAME
+ * retry iteration, so without this the last-resort rescue could never start
+ * while home stays down and the pool is dark — the exact scenario it exists
+ * for. Bounded cost: one extra TLS handshake, and derp_drive_connects already
+ * caps concurrent handshake crypto at 2 per pass. */
+static bool s_kick_skip_spacing;
+
+void ml_derp_note_reconnect_cause(int cause)
+{
+  if (cause >= 0 && cause < 5) s_reconn_causes[cause]++;
+}
+
+void ml_derp_get_reconnect_causes(uint32_t out[5])
+{
+  for (int i = 0; i < 5; i++) out[i] = s_reconn_causes[i];
+}
 
 void ml_derp_get_reconnect_diag(uint32_t out[3])
 {
@@ -587,10 +611,11 @@ static inline bool derp_conn_is_home(const microlink_t * ml, const ml_derp_conn_
  * the event-driven reconnect (the handler frees TLS then kicks), an aux is
  * freed NOW so derp_manage_aux can rebuild without re-initing over live
  * contexts. region_id is preserved for the retry. */
-static void derp_reap_conn(microlink_t * ml, ml_derp_conn_t * c)
+static void derp_reap_conn(microlink_t * ml, ml_derp_conn_t * c, int cause)
 {
   c->connected = false;
   if (derp_conn_is_home(ml, c)) {
+    ml_derp_note_reconnect_cause(cause);
     xEventGroupSetBits(ml->events, ML_EVT_DERP_RECONNECT);
   } else {
     ml_derp_disconnect(ml, c);
@@ -807,14 +832,19 @@ static void derp_manage_aux(microlink_t * ml, uint16_t eff_home, int aux_burst[]
      * down region server isn't hammered — mirrors the home retry cadence. */
     uint64_t gap = (aux_burst[slot] < 2) ? 5000u : (aux_burst[slot] < 3) ? 10000u : 60000u;
     if (c->last_connect_attempt_ms != 0 && (now - c->last_connect_attempt_ms) < gap) continue;
-    c->last_connect_attempt_ms = now;
-    if (aux_burst[slot] < 100) aux_burst[slot]++;
-    ESP_LOGI(TAG, "Opening aux DERP conn slot %d for region %u", slot, (unsigned)rid);
     /* Stage-2: KICK the async connect; the task loop's stepper advances it a
      * bounded action per iteration (aux_burst resets on completion there).
      * kick() failing == immediate DNS/socket error; the slot keeps the region
-     * (derp_cs_fail assigns it) and the per-slot backoff above retries. */
-    (void)ml_derp_connect_kick(ml, c, rid);
+     * (derp_cs_fail assigns it) and the per-slot backoff retries. A spacing-
+     * gate REFUSAL is not an attempt: stamp/bump only for real outcomes, or a
+     * flush would burn the 5s→10s→60s ladder on kicks that never happened
+     * (review finding). */
+    if (ml_derp_connect_kick(ml, c, rid) == ESP_ERR_NOT_FINISHED) {
+      return; /* window closed this pass for all non-home kicks anyway */
+    }
+    c->last_connect_attempt_ms = now;
+    if (aux_burst[slot] < 100) aux_burst[slot]++;
+    ESP_LOGI(TAG, "Opening aux DERP conn slot %d for region %u", slot, (unsigned)rid);
     /* One new kick per call keeps handshake crypto bursts bounded. */
     return;
   }
@@ -1377,7 +1407,10 @@ void ml_derp_tx_task(void * arg)
                   (unsigned)home_region,
                   slot,
                   (unsigned)fb);
-                if (ml_derp_connect_kick(ml, &ml->derp[slot], fb) == ESP_OK) {
+                s_kick_skip_spacing = true; /* home stamped the window µs ago; do not refuse the last resort */
+                esp_err_t rk = ml_derp_connect_kick(ml, &ml->derp[slot], fb);
+                s_kick_skip_spacing = false;
+                if (rk == ESP_OK) {
                   s_rescue_slot = slot; /* counter increments on confirmed completion */
                 }
               }
@@ -1474,7 +1507,7 @@ void ml_derp_tx_task(void * arg)
           if (ret < 0) {
             ESP_LOGW(
               TAG, "DERP write failed on %s conn (region %u)", (c == home) ? "home" : "aux", (unsigned)c->region_id);
-            derp_reap_conn(ml, c);
+            derp_reap_conn(ml, c, 0);
           } else {
             frames_tx++;
             c->last_used_ms = ml_get_time_ms();
@@ -1521,7 +1554,7 @@ void ml_derp_tx_task(void * arg)
               ret,
               (c == home) ? "home" : "aux",
               (unsigned)c->region_id);
-            derp_reap_conn(ml, c);
+            derp_reap_conn(ml, c, 1);
             break;
           }
         }
@@ -1554,7 +1587,7 @@ void ml_derp_tx_task(void * arg)
           "DERP home conn (region %u) tx-active but relay-rx-silent %us — reaping",
           (unsigned)home->region_id,
           (unsigned)((rnow - home->last_relay_rx_ms) / 1000));
-        derp_reap_conn(ml, home);
+        derp_reap_conn(ml, home, 2);
       }
     }
 
@@ -1791,8 +1824,33 @@ static void derp_cs_fail(microlink_t * ml, ml_derp_conn_t * c, const char * why)
   s_diag_cs_fails++;
 }
 
+static uint64_t s_last_connect_kick_ms;
+static uint32_t s_diag_kicks_spaced;
+
+uint32_t ml_derp_get_kicks_spaced(void)
+{
+  return s_diag_kicks_spaced;
+}
+
 esp_err_t ml_derp_connect_kick(microlink_t * ml, ml_derp_conn_t * c, uint16_t region_id)
 {
+  /* Flush-storm spacing (see ML_DERP_CONNECT_SPACING_MS): refuse BEFORE the
+   * teardown so a live conn is never sacrificed for a kick we won't start.
+   * The HOME slot is exempt from refusal — ML_EVT_DERP_RECONNECT re-kicks it
+   * immediately to beat the 2 s heartbeat timeout, and a silent refusal there
+   * would defer the safety path 5-60 s (review 🔴). Home kicks still stamp
+   * the window so aux kicks cannot stack TLS work right behind home's. */
+  uint64_t know = ml_get_time_ms();
+  bool kick_is_home = derp_conn_is_home(ml, c);
+  if (
+    !kick_is_home && !s_kick_skip_spacing && s_last_connect_kick_ms != 0 &&
+    know - s_last_connect_kick_ms < ML_DERP_CONNECT_SPACING_MS)
+  {
+    s_diag_kicks_spaced++;
+    return ESP_ERR_NOT_FINISHED;
+  }
+  s_last_connect_kick_ms = know;
+
   /* Idempotency guard (2026-05-25 leak class): never re-init over live
    * contexts or a half-done connect. Tear down first. */
   if (c->tls_inited || c->cstate != DERP_CS_IDLE) {

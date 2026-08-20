@@ -17,6 +17,7 @@
  *   operators blob operator allowlist: count byte + u32 ids
  *   wifi_txp  u8   WiFi max TX power, quarter-dBm (8..84); 0/absent = config default
  *   led_bri   u8   master LED brightness, 0..100%; absent/corrupt = default 50
+ *   ctrl_rst  u8   one-shot controlled-reset cause crumb (DCS_CTRL_RST_*)
  */
 
 #include <string.h>
@@ -135,6 +136,65 @@ esp_err_t dcs_nvs_write_pstop_peer(uint32_t ip, uint16_t port)
   }
   nvs_close(h);
   return r;
+}
+
+/* xc_det: one-shot XCHECK detail crumb, (code<<4)|stalled_core. Same lifecycle
+ * as ctrl_rst — written at fault announce, taken (and erased) at next boot. */
+void dcs_nvs_set_xcheck_detail(uint8_t detail)
+{
+  nvs_handle_t h;
+  if (nvs_open(DCS_NVS_NS, NVS_READWRITE, &h) != ESP_OK) {
+    ESP_LOGW(TAG, "xc_det: nvs_open failed");
+    return;
+  }
+  if (nvs_set_u8(h, "xc_det", detail) != ESP_OK || nvs_commit(h) != ESP_OK) {
+    ESP_LOGW(TAG, "xc_det: write failed");
+  }
+  nvs_close(h);
+}
+
+uint8_t dcs_nvs_take_xcheck_detail(void)
+{
+  nvs_handle_t h;
+  uint8_t v = 0;
+  if (nvs_open(DCS_NVS_NS, NVS_READWRITE, &h) != ESP_OK) return 0;
+  if (nvs_get_u8(h, "xc_det", &v) == ESP_OK) {
+    if (nvs_erase_key(h, "xc_det") != ESP_OK || nvs_commit(h) != ESP_OK) {
+      ESP_LOGW(TAG, "xc_det: erase failed");
+    }
+  }
+  nvs_close(h);
+  return v;
+}
+
+void dcs_nvs_set_ctrl_reset_cause(uint8_t cause)
+{
+  nvs_handle_t h;
+  if (nvs_open(DCS_NVS_NS, NVS_READWRITE, &h) != ESP_OK) {
+    ESP_LOGW(TAG, "ctrl-reset crumb open failed (cause %u will be lost)", (unsigned)cause);
+    return;
+  }
+  if (nvs_set_u8(h, DCS_NVS_KEY_CTRL_RST, cause) != ESP_OK || nvs_commit(h) != ESP_OK) {
+    ESP_LOGW(TAG, "ctrl-reset crumb write failed (cause %u will be lost)", (unsigned)cause);
+  }
+  nvs_close(h);
+}
+
+uint8_t dcs_nvs_take_ctrl_reset_cause(void)
+{
+  nvs_handle_t h;
+  if (nvs_open(DCS_NVS_NS, NVS_READWRITE, &h) != ESP_OK) return 0;
+  uint8_t v = 0;
+  if (nvs_get_u8(h, DCS_NVS_KEY_CTRL_RST, &v) == ESP_OK) {
+    /* One-shot: a stale crumb must not mislabel a later POWERON/panic. The
+     * caller additionally gates on reset_reason==SW as the backstop for a
+     * failed erase here. */
+    if (nvs_erase_key(h, DCS_NVS_KEY_CTRL_RST) != ESP_OK || nvs_commit(h) != ESP_OK) {
+      ESP_LOGW(TAG, "ctrl-reset crumb erase failed (stale value may persist)");
+    }
+  }
+  nvs_close(h);
+  return v;
 }
 
 void dcs_nvs_push_reset_reason(uint8_t reason)

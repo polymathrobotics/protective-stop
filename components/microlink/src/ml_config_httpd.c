@@ -311,6 +311,16 @@ bool ml_config_peer_is_allowed(const ml_config_ctx_t * ctx, uint32_t vpn_ip)
   /* Fast path: filter disabled → allow all */
   if (!ctx->filter_enabled) return true;
 
+  /* Every PINNED peer (configured machine slots / operators) is always
+   * allowed. Centralized here so all five call sites — admission, both disco
+   * ping gates, periodic probes, boot preseed — inherit the exemption: f498's
+   * own allowlist blocked its configured machine and a one-site fix left the
+   * peer admitted but disco-dead and never preseeded. The allowlist governs
+   * strangers; arming authority stays machine-side (operator list). Sits
+   * after the filter-disabled fast path (the exemption only matters when the
+   * filter can reject) and strictly before the mutex slow path. */
+  if (ml_wg_ip_is_pinned(vpn_ip)) return true;
+
   /* Slow path: check allowlist under mutex */
   bool allowed = false;
   ml_config_ctx_t * mctx = (ml_config_ctx_t *)ctx; /* cast away const for mutex */
@@ -965,7 +975,7 @@ static esp_err_t handler_monitor(httpd_req_t * req)
        * effective-home == the override from the instant it is set, so the
        * eff alias can't tell whether the conn has moved yet. */
       {
-        uint32_t pd[5] = {0};
+        uint32_t pd[6] = {0};
         ml_wg_get_pin_diag(pd);
         ml_derp_conn_t * homec = &ml->derp[ml->derp_home_slot];
         bool pin_ok =
@@ -976,6 +986,7 @@ static esp_err_t handler_monitor(httpd_req_t * req)
         cJSON_AddNumberToObject(json, "pin_mbb_retries", pd[2]);
         cJSON_AddNumberToObject(json, "pin_backoff_pending", pd[3]);
         cJSON_AddNumberToObject(json, "pin_absent_resyncs", pd[4]);
+        cJSON_AddNumberToObject(json, "pin_absent_nvs_restores", pd[5]);
       }
     }
     /* Home-region-unreachable fallback telemetry (DERP design-review finding):
@@ -1110,10 +1121,19 @@ static esp_err_t handler_monitor(httpd_req_t * req)
         cJSON_AddNumberToObject(json, "wg_rx_drops_netio", ml_net_io_get_wg_rx_drops());
         cJSON_AddNumberToObject(json, "wg_rx_drops_derp", ml_derp_get_wg_rx_drops());
         {
-          uint32_t ig[2] = {0};
+          uint32_t ig[3] = {0};
           ml_wg_get_ingest_diag(ig);
           cJSON_AddNumberToObject(json, "peer_readds_skipped", ig[0]);
           cJSON_AddNumberToObject(json, "region_stash_restores", ig[1]);
+          cJSON_AddNumberToObject(json, "peer_allowlist_rejects", ig[2]);
+          uint32_t sf[7] = {0};
+          ml_wg_get_skipfail_diag(sf);
+          cJSON * sfa = cJSON_AddArrayToObject(json, "readd_skipfail");
+          if (sfa) {
+            /* index = first failing §7a clause: 0=!existing 1=no-wg-slot
+             * 2=vpn_ip 3=disco_key 4=hostname 5=region 6=endpoints */
+            for (int i = 0; i < 7; i++) cJSON_AddItemToArray(sfa, cJSON_CreateNumber(sf[i]));
+          }
           uint32_t fl[3] = {0};
           ml_peer_nvs_get_flush_diag(fl);
           cJSON_AddNumberToObject(json, "nvs_flush_last_ms", fl[0]);
@@ -1135,6 +1155,8 @@ static esp_err_t handler_monitor(httpd_req_t * req)
           cJSON_AddNumberToObject(e, "probe_ms", we[i].disco_probe_ms);
           cJSON_AddNumberToObject(e, "cmm", we[i].cmm_sends);
           cJSON_AddNumberToObject(e, "flush_ms", we[i].nvs_flush_ms);
+          cJSON_AddNumberToObject(e, "ingest_ms", we[i].ingest_ms);
+          cJSON_AddNumberToObject(e, "drain_ms", we[i].drain_ms);
           cJSON_AddItemToArray(wa, e);
         }
         ml_derp_stall_event_t de[ML_STALL_RING_LEN];
@@ -1171,10 +1193,11 @@ static esp_err_t handler_monitor(httpd_req_t * req)
       uint32_t rc[3] = {0};
       ml_derp_get_reconnect_diag(rc);
       cJSON_AddNumberToObject(json, "derp_reconnects", rc[0]);
+      cJSON_AddNumberToObject(json, "derp_kicks_spaced", ml_derp_get_kicks_spaced());
       cJSON_AddNumberToObject(json, "derp_reconnect_last_ms", rc[1]);
       cJSON_AddNumberToObject(json, "derp_reconnect_worst_ms", rc[2]);
-      extern void ml_wg_get_session_diag(microlink_t *, uint32_t[5]);
-      uint32_t sd[5] = {0};
+      extern void ml_wg_get_session_diag(microlink_t *, uint32_t[7]);
+      uint32_t sd[7] = {0};
       ml_wg_get_session_diag(ml, sd);
       cJSON_AddNumberToObject(json, "ep_learn_evictions", sd[0]);
       cJSON_AddNumberToObject(json, "wg_kp_age_max", sd[1]);
@@ -1184,6 +1207,27 @@ static esp_err_t handler_monitor(httpd_req_t * req)
        * THIS node = the disarm cause, even with derp_reconnects=0. */
       cJSON_AddNumberToObject(json, "rx_worst_gap_ms", sd[3]);
       cJSON_AddNumberToObject(json, "rx_worst_gap_at_s", sd[4] / 1000);
+      /* TX twin (replier-silence half of the flush mechanism) + the
+       * flush-recovery silence-ping verification trio. */
+      cJSON_AddNumberToObject(json, "tx_worst_gap_ms", sd[5]);
+      cJSON_AddNumberToObject(json, "tx_worst_gap_at_s", sd[6] / 1000);
+      {
+        uint32_t sil[5] = {0};
+        ml_wg_get_silence_diag(sil);
+        cJSON_AddNumberToObject(json, "disco_silence_pings", sil[0]);
+        cJSON_AddNumberToObject(json, "silence_resume_last_ms", sil[1]);
+        cJSON_AddNumberToObject(json, "silence_resume_worst_ms", sil[2]);
+        cJSON_AddNumberToObject(json, "silence_resume_at_s", sil[3]);
+        cJSON_AddNumberToObject(json, "peer_table_full_count", sil[4]);
+      }
+      {
+        uint32_t rc[5] = {0};
+        ml_derp_get_reconnect_causes(rc);
+        cJSON * rcj = cJSON_AddArrayToObject(json, "derp_reconn_causes");
+        for (int rci = 0; rci < 5; rci++) {
+          cJSON_AddItemToArray(rcj, cJSON_CreateNumber(rc[rci]));
+        }
+      }
 
       /* Same-LAN direct-path diagnostics for the priority peer (the machine):
        * what LAN endpoint we advertise, which candidate endpoints we hold for

@@ -300,6 +300,38 @@ esp_err_t ml_peer_nvs_flush_if_due(uint64_t now_ms, bool ingest_busy)
   return r;
 }
 
+/* Single entry→update decode — ml_peer_nvs_lookup_update and
+ * ml_peer_nvs_load_all must agree on the layout/decode rules (is_ipv6 forced
+ * false, hostname truncated + NUL-terminated), so there is exactly one copy. */
+static void entry_to_update(const peer_nvs_entry_t * e, ml_peer_update_t * out)
+{
+  memset(out, 0, sizeof(*out));
+  out->vpn_ip = e->vpn_ip;
+  memcpy(out->public_key, e->public_key, 32);
+  memcpy(out->disco_key, e->disco_key, 32);
+  out->derp_region = e->derp_region;
+  out->endpoint_count = e->endpoint_count;
+  for (int j = 0; j < e->endpoint_count && j < 2; j++) {
+    out->endpoints[j].ip = e->endpoints[j].ip;
+    out->endpoints[j].port = e->endpoints[j].port;
+    out->endpoints[j].is_ipv6 = false;
+  }
+  memcpy(out->hostname, e->hostname_short, sizeof(e->hostname_short));
+  out->hostname[sizeof(e->hostname_short)] = '\0';
+}
+
+bool ml_peer_nvs_lookup_update(uint32_t vpn_ip, ml_peer_update_t * out)
+{
+  if (!s_initialized || !s_table || !out || vpn_ip == 0) return false;
+  for (int i = 0; i < s_table->count; i++) {
+    peer_nvs_entry_t * e = &s_table->entries[i];
+    if (e->vpn_ip != vpn_ip) continue;
+    entry_to_update(e, out);
+    return true;
+  }
+  return false;
+}
+
 int ml_peer_nvs_load_all(ml_peer_t * peers, int max_peers)
 {
   if (!s_initialized || !peers || !s_table) return 0;
@@ -313,24 +345,21 @@ int ml_peer_nvs_load_all(ml_peer_t * peers, int max_peers)
     ml_peer_t * p = &peers[loaded];
     memset(p, 0, sizeof(ml_peer_t));
 
-    p->vpn_ip = entry->vpn_ip;
-    memcpy(p->public_key, entry->public_key, 32);
-    memcpy(p->disco_key, entry->disco_key, 32);
-    p->derp_region = entry->derp_region;
+    ml_peer_update_t u;
+    entry_to_update(entry, &u); /* one shared decode with lookup_update */
+    p->vpn_ip = u.vpn_ip;
+    memcpy(p->public_key, u.public_key, 32);
+    memcpy(p->disco_key, u.disco_key, 32);
+    p->derp_region = u.derp_region;
+    strlcpy(p->hostname, u.hostname, sizeof(p->hostname));
+    p->endpoint_count = u.endpoint_count;
+    for (int j = 0; j < u.endpoint_count && j < 2; j++) {
+      p->endpoints[j].ip = u.endpoints[j].ip;
+      p->endpoints[j].port = u.endpoints[j].port;
+      p->endpoints[j].is_ipv6 = u.endpoints[j].is_ipv6;
+    }
     p->active = true;
     p->wg_peer_index = -1;
-
-    /* Restore hostname (truncated, ensure null-terminated) */
-    memcpy(p->hostname, entry->hostname_short, sizeof(entry->hostname_short));
-    p->hostname[sizeof(entry->hostname_short)] = '\0';
-
-    /* Restore endpoints */
-    p->endpoint_count = entry->endpoint_count;
-    for (int j = 0; j < entry->endpoint_count && j < 2; j++) {
-      p->endpoints[j].ip = entry->endpoints[j].ip;
-      p->endpoints[j].port = entry->endpoints[j].port;
-      p->endpoints[j].is_ipv6 = false;
-    }
 
     loaded++;
 

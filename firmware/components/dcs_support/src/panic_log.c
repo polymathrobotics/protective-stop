@@ -51,6 +51,28 @@ static bool s_have_snapshot = false;
 
 static vprintf_like_t s_chain_vprintf = NULL;
 
+/* Console-chain budget (task #60 core-stall family). The chained console is
+ * UART0 @115200 ≈ 11.5k chars/s; a measured 147-line/s log storm (~14.7k
+ * chars/s) EXCEEDS that, so the blocking console write becomes a per-line
+ * multi-ms stall on whatever task logs — the sibling-core heartbeat starves
+ * (XCHECK PEER_HB) and the lockstep comparator blips. The RTC ring (fast RAM
+ * write) always gets every line; the CONSOLE gets at most
+ * PANIC_LOG_CONSOLE_BUDGET lines per second, the rest are counted+dropped. */
+#define PANIC_LOG_CONSOLE_BUDGET 40u
+static uint32_t s_rate_win_start_s;
+static uint32_t s_rate_win_count; /* lines this second (all) */
+static uint32_t s_rate_last; /* lines/s of the last full second */
+static uint32_t s_rate_peak; /* worst lines/s since boot */
+static uint32_t s_console_skipped; /* chained-console lines dropped by budget */
+static uint32_t s_chained_this_win;
+
+void panic_log_get_rate_diag(uint32_t out[3])
+{
+  out[0] = s_rate_last;
+  out[1] = s_rate_peak;
+  out[2] = s_console_skipped;
+}
+
 static void panic_log_write_chars(const char * src, size_t len)
 {
   if (len == 0u) {
@@ -82,10 +104,27 @@ static int panic_log_vprintf(const char * fmt, va_list ap)
     panic_log_write_chars(buf, take);
   }
 
+  /* Rate window + console budget. Plain statics, no locking: esp_log already
+   * serializes callers, and these are diagnostics — an off-by-one under a
+   * rare race is fine; a lock here would re-add the very stall we're removing. */
+  uint32_t now_s = (uint32_t)(esp_log_timestamp() / 1000u);
+  if (now_s != s_rate_win_start_s) {
+    s_rate_last = s_rate_win_count;
+    if (s_rate_last > s_rate_peak) s_rate_peak = s_rate_last;
+    s_rate_win_start_s = now_s;
+    s_rate_win_count = 0;
+    s_chained_this_win = 0;
+  }
+  s_rate_win_count++;
+
   if (s_chain_vprintf != NULL) {
-    int rv = s_chain_vprintf(fmt, ap_copy);
-    va_end(ap_copy);
-    return rv;
+    if (s_chained_this_win < PANIC_LOG_CONSOLE_BUDGET) {
+      s_chained_this_win++;
+      int rv = s_chain_vprintf(fmt, ap_copy);
+      va_end(ap_copy);
+      return rv;
+    }
+    s_console_skipped++;
   }
   va_end(ap_copy);
   return n;
@@ -131,9 +170,14 @@ bool panic_log_has_snapshot(void)
  * reboot, the snapshot held over from this boot will end with the panic text.
  */
 extern void __real_panic_print_char(const char c);
-void __wrap_panic_print_char(const char c);
+void IRAM_ATTR __wrap_panic_print_char(const char c);
 
-void __wrap_panic_print_char(const char c)
+/* IRAM: an INT_WDT can fire inside a flash-cache-disabled window (NVS commit,
+ * OTA write). A flash-resident capture path can't execute there — the
+ * second-stage hardware reset then fires with NOTHING written, which matches
+ * the un-attributable 2026-08-16 reset_reason=5 (no ring text, no core).
+ * Pairs with CONFIG_ESP_PANIC_HANDLER_IRAM=y; s_pl is RTC memory (cache-safe). */
+void IRAM_ATTR __wrap_panic_print_char(const char c)
 {
   /* Append to ringbuffer. No locking — we're in panic context, all other
      * tasks are frozen and interrupts are off. */

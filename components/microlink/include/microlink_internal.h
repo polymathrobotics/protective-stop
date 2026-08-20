@@ -211,6 +211,17 @@ extern "C"
 #define ML_DISCO_HEARTBEAT_MS 30000
 #define ML_DISCO_TRUST_DURATION_MS 60000
 #define ML_DISCO_PING_TIMEOUT_MS 5000
+/* Safety peers keep probes matchable far longer: the run-46 wedge's unmatched
+ * pongs were replies delayed 5-11 s behind the far end's blocking DERP TLS
+ * reconnect — past the 5 s general TTL, so the endpoint learn never completed
+ * and direct never re-adopted. A late pong from a safety peer is still a
+ * genuine endpoint proof; only these probes get the longer window. */
+#define ML_DISCO_SAFETY_PROBE_TTL_MS 15000
+/* Tail of the probe table only safety-peer probes may occupy, so general
+ * tailnet churn can never starve a safety peer of a probe slot (probe-table
+ * exhaustion = the 2026-08-09 regains oscillation; occupancy 12/64 observed
+ * during the run-46 wedge, but the reserve makes the guarantee structural). */
+#define ML_DISCO_PROBE_RESERVE_SLOTS 16
 #define ML_DISCO_UPGRADE_INTERVAL_MS 60000
 
 /* Priority-peer path liveness (2026-07-21 failover speedup): the peer named
@@ -219,6 +230,15 @@ extern "C"
  * the 60 s trust lease), and a faster direct re-probe while demoted. Only
  * the priority peer — the 16-peer tailnet load profile is unchanged. */
 #define ML_DISCO_PRIORITY_HB_MS 3000
+/* Flush recovery (2026-08-16 mechanism): a middlebox conn-state flush kills
+ * the router-crossing direct NAT entries AND the DERP relay lattice in the
+ * same instant. The machine is a pure replier, so its only path-restoring
+ * packet was the 3 s-cadence disco heartbeat — recovery was cadence-bound at
+ * 3.0-3.3 s > the 2.0 s heartbeat timeout (one disarm per flush wave, three
+ * events measured). When a direct safety peer's rx goes silent past this
+ * threshold, ping IMMEDIATELY (~1 Hz while silent) so the punch is re-created
+ * inside the timeout window. Additive probes only; never fires at 5 Hz rx. */
+#define ML_DISCO_SILENCE_PING_MS 700
 #define ML_DISCO_PRIORITY_PATH_DEAD_MS \
   4000 /* was 8000: bound autonomous
                                                 * direct->DERP failover to <5s.
@@ -254,6 +274,12 @@ extern "C"
  * server-side black-hole or half-dead TCP. Idle conns (no recent tx) are NOT
  * reaped — nothing is owed back on them. */
 #define ML_DERP_RX_STALE_MS 150000
+/* Global floor between DERP connect STARTS. A control-plane flush kills every
+ * conn at once; back-to-back TLS connect work then starves DIRECT heartbeat
+ * rx (run-26 switch drop-gap; run-43: 52 reconnects rode the flush, both
+ * disarms inside the burst). Callers all retry on their own cadence, so a
+ * refused kick just lands next tick. */
+#define ML_DERP_CONNECT_SPACING_MS 1500
 #define ML_DERP_RX_STALE_TX_ACTIVE_MS 30000
 /* WG-rx handshake budget (docs/STALL_EVENT_CLOSURE_DESIGN.md): an inbound
  * WG INITIATION costs ~4 X25519 ≈ 45 ms measured and is processed holding
@@ -297,6 +323,9 @@ extern "C"
     uint16_t disco_probe_ms; /* disco_periodic_probes duration this pass */
     uint16_t cmm_sends; /* CallMeMaybe seals this pass (~30 ms each) */
     uint16_t nvs_flush_ms; /* peer-cache flash-flush wall-clock this pass */
+    uint16_t ingest_ms; /* process_peer_updates wall-clock this pass — covers
+                         * skips/rejects/logging the add counter cannot see */
+    uint16_t drain_ms; /* cumulative wg_mgr_drain_wg_rx wall-clock this pass */
   } ml_wg_stall_event_t;
 
   typedef struct
@@ -341,7 +370,12 @@ extern "C"
  * additionally fires one immediate CMM (see disco_periodic_probes). */
 #define ML_DISCO_RELAY_RETRY_FIRST_MS 5000
 #define ML_DISCO_RELAY_RETRY_MIN_MS 30000
-#define ML_DISCO_RELAY_RETRY_MAX_MS 300000
+/* Was 300000 (5 min). This cycle only ever runs for SAFETY peers, and the
+ * run-46 wedge showed the grown backoff (observed 153-293 s) BECOMES the
+ * outage period: every regain attempt that fails pushes the next one out
+ * another multiple. A safety link retries direct at least every 30 s,
+ * regardless of history — the retry is one CMM + one ping sweep, cheap. */
+#define ML_DISCO_RELAY_RETRY_MAX_MS 30000
 /* Min interval between coord re-fetch (reconnect) requests for a symmetric-NAT
  * safety peer that stays relay-bound. The re-fetch pulls the peer's CURRENT
  * endpoints (steady-state coord updates are OmitPeers=true and never do), so the
@@ -1005,8 +1039,10 @@ extern "C"
   /* Handshake-budget diag: out[0]=deferred (requeued), out[1]=dropped (cap/full). */
   void ml_wg_get_hs_budget_diag(uint32_t out[2]);
   bool ml_wg_fleet_configured(microlink_t * ml);
-  /* §7a/§7c diag: out[0]=unchanged re-adds skipped, out[1]=region stash restores. */
-  void ml_wg_get_ingest_diag(uint32_t out[2]);
+  /* §7a/§7c diag: out[0]=unchanged re-adds skipped, out[1]=region stash restores,
+ * out[2]=allowlist rejects (near-zero-cost updates exempt from ingest pacing). */
+  void ml_wg_get_ingest_diag(uint32_t out[3]);
+  void ml_wg_get_skipfail_diag(uint32_t out[7]); /* first-failing §7a clause counts */
   /* wg_rx edge drops at each producer (queue-full sheds, previously silent). */
   uint32_t ml_net_io_get_wg_rx_drops(void);
   uint32_t ml_derp_get_wg_rx_drops(void);
@@ -1036,9 +1072,27 @@ extern "C"
   /* Stage-1 pin->MBB telemetry (docs/STAGE1_PIN_MBB_DESIGN.md):
    * out[0]=pin MBB requests, out[1]=commits, out[2]=retries (failed proves,
    * retry-forever), out[3]=backoff currently pending (0/1), out[4]=coord
-   * full-resyncs forced by a pinned-but-absent peer (f498 heal). Owned by
-   * the wg_mgr task; word-sized cross-task reads. */
-  void ml_wg_get_pin_diag(uint32_t out[5]);
+   * full-resyncs forced by a pinned-but-absent peer (f498 heal),
+   * out[5]=absent pins restored from the NVS cache. Owned by the wg_mgr
+   * task; word-sized cross-task reads. */
+  void ml_wg_get_pin_diag(uint32_t out[6]);
+  /* Lookup a peer in the NVS cache by VPN IP into an update struct (pin-absent
+   * self-heal synthesis path). Returns false when uncached/uninitialized. */
+  bool ml_peer_nvs_lookup_update(uint32_t vpn_ip, ml_peer_update_t * out);
+  /* One-shot: the next long-poll MapRequest sends OmitPeers=false so the
+   * control plane re-delivers the FULL peer list (pin-absent heal fallback). */
+  void ml_coord_request_full_peers(void);
+  /* True when vpn_ip is the priority peer or an extra pin — consumed by
+   * ml_config_peer_is_allowed()'s centralized pin exemption. */
+  bool ml_wg_ip_is_pinned(uint32_t vpn_ip);
+  uint32_t ml_derp_get_kicks_spaced(void); /* connect kicks refused by the spacing gate */
+  /* Flush-recovery silence-ping diag: out[0]=pings sent, out[1]=last
+   * ping→direct-pong resume delta ms, out[2]=worst resume delta ms,
+   * out[3]=uptime s of the last resume record, out[4]=peer-table-full
+   * add refusals (rides here to keep the monitor call count down). */
+  void ml_wg_get_silence_diag(uint32_t out[5]);
+  void ml_derp_note_reconnect_cause(int cause);
+  void ml_derp_get_reconnect_causes(uint32_t out[5]);
   /* Stage-0b: worst single wg_mgr loop iteration ms (heartbeat-path stall). */
   uint32_t ml_wg_get_max_iter_ms(void);
   /* Path-diversity telemetry: out[0]=leg-2 mirrors sent, out[1]=mirrors

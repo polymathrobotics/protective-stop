@@ -43,6 +43,17 @@ static const char * TAG = "ml_coord";
 /* Periodic re-registrations executed (coord-task-owned; word-sized cross-task
  * read via ml_coord_get_reregisters for /admin/api/monitor). */
 static uint32_t s_diag_coord_reregisters;
+/* One-shot: next long-poll MapRequest sends OmitPeers=false (full peer
+ * redelivery). Set by the pin-absent heal when NVS synthesis has nothing to
+ * work from — the default OmitPeers=true reconnect provably never re-delivers
+ * a peer the server believes we hold (f498, 2026-08-16). */
+static volatile bool s_want_full_peers;
+
+void ml_coord_request_full_peers(void)
+{
+  s_want_full_peers = true;
+}
+
 /* The next successful connect is a scheduled re-register, not a flap: keep it
  * out of connect_count so ml_reconnects stays a pure flap signal for soaks.
  * Any GENUINE reconnect trigger clears it so a real flap is never masked. */
@@ -2084,7 +2095,14 @@ static int do_start_long_poll(microlink_t * ml, ml_noise_state_t * noise)
   cJSON_AddBoolToObject(root, "Stream", true);
   cJSON_AddBoolToObject(root, "KeepAlive", true);
   cJSON_AddStringToObject(root, "Compress", ""); /* Disable compression */
-  cJSON_AddBoolToObject(root, "OmitPeers", true); /* Already have peers */
+  {
+    /* Default: peers arrive via patches. One-shot false = full redelivery,
+     * requested by the pin-absent heal (see s_want_full_peers). */
+    bool omit = !s_want_full_peers;
+    s_want_full_peers = false;
+    cJSON_AddBoolToObject(root, "OmitPeers", omit);
+    if (!omit) ESP_LOGW(TAG, "MapRequest with OmitPeers=false (full peer redelivery requested)");
+  }
 
   /* NOTE: With Version >= 68, the control plane IGNORES Endpoints and
      * Hostinfo in Stream=true MapRequests. Endpoints are sent via separate
@@ -2425,8 +2443,10 @@ static int poll_map_update(microlink_t * ml, ml_noise_state_t * noise)
     /* Only the map long-poll stream ended (RST_STREAM / END_STREAM / trailers)
      * — routine ~90 min expiry — while the TCP+Noise connection stays healthy.
      * Return -2 so the caller does a soft refresh (re-issue the streaming
-     * MapRequest on a fresh stream id with OmitPeers=true) instead of a full
-     * reconnect that would re-download all peers. Any DATA in this batch is
+     * MapRequest on a fresh stream id with OmitPeers=true — unless the
+     * pin-absent heal has s_want_full_peers pending, which makes the next
+     * request a deliberate full redelivery) instead of a full reconnect
+     * that would re-download all peers. Any DATA in this batch is
      * stale — discard it. */
     free(frame_buf);
     return -2;
@@ -2982,7 +3002,9 @@ void ml_coord_task(void * arg)
           /* Routine map-stream expiry, TCP+Noise connection still healthy:
            * soft-refresh the long-poll on a fresh stream id instead of a full
            * reconnect. do_start_long_poll() sends OmitPeers=true, so this does
-           * NOT re-download the ~128 peers (the rebond flood we are removing). */
+           * NOT re-download the ~128 peers (the rebond flood we are removing) —
+           * EXCEPT when the pin-absent heal's s_want_full_peers one-shot is
+           * pending, which turns exactly one refresh into a full redelivery. */
           ESP_LOGI(TAG, "Map long-poll stream refresh (connection preserved)");
           if (do_start_long_poll(ml, &noise) < 0) {
             state = COORD_RECONNECTING;

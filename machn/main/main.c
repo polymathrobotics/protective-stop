@@ -553,8 +553,7 @@ static void comparator_task(void * arg)
       machine_stop_robot(&g_core[1].machine);
       if ((TickType_t)(nt - clk_fault_tick) >= pdMS_TO_TICKS(MACHN_CLK_RESET_GRACE_MS)) {
         ESP_LOGE(TAG, "CLOCK FAULT: controlled reset now");
-        vTaskDelay(pdMS_TO_TICKS(20)); /* flush the log line */
-        esp_restart();
+        dcs_controlled_reset(DCS_CTRL_RST_CLOCK_FAULT); /* crumb + flush + restart */
       }
       vTaskDelay(pdMS_TO_TICKS(TICK_MS));
       continue; /* no reply, no re-arm while the clock is untrustworthy */
