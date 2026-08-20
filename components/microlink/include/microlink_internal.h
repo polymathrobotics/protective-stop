@@ -211,6 +211,17 @@ extern "C"
 #define ML_DISCO_HEARTBEAT_MS 30000
 #define ML_DISCO_TRUST_DURATION_MS 60000
 #define ML_DISCO_PING_TIMEOUT_MS 5000
+/* Safety peers keep probes matchable far longer: the run-46 wedge's unmatched
+ * pongs were replies delayed 5-11 s behind the far end's blocking DERP TLS
+ * reconnect — past the 5 s general TTL, so the endpoint learn never completed
+ * and direct never re-adopted. A late pong from a safety peer is still a
+ * genuine endpoint proof; only these probes get the longer window. */
+#define ML_DISCO_SAFETY_PROBE_TTL_MS 15000
+/* Tail of the probe table only safety-peer probes may occupy, so general
+ * tailnet churn can never starve a safety peer of a probe slot (probe-table
+ * exhaustion = the 2026-08-09 regains oscillation; occupancy 12/64 observed
+ * during the run-46 wedge, but the reserve makes the guarantee structural). */
+#define ML_DISCO_PROBE_RESERVE_SLOTS 16
 #define ML_DISCO_UPGRADE_INTERVAL_MS 60000
 
 /* Priority-peer path liveness (2026-07-21 failover speedup): the peer named
@@ -359,7 +370,12 @@ extern "C"
  * additionally fires one immediate CMM (see disco_periodic_probes). */
 #define ML_DISCO_RELAY_RETRY_FIRST_MS 5000
 #define ML_DISCO_RELAY_RETRY_MIN_MS 30000
-#define ML_DISCO_RELAY_RETRY_MAX_MS 300000
+/* Was 300000 (5 min). This cycle only ever runs for SAFETY peers, and the
+ * run-46 wedge showed the grown backoff (observed 153-293 s) BECOMES the
+ * outage period: every regain attempt that fails pushes the next one out
+ * another multiple. A safety link retries direct at least every 30 s,
+ * regardless of history — the retry is one CMM + one ping sweep, cheap. */
+#define ML_DISCO_RELAY_RETRY_MAX_MS 30000
 /* Min interval between coord re-fetch (reconnect) requests for a symmetric-NAT
  * safety peer that stays relay-bound. The re-fetch pulls the peer's CURRENT
  * endpoints (steady-state coord updates are OmitPeers=true and never do), so the
@@ -1072,7 +1088,9 @@ extern "C"
   uint32_t ml_derp_get_kicks_spaced(void); /* connect kicks refused by the spacing gate */
   /* Flush-recovery silence-ping diag: out[0]=pings sent, out[1]=last
    * ping→direct-pong resume delta ms, out[2]=worst resume delta ms. */
-  void ml_wg_get_silence_diag(uint32_t out[3]);
+  void ml_wg_get_silence_diag(uint32_t out[5]);
+  void ml_derp_note_reconnect_cause(int cause);
+  void ml_derp_get_reconnect_causes(uint32_t out[4]);
   /* Stage-0b: worst single wg_mgr loop iteration ms (heartbeat-path stall). */
   uint32_t ml_wg_get_max_iter_ms(void);
   /* Path-diversity telemetry: out[0]=leg-2 mirrors sent, out[1]=mirrors

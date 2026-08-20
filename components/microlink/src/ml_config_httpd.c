@@ -1212,11 +1212,21 @@ static esp_err_t handler_monitor(httpd_req_t * req)
       cJSON_AddNumberToObject(json, "tx_worst_gap_ms", sd[5]);
       cJSON_AddNumberToObject(json, "tx_worst_gap_at_s", sd[6] / 1000);
       {
-        uint32_t sil[3] = {0};
+        uint32_t sil[5] = {0};
         ml_wg_get_silence_diag(sil);
         cJSON_AddNumberToObject(json, "disco_silence_pings", sil[0]);
         cJSON_AddNumberToObject(json, "silence_resume_last_ms", sil[1]);
         cJSON_AddNumberToObject(json, "silence_resume_worst_ms", sil[2]);
+        cJSON_AddNumberToObject(json, "silence_resume_at_s", sil[3]);
+        cJSON_AddNumberToObject(json, "peer_table_full_count", sil[4]);
+      }
+      {
+        uint32_t rc[4] = {0};
+        ml_derp_get_reconnect_causes(rc);
+        cJSON * rcj = cJSON_AddArrayToObject(json, "derp_reconn_causes");
+        for (int rci = 0; rci < 4; rci++) {
+          cJSON_AddItemToArray(rcj, cJSON_CreateNumber(rc[rci]));
+        }
       }
 
       /* Same-LAN direct-path diagnostics for the priority peer (the machine):

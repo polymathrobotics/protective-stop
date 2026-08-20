@@ -175,6 +175,9 @@ typedef struct
   uint64_t derp_match_ms;
   int peer_index;
   bool active;
+  bool safety; /* probe to a safety peer: may use the reserved slot tail and
+                * stays matchable ML_DISCO_SAFETY_PROBE_TTL_MS (late pongs
+                * behind a far-end DERP reconnect must still learn endpoints) */
 } disco_probe_t;
 
 #define MAX_PENDING_PROBES 64
@@ -897,14 +900,25 @@ static uint32_t s_diag_relay_disco_resets; /* per-peer from-scratch disco resets
                                             * (v2: rate-limited per-peer via p->disco_reset_next_ms) */
 static uint32_t s_diag_ep_learn_evictions; /* learn-from-ping ring-evictions on a full endpoint table —
                                             * nonzero = the B-1 wedge trigger occurred and was absorbed */
+static uint32_t s_diag_peer_table_full; /* over-cap add refusals; the LOG is rate-limited (task #60: the
+                                         * un-limited warn ran at 147 lines/s at a core-stall, and every
+                                         * ESP_LOG line pays the RTC-ring + console-chain tax) */
+static uint64_t s_peer_table_full_log_ms; /* last time the warn was actually emitted */
 
-/* Flush-recovery silence-ping state (see disco_silence_ping): pairing slot +
- * counters shared between the ping site and the pong-resume site. */
+/* Flush-recovery silence-ping state (see disco_silence_ping): PER-PEER pairing
+ * slots (review 3793497415 — the single slot lost pairings whenever a flush
+ * silenced several safety peers at once: run-46 measured a bogus 72 s "resume"
+ * from exactly that overwrite). One slot per safety peer, keyed by peer idx. */
+#define SILENCE_PAIR_SLOTS 8
+static struct {
+  int peer_idx; /* -1 = free */
+  uint64_t ping_ms;
+} s_silence_pairs[SILENCE_PAIR_SLOTS] = {[0 ... SILENCE_PAIR_SLOTS - 1] = {-1, 0}};
 static uint32_t s_diag_silence_pings;
-static int s_silence_ping_peer = -1; /* pairing: last silence-ping peer idx */
-static uint64_t s_silence_ping_ms;
 static uint32_t s_diag_silence_resume_last_ms;
 static uint32_t s_diag_silence_resume_worst_ms;
+static uint32_t s_diag_silence_resume_at_s; /* uptime s of the last resume record —
+                                             * dates the gauge (boot-window vs live) */
 
 /* DISCO observability counters — the 2026-08-09 regains-oscillation root cause
  * rested on CALCULATED probe-table/CMM dynamics; these measure them instead.
@@ -2115,7 +2129,20 @@ static int add_peer(microlink_t * ml, const ml_peer_update_t * update, bool * sk
     }
 
     if (idx < 0) {
-      ESP_LOGW(TAG, "Peer table full (%d slots), cannot add %s", ML_MAX_PEERS, update->hostname);
+      /* On a 130+-node tailnet this fires per rejected patch entry — a steady
+       * log storm (147 lines/s measured at a DUT core-stall). Count always,
+       * log at most once per 10 s with the count folded in. */
+      s_diag_peer_table_full++;
+      uint64_t now_ms = esp_timer_get_time() / 1000ULL;
+      if (now_ms - s_peer_table_full_log_ms >= 10000ULL) {
+        s_peer_table_full_log_ms = now_ms;
+        ESP_LOGW(
+          TAG,
+          "Peer table full (%d slots), cannot add %s (%lu refusals total, log rate-limited)",
+          ML_MAX_PEERS,
+          update->hostname,
+          (unsigned long)s_diag_peer_table_full);
+      }
       return -1;
     }
     if (idx >= ml->peer_count) {
@@ -2490,14 +2517,20 @@ static void disco_build_ping(microlink_t * ml, int peer_idx, uint8_t * out, size
   pos += sizeof(ciphertext);
   *out_len = pos;
 
-  /* Track pending probe */
+  /* Track pending probe. General peers may only use the head of the table;
+   * the ML_DISCO_PROBE_RESERVE_SLOTS tail is safety-peer-only, so tailnet
+   * churn can never leave a safety ping unregistered (unmatched pong = no
+   * endpoint learn = the run-46 wedge). */
+  bool probe_safety = is_safety_peer(ml, p->vpn_ip);
+  int scan_limit = probe_safety ? MAX_PENDING_PROBES : (MAX_PENDING_PROBES - ML_DISCO_PROBE_RESERVE_SLOTS);
   bool registered = false;
-  for (int i = 0; i < MAX_PENDING_PROBES; i++) {
+  for (int i = 0; i < scan_limit; i++) {
     if (!pending_probes[i].active) {
       memcpy(pending_probes[i].txid, txid, DISCO_TXID_LEN);
       pending_probes[i].peer_index = peer_idx;
       pending_probes[i].sent_ms = ml_get_time_ms();
       pending_probes[i].derp_match_ms = 0;
+      pending_probes[i].safety = probe_safety;
       pending_probes[i].active = true;
       registered = true;
       /* Track the table's occupancy high water (probe_tbl_hw). Registration is
@@ -2912,12 +2945,16 @@ static void process_disco_pong(
       /* Silence-ping pairing (flush-mechanism verification): first direct pong
        * from the peer we last silence-pinged dates the outage-to-resume delta.
        * Prediction if the mechanism holds: resume ≈ ping + RTT, not random. */
-      if (s_silence_ping_peer == (int)(p - ml->peers) && s_silence_ping_ms != 0) {
-        uint32_t d = (uint32_t)(now - s_silence_ping_ms);
-        s_diag_silence_resume_last_ms = d;
-        if (d > s_diag_silence_resume_worst_ms) s_diag_silence_resume_worst_ms = d;
-        s_silence_ping_peer = -1;
-        s_silence_ping_ms = 0;
+      for (int si = 0; si < SILENCE_PAIR_SLOTS; si++) {
+        if (s_silence_pairs[si].peer_idx == (int)(p - ml->peers) && s_silence_pairs[si].ping_ms != 0) {
+          uint32_t d = (uint32_t)(now - s_silence_pairs[si].ping_ms);
+          s_diag_silence_resume_last_ms = d;
+          if (d > s_diag_silence_resume_worst_ms) s_diag_silence_resume_worst_ms = d;
+          s_diag_silence_resume_at_s = (uint32_t)(now / 1000u);
+          s_silence_pairs[si].peer_idx = -1;
+          s_silence_pairs[si].ping_ms = 0;
+          break;
+        }
       }
 
       /* Flap-damping bookkeeping (FIX 2). Timestamp only the genuine false->true
@@ -3879,11 +3916,13 @@ static void disco_wake_peer(microlink_t * ml, uint32_t vpn_ip, bool link_healthy
  * the far side probes back once its mapping re-binds. Additive-only: never
  * fires while 5 Hz rx is flowing, never for relay-bound peers, touches no
  * session or teardown state. Statics live with the diag block near the top. */
-void ml_wg_get_silence_diag(uint32_t out[3])
+void ml_wg_get_silence_diag(uint32_t out[5])
 {
   out[0] = s_diag_silence_pings;
   out[1] = s_diag_silence_resume_last_ms;
   out[2] = s_diag_silence_resume_worst_ms;
+  out[3] = s_diag_silence_resume_at_s;
+  out[4] = s_diag_peer_table_full;
 }
 
 static void disco_silence_ping(microlink_t * ml, uint32_t vpn_ip)
@@ -3899,8 +3938,23 @@ static void disco_silence_ping(microlink_t * ml, uint32_t vpn_ip)
   uint64_t nowp = ml_get_time_ms();
   if (nowp - p->last_ping_sent_ms < 900) return; /* ~1 Hz while silent */
   s_diag_silence_pings++;
-  s_silence_ping_peer = pidx;
-  s_silence_ping_ms = nowp;
+  /* Upsert this peer's pairing slot (refresh = resume measures from the LAST
+   * ping, i.e. ≈ RTT when the mechanism works). No free slot: overwrite the
+   * oldest — better to lose the stalest pairing than the newest. */
+  {
+    int slot = -1, oldest = 0;
+    for (int si = 0; si < SILENCE_PAIR_SLOTS; si++) {
+      if (s_silence_pairs[si].peer_idx == pidx) {
+        slot = si;
+        break;
+      }
+      if (s_silence_pairs[si].peer_idx < 0 && slot < 0) slot = si;
+      if (s_silence_pairs[si].ping_ms < s_silence_pairs[oldest].ping_ms) oldest = si;
+    }
+    if (slot < 0) slot = oldest;
+    s_silence_pairs[slot].peer_idx = pidx;
+    s_silence_pairs[slot].ping_ms = nowp;
+  }
   s_disco_ping_skip_dedup = true;
   disco_send_ping_to_peer(ml, pidx, true);
   s_disco_ping_skip_dedup = false;
@@ -4132,8 +4186,9 @@ static void disco_periodic_probes(microlink_t * ml)
         relay_retry_fired = true; /* bounded: one NaCl seal + one sweep per tick */
         disco_send_call_me_maybe(ml, i);
         disco_send_ping_to_peer(ml, i, true);
-        /* Backoff after round N: 30 s << (N-1), capped at 300 s. With the
-         * 5 s first round that gives 5 -> 30 -> 60 -> 120 -> 240 -> 300 cap. */
+        /* Backoff after round N: 30 s << (N-1), CAPPED AT 30 s (run-46: the
+         * grown cap became the wedge's outage period) — effectively 5 s first
+         * round then a steady 30 s cadence for as long as the peer is relay-bound. */
         if (p->relay_retry_count < 5u) {
           p->relay_retry_count++;
         }
@@ -4271,7 +4326,8 @@ static void disco_periodic_probes(microlink_t * ml)
   now = ml_get_time_ms();
   for (int i = 0; i < MAX_PENDING_PROBES; i++) {
     if (!pending_probes[i].active) continue;
-    bool timed_out = now - pending_probes[i].sent_ms > ML_DISCO_PING_TIMEOUT_MS;
+    uint64_t ttl_ms = pending_probes[i].safety ? ML_DISCO_SAFETY_PROBE_TTL_MS : ML_DISCO_PING_TIMEOUT_MS;
+    bool timed_out = now - pending_probes[i].sent_ms > ttl_ms;
     /* Bounded post-DERP-match window (see disco_probe_t.derp_match_ms): a
      * via-DERP-answered probe waits only ML_DISCO_DERP_MATCH_GRACE_MS for its
      * slower direct twin, not the full 5 s timeout — unbounded lifetimes here

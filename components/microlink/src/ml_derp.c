@@ -559,6 +559,21 @@ uint32_t ml_derp_get_route_fallbacks(void)
 static uint32_t s_diag_derp_reconnects;
 static uint32_t s_diag_derp_last_reconnect_ms;
 static uint32_t s_diag_derp_worst_reconnect_ms;
+/* HOME-reconnect cause attribution (run-46: machn churned ~50-64 home
+ * reconnects/hr with no way to tell why). Indices: 0=tx write failed,
+ * 1=rx read error (RST/EOF), 2=tx-active-rx-silent staleness reap,
+ * 3=interface rebind (microlink.c network-change path). */
+static uint32_t s_reconn_causes[4];
+
+void ml_derp_note_reconnect_cause(int cause)
+{
+  if (cause >= 0 && cause < 4) s_reconn_causes[cause]++;
+}
+
+void ml_derp_get_reconnect_causes(uint32_t out[4])
+{
+  for (int i = 0; i < 4; i++) out[i] = s_reconn_causes[i];
+}
 
 void ml_derp_get_reconnect_diag(uint32_t out[3])
 {
@@ -587,10 +602,11 @@ static inline bool derp_conn_is_home(const microlink_t * ml, const ml_derp_conn_
  * the event-driven reconnect (the handler frees TLS then kicks), an aux is
  * freed NOW so derp_manage_aux can rebuild without re-initing over live
  * contexts. region_id is preserved for the retry. */
-static void derp_reap_conn(microlink_t * ml, ml_derp_conn_t * c)
+static void derp_reap_conn(microlink_t * ml, ml_derp_conn_t * c, int cause)
 {
   c->connected = false;
   if (derp_conn_is_home(ml, c)) {
+    ml_derp_note_reconnect_cause(cause);
     xEventGroupSetBits(ml->events, ML_EVT_DERP_RECONNECT);
   } else {
     ml_derp_disconnect(ml, c);
@@ -1479,7 +1495,7 @@ void ml_derp_tx_task(void * arg)
           if (ret < 0) {
             ESP_LOGW(
               TAG, "DERP write failed on %s conn (region %u)", (c == home) ? "home" : "aux", (unsigned)c->region_id);
-            derp_reap_conn(ml, c);
+            derp_reap_conn(ml, c, 0);
           } else {
             frames_tx++;
             c->last_used_ms = ml_get_time_ms();
@@ -1526,7 +1542,7 @@ void ml_derp_tx_task(void * arg)
               ret,
               (c == home) ? "home" : "aux",
               (unsigned)c->region_id);
-            derp_reap_conn(ml, c);
+            derp_reap_conn(ml, c, 1);
             break;
           }
         }
@@ -1559,7 +1575,7 @@ void ml_derp_tx_task(void * arg)
           "DERP home conn (region %u) tx-active but relay-rx-silent %us — reaping",
           (unsigned)home->region_id,
           (unsigned)((rnow - home->last_relay_rx_ms) / 1000));
-        derp_reap_conn(ml, home);
+        derp_reap_conn(ml, home, 2);
       }
     }
 

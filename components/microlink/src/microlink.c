@@ -549,6 +549,7 @@ esp_err_t microlink_rebind(microlink_t * ml)
      * derp_tx_task to close TLS, then reconnect with full handshake.
      * Pending TX packets are drained but WG state is preserved. */
   xEventGroupClearBits(ml->events, ML_EVT_DERP_CONNECTED);
+  ml_derp_note_reconnect_cause(3); /* cause 3 = interface rebind */
   xEventGroupSetBits(ml->events, ML_EVT_DERP_RECONNECT);
   ESP_LOGI(TAG, "Rebind: signaled coord + DERP to reconnect");
 
