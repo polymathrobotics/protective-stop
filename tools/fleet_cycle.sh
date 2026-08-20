@@ -37,7 +37,9 @@ source "$ENV_FILE"
 : "${DEVICE_AUTH:?fleet.env must set DEVICE_AUTH (user:pass)}"
 # REGISTRY_URL / REGISTRY_AUTH / ELF_ARCHIVE_DIR are optional.
 
-VERSION="$(git -C "$REPO" describe --always --dirty)"
+# --tags matches ESP-IDF's PROJECT_VER invocation exactly — a divergence here
+# false-aborts the binary verify on a correct build (review yellow).
+VERSION="$(git -C "$REPO" describe --always --tags --dirty)"
 if [[ "$VERSION" == *-dirty ]]; then
   echo "fleet_cycle: refusing to flash a dirty tree ($VERSION)" >&2
   exit 1
@@ -46,7 +48,11 @@ echo "== lineage $VERSION"
 
 for role in firmware machn; do
   echo "== fullclean build: $role"
-  (cd "$REPO/$role" && idf.py fullclean >/dev/null && idf.py build >/dev/null)
+  # fullclean does NOT delete sdkconfig, and ESP-IDF merges SDKCONFIG_DEFAULTS
+  # (incl. sdkconfig.credentials) only when sdkconfig is absent — a stale
+  # sdkconfig would pass the non-empty credential check below with the WRONG
+  # value (review red: the exact worktree trap this script exists to catch).
+  (cd "$REPO/$role" && rm -f sdkconfig sdkconfig.old && idf.py fullclean >/dev/null && idf.py build >/dev/null)
 done
 
 echo "== verify version string + credentials"
