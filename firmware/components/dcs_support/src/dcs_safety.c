@@ -47,9 +47,13 @@ void dcs_safety_account_boot(void)
   g_dcs.boot_count = dcs_nvs_read_boot_count();
   dcs_nvs_push_reset_reason(g_dcs.reset_reason); /* crash-pattern history */
   g_dcs.ctrl_reset_cause = dcs_nvs_take_ctrl_reset_cause(); /* one-shot crumb */
+  g_dcs.xcheck_detail = dcs_nvs_take_xcheck_detail(); /* one-shot, XCHECK-only */
   if (g_dcs.reset_reason != (uint8_t)ESP_RST_SW) {
     g_dcs.ctrl_reset_cause = 0; /* crumb only labels an esp_restart() boot — a
                                  * failed erase must not mislabel POWERON/panic */
+  }
+  if (g_dcs.ctrl_reset_cause != DCS_CTRL_RST_XCHECK) {
+    g_dcs.xcheck_detail = 0; /* detail rides only on an XCHECK-labeled boot */
   }
 
 #if CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH && CONFIG_ESP_COREDUMP_DATA_FORMAT_ELF
@@ -63,8 +67,11 @@ void dcs_safety_account_boot(void)
       g_dcs.crash_present = true;
       g_dcs.crash_pc = cs->exc_pc;
       strlcpy(g_dcs.crash_task, cs->exc_task, sizeof(g_dcs.crash_task));
+      strlcpy(g_dcs.crash_sha, (const char *)cs->app_elf_sha256, sizeof(g_dcs.crash_sha));
       ESP_LOGE(
-        TAG, "COREDUMP in flash: task=%s pc=0x%08lx (persists until the next crash)", g_dcs.crash_task,
+        TAG,
+        "COREDUMP in flash: task=%s pc=0x%08lx (persists until the next crash)",
+        g_dcs.crash_task,
         (unsigned long)g_dcs.crash_pc);
     }
     free(cs);
