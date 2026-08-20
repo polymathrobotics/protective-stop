@@ -86,9 +86,21 @@ for ip in $REMOTE_IPS; do
   echo "== flash remote $ip"
   ota "$ip" "$REPO/firmware/build/pstop_remote.bin"
 done
+failed=""
 for ip in $REMOTE_IPS; do
-  wait_ver "$ip" && echo "   $ip OK"
+  # NOT `wait_ver && echo`: under set -e a failing non-final &&-element is
+  # errexit-EXEMPT, so a mixed fleet would sail through silently — the exact
+  # failure this script exists to prevent (review red).
+  if wait_ver "$ip"; then
+    echo "   $ip OK"
+  else
+    failed="$failed $ip"
+  fi
 done
+if [[ -n "$failed" ]]; then
+  echo "fleet_cycle: version verification FAILED on:$failed" >&2
+  exit 1
+fi
 
 if [[ -n "${REGISTRY_URL:-}" ]]; then
   echo "== registry upload"

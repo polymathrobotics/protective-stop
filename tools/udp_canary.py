@@ -96,7 +96,9 @@ def main():
     sock.bind(('0.0.0.0', args.port))
     sock.settimeout(args.interval)
 
-    mapped = None
+    mapped = {}  # per-server reflexive address: a symmetric NAT maps each
+    # destination differently, so diffing across servers would flap REBIND
+    # forever (review red). A real rebind/failover changes the SAME server's view.
     last_rx = time.monotonic()
     gap_open_at = None
     idx = 0
@@ -116,12 +118,12 @@ def main():
                     log('CANARY_GAP_CLOSE after %.3fs' % (now - gap_open_at))
                     gap_open_at = None
                 last_rx = now
-                if mapped is None:
-                    mapped = got
-                    log('CANARY_BASELINE %s (via %s)' % (mapped, name))
-                elif got != mapped:
-                    log('CANARY_REBIND %s -> %s (via %s)' % (mapped, got, name))
-                    mapped = got
+                if name not in mapped:
+                    mapped[name] = got
+                    log('CANARY_BASELINE %s (via %s)' % (got, name))
+                elif got != mapped[name]:
+                    log('CANARY_REBIND %s -> %s (via %s)' % (mapped[name], got, name))
+                    mapped[name] = got
         except socket.timeout:
             pass
         except OSError as exc:

@@ -85,7 +85,11 @@ class Ros2Source:
         now = time.time()
         armed = (now - self._hb_at) < 1.5 and self._hb_stop is False
         fresh = (now - self._remotes_at) < 3.0
-        return armed, (self._remotes if fresh else {})
+        ages = {dev: age for dev, (age, _) in self._remotes.items()} if fresh else {}
+        return armed, ages
+
+    def idle(self, seconds):
+        self._rclpy.spin_once(self._node, timeout_sec=seconds)
 
 
 class HttpSource:
@@ -94,6 +98,9 @@ class HttpSource:
     def __init__(self, state_url):
         self._url = state_url
 
+    def idle(self, seconds):
+        time.sleep(seconds)
+
     def sample(self):
         state = http_json(self._url, timeout=4)
         if state is None:
@@ -101,7 +108,10 @@ class HttpSource:
         armed = state.get('l0') == 1 and state.get('l1') == 1
         remotes = {}
         for rec in state.get('bonded_remotes', []):
-            remotes['%08x' % rec.get('id', 0)] = (int(rec.get('age_ms', 0)), int(rec.get('rebonds', 0)))
+            # bonded_remotes[] carries no rebond counter (review red) — ages
+            # only here; rebonds come from each REMOTE's own machine-slot
+            # records in the 30 s admin poll below.
+            remotes['%08x' % rec.get('id', 0)] = int(rec.get('age_ms', 0))
         return armed, remotes
 
 
@@ -151,13 +161,17 @@ def main():
     by_id = {rc['device_id']: name for name, rc in remotes.items()}
 
     while time.time() - t0 < args.duration_h * 3600:
-        armed, ages = source.sample()
         now = time.time()
         if now < next_sample:
+            # Throttle BEFORE sampling (review yellow: the HTTP source was an
+            # unthrottled busy-loop hammering the machine between samples).
+            source.idle(min(0.2, next_sample - now))
             continue
+        armed, ages = source.sample()
+        now = time.time()
         next_sample = now + 2.0
 
-        for dev_id, (age, rebonds) in ages.items():
+        for dev_id, age in ages.items():
             name = by_id.get(dev_id)
             if name is None:
                 continue
@@ -167,10 +181,6 @@ def main():
                 log('STOP-EVENT %s AGE #%d (age=%dms) +%dm' % (name, events[name]['AGE'], age, (now - t0) // 60))
             elif age <= age_limit:
                 in_age[name] = False
-            if name in last_rebonds and rebonds > last_rebonds[name]:
-                events[name]['REBOND'] += rebonds - last_rebonds[name]
-                log('STOP-EVENT %s REBOND #%d +%dm' % (name, events[name]['REBOND'], (now - t0) // 60))
-            last_rebonds[name] = rebonds
 
         if now >= next_http:
             next_http = now + 30
@@ -183,9 +193,17 @@ def main():
                     events[name]['MISMATCH'] += mm - last_mismatch[name]
                     log('STOP-EVENT %s MISMATCH #%d +%dm' % (name, events[name]['MISMATCH'], (now - t0) // 60))
                 last_mismatch[name] = mm
+                # Rebonds from the remote's own machine-slot records (summed
+                # over configured slots): bonded_remotes[] on the machine side
+                # has no rebond counter (review red).
+                rb = sum(slot.get('rebonds', 0) for slot in state.get('pstop_machines', []) if slot.get('cfg'))
+                if name in last_rebonds and rb > last_rebonds[name]:
+                    events[name]['REBOND'] += rb - last_rebonds[name]
+                    log('STOP-EVENT %s REBOND #%d +%dm' % (name, events[name]['REBOND'], (now - t0) // 60))
+                last_rebonds[name] = rb
 
         if not armed and cfg.get('rearm_cmd') and (now - last_rearm) > 90:
-            if ages and all(age < age_limit * 0.75 for age, _ in ages.values()):
+            if ages and all(age < age_limit * 0.75 for age in ages.values()):
                 last_rearm = now
                 subprocess.Popen(shlex.split(cfg['rearm_cmd']))
                 log('rearm attempt')
