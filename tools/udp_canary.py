@@ -111,6 +111,7 @@ def main():
     outstanding = {}
 
     while True:
+        iter_start = time.monotonic()
         req, txid = build_binding_request()
         name, addr = resolved[idx % len(resolved)]
         idx += 1
@@ -154,7 +155,10 @@ def main():
         if gap_open_at is None and time.monotonic() - last_rx > args.gap_s:
             gap_open_at = last_rx
             log('CANARY_GAP_OPEN silence > %.1fs' % args.gap_s)
-        time.sleep(max(0.0, args.interval - 0.05))
+        # Pace by REMAINDER: a no-reply iteration already spent the full recv
+        # timeout, so an unconditional extra sleep would halve the cadence in
+        # exactly the outage windows the GAP events exist to time (review 🟡).
+        time.sleep(max(0.0, args.interval - (time.monotonic() - iter_start)))
 
 
 if __name__ == '__main__':

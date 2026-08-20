@@ -142,7 +142,8 @@ def main():
     else:
         source = HttpSource(cfg['machine_state_url'])
 
-    events = {name: {'AGE': 0, 'REBOND': 0, 'MISMATCH': 0} for name in remotes}
+    events = {name: {'AGE': 0, 'REBOND': 0, 'MISMATCH': 0, 'REBOOT': 0} for name in remotes}
+    last_uptime = {}
     last_rebonds = {}
     # MISMATCH baselines lazily on the first SUCCESSFUL poll (same first-sample
     # guard REBOND uses): an unreachable-at-start remote with a pre-existing
@@ -198,6 +199,20 @@ def main():
                 if state is None:
                     continue
                 seen_admin.add(name)
+                # Reboot boundary: the firmware counters are RAM-only, so a
+                # mid-run reboot resets them to 0 and a plain diff would
+                # silently rebaseline downward (review 🟡). Uptime regression
+                # = reboot: count it as its own stop event and rebaseline.
+                up = state.get('uptime_ms') or 0
+                if name in last_uptime and up < last_uptime[name]:
+                    events[name]['REBOOT'] += 1
+                    log(
+                        'STOP-EVENT %s REBOOT #%d (reset_reason=%s) +%dm'
+                        % (name, events[name]['REBOOT'], state.get('reset_reason'), (now - t0) // 60)
+                    )
+                    last_rebonds.pop(name, None)
+                    last_mismatch.pop(name, None)
+                last_uptime[name] = up
                 mm = state.get('pstop_mismatch') or 0
                 if name in last_mismatch and mm > last_mismatch[name]:
                     events[name]['MISMATCH'] += mm - last_mismatch[name]
