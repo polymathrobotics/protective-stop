@@ -208,8 +208,20 @@ static err_t wireguardif_peer_output(struct netif *netif, struct pbuf *q, struct
 			// active while a direct endpoint exists (this branch), so it
 			// self-limits to exactly the at-risk window.
 			if (peer->dual_path && device->derp_output_fn) {
-				(void)device->derp_output_fn(peer->public_key, data,
-				                             q->tot_len, device->derp_output_ctx);
+				err_t derp_res = device->derp_output_fn(peer->public_key, data,
+				                                        q->tot_len, device->derp_output_ctx);
+				// The direct result still drives the caller's error handling,
+				// but for DELIVERY accounting (last_tx / worst_tx_gap) a
+				// successful DERP mirror counts: the safety data plane kept
+				// delivering even if the direct sub-send hiccuped. Mirrors
+				// the RX gauge's documented path-agnostic semantics
+				// (review 🟡: a direct-only ENOBUFS was inflating the gap).
+				if (result != ERR_OK && derp_res == ERR_OK) {
+					peer->tx_any_path_ok = true;
+				}
+			}
+			if (result == ERR_OK) {
+				peer->tx_any_path_ok = true;
 			}
 
 			mem_free(data);
@@ -327,11 +339,16 @@ static err_t wireguardif_output_to_peer(struct netif *netif, struct pbuf *q, con
 				WG_DEBUG("[WG_TX] Sending encrypted DATA packet: %u bytes, remote_idx=%lu\n",
 				       (unsigned)pbuf->tot_len, (unsigned long)hdr->receiver);
 			
+				peer->tx_any_path_ok = false;
 				result = wireguardif_peer_output(netif, pbuf, peer);
 				WG_DEBUG("[WG_TX] peer_output result=%d\n", result);
 			
 
-				if (result == ERR_OK) {
+				// Path-agnostic on purpose (matches the RX twin): a delivered
+				// DERP mirror advances last_tx even when the direct sub-send
+				// failed, so worst_tx_gap measures data-plane silence, not
+				// direct-path hiccups (review 🟡).
+				if (result == ERR_OK || peer->tx_any_path_ok) {
 					now = wireguard_sys_now();
 					if (peer->last_tx != 0) {
 						uint32_t txgap = now - peer->last_tx;

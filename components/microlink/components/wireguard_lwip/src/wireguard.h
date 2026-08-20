@@ -197,6 +197,10 @@ struct wireguard_peer {
 	// outbound gap to a peer tracks the inbound gap during an edge flush —
 	// the replier-silence half of the 2026-08-16 flush mechanism.
 	uint32_t worst_tx_gap;
+	// Per-send scratch: set when ANY path (direct or DERP mirror) delivered
+	// the current packet; cleared by the caller before each send. Lets the
+	// tx-gap gauge stay path-agnostic like its RX twin (review yellow).
+	bool tx_any_path_ok;
 	uint32_t worst_tx_gap_at_ms;
 
 	// We set this flag on RX/TX of packets if we think that we should initiate a new handshake
