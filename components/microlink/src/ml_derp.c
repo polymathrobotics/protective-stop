@@ -562,17 +562,18 @@ static uint32_t s_diag_derp_worst_reconnect_ms;
 /* HOME-reconnect cause attribution (run-46: machn churned ~50-64 home
  * reconnects/hr with no way to tell why). Indices: 0=tx write failed,
  * 1=rx read error (RST/EOF), 2=tx-active-rx-silent staleness reap,
- * 3=interface rebind (microlink.c network-change path). */
-static uint32_t s_reconn_causes[4];
+ * 3=interface rebind (microlink.c network-change path),
+ * 4=region rehome (negotiator legacy immediate path, ml_wg_mgr.c). */
+static uint32_t s_reconn_causes[5];
 
 void ml_derp_note_reconnect_cause(int cause)
 {
-  if (cause >= 0 && cause < 4) s_reconn_causes[cause]++;
+  if (cause >= 0 && cause < 5) s_reconn_causes[cause]++;
 }
 
-void ml_derp_get_reconnect_causes(uint32_t out[4])
+void ml_derp_get_reconnect_causes(uint32_t out[5])
 {
-  for (int i = 0; i < 4; i++) out[i] = s_reconn_causes[i];
+  for (int i = 0; i < 5; i++) out[i] = s_reconn_causes[i];
 }
 
 void ml_derp_get_reconnect_diag(uint32_t out[3])

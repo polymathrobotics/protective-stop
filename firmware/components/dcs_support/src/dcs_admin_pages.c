@@ -838,6 +838,13 @@ static esp_err_t page_perf(httpd_req_t * req)
  * image persists until the next crash, so this is idempotent and read-only. */
 static esp_err_t api_coredump(httpd_req_t * req)
 {
+  /* A coredump is a raw RAM image — task stacks can hold WG/Noise/machine key
+   * material — so this is admin-gated like enter_download/operators (review 🔴). */
+  if (!ml_app_check_admin_auth(req)) {
+    httpd_resp_set_status(req, "401 Unauthorized");
+    httpd_resp_set_hdr(req, "WWW-Authenticate", "Basic realm=\"pstop admin\"");
+    return httpd_resp_sendstr(req, "{\"ok\":false,\"error\":\"admin auth required\"}");
+  }
 #if CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH
   size_t cd_addr = 0;
   size_t cd_size = 0;

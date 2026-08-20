@@ -1378,6 +1378,7 @@ static void neg_apply_target(microlink_t * ml, uint16_t target, uint8_t src)
       (unsigned)target,
       microlink_region_source_str(src));
     ml->derp_home_region = target;
+    ml_derp_note_reconnect_cause(4); /* cause 4 = region rehome (legacy immediate path) */
     xEventGroupSetBits(ml->events, ML_EVT_DERP_RECONNECT);
     neg_note_auto_apply(ml, target, src, now);
     if (src == MICROLINK_REGION_SRC_AUTO_FLEET) {
@@ -2133,6 +2134,7 @@ static int add_peer(microlink_t * ml, const ml_peer_update_t * update, bool * sk
        * log storm (147 lines/s measured at a DUT core-stall). Count always,
        * log at most once per 10 s with the count folded in. */
       s_diag_peer_table_full++;
+      if (skipped) *skipped = true; /* zero-work refusal — must not burn a pacing slot (review 🟡) */
       uint64_t now_ms = esp_timer_get_time() / 1000ULL;
       if (now_ms - s_peer_table_full_log_ms >= 10000ULL) {
         s_peer_table_full_log_ms = now_ms;

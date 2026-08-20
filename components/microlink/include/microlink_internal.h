@@ -1087,10 +1087,12 @@ extern "C"
   bool ml_wg_ip_is_pinned(uint32_t vpn_ip);
   uint32_t ml_derp_get_kicks_spaced(void); /* connect kicks refused by the spacing gate */
   /* Flush-recovery silence-ping diag: out[0]=pings sent, out[1]=last
-   * ping→direct-pong resume delta ms, out[2]=worst resume delta ms. */
+   * ping→direct-pong resume delta ms, out[2]=worst resume delta ms,
+   * out[3]=uptime s of the last resume record, out[4]=peer-table-full
+   * add refusals (rides here to keep the monitor call count down). */
   void ml_wg_get_silence_diag(uint32_t out[5]);
   void ml_derp_note_reconnect_cause(int cause);
-  void ml_derp_get_reconnect_causes(uint32_t out[4]);
+  void ml_derp_get_reconnect_causes(uint32_t out[5]);
   /* Stage-0b: worst single wg_mgr loop iteration ms (heartbeat-path stall). */
   uint32_t ml_wg_get_max_iter_ms(void);
   /* Path-diversity telemetry: out[0]=leg-2 mirrors sent, out[1]=mirrors

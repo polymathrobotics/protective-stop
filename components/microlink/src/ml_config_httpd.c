@@ -1221,10 +1221,10 @@ static esp_err_t handler_monitor(httpd_req_t * req)
         cJSON_AddNumberToObject(json, "peer_table_full_count", sil[4]);
       }
       {
-        uint32_t rc[4] = {0};
+        uint32_t rc[5] = {0};
         ml_derp_get_reconnect_causes(rc);
         cJSON * rcj = cJSON_AddArrayToObject(json, "derp_reconn_causes");
-        for (int rci = 0; rci < 4; rci++) {
+        for (int rci = 0; rci < 5; rci++) {
           cJSON_AddItemToArray(rcj, cJSON_CreateNumber(rc[rci]));
         }
       }
