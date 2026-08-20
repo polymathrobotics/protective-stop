@@ -566,6 +566,14 @@ static uint32_t s_diag_derp_worst_reconnect_ms;
  * 4=region rehome (negotiator legacy immediate path, ml_wg_mgr.c). */
 static uint32_t s_reconn_causes[5];
 
+/* One-shot spacing-gate bypass for the pool-dark rescue-aux kick (review 🔴):
+ * the home kick stamps the shared window microseconds earlier in the SAME
+ * retry iteration, so without this the last-resort rescue could never start
+ * while home stays down and the pool is dark — the exact scenario it exists
+ * for. Bounded cost: one extra TLS handshake, and derp_drive_connects already
+ * caps concurrent handshake crypto at 2 per pass. */
+static bool s_kick_skip_spacing;
+
 void ml_derp_note_reconnect_cause(int cause)
 {
   if (cause >= 0 && cause < 5) s_reconn_causes[cause]++;
@@ -1399,7 +1407,10 @@ void ml_derp_tx_task(void * arg)
                   (unsigned)home_region,
                   slot,
                   (unsigned)fb);
-                if (ml_derp_connect_kick(ml, &ml->derp[slot], fb) == ESP_OK) {
+                s_kick_skip_spacing = true; /* home stamped the window µs ago; do not refuse the last resort */
+                esp_err_t rk = ml_derp_connect_kick(ml, &ml->derp[slot], fb);
+                s_kick_skip_spacing = false;
+                if (rk == ESP_OK) {
                   s_rescue_slot = slot; /* counter increments on confirmed completion */
                 }
               }
@@ -1831,7 +1842,10 @@ esp_err_t ml_derp_connect_kick(microlink_t * ml, ml_derp_conn_t * c, uint16_t re
    * the window so aux kicks cannot stack TLS work right behind home's. */
   uint64_t know = ml_get_time_ms();
   bool kick_is_home = derp_conn_is_home(ml, c);
-  if (!kick_is_home && s_last_connect_kick_ms != 0 && know - s_last_connect_kick_ms < ML_DERP_CONNECT_SPACING_MS) {
+  if (
+    !kick_is_home && !s_kick_skip_spacing && s_last_connect_kick_ms != 0 &&
+    know - s_last_connect_kick_ms < ML_DERP_CONNECT_SPACING_MS)
+  {
     s_diag_kicks_spaced++;
     return ESP_ERR_NOT_FINISHED;
   }
