@@ -149,8 +149,12 @@ def main():
     # nonzero counter must not get charged its history as run events (review 🟡).
     last_mismatch = {}
     in_age = {name: False for name in remotes}
-    seen = set()  # remotes actually observed at least once — an unobserved
-    # remote must not masquerade as clean (review 🟡)
+    # Two independent observation channels, tracked separately (review 🟡):
+    # AGE comes from the machine's bond view; REBOND/MISMATCH come from each
+    # remote's own admin poll. A remote is only fully observed when BOTH
+    # channels reported — an unreachable admin_url must not land in clean.
+    seen_ages = set()
+    seen_admin = set()
 
     log(
         '%s START (%.1fh per-remote gate, criterion=%s, age_limit=%dms)'
@@ -179,7 +183,7 @@ def main():
             name = by_id.get(dev_id)
             if name is None:
                 continue
-            seen.add(name)
+            seen_ages.add(name)
             if age > age_limit and not in_age[name]:
                 in_age[name] = True
                 events[name]['AGE'] += 1
@@ -193,7 +197,7 @@ def main():
                 state = http_json(rc['admin_url'] + '/state.json', timeout=4)
                 if state is None:
                     continue
-                seen.add(name)
+                seen_admin.add(name)
                 mm = state.get('pstop_mismatch') or 0
                 if name in last_mismatch and mm > last_mismatch[name]:
                     events[name]['MISMATCH'] += mm - last_mismatch[name]
@@ -227,10 +231,14 @@ def main():
             next_hour += 3600
             log('HOURLY +%dm armed=%s | events=%s' % ((now - t0) // 60, armed, events))
 
-    unobserved = [name for name in remotes if name not in seen]
+    fully_seen = seen_ages & seen_admin
+    unobserved = [name for name in remotes if name not in fully_seen]
     if unobserved:
-        log('WARNING: never observed: %s (excluded from clean set)' % unobserved)
-    clean = [name for name, ev in events.items() if sum(ev.values()) == 0 and name in seen]
+        log(
+            'WARNING: not fully observed (ages=%s admin=%s): %s — excluded from clean set'
+            % (sorted(seen_ages), sorted(seen_admin), unobserved)
+        )
+    clean = [name for name, ev in events.items() if sum(ev.values()) == 0 and name in fully_seen]
     ok = bool(clean) if criterion == 'any' else len(clean) == len(remotes)
     log(
         '%s %s: clean_remotes=%s | events=%s (criterion=%s)'

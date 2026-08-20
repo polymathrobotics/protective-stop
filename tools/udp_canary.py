@@ -117,9 +117,15 @@ def main():
         try:
             sock.sendto(req, addr)
             outstanding[txid] = (name, time.monotonic())
-            # Drain EVERY queued reply, matching each by its own txid.
+            # Drain EVERY queued reply, matching each by its own txid. The
+            # FIRST recv waits the full interval; subsequent drain checks use
+            # a near-zero timeout so a consumed reply doesn't cost another
+            # full interval and halve the probe cadence (review 🟡).
+            first_recv = True
             while True:
                 try:
+                    sock.settimeout(args.interval if first_recv else 0.02)
+                    first_recv = False
                     data, _ = sock.recvfrom(1024)
                 except socket.timeout:
                     break
