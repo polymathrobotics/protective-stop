@@ -109,6 +109,9 @@ if [[ -n "$failed" ]]; then
 fi
 
 if [[ -n "${REGISTRY_URL:-}" ]]; then
+  # set -u: a REGISTRY_URL without REGISTRY_AUTH must fail loudly here, not
+  # as an unbound-variable abort mid-upload (review yellow).
+  : "${REGISTRY_AUTH:?fleet.env sets REGISTRY_URL but not REGISTRY_AUTH}"
   echo "== registry upload"
   curl -sf -m 60 -u "$REGISTRY_AUTH" -F "file=@$REPO/firmware/build/pstop_remote.bin" \
     -F "notes=$VERSION (fleet_cycle)" "$REGISTRY_URL/api/firmware" >/dev/null
