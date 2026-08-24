@@ -29,6 +29,7 @@ extern void main_req_3_13_test(void);
 
 
 extern void main_req_3_14_test(void);
+extern void main_req_3_16_test(void);
 
 void setUp(void) {}
 
@@ -64,6 +65,7 @@ main(void)
 
 
     main_req_3_14_test();
+    main_req_3_16_test();
 
     return UNITY_END();
 }
