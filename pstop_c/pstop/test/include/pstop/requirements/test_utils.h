@@ -34,4 +34,7 @@ extern pstop_error_t send_stop(pstop_machine_t *machine, pstop_msg_t *resp,
 extern pstop_error_t send_ok(pstop_machine_t *machine, pstop_msg_t *resp,
     const device_id_t *remote, const device_id_t *local, uint32_t counter, uint64_t timestamp);
 
+extern pstop_error_t send_unbond(pstop_machine_t *machine, pstop_msg_t *resp,
+    const device_id_t *remote, const device_id_t *local, uint32_t counter, uint64_t timestamp);
+
 #endif /* PSTOP_REQUIREMENTS_TEST_UTILS_H */

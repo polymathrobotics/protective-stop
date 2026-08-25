@@ -40,90 +40,44 @@ req_3_16_test(void)
     reset_robot_status();
 
     set_time(1000);
-    set_operator_allowed(true, false, 1000U); // this remote is not allowed
+    set_operator_allowed(true, false, 1000U);
+
+    device_id_t remote = {
+        .data = REMOTE_ID
+    };
 
     // bond first remote
-    pstop_msg_t req;
-    pstop_message_init(&req);
-    req.message = PSTOP_MESSAGE_BOND;
-    req.counter = 10;
-    req.stamp = 1000;
-    req.id.data = REMOTE_ID;
-    req.receiver_id.data = MACHINE_ID;
-    req.received_counter = 0U;
-    req.received_stamp = 0U;
-    req.checksum = 10U;
-    req.calculated_checksum = 10U;
-
     pstop_msg_t resp;
-    pstop_message_init(&resp);
 
-    TEST_ASSERT_EQUAL(PSTOP_OK, machine_process_message(&machine, &req, &resp));
+    TEST_ASSERT_EQUAL(PSTOP_OK, send_bond(&machine, &resp, &remote, &MACHINE, 10, 1000));
     TEST_ASSERT_EQUAL(PSTOP_MESSAGE_BOND, resp.message);
 
-    req.message = PSTOP_MESSAGE_STOP;
-    req.counter++;
-    req.stamp += 500;
-    req.received_counter = resp.counter;
-    req.received_stamp = resp.stamp;
-    set_time(get_time() + 500);
-
-    TEST_ASSERT_EQUAL(PSTOP_OK, machine_process_message(&machine, &req, &resp));
+    TEST_ASSERT_EQUAL(PSTOP_OK, send_stop(&machine, &resp, &remote, &MACHINE, 11, 1500));
     TEST_ASSERT_EQUAL(PSTOP_MESSAGE_STOP, resp.message);
     TEST_ASSERT_EQUAL(PSTOP_STATUS_STOP, get_last_status()); // in a stopped state
 
     // stop then OK
-    req.message = PSTOP_MESSAGE_OK;
-    req.counter++;
-    req.stamp += 500;
-    req.received_counter = resp.counter;
-    req.received_stamp = resp.stamp;
-    set_time(get_time() + 500);
-
-    TEST_ASSERT_EQUAL(PSTOP_OK, machine_process_message(&machine, &req, &resp));
+    TEST_ASSERT_EQUAL(PSTOP_OK, send_ok(&machine, &resp, &remote, &MACHINE, 12, 2000));
     TEST_ASSERT_EQUAL(PSTOP_MESSAGE_OK, resp.message);
     TEST_ASSERT_EQUAL(PSTOP_STATUS_OK, get_last_status()); // in OK state
 
     // bond second remote
-    pstop_msg_t req2;
-    pstop_message_init(&req2);
-    req2.message = PSTOP_MESSAGE_BOND;
-    req2.counter = 10;
-    req2.stamp = 1000;
-    req2.id.data = REMOTE_2_ID;
-    req2.receiver_id.data = MACHINE_ID;
-    req2.received_counter = 0U;
-    req2.received_stamp = 0U;
-    req2.checksum = 10U;
-    req2.calculated_checksum = 10U;
+    device_id_t remote2 = {
+        .data = REMOTE_2_ID
+    };
 
     pstop_msg_t resp2;
-    pstop_message_init(&resp2);
 
-    TEST_ASSERT_EQUAL(PSTOP_OK, machine_process_message(&machine, &req2, &resp2));
+    TEST_ASSERT_EQUAL(PSTOP_OK, send_bond(&machine, &resp2, &remote2, &MACHINE, 10, 1000));
     TEST_ASSERT_EQUAL(PSTOP_MESSAGE_BOND, resp2.message);
 
     // first device sends STOP
-    req.message = PSTOP_MESSAGE_STOP;
-    req.counter++;
-    req.stamp += 500;
-    req.received_counter = resp.counter;
-    req.received_stamp = resp.stamp;
-    set_time(get_time() + 500);
-
-    TEST_ASSERT_EQUAL(PSTOP_OK, machine_process_message(&machine, &req, &resp));
+    TEST_ASSERT_EQUAL(PSTOP_OK, send_stop(&machine, &resp, &remote, &MACHINE, 13, 2500));
     TEST_ASSERT_EQUAL(PSTOP_MESSAGE_STOP, resp.message);
     TEST_ASSERT_EQUAL(PSTOP_STATUS_STOP, get_last_status()); // in a stopped state
 
     // second device sends OK
-    req2.message = PSTOP_MESSAGE_OK;
-    req2.counter++;
-    req2.stamp += 500;
-    req2.received_counter = resp2.counter;
-    req2.received_stamp = resp2.stamp;
-    set_time(get_time() + 500);
-
-    TEST_ASSERT_EQUAL(PSTOP_OK, machine_process_message(&machine, &req2, &resp2));
+    TEST_ASSERT_EQUAL(PSTOP_OK, send_ok(&machine, &resp2, &remote2, &MACHINE, 11, 1500));
     TEST_ASSERT_EQUAL(PSTOP_MESSAGE_STOP, resp2.message);
     TEST_ASSERT_EQUAL(PSTOP_STATUS_STOP, get_last_status()); // still in stopped state
 }
