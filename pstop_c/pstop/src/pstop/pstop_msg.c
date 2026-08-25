@@ -21,6 +21,8 @@ pstop_message_init(pstop_msg_t *msg)
     msg->counter = 0U;
     msg->received_counter = 0U;
     msg->message = PSTOP_MESSAGE_UNKNOWN;
+    msg->padding1 = 0U;
+    msg->padding2 = 0U;
     msg->checksum = 0U;
     msg->calculated_checksum = 0U;
 }
@@ -128,7 +130,7 @@ static
 void
 read_device_id(device_id_t *device_id, const uint8_t *data, size_t *pos)
 {
-#if PSTOP_VERSION == 0x01
+#if PSTOP_VERSION == 0x02
     device_id->data = read_uint32(data, pos);
 #else
 #   error "Unsupported PSTOP_VERSION"
@@ -139,7 +141,7 @@ static
 void
 write_device_id(const device_id_t *device_id, uint8_t *data, size_t *pos)
 {
-#if PSTOP_VERSION == 0x01
+#if PSTOP_VERSION == 0x02
     write_uint32(device_id->data, data, pos);
 #else
 #   error "Unsupported PSTOP_VERSION"
@@ -180,6 +182,8 @@ pstop_create_generic_message(pstop_msg_t *msg,
     msg->heartbeat_timeout = 0U;
     msg->counter = counter;
     msg->received_counter = received_counter;
+    msg->padding1 = 0U;
+    msg->padding2 = 0U;
     msg->checksum = 0U;
     msg->calculated_checksum = 0U;
 }
@@ -243,6 +247,8 @@ pstop_message_decode(pstop_msg_t *msg, const uint8_t *data)
     msg->heartbeat_timeout = read_uint32(data, &pos);
     msg->counter = read_uint32(data, &pos);
     msg->received_counter = read_uint32(data, &pos);
+    msg->padding1 = read_uint32(data, &pos);
+    msg->padding2 = read_uint32(data, &pos);
     msg->checksum = read_uint16(data, &pos);
     msg->calculated_checksum = checksum_crc16(data, PSTOP_MESSAGE_SIZE - 2U);
 }
@@ -260,6 +266,8 @@ pstop_message_encode(const pstop_msg_t *msg, uint8_t *data)
     write_uint32(msg->heartbeat_timeout, data, &pos);
     write_uint32(msg->counter, data, &pos);
     write_uint32(msg->received_counter, data, &pos);
+    write_uint32(msg->padding1, data, &pos);
+    write_uint32(msg->padding2, data, &pos);
     uint16_t checksum = checksum_crc16(data, PSTOP_MESSAGE_SIZE - 2U);
     write_uint16(checksum, data, &pos);
 }
