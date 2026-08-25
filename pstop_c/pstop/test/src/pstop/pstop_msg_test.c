@@ -21,8 +21,10 @@ PSTOP_MSG_BYTES[] = {
 
     0x50U, 0x51U, 0x52U, 0x53U, // counter
     0x60U, 0x61U, 0x62U, 0x63U, // received counter
+    0x70U, 0x71U, 0x72U, 0x73U, // padding1
+    0x80U, 0x81U, 0x82U, 0x83U, // padding2
 
-    0x42U, 0xF9U // checksum
+    0x4CU, 0xB1U // checksum
 };
 
 static
@@ -46,7 +48,9 @@ decode_pstop_msg()
     TEST_ASSERT_EQUAL(0x43424140U, msg.heartbeat_timeout);
     TEST_ASSERT_EQUAL(0x53525150U, pstop_message_get_counter(&msg));
     TEST_ASSERT_EQUAL(0x63626160U, msg.received_counter);
-    TEST_ASSERT_EQUAL(0xF942U, msg.checksum);
+    TEST_ASSERT_EQUAL(0x73727170U, msg.padding1);
+    TEST_ASSERT_EQUAL(0x83828180U, msg.padding2);
+    TEST_ASSERT_EQUAL(0xB14CU, msg.checksum);
 }
 
 static
@@ -63,7 +67,9 @@ encode_pstop_msg()
     msg.heartbeat_timeout = 0x43424140U;
     msg.counter = 0x53525150U;
     msg.received_counter = 0x63626160U;
-    msg.checksum = 0xF942U;
+    msg.padding1 = 0x73727170U;
+    msg.padding2 = 0x83828180U;
+    msg.checksum = 0xB14CU;
 
     uint8_t bytes[PSTOP_MESSAGE_SIZE];
     pstop_message_encode(&msg, bytes);

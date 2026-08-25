@@ -9,7 +9,7 @@
 #include "pstop/config.h"
 
 typedef struct {
-#if PSTOP_VERSION == 0x01
+#if PSTOP_VERSION == 0x02
     // IPv4 address
     uint32_t data;
 #else
@@ -42,7 +42,7 @@ void device_id_copy(device_id_t *device_id, const device_id_t *id);
  */
 int device_id_cmp(const device_id_t *lhs, const device_id_t *rhs);
 
-#if PSTOP_VERSION == 0x00
+#if PSTOP_VERSION == 0x02
 
 /**
  * @brief Utility function to set a device ID from a uint32_t

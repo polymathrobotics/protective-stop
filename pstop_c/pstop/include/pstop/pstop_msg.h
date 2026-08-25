@@ -72,6 +72,12 @@ typedef struct {
     uint32_t received_counter;
 
     /**
+     * extra padding bytes
+     */
+    uint32_t padding1;
+    uint32_t padding2;
+
+    /**
      * a CRC-16 checksum of the above values.
      */
     uint16_t checksum;
