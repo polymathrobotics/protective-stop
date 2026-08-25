@@ -164,11 +164,11 @@ main(int argc, char *argv[])
     fprintf(stderr, "uuid=%d\n", this_uuid.data);
     send_bond(&udp_transport, &env, &machine, &this_uuid);
 
-    sleep_ms(750);
+    sleep_ms(500);
 
     for(int i = 0; i < 30; ++i) {
         send_ok(&udp_transport, &env, &machine, &this_uuid, (i % 2));
-        sleep_ms(750);
+        sleep_ms(500);
     }
 
     send_unbond(&udp_transport, &env, &machine, &this_uuid);
