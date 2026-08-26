@@ -14,6 +14,7 @@
 #include <mutex>
 #include <string>
 #include <thread>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -23,6 +24,7 @@ extern "C"
 #include "pstop/pstop_application.h"
 #include "pstop/pstop_msg.h"
 #include "pstop/pstop_remote_data.h"
+#include "pstop_aux_channel.h"
 #include "transport/udp/udp_transport.h"
 }
 
@@ -45,6 +47,17 @@ struct SoftwareMachineBackend::Impl
   mutable std::mutex mtx;
   MachineSnapshot snap;  // guarded
   MachineTiming timing;  // guarded (read by the C remote-details callback)
+
+  // Remote-announced role (aux uplink), keyed by remote id. Touched ONLY on the
+  // machine thread (written in run(), read from cb_remote_details and
+  // rebuild_snapshot, both of which run on that thread), so it needs no lock.
+  std::unordered_map<uint32_t, uint8_t> claimed_roles;
+  pstop_aux_role_t role_of(uint32_t id) const
+  {
+    auto it = claimed_roles.find(id);
+    return (it != claimed_roles.end()) ? static_cast<pstop_aux_role_t>(it->second)
+                                       : PSTOP_AUX_ROLE_UNSPECIFIED;
+  }
 
   void run();
   void rebuild_snapshot();  // caller holds no lock; locks internally
@@ -75,10 +88,18 @@ static remote_details_t cb_remote_details(const device_id_t * id)
   // which accepted every remote as a full operator.
   bool stop_only = true;
   if (g_impl) {
-    std::lock_guard<std::mutex> lk(g_impl->mtx);
-    hb = g_impl->timing.heartbeat_ms;
-    allow = g_impl->cfg.allow_unlisted;
-    stop_only = software_remote_is_stop_only(g_impl->cfg, (id != nullptr) ? id->data : 0U);
+    {
+      std::lock_guard<std::mutex> lk(g_impl->mtx);
+      hb = g_impl->timing.heartbeat_ms;
+      allow = g_impl->cfg.allow_unlisted;
+      stop_only = software_remote_is_stop_only(g_impl->cfg, (id != nullptr) ? id->data : 0U);
+    }
+    // AND-rule: operator authority also requires an explicit OPERATOR
+    // announcement (aux uplink); otherwise fail safe to stop-only. The role map
+    // is machine-thread-only, so it is read outside the mtx.
+    if (!stop_only && !pstop_aux_role_is_operator(g_impl->role_of((id != nullptr) ? id->data : 0U))) {
+      stop_only = true;
+    }
   }
   remote_detail_set(&d, allow, hb, stop_only);
   return d;
@@ -193,8 +214,29 @@ void SoftwareMachineBackend::Impl::run()
       // Drop a non-BOND from an unknown/timed-out remote (upstream would
       // dereference before its NULL guard); a fresh BOND re-bonds.
       bool known = pstop_remote_get(&machine.remotes, &req_msg.id) != nullptr;
+
+      // Aux uplink: record the announced role BEFORE processing so the AND-rule
+      // in cb_remote_details sees it at bond. A role transition on an already-
+      // bonded remote is contained here (drop bond + STOP) so it must re-bond
+      // with the new authorization (invariant 3).
+      if (req_msg.checksum == req_msg.calculated_checksum) {
+        pstop_aux_role_t role = pstop_aux_decode_role(&req_msg);
+        auto it = claimed_roles.find(req_msg.id.data);
+        bool changed = (it != claimed_roles.end()) && (it->second != static_cast<uint8_t>(role));
+        claimed_roles[req_msg.id.data] = static_cast<uint8_t>(role);
+        if (changed && known) {
+          pstop_remote_data_t * c = pstop_remote_get(&machine.remotes, &req_msg.id);
+          if (c != nullptr) {
+            pstop_remote_deactivate(c);
+          }
+          machine_stop_robot(&machine);
+        }
+      }
+
       if (known || req_msg.message == PSTOP_MESSAGE_BOND) {
         if (machine_process_message(&machine, &req_msg, &resp_msg) == PSTOP_OK) {
+          // Aux downlink (machine -> remote feedback): reserved today, emit zero.
+          pstop_aux_encode_feedback_none(&resp_msg);
           pstop_message_encode(&resp_msg, respbytes);
           transport_udp_write(&udp, respbytes, PSTOP_MESSAGE_SIZE,
               reinterpret_cast<struct sockaddr_in *>(&client));
@@ -239,6 +281,7 @@ void SoftwareMachineBackend::Impl::rebuild_snapshot()
       PSTOP_REMOTE_INITING ? 1 : (c->remote_state == PSTOP_REMOTE_STOPPED ? 3 : 2);
     r.in_use = rs->remote_stop_id == c->local_remote_id;
     r.stop_only = c->is_stop_only;
+    r.claimed_role = static_cast<uint8_t>(role_of(c->remote_data.remote_id.data));
     // reply_age / rtt / rebonds are microlink-side metrics not tracked by
     // pstop_c; left 0 on the software backend.
     s.remotes.push_back(std::move(r));
