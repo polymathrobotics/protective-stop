@@ -93,6 +93,9 @@ add_executable(pstop_requirements_test
   test/src/pstop/requirements/req_3_15_test.c
   test/src/pstop/requirements/req_3_16_test.c
   test/src/pstop/requirements/req_3_17_test.c
+  test/src/pstop/requirements/req_3_18_test.c
+  test/src/pstop/requirements/req_3_19_test.c
+  test/src/pstop/requirements/req_3_20_test.c
 
   test/src/pstop/requirements/test_utils.c
 
