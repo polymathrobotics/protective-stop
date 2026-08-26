@@ -27,6 +27,8 @@ generate_parameter_library(${PROJECT_NAME}_parameters
 
 # Vendored, unmodified pstop_c sources (same set host/machine_app_runner links).
 set(PSTOP_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/../../pstop_c)
+# Non-certified aux-channel schema shared by all wrappers (repo-root common/).
+set(PSTOP_COMMON ${CMAKE_CURRENT_SOURCE_DIR}/../../common)
 file(GLOB PSTOP_SRCS CONFIGURE_DEPENDS ${PSTOP_ROOT}/pstop/src/pstop/*.c)
 set(TRANSPORT_SRCS ${PSTOP_ROOT}/transport/src/transport/udp/udp_transport.c)
 
@@ -56,6 +58,7 @@ target_include_directories(${PROJECT_NAME} PUBLIC
 target_include_directories(${PROJECT_NAME} PRIVATE
   ${PSTOP_ROOT}/pstop/include
   ${PSTOP_ROOT}/transport/include
+  ${PSTOP_COMMON}
 )
 target_link_libraries(${PROJECT_NAME}
   PUBLIC

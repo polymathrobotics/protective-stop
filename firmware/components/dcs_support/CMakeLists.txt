@@ -19,6 +19,10 @@ idf_component_register(
         "src/panic_log.c"
     INCLUDE_DIRS
         "include"
+        # Non-certified aux-channel schema shared by remote + machn (repo-root
+        # common/). Exposed publicly so both ESP32 apps that REQUIRE dcs_support
+        # can include "pstop_aux_channel.h". See common/pstop_aux_channel.h.
+        "${CMAKE_CURRENT_LIST_DIR}/../../../common"
     PRIV_INCLUDE_DIRS
         "src"
     REQUIRES espcoredump
