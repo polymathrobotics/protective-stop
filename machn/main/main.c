@@ -62,6 +62,7 @@
 #include "pstop/machine.h"
 #include "pstop/pstop_msg.h"
 #include "pstop/pstop_remote_data.h"
+#include "pstop_aux_channel.h"
 
 static const char * TAG = "machn";
 
@@ -192,6 +193,65 @@ typedef struct
 
 static machn_seen_t g_seen[DCS_MACHN_MAX_REMOTES];
 
+/* Remote-announced role map (aux uplink). The safety cores read it from
+ * details_default when a remote bonds; the comparator is the single writer and
+ * always writes BEFORE it notifies the cores for the tick, so the FreeRTOS
+ * notify barrier makes every core read see a consistent id/role pair. 32-bit
+ * atomics (natively lock-free on Xtensa), mirroring the operator allowlist
+ * cache. id 0 = empty slot. */
+static atomic_uint_fast32_t g_claimed_id[DCS_MACHN_MAX_REMOTES];
+static atomic_uint_fast32_t g_claimed_role[DCS_MACHN_MAX_REMOTES];
+
+/* The announced role for id, or UNSPECIFIED if unknown. */
+static pstop_aux_role_t claimed_role_get(uint32_t id)
+{
+  if (id == 0u) {
+    return PSTOP_AUX_ROLE_UNSPECIFIED;
+  }
+  for (int i = 0; i < DCS_MACHN_MAX_REMOTES; i++) {
+    if ((uint32_t)atomic_load(&g_claimed_id[i]) == id) {
+      return (pstop_aux_role_t)atomic_load(&g_claimed_role[i]);
+    }
+  }
+  return PSTOP_AUX_ROLE_UNSPECIFIED;
+}
+
+/* Record id's latest announced role. Returns true iff id was already known with
+ * a DIFFERENT role (a transition the caller must contain). Comparator-only. */
+static bool claimed_role_note(uint32_t id, pstop_aux_role_t role)
+{
+  if (id == 0u) {
+    return false;
+  }
+  int free_slot = -1;
+  for (int i = 0; i < DCS_MACHN_MAX_REMOTES; i++) {
+    if ((uint32_t)atomic_load(&g_claimed_id[i]) == id) {
+      bool changed = ((pstop_aux_role_t)atomic_load(&g_claimed_role[i]) != role);
+      atomic_store(&g_claimed_role[i], role);
+      return changed;
+    }
+    if ((free_slot < 0) && ((uint32_t)atomic_load(&g_claimed_id[i]) == 0u)) {
+      free_slot = i;
+    }
+  }
+  if (free_slot >= 0) {
+    atomic_store(&g_claimed_role[free_slot], role); /* role before id: reader keys off id */
+    atomic_store(&g_claimed_id[free_slot], id);
+  }
+  return false; /* brand-new remote: bonds fresh with the right role, no reset */
+}
+
+/* Release id's slot when the remote ages out. Comparator-only. */
+static void claimed_role_forget(uint32_t id)
+{
+  for (int i = 0; i < DCS_MACHN_MAX_REMOTES; i++) {
+    if ((uint32_t)atomic_load(&g_claimed_id[i]) == id) {
+      atomic_store(&g_claimed_id[i], 0u);
+      return;
+    }
+  }
+}
+
 static void seen_note(uint32_t id, uint32_t ip, uint64_t now, uint64_t received_stamp)
 {
   int free_slot = -1;
@@ -223,14 +283,15 @@ static void seen_publish(uint64_t now)
 {
   for (int i = 0; i < DCS_MACHN_MAX_REMOTES; i++) {
     if (g_seen[i].id == 0u) {
-      dcs_publish_machn_remote(i, 0u, 0u, 0u, 0u, 0u, false);
+      dcs_publish_machn_remote(i, 0u, 0u, 0u, 0u, 0u, false, PSTOP_AUX_ROLE_UNSPECIFIED);
       continue;
     }
     uint64_t age = (now > g_seen[i].last_rx_ms) ? (now - g_seen[i].last_rx_ms) : 0u;
     if (age > 30000u) { /* gone half a minute: drop from the page */
       dcs_untrack_peer_health(g_seen[i].ip); /* stop heartbeat-pinging it */
+      claimed_role_forget(g_seen[i].id); /* release its aux-role slot */
       g_seen[i].id = 0u;
-      dcs_publish_machn_remote(i, 0u, 0u, 0u, 0u, 0u, false);
+      dcs_publish_machn_remote(i, 0u, 0u, 0u, 0u, 0u, false, PSTOP_AUX_ROLE_UNSPECIFIED);
       continue;
     }
     /* Keep the disco heartbeat (and thus the path-RTT sample) alive toward
@@ -246,7 +307,8 @@ static void seen_publish(uint64_t now)
       st = (uint32_t)rd->remote_state;
       stop_only = rd->is_stop_only; /* library's per-remote authorization (latched at bond) */
     }
-    dcs_publish_machn_remote(i, g_seen[i].id, g_seen[i].ip, st, (uint32_t)age, g_seen[i].rtt_ms, stop_only);
+    dcs_publish_machn_remote(
+      i, g_seen[i].id, g_seen[i].ip, st, (uint32_t)age, g_seen[i].rtt_ms, stop_only, claimed_role_get(g_seen[i].id));
   }
 }
 
@@ -286,7 +348,15 @@ static remote_details_t details_default(const device_id_t * device_id)
      * safety cores). Latched onto the client at bond (pstop_c machine.c
      * add_new_client) — an operator added later applies on the remote's next
      * bond. */
-  const bool is_operator = (device_id != NULL) && dcs_operator_is_listed(device_id->data);
+  const bool is_listed = (device_id != NULL) && dcs_operator_is_listed(device_id->data);
+  /* AND-rule: a remote may re-arm only if it BOTH announces the operator role
+     * (aux uplink) AND is on the machine allowlist. A stop-only/unspecified
+     * claim, or an unlisted id, stays stop-only. Strictly more conservative than
+     * the allowlist alone: a provisioning gap surfaces as stop-only, never as an
+     * unexpected operator. The role is latched with is_stop_only at bond; a later
+     * role change forces a re-bond (see role_change_reset). */
+  const pstop_aux_role_t claimed = (device_id != NULL) ? claimed_role_get(device_id->data) : PSTOP_AUX_ROLE_UNSPECIFIED;
+  const bool is_operator = is_listed && pstop_aux_role_is_operator(claimed);
   remote_detail_set(&d, true, MACHN_DEFAULT_HEARTBEAT_MS, !is_operator);
   return d;
 }
@@ -335,6 +405,26 @@ static void core_instance_init(int c)
   device_id_copy(&mc->machine.application->machine_device_id, &mid);
 }
 
+/* Contain a remote's role transition (invariant 3): drop its bond on both
+ * instances and force STOP, so it must re-bond — which re-runs details_default
+ * and re-latches is_stop_only from the NEW role — and a fresh stop/OK gesture is
+ * required before anything can re-arm. Public pstop_c API only; runs on the
+ * comparator between core windows (cores idle), like the seen_publish read. */
+static void role_change_reset(uint32_t id)
+{
+  device_id_t rid = {.data = id};
+  for (int c = 0; c < 2; c++) {
+    /* Cast away const: the record lives in our own g_core[c].remotes[] and the
+       * accessor is the only public way to reach it by id. */
+    pstop_remote_data_t * client = (pstop_remote_data_t *)machine_get_remote_data(&g_core[c].machine, &rid);
+    if (client != NULL) {
+      pstop_remote_deactivate(client);
+    }
+    machine_stop_robot(&g_core[c].machine);
+  }
+  ESP_LOGW(TAG, "remote 0x%08lx role changed — bond dropped, STOP forced, re-bond required", (unsigned long)id);
+}
+
 /* === Per-core task: process staged op, run liveness, drive own relay ===== */
 
 static void core_task(void * arg)
@@ -356,6 +446,9 @@ static void core_task(void * arg)
       memset(&mc->resp, 0, sizeof(mc->resp));
       mc->err = machine_process_message(&mc->machine, &req, &mc->resp);
       if (mc->err == PSTOP_OK) {
+        /* Aux downlink (machine -> remote feedback): reserved today, emit zero.
+             * Both cores write the same value, so resp_bytes stay identical. */
+        pstop_aux_encode_feedback_none(&mc->resp);
         pstop_message_encode(&mc->resp, mc->resp_bytes);
       } else {
         memset(mc->resp_bytes, 0, sizeof(mc->resp_bytes));
@@ -577,8 +670,23 @@ static void comparator_task(void * arg)
         last_rx_ms = now_ms();
       }
       /* Short/garbage datagrams are dropped silently (fail-safe: no
-             * reply). Additional queued datagrams are handled on subsequent
-             * ticks — remotes publish at >= 200 ms spacing per unit. */
+              * reply). Additional queued datagrams are handled on subsequent
+              * ticks — remotes publish at >= 200 ms spacing per unit. */
+    }
+
+    /* Aux uplink: record the sender's announced role BEFORE the cores process
+         * this datagram, so details_default sees the right role when a bond is
+         * accepted this tick. A role transition for an already-known remote is
+         * contained here (drop bond + STOP) so the demoted/promoted remote must
+         * re-bond with the new authorization. */
+    if (g_rx_pending != 0) {
+      pstop_msg_t rx;
+      pstop_message_decode(&rx, g_rx_bytes);
+      if (rx.checksum == rx.calculated_checksum) {
+        if (claimed_role_note(rx.id.data, pstop_aux_decode_role(&rx))) {
+          role_change_reset(rx.id.data);
+        }
+      }
     }
 
     /* Run both cores against the staged op (or a bare liveness tick).

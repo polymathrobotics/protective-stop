@@ -471,13 +471,14 @@ static esp_err_t page_state(httpd_req_t * req)
       n += snprintf(
         buf + n,
         cap - n,
-        "%s{\"id\":%lu,\"ip\":%lu,\"state\":%lu,\"stop_only\":%d,\"age_ms\":%lu,\"rtt_ms\":%lu,"
-        "\"wg_rtt_ms\":%lu,\"wg_rtt_age_ms\":%lu,\"wg_direct\":%d}",
+        "%s{\"id\":%lu,\"ip\":%lu,\"state\":%lu,\"stop_only\":%d,\"claimed_role\":\"%s\",\"age_ms\":%lu,"
+        "\"rtt_ms\":%lu,\"wg_rtt_ms\":%lu,\"wg_rtt_age_ms\":%lu,\"wg_direct\":%d}",
         first ? "" : ",",
         (unsigned long)rid,
         (unsigned long)rip,
         (unsigned long)atomic_load(&g_dcs_machn_r_state[i]),
         (int)atomic_load(&g_dcs_machn_r_stop_only[i]),
+        pstop_aux_role_str((pstop_aux_role_t)atomic_load(&g_dcs_machn_r_role[i])),
         (unsigned long)atomic_load(&g_dcs_machn_r_age_ms[i]),
         (unsigned long)atomic_load(&g_dcs_machn_r_rtt_ms[i]),
         (unsigned long)wg_rtt2,

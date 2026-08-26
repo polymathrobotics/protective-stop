@@ -274,7 +274,14 @@ extern "C"
  */
 #define DCS_MACHN_MAX_REMOTES 8
   void dcs_publish_machn_remote(
-    int slot, uint32_t remote_id, uint32_t ip, uint32_t state, uint32_t age_ms, uint32_t rtt_ms, bool stop_only);
+    int slot,
+    uint32_t remote_id,
+    uint32_t ip,
+    uint32_t state,
+    uint32_t age_ms,
+    uint32_t rtt_ms,
+    bool stop_only,
+    uint8_t claimed_role);
 
   /**
  * @brief Publish the machine-role arming/restart state (comparator, once per

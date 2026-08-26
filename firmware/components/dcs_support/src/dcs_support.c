@@ -157,6 +157,7 @@ atomic_uint_fast32_t g_dcs_machn_r_age_ms[DCS_MACHN_MAX_REMOTES];
 atomic_uint_fast32_t g_dcs_machn_r_rtt_ms[DCS_MACHN_MAX_REMOTES];
 atomic_uint_fast32_t g_dcs_machn_r_ip[DCS_MACHN_MAX_REMOTES];
 atomic_uint_fast32_t g_dcs_machn_r_stop_only[DCS_MACHN_MAX_REMOTES];
+atomic_uint_fast32_t g_dcs_machn_r_role[DCS_MACHN_MAX_REMOTES]; /* remote-announced role (pstop_aux_role_t) */
 
 /* Operator allowlist RAM cache. Lock-free for readers: the safety cores scan
  * these atomics from their remote_details callback, never touching NVS/flash.
@@ -639,7 +640,14 @@ void dcs_publish_relay_fault(uint32_t fault_a_ticks, uint32_t fault_b_ticks, boo
 }
 
 void dcs_publish_machn_remote(
-  int slot, uint32_t remote_id, uint32_t ip, uint32_t state, uint32_t age_ms, uint32_t rtt_ms, bool stop_only)
+  int slot,
+  uint32_t remote_id,
+  uint32_t ip,
+  uint32_t state,
+  uint32_t age_ms,
+  uint32_t rtt_ms,
+  bool stop_only,
+  uint8_t claimed_role)
 {
   if ((slot < 0) || (slot >= DCS_MACHN_MAX_REMOTES)) {
     return;
@@ -650,6 +658,7 @@ void dcs_publish_machn_remote(
   atomic_store(&g_dcs_machn_r_age_ms[slot], age_ms);
   atomic_store(&g_dcs_machn_r_rtt_ms[slot], rtt_ms);
   atomic_store(&g_dcs_machn_r_stop_only[slot], stop_only ? 1u : 0u);
+  atomic_store(&g_dcs_machn_r_role[slot], claimed_role);
 }
 
 void dcs_publish_machn_arm(uint32_t remote_stop_id, uint32_t restart_state)

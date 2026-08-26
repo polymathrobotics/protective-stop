@@ -208,6 +208,7 @@ extern "C"
   extern atomic_uint_fast32_t g_dcs_machn_r_rtt_ms[DCS_MACHN_MAX_REMOTES];
   extern atomic_uint_fast32_t g_dcs_machn_r_ip[DCS_MACHN_MAX_REMOTES]; /* UDP source = remote's tailnet IP */
   extern atomic_uint_fast32_t g_dcs_machn_r_stop_only[DCS_MACHN_MAX_REMOTES]; /* 1 = stop-only (no re-arm) */
+  extern atomic_uint_fast32_t g_dcs_machn_r_role[DCS_MACHN_MAX_REMOTES]; /* remote-announced role (pstop_aux_role_t) */
   extern atomic_uint_fast32_t g_dcs_pstop_rtt_ms;
   extern atomic_uint_fast64_t g_dcs_pstop_last_reply_ms;
   extern atomic_uint_fast32_t g_dcs_pstop_peer_ip;
