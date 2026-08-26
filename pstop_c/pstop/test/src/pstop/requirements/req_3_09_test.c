@@ -39,125 +39,94 @@ req_3_09_test(void)
     pstop_machine_t machine;
     machine_init(&machine, &pstop_app, pstop_clients, MAX_CLIENTS);
     configure_app_defaults(&pstop_app, &MACHINE, 0U, 0U, 200U);
-
-    pstop_msg_t req;
-    pstop_message_init(&req);
-    req.message = PSTOP_MESSAGE_BOND;
-    req.counter = 10;
-    req.stamp = 1000;
-    req.id.data = REMOTE_ID;
-    req.receiver_id.data = MACHINE_ID;
-    req.received_counter = 0U;
-    req.received_stamp = 0U;
-    req.checksum = 10U;
-    req.calculated_checksum = 10U;
-
-    pstop_msg_t resp;
-    pstop_message_init(&resp);
-
     set_operator_allowed(true, false, 1000U); // Allow this device ID
 
-    set_time(1000);
-    TEST_ASSERT_EQUAL(PSTOP_OK, machine_process_message(&machine, &req, &resp));
+    device_id_t remote = {
+        .data = REMOTE_ID
+    };
+
+    pstop_msg_t resp;
+
+    TEST_ASSERT_EQUAL(PSTOP_OK, send_bond(&machine, &resp, &remote, &MACHINE, 10, 1000));
     TEST_ASSERT_EQUAL(PSTOP_MESSAGE_BOND, resp.message);
 
     TEST_ASSERT_EQUAL(PSTOP_STATUS_STOP, get_last_status());
 
-    req.message = PSTOP_MESSAGE_STOP;
-    req.counter++;
-    req.stamp++;
-    req.received_counter = resp.counter;
-    req.received_stamp = resp.stamp;
-    TEST_ASSERT_EQUAL(PSTOP_OK, machine_process_message(&machine, &req, &resp));
+    TEST_ASSERT_EQUAL(PSTOP_OK, send_stop(&machine, &resp, &remote, &MACHINE, 11, 1500));
     TEST_ASSERT_EQUAL(PSTOP_MESSAGE_STOP, resp.message);
     TEST_ASSERT_EQUAL(PSTOP_STATUS_STOP, get_last_status());
 
-    set_time(get_time() + 1001U);
-    req.message = PSTOP_MESSAGE_OK;
-    req.counter++;
-    req.stamp += 1001U;
-    req.received_counter = resp.counter;
-    req.received_stamp = resp.stamp;
-    TEST_ASSERT_EQUAL(PSTOP_OK, machine_process_message(&machine, &req, &resp));
+    TEST_ASSERT_EQUAL(PSTOP_OK, send_ok(&machine, &resp, &remote, &MACHINE, 12, 2000));
     TEST_ASSERT_EQUAL(PSTOP_MESSAGE_OK, resp.message);
     TEST_ASSERT_EQUAL(PSTOP_STATUS_OK, get_last_status());
 
-    const pstop_remote_data_t *remote = machine_get_remote_data(&machine, &(req.id));
-    TEST_ASSERT_NOT_NULL(remote);
-    TEST_ASSERT_EQUAL(PSTOP_REMOTE_OK, remote->remote_state);
+    const pstop_remote_data_t *remote_data = machine_get_remote_data(&machine, &remote);
+    TEST_ASSERT_NOT_NULL(remote_data);
+    TEST_ASSERT_EQUAL(PSTOP_REMOTE_OK, remote_data->remote_state);
 
     // this remote has control
     const robot_state_t *robot = machine_get_robot_state(&machine);
 
     TEST_ASSERT_EQUAL(ROBOT_RESTART_STATE_OK, robot->restart_state);
-    TEST_ASSERT_EQUAL(robot->remote_stop_id, remote->local_remote_id);
+    TEST_ASSERT_EQUAL(robot->remote_stop_id, remote_data->local_remote_id);
 
     // bond from new clients is still OK
-    pstop_msg_t req2;
-    pstop_message_init(&req2);
-    req2.message = PSTOP_MESSAGE_BOND;
-    req2.counter = 10;
-    req2.stamp = 1000;
-    req2.id.data = REMOTE_ID + 1;
-    req2.receiver_id.data = MACHINE_ID;
-    req2.received_counter = 0U;
-    req2.received_stamp = 0U;
-    req2.checksum = 10U;
-    req2.calculated_checksum = 10U;
-
+    remote.data = REMOTE_ID + 1;
     pstop_msg_t resp2;
-    pstop_message_init(&resp2);
-    TEST_ASSERT_EQUAL(PSTOP_OK, machine_process_message(&machine, &req2, &resp2));
+    TEST_ASSERT_EQUAL(PSTOP_OK, send_bond(&machine, &resp2, &remote, &MACHINE, 10, 2500));
     TEST_ASSERT_EQUAL(PSTOP_MESSAGE_BOND, resp2.message);
     TEST_ASSERT_EQUAL(PSTOP_STATUS_OK, get_last_status());
 
     // this is a problem and should stop machine
-    req.message = PSTOP_MESSAGE_BOND;
-    req.counter++;
-    req.stamp++;
-    req.received_counter = resp.counter;
-    req.received_stamp = resp.stamp;
-    TEST_ASSERT_EQUAL(PSTOP_OK, machine_process_message(&machine, &req, &resp));
-    TEST_ASSERT_EQUAL(PSTOP_MESSAGE_STOP, resp.message);
+    {
+        remote.data = REMOTE_ID;
+
+        // this complete req is still required so we can
+        // skip typical bond messages and use previous counter/timestamp
+        // This forces the check to the machine for bond handling
+        // and skips the black channel error handling
+        pstop_msg_t req;
+        pstop_message_init(&req);
+        req.message = PSTOP_MESSAGE_BOND;
+        req.counter = 13;
+        req.stamp = 2500;
+        device_id_copy(&(req.id), &remote);
+        device_id_copy(&(req.receiver_id), &MACHINE);
+        req.received_counter = resp.counter;
+        req.received_stamp = resp.stamp;
+        req.checksum = 10U;
+        req.calculated_checksum = 10U;
+        TEST_ASSERT_EQUAL(PSTOP_OK, machine_process_message(&machine, &req, &resp));
+        TEST_ASSERT_EQUAL(PSTOP_MESSAGE_STOP, resp.message);
+    }
 
     robot = machine_get_robot_state(&machine);
     TEST_ASSERT_EQUAL(ROBOT_RESTART_STATE_NEED_STOP, robot->restart_state);
 
-    remote = machine_get_remote_data(&machine, &(req.id));
-    TEST_ASSERT_NOT_NULL(remote);
-    TEST_ASSERT_EQUAL(PSTOP_REMOTE_OK, remote->remote_state);
-    TEST_ASSERT_EQUAL(robot->remote_stop_id, remote->local_remote_id);
+    remote_data = machine_get_remote_data(&machine, &remote);
+    TEST_ASSERT_NOT_NULL(remote_data);
+    TEST_ASSERT_EQUAL(PSTOP_REMOTE_OK, remote_data->remote_state);
+    TEST_ASSERT_EQUAL(robot->remote_stop_id, remote_data->local_remote_id);
     TEST_ASSERT_EQUAL(PSTOP_STATUS_STOP, get_last_status());
 
     // now do stop/ok sequence to get moving again
-    req.message = PSTOP_MESSAGE_STOP;
-    req.counter++;
-    req.stamp++;
-    req.received_counter = resp.counter;
-    req.received_stamp = resp.stamp;
-    TEST_ASSERT_EQUAL(PSTOP_OK, machine_process_message(&machine, &req, &resp));
+    TEST_ASSERT_EQUAL(PSTOP_OK, send_stop(&machine, &resp, &remote, &MACHINE, 14, 3000));
     TEST_ASSERT_EQUAL(PSTOP_MESSAGE_STOP, resp.message);
 
     robot = machine_get_robot_state(&machine);
     TEST_ASSERT_EQUAL(ROBOT_RESTART_STATE_STOP_RECEIVED, robot->restart_state);
     TEST_ASSERT_EQUAL(PSTOP_STATUS_STOP, get_last_status());
 
-    req.message = PSTOP_MESSAGE_OK;
-    req.counter++;
-    req.stamp += 1001U;
-    req.received_counter = resp.counter;
-    req.received_stamp = resp.stamp;
-    set_time(get_time() + 1001U);
-    TEST_ASSERT_EQUAL(PSTOP_OK, machine_process_message(&machine, &req, &resp));
+    TEST_ASSERT_EQUAL(PSTOP_OK, send_ok(&machine, &resp, &remote, &MACHINE, 15, 3500));
     TEST_ASSERT_EQUAL(PSTOP_MESSAGE_OK, resp.message);
     TEST_ASSERT_EQUAL(PSTOP_STATUS_OK, get_last_status());
 
-    remote = machine_get_remote_data(&machine, &(req.id));
-    TEST_ASSERT_EQUAL(PSTOP_REMOTE_OK, remote->remote_state);
+    remote_data = machine_get_remote_data(&machine, &remote);
+    TEST_ASSERT_EQUAL(PSTOP_REMOTE_OK, remote_data->remote_state);
 
     // this remote has control
     robot = machine_get_robot_state(&machine);
-    TEST_ASSERT_EQUAL(robot->remote_stop_id, remote->local_remote_id);
+    TEST_ASSERT_EQUAL(robot->remote_stop_id, remote_data->local_remote_id);
 }
 
 void
