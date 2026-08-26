@@ -45,6 +45,7 @@
 #include "pstop/machine.h"
 #include "pstop/pstop_msg.h"
 #include "pstop/pstop_remote_data.h"
+#include "pstop_aux_channel.h"
 #include "transport/udp/udp_transport.h"
 
 /* CLOCK_BOOTTIME is Linux-specific; fall back to MONOTONIC_RAW / REALTIME on
@@ -361,22 +362,71 @@ static void on_sig(int signo)
   s_running = 0;
 }
 
-/* Consults the configured allowlist. A remote listed in [[operator]] uses its
- * entry; an unlisted remote uses [policy] (allow_unlisted + defaults). */
+/* Remote-announced role map (aux uplink). Single-threaded: the loop notes the
+ * role before machine_process_message, so is_operator_allowed (called from
+ * within it) sees the current role at bond time. id 0 = empty slot. */
+#define ROLE_MAP_MAX MAX_OPERATORS
+static uint32_t s_role_id[ROLE_MAP_MAX];
+static uint8_t s_role_val[ROLE_MAP_MAX];
+
+static pstop_aux_role_t role_get(uint32_t id)
+{
+  for (int i = 0; i < (int)ROLE_MAP_MAX; i++) {
+    if (s_role_id[i] == id && id != 0u) {
+      return (pstop_aux_role_t)s_role_val[i];
+    }
+  }
+  return PSTOP_AUX_ROLE_UNSPECIFIED;
+}
+
+/* Record id's latest role; returns 1 iff id was already known with a different
+ * role (a transition the caller must contain). */
+static int role_note(uint32_t id, pstop_aux_role_t role)
+{
+  if (id == 0u) {
+    return 0;
+  }
+  int free_slot = -1;
+  for (int i = 0; i < (int)ROLE_MAP_MAX; i++) {
+    if (s_role_id[i] == id) {
+      int changed = (s_role_val[i] != (uint8_t)role);
+      s_role_val[i] = (uint8_t)role;
+      return changed;
+    }
+    if (free_slot < 0 && s_role_id[i] == 0u) {
+      free_slot = i;
+    }
+  }
+  if (free_slot >= 0) {
+    s_role_val[free_slot] = (uint8_t)role;
+    s_role_id[free_slot] = id;
+  }
+  return 0; /* brand-new remote: bonds fresh with the right role */
+}
+
+/* Consults the configured allowlist, ANDed with the remote's announced role. A
+ * remote listed in [[operator]] uses its entry; an unlisted remote uses [policy]
+ * (allow_unlisted + defaults). Operator authority additionally requires the
+ * remote to announce the OPERATOR role (aux uplink); otherwise it is stop-only
+ * (fail-safe) — strictly more conservative than config alone. */
 static remote_details_t is_operator_allowed(const device_id_t * device_id)
 {
   remote_details_t d;
+  d.allowed = g_cfg.allow_unlisted;
+  d.stop_only = g_cfg.default_stop_only;
+  d.heartbeat_ms = g_cfg.default_heartbeat_ms;
   for (int i = 0; i < g_cfg.n_operators; i++) {
     if (g_cfg.operators[i].device_id == device_id->data) {
       d.allowed = g_cfg.operators[i].allowed;
       d.stop_only = g_cfg.operators[i].stop_only;
       d.heartbeat_ms = g_cfg.operators[i].heartbeat_ms ? g_cfg.operators[i].heartbeat_ms : g_cfg.default_heartbeat_ms;
-      return d;
+      break;
     }
   }
-  d.allowed = g_cfg.allow_unlisted;
-  d.stop_only = g_cfg.default_stop_only;
-  d.heartbeat_ms = g_cfg.default_heartbeat_ms;
+  /* AND-rule: operator authority requires an explicit OPERATOR announcement. */
+  if (!d.stop_only && !pstop_aux_role_is_operator(role_get(device_id->data))) {
+    d.stop_only = 1;
+  }
   return d;
 }
 
@@ -959,6 +1009,22 @@ int main(int argc, char * argv[])
         if (req_msg.stamp > last_rx_stamp) last_rx_stamp = req_msg.stamp;
       }
 
+      /* Aux uplink: record the announced role BEFORE processing so the AND-rule
+             * in is_operator_allowed sees it at bond. A role transition on an
+             * already-bonded remote is contained here (drop bond + STOP) so it
+             * must re-bond with the new authorization (invariant 3). */
+      if (
+        req_msg.checksum == req_msg.calculated_checksum &&
+        role_note(req_msg.id.data, pstop_aux_decode_role(&req_msg)) && known)
+      {
+        pstop_remote_data_t * c = pstop_remote_get(&machine.remotes, &req_msg.id);
+        if (c != NULL) {
+          pstop_remote_deactivate(c);
+        }
+        machine_stop_robot(&machine);
+        fprintf(stderr, "remote 0x%08X role changed — bond dropped, STOP forced, re-bond required\n", req_msg.id.data);
+      }
+
       int prev_robot = machine.robot_state.robot_state;
       int prev_restart = machine.robot_state.restart_state;
       uint32_t prev_sid = machine.robot_state.remote_stop_id;
@@ -1012,6 +1078,8 @@ int main(int argc, char * argv[])
       }
 
       if (err == PSTOP_OK) {
+        /* Aux downlink (machine -> remote feedback): reserved today, emit zero. */
+        pstop_aux_encode_feedback_none(&resp_msg);
         pstop_message_encode(&resp_msg, respbytes);
         transport_udp_write(&udp_transport, respbytes, PSTOP_MESSAGE_SIZE, (struct sockaddr_in *)&client);
         if (g_cfg.verbose)
