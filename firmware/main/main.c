@@ -168,6 +168,7 @@ typedef struct
   uint32_t received_counter;
   uint64_t received_stamp;
   uint32_t receiver_id; /* this machine's device id */
+  uint8_t role; /* announced role, snapshotted once so both cores encode it identically */
 } tick_input_t;
 
 static tick_input_t g_tick[PSTOP_MAX_MACHINES];
@@ -565,11 +566,13 @@ static void core_task(void * arg)
       msg.counter = in[i].counter;
       msg.received_counter = in[i].received_counter;
       msg.heartbeat_timeout = HEARTBEAT_TIMEOUT_MS;
-      /* Aux uplink: announce this remote's operator/stop-only role. Both cores
-             * read the same lock-free NVS-backed mirror, so the encoded bytes
-             * stay byte-identical and the comparator memcmp still covers the
-             * role. pstop_message_init() already zeroed the downlink field. */
-      pstop_aux_encode_role(&msg, (pstop_aux_role_t)dcs_role_get());
+      /* Aux uplink: announce this remote's operator/stop-only role. The role is
+             * taken from the per-tick snapshot the comparator published (like every
+             * other field above), NOT read live per core — a live read could
+             * straddle a concurrent /api/role write and make the two cores encode
+             * different role bytes, tripping the comparator memcmp and withholding
+             * the tick. pstop_message_init() already zeroed the downlink field. */
+      pstop_aux_encode_role(&msg, (pstop_aux_role_t)in[i].role);
       /* pstop_message_encode computes the CRC over the payload and writes it to
              * the last 2 bytes — both cores produce byte-identical buffers given
              * identical input fields. */
@@ -1184,6 +1187,9 @@ static void comparator_task(void * arg)
         g_tick[i].received_counter = s->pd.last_received_counter;
         g_tick[i].received_stamp = s->pd.last_timestamp;
         g_tick[i].receiver_id = s->machine_id;
+        /* Snapshot the announced role ONCE here so both cores encode the same
+             * byte this tick (see the encode site in core_task). */
+        g_tick[i].role = (uint8_t)dcs_role_get();
         s->tx_stamp_history[s->pd.msg_counter & 15] = now_ms;
         any_active = true;
       }

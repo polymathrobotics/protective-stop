@@ -676,15 +676,25 @@ static void comparator_task(void * arg)
 
     /* Aux uplink: record the sender's announced role BEFORE the cores process
          * this datagram, so details_default sees the right role when a bond is
-         * accepted this tick. A role transition for an already-known remote is
+         * accepted this tick. A role transition for an already-bonded remote is
          * contained here (drop bond + STOP) so the demoted/promoted remote must
-         * re-bond with the new authorization. */
+         * re-bond with the new authorization.
+         *
+         * Only a currently-bonded remote (or an incoming BOND, which is about to
+         * become one) may touch the role table or trigger the forced STOP: the
+         * CRC is a public integrity check, not authentication, so acting on an
+         * arbitrary/spoofed id would let any sender on the path force a STOP or
+         * pollute the table. Mirrors the host + ROS 2 backends' `known` gate. */
     if (g_rx_pending != 0) {
       pstop_msg_t rx;
       pstop_message_decode(&rx, g_rx_bytes);
       if (rx.checksum == rx.calculated_checksum) {
-        if (claimed_role_note(rx.id.data, pstop_aux_decode_role(&rx))) {
-          role_change_reset(rx.id.data);
+        device_id_t rid = {.data = rx.id.data};
+        bool known = machine_get_remote_data(&g_core[0].machine, &rid) != NULL;
+        if (known || (rx.message == PSTOP_MESSAGE_BOND)) {
+          if (claimed_role_note(rx.id.data, pstop_aux_decode_role(&rx)) && known) {
+            role_change_reset(rx.id.data);
+          }
         }
       }
     }

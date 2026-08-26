@@ -218,8 +218,12 @@ void SoftwareMachineBackend::Impl::run()
       // Aux uplink: record the announced role BEFORE processing so the AND-rule
       // in cb_remote_details sees it at bond. A role transition on an already-
       // bonded remote is contained here (drop bond + STOP) so it must re-bond
-      // with the new authorization (invariant 3).
-      if (req_msg.checksum == req_msg.calculated_checksum) {
+      // with the new authorization (invariant 3). Only a bonded remote (or an
+      // incoming BOND) may touch the table or trigger the STOP: the CRC is a
+      // public integrity check, not auth, so an arbitrary/spoofed id must not be
+      // able to force a STOP; rebuild_snapshot() prunes the table to bonded ids.
+      if (req_msg.checksum == req_msg.calculated_checksum &&
+          (known || req_msg.message == PSTOP_MESSAGE_BOND)) {
         pstop_aux_role_t role = pstop_aux_decode_role(&req_msg);
         auto it = claimed_roles.find(req_msg.id.data);
         bool changed = (it != claimed_roles.end()) && (it->second != static_cast<uint8_t>(role));
@@ -285,6 +289,17 @@ void SoftwareMachineBackend::Impl::rebuild_snapshot()
     // reply_age / rtt / rebonds are microlink-side metrics not tracked by
     // pstop_c; left 0 on the software backend.
     s.remotes.push_back(std::move(r));
+  }
+
+  // Forget roles for remotes that are no longer bonded (the counterpart to
+  // machn's claimed_role_forget()): reconcile the table against the live bond
+  // set every iteration so it can never grow past the bond-slot count, even if
+  // a remote times out without an explicit unbond. Runs on this (machine)
+  // thread, the only accessor of claimed_roles.
+  for (auto it = claimed_roles.begin(); it != claimed_roles.end();) {
+    device_id_t did = {it->first};
+    it = (pstop_remote_get(&machine.remotes, &did) == nullptr) ? claimed_roles.erase(it)
+                                                               : std::next(it);
   }
 
   std::lock_guard<std::mutex> lk(mtx);
