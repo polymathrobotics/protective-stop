@@ -18,6 +18,7 @@
  *   wifi_txp  u8   WiFi max TX power, quarter-dBm (8..84); 0/absent = config default
  *   led_bri   u8   master LED brightness, 0..100%; absent/corrupt = default 50
  *   ctrl_rst  u8   one-shot controlled-reset cause crumb (DCS_CTRL_RST_*)
+ *   role      u8   remote self-role (pstop_aux_role_t): absent/corrupt = stop_only
  */
 
 #include <string.h>
@@ -26,6 +27,7 @@
 #include "esp_err.h"
 #include "esp_log.h"
 #include "nvs.h"
+#include "pstop_aux_channel.h"
 
 static const char * TAG = "dcs_nvs";
 
@@ -307,6 +309,34 @@ esp_err_t dcs_nvs_write_led_brightness(uint8_t pct)
   esp_err_t r = nvs_open(DCS_NVS_NS, NVS_READWRITE, &h);
   if (r != ESP_OK) return r;
   r = nvs_set_u8(h, DCS_NVS_KEY_LED_BRIGHT, pct);
+  if (r == ESP_OK) {
+    r = nvs_commit(h);
+  }
+  nvs_close(h);
+  return r;
+}
+
+uint8_t dcs_nvs_read_role(void)
+{
+  nvs_handle_t h;
+  if (nvs_open(DCS_NVS_NS, NVS_READONLY, &h) != ESP_OK) return PSTOP_AUX_ROLE_STOP_ONLY;
+  uint8_t v = PSTOP_AUX_ROLE_STOP_ONLY;
+  (void)nvs_get_u8(h, DCS_NVS_KEY_ROLE, &v); /* absent -> stop_only */
+  nvs_close(h);
+  /* Fail-safe: only an explicit OPERATOR value grants re-arm capability; any
+   * other stored value (unset, corrupt, unknown schema) degrades to stop_only. */
+  return (v == PSTOP_AUX_ROLE_OPERATOR) ? PSTOP_AUX_ROLE_OPERATOR : PSTOP_AUX_ROLE_STOP_ONLY;
+}
+
+esp_err_t dcs_nvs_write_role(uint8_t role)
+{
+  if ((role != PSTOP_AUX_ROLE_STOP_ONLY) && (role != PSTOP_AUX_ROLE_OPERATOR)) {
+    return ESP_ERR_INVALID_ARG;
+  }
+  nvs_handle_t h;
+  esp_err_t r = nvs_open(DCS_NVS_NS, NVS_READWRITE, &h);
+  if (r != ESP_OK) return r;
+  r = nvs_set_u8(h, DCS_NVS_KEY_ROLE, role);
   if (r == ESP_OK) {
     r = nvs_commit(h);
   }

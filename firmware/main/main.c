@@ -56,6 +56,7 @@
 #include "lwip/sockets.h"
 #include "pstop/protocol_data.h"
 #include "pstop/pstop_msg.h"
+#include "pstop_aux_channel.h"
 #include "soc/gpio_struct.h" /* GPIO peripheral instance for gpio_ll_* */
 
 /* ============================================================================
@@ -564,9 +565,14 @@ static void core_task(void * arg)
       msg.counter = in[i].counter;
       msg.received_counter = in[i].received_counter;
       msg.heartbeat_timeout = HEARTBEAT_TIMEOUT_MS;
-      /* pstop_message_encode computes the CRC over bytes [0..37] and
-             * writes it to bytes [38..39] — both cores produce byte-identical
-             * buffers given identical input fields. */
+      /* Aux uplink: announce this remote's operator/stop-only role. Both cores
+             * read the same lock-free NVS-backed mirror, so the encoded bytes
+             * stay byte-identical and the comparator memcmp still covers the
+             * role. pstop_message_init() already zeroed the downlink field. */
+      pstop_aux_encode_role(&msg, (pstop_aux_role_t)dcs_role_get());
+      /* pstop_message_encode computes the CRC over the payload and writes it to
+             * the last 2 bytes — both cores produce byte-identical buffers given
+             * identical input fields. */
       pstop_message_encode(&msg, g_encoded[core_id][i]);
     }
 
@@ -928,6 +934,9 @@ static void sess_bond_step(pstop_sess_t * s, int slot, uint64_t now_ms)
   req.stamp = now_ms;
   req.counter = s->bond_counter;
   req.heartbeat_timeout = HEARTBEAT_TIMEOUT_MS;
+  /* Announce the role on BOND too, so the machine has the claim cached before
+   * its remote_details callback runs when the bond is accepted. */
+  pstop_aux_encode_role(&req, (pstop_aux_role_t)dcs_role_get());
   uint8_t req_bytes[PSTOP_MESSAGE_SIZE];
   pstop_message_encode(&req, req_bytes);
 
@@ -983,6 +992,11 @@ static uint32_t sess_drain_replies(pstop_sess_t * s, int slot, uint64_t now_ms)
     if (resp.checksum != resp.calculated_checksum) {
       continue;
     }
+
+    /* Aux downlink (machine -> remote feedback): reserved today. Read + ignore
+         * so the parse hook exists and is exercised; interpret once a downlink
+         * schema version is defined. See common/pstop_aux_channel.h. */
+    (void)pstop_aux_read_feedback_raw(&resp);
 
     /* The machine governs the update rate its safety case needs: adopt the
          * heartbeat window it advertises in every accepted reply (0 = reject

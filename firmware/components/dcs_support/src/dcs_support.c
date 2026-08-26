@@ -29,6 +29,7 @@
 #include "nvs_flash.h"
 #include "panic_log.h"
 #include "pstop/pstop_msg.h" /* PSTOP_MESSAGE_OK = machine armed/running (primary rule) */
+#include "pstop_aux_channel.h" /* pstop_aux_role_t: remote self-role values */
 
 static const char * TAG = "dcs_support";
 
@@ -271,6 +272,40 @@ esp_err_t dcs_operator_del(uint32_t remote_id)
   return r;
 }
 
+/* Remote self-role RAM mirror. Lock-free for the safety cores: both cores read
+ * this atomic each tick to encode the announced role into every pstop frame, so
+ * the two cores stay byte-identical (the comparator memcmp still covers it). NVS
+ * is the source of truth; the mirror is loaded at boot and updated on set. */
+static atomic_uint_fast32_t g_dcs_role;
+
+static void dcs_role_load_from_nvs(void)
+{
+  uint8_t role = dcs_nvs_read_role(); /* fail-safe: stop_only unless explicitly operator */
+  atomic_store(&g_dcs_role, role);
+  ESP_LOGI(TAG, "remote role: %s", pstop_aux_role_str((pstop_aux_role_t)role));
+}
+
+uint8_t dcs_role_get(void)
+{
+  return (uint8_t)atomic_load(&g_dcs_role);
+}
+
+esp_err_t dcs_role_set(uint8_t role)
+{
+  if ((role != PSTOP_AUX_ROLE_STOP_ONLY) && (role != PSTOP_AUX_ROLE_OPERATOR)) {
+    return ESP_ERR_INVALID_ARG;
+  }
+  /* NVS stays the source of truth: only publish to the live mirror once the
+   * persist succeeds, so a failed write leaves the announced role unchanged. */
+  esp_err_t r = dcs_nvs_write_role(role);
+  if (r != ESP_OK) {
+    return r;
+  }
+  atomic_store(&g_dcs_role, role);
+  ESP_LOGI(TAG, "remote role set -> %s", pstop_aux_role_str((pstop_aux_role_t)role));
+  return ESP_OK;
+}
+
 /* === DERP region auto-negotiation: §4.2 primary-machine feed ===============
  *
  * microlink derives the chip's DERP home region from the machine-slot table +
@@ -494,6 +529,7 @@ dcs_boot_state_t dcs_support_init(void)
     ESP_LOGW(TAG, "operator-allowlist mutex alloc failed — add/del will run unserialized");
   }
   dcs_operators_load_from_nvs();
+  dcs_role_load_from_nvs(); /* remote self-role mirror, before the safety cores spawn */
 
   /* Register the admin pages now that ml_app is up. */
   dcs_admin_pages_register(g_dcs.app);

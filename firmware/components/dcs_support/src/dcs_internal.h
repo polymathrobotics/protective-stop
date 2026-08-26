@@ -40,6 +40,7 @@ extern "C"
 #define DCS_NVS_KEY_OPERATORS "operators" /* operator allowlist (blob: count byte + u32 ids) */
 #define DCS_NVS_KEY_WIFI_TXP "wifi_txp" /* WiFi max TX power, quarter-dBm (8..84); 0/absent = config default */
 #define DCS_NVS_KEY_LED_BRIGHT "led_bri" /* master LED brightness, 0..100%; absent = default */
+#define DCS_NVS_KEY_ROLE "role" /* remote self-role: pstop_aux_role_t value (1=stop_only default, 2=operator) */
 
 #define DCS_LED_BRIGHTNESS_DEFAULT 50 /* master ring brightness when the NVS key is absent */
 #define DCS_LED_BRIGHTNESS_MIN \
@@ -337,6 +338,12 @@ extern "C"
  * (>100); applied live by dcs_pstop_ring_set_brightness and re-loaded at boot. */
   uint8_t dcs_nvs_read_led_brightness(void);
   esp_err_t dcs_nvs_write_led_brightness(uint8_t pct);
+
+  /* Remote self-role (see common/pstop_aux_channel.h). Read fails safe to
+   * stop_only for absent/corrupt/unknown values; write accepts only the
+   * stop_only/operator enum values. */
+  uint8_t dcs_nvs_read_role(void);
+  esp_err_t dcs_nvs_write_role(uint8_t role);
 
   /* Multi-machine peer table (ps_peers blob). One record per slot. Read
  * falls back to migrating the legacy ps_ip/ps_port pair into slot 0 when

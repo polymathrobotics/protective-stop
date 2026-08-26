@@ -199,6 +199,10 @@ static const char k_index_html[] =
   "<p style='margin-top:1em'><b>STOP button</b> <small>(dual-channel DPST, live &mdash; no peer needed)</small></p>"
   "<div id='btnstat' style='font-size:1.4em;font-weight:bold;margin:6px 0'>-</div>"
   "<div id='btn' class='bd'>-</div>"
+  "<p style='margin-top:1em'><b>Remote role</b> "
+  "<small>(operator may re-arm the machine; stop-only may only STOP)</small></p>"
+  "<p>current: <span id='rolest'>-</span>"
+  " &nbsp;<button class='btn' id='rolebtn' type='button'>toggle</button></p>"
 #endif
   "<p style='margin-top:1em'><b>PSTOP peers</b> <small>(bonded devices, live)</small></p>"
   "<div id='peers' class='bd'>-</div>"
@@ -406,6 +410,9 @@ static const char k_index_html[] =
   "renderRelays(j);renderOps(j);"
 #else
   "renderBtn(j);renderPeerMgmt(j);"
+  "{const rs=document.getElementById('rolest');"
+  "if(rs){rs.textContent=(j.role||'-').toUpperCase();"
+  "rs.className=(j.role==='operator')?'ok':'';}}"
 #endif
   "document.getElementById('t0').textContent=j.t0;"
   "document.getElementById('t1').textContent=j.t1;"
@@ -483,6 +490,12 @@ static const char k_index_html[] =
 #else
   "document.getElementById('pmadd').addEventListener('click',pmAdd);"
   "document.getElementById('pmip').addEventListener('keydown',e=>{if(e.key==='Enter')pmAdd();});"
+  "document.getElementById('rolebtn').addEventListener('click',async()=>{"
+  "const cur=(document.getElementById('rolest').textContent||'').trim().toLowerCase();"
+  "const next=(cur==='operator')?'stop_only':'operator';"
+  "if(!confirm('Set remote role to '+next+'?'))return;"
+  "try{await authFetch('/api/role?role='+next,{method:'POST'});poll();}catch(e){}"
+  "});"
 #endif
   "document.getElementById('dbtn').addEventListener('click',async()=>{"
   "try{await fetch('/api/derp',{method:'POST'});poll();}catch(e){}"
