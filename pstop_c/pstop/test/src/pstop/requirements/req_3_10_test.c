@@ -41,46 +41,28 @@ req_3_10_test(void)
     set_time(1000);
     set_operator_allowed(true, false, 1000U); // Allow this device ID
 
+    device_id_t remote = {
+        .data = REMOTE_ID
+    };
+
     for(unsigned i = 0; i < MAX_CLIENTS; ++i) {
-        pstop_msg_t req;
-        pstop_message_init(&req);
-        req.message = PSTOP_MESSAGE_BOND;
-        req.counter = 10;
-        req.stamp = 1000;
-        req.id.data = REMOTE_ID + i;
-        req.receiver_id.data = MACHINE_ID;
-        req.received_counter = 0U;
-        req.received_stamp = 0U;
-        req.checksum = 10U;
-        req.calculated_checksum = 10U;
+        remote.data = REMOTE_ID + i;
 
         pstop_msg_t resp;
-        pstop_message_init(&resp);
 
-        TEST_ASSERT_EQUAL(PSTOP_OK, machine_process_message(&machine, &req, &resp));
+        TEST_ASSERT_EQUAL(PSTOP_OK, send_bond(&machine, &resp, &remote, &MACHINE, 10, 1000));
         TEST_ASSERT_EQUAL(PSTOP_MESSAGE_BOND, resp.message);
 
         TEST_ASSERT_EQUAL(PSTOP_STATUS_STOP, get_last_status());
     }
 
     // BOND third client. Should be rejected
-    pstop_msg_t req2;
-    pstop_message_init(&req2);
-    req2.message = PSTOP_MESSAGE_BOND;
-    req2.counter = 10;
-    req2.stamp = 1000;
-    req2.id.data = REMOTE_ID + MAX_CLIENTS;
-    req2.receiver_id.data = MACHINE_ID;
-    req2.received_counter = 0U;
-    req2.received_stamp = 0U;
-    req2.checksum = 10U;
-    req2.calculated_checksum = 10U;
+    remote.data = REMOTE_ID + MAX_CLIENTS;
 
     pstop_msg_t resp2;
-    pstop_message_init(&resp2);
 
     set_operator_allowed(true, false, 1000U); // Allow this device ID
-    TEST_ASSERT_EQUAL(PSTOP_OUT_OF_OPERATOR_SPACE, machine_process_message(&machine, &req2, &resp2));
+    TEST_ASSERT_EQUAL(PSTOP_OUT_OF_OPERATOR_SPACE, send_bond(&machine, &resp2, &remote, &MACHINE, 10, 1000));
     TEST_ASSERT_EQUAL(PSTOP_MESSAGE_UNBOND, resp2.message);
 
     TEST_ASSERT_EQUAL(PSTOP_STATUS_STOP, get_last_status());

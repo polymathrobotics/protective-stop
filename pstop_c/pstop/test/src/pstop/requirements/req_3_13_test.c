@@ -39,48 +39,25 @@ req_3_13_test(void)
     reset_robot_status();
 
     set_time(1000);
-    set_operator_allowed(true, false, 1000U); // this remote is not allowed
+    set_operator_allowed(true, false, 1000U);
 
-    pstop_msg_t req;
-    pstop_message_init(&req);
-    req.message = PSTOP_MESSAGE_BOND;
-    req.counter = 10;
-    req.stamp = 100;
-    req.id.data = REMOTE_ID;
-    req.receiver_id.data = MACHINE_ID;
-    req.received_counter = 0U;
-    req.received_stamp = 0U;
-    req.checksum = 10U;
-    req.calculated_checksum = 10U;
+    device_id_t remote = {
+        .data = REMOTE_ID
+    };
 
     pstop_msg_t resp;
-    pstop_message_init(&resp);
 
-    TEST_ASSERT_EQUAL(PSTOP_OK, machine_process_message(&machine, &req, &resp));
+    TEST_ASSERT_EQUAL(PSTOP_OK, send_bond(&machine, &resp, &remote, &MACHINE, 10, 1000));
     TEST_ASSERT_EQUAL(PSTOP_MESSAGE_BOND, resp.message);
     TEST_ASSERT_EQUAL(PSTOP_STATUS_STOP, get_last_status()); // in a stopped state
 
     // send OK, but we are in a Stoppped state so will reply with STOP
-    req.message = PSTOP_MESSAGE_OK;
-    req.counter++;
-    req.stamp += 500;
-    req.received_counter = resp.counter;
-    req.received_stamp = resp.stamp;
-
-    set_time(get_time() + 500);
-    TEST_ASSERT_EQUAL(PSTOP_OK, machine_process_message(&machine, &req, &resp));
+    TEST_ASSERT_EQUAL(PSTOP_OK, send_ok(&machine, &resp, &remote, &MACHINE, 11, 1500));
     TEST_ASSERT_EQUAL(PSTOP_MESSAGE_STOP, resp.message);
     TEST_ASSERT_EQUAL(PSTOP_STATUS_STOP, get_last_status()); // in a stopped state
 
     // start the stop/ok process
-    req.message = PSTOP_MESSAGE_STOP;
-    req.counter++;
-    req.stamp += 500;
-    req.received_counter = resp.counter;
-    req.received_stamp = resp.stamp;
-    set_time(get_time() + 500);
-
-    TEST_ASSERT_EQUAL(PSTOP_OK, machine_process_message(&machine, &req, &resp));
+    TEST_ASSERT_EQUAL(PSTOP_OK, send_stop(&machine, &resp, &remote, &MACHINE, 12, 2000));
     TEST_ASSERT_EQUAL(PSTOP_MESSAGE_STOP, resp.message);
     TEST_ASSERT_EQUAL(PSTOP_STATUS_STOP, get_last_status()); // in a stopped state
     const robot_state_t *robot = machine_get_robot_state(&machine);
@@ -88,14 +65,7 @@ req_3_13_test(void)
     TEST_ASSERT_EQUAL(ROBOT_RESTART_STATE_STOP_RECEIVED, robot->restart_state);
 
     // now switches to OK, so OK messages reply with OK
-    req.message = PSTOP_MESSAGE_OK;
-    req.counter++;
-    req.stamp += 500;
-    req.received_counter = resp.counter;
-    req.received_stamp = resp.stamp;
-    set_time(get_time() + 500);
-
-    TEST_ASSERT_EQUAL(PSTOP_OK, machine_process_message(&machine, &req, &resp));
+    TEST_ASSERT_EQUAL(PSTOP_OK, send_ok(&machine, &resp, &remote, &MACHINE, 13, 2500));
     TEST_ASSERT_EQUAL(PSTOP_MESSAGE_OK, resp.message);
     TEST_ASSERT_EQUAL(PSTOP_STATUS_OK, get_last_status()); // in a stopped state
 }

@@ -1,7 +1,6 @@
 
 // SPDX-FileCopyrightText: 2026 Polymath Robotics, Inc.
 // SPDX-License-Identifier: Apache-2.0
-#include <stdio.h>
 
 #include <stdlib.h>
 
@@ -48,7 +47,6 @@ check_timestamp(const pstop_application_config_t *app_config, const protocol_dat
 
     // did the other end miss a message?
     if(req->received_stamp < client->last_timestamp) {
-        fprintf(stderr, "Old timestamp: %ld < %ld\n", req->received_stamp, client->last_timestamp);
         uint64_t diff = client->last_timestamp - req->received_stamp;
 
         uint16_t missed = (uint16_t)(diff / client->heartbeat_ms);

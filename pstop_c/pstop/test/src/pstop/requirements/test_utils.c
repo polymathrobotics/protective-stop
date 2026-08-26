@@ -101,6 +101,7 @@ send_bond(pstop_machine_t *machine, pstop_msg_t *resp,
     req.checksum = 10U;
     req.calculated_checksum = 10U;
 
+    set_time(timestamp);
     pstop_message_init(resp);
 
     return machine_process_message(machine, &req, resp);

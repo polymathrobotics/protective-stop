@@ -41,22 +41,13 @@ req_3_11_test(void)
     set_time(1000);
     set_operator_allowed(false, false, 1000U); // this remote is not allowed
 
-    pstop_msg_t req;
-    pstop_message_init(&req);
-    req.message = PSTOP_MESSAGE_BOND;
-    req.counter = 10;
-    req.stamp = 1000;
-    req.id.data = REMOTE_ID;
-    req.receiver_id.data = MACHINE_ID;
-    req.received_counter = 0U;
-    req.received_stamp = 0U;
-    req.checksum = 10U;
-    req.calculated_checksum = 10U;
+    device_id_t remote = {
+        .data = REMOTE_ID
+    };
 
     pstop_msg_t resp;
-    pstop_message_init(&resp);
 
-    TEST_ASSERT_EQUAL(PSTOP_OPERATOR_NOT_ALLOWED, machine_process_message(&machine, &req, &resp));
+    TEST_ASSERT_EQUAL(PSTOP_OPERATOR_NOT_ALLOWED, send_bond(&machine, &resp, &remote, &MACHINE, 10, 1000));
     TEST_ASSERT_EQUAL(PSTOP_MESSAGE_UNBOND, resp.message);
 }
 
