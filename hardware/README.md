@@ -1,6 +1,8 @@
 # Hardware
 
-**[OSHW] [US002846](https://certification.oshwa.org/us002846.html) | OSHWA-certified open source hardware**
+<a href="https://certification.oshwa.org/us002846.html">
+  <img src="oshwa-certification-mark.svg" alt="OSHWA open source hardware certification mark, UID US002846" width="320" />
+</a>
 
 <p>
   <img src="enclosure-render.png" alt="CAD render: E-stop button over the 16-LED ring, ports in the side pod" width="49%" />
@@ -135,6 +137,8 @@ fit-check references, with their origins listed below.
 | `esp32-S3.step` | CERN-OHL-P-2.0 (original board fit model) |
 | `LED.step` | CERN-OHL-P-2.0 (ring model commissioned by Polymath Robotics) |
 | `README.md`, `ASSEMBLY.md`, `enclosure-render.png`, `real.jpg`, `assembly/*.jpg` | CC-BY-4.0 (original documentation) |
+| `oshwa-certification-mark.svg` | Official OSHWA wide certification mark generated for UID `US002846`; use is governed by the [OSHWA certification agreement](https://certification.oshwa.org/license-agreement.html) |
+| `oshw-license-facts.svg` | Generated with the [Open Source Licenses Facts generator](https://oshwa.github.io/certification-mark-generator/facts) for this project's certified license combination |
 | `ESP32-S3-ETH-Schematic.pdf` | Waveshare, from the <a href="https://www.waveshare.com/wiki/ESP32-S3-ETH" target="_blank" rel="noopener">product wiki</a> (<a href="https://files.waveshare.com/wiki/ESP32-S3-ETH/ESP32-S3-ETH-Schematic.pdf" target="_blank" rel="noopener">direct PDF</a>) |
 | `ESP32-S3-ETH-details-15.jpg` | Waveshare product photo, from the <a href="https://www.waveshare.com/esp32-s3-eth.htm" target="_blank" rel="noopener">product page</a> |
 | `FF0126BBCAEA01.stp` | NKK Switches E-stop model, from the <a href="https://www.nkkswitches.com/distributor-landing-page/?part_no=FF0126BBCAEA01&vendor=digikey" target="_blank" rel="noopener">NKK part page</a>; series datasheet: <a href="https://www.nkkswitches.eu/pdf/estop_FF01.pdf" target="_blank" rel="noopener">FF01 (NKK)</a> |

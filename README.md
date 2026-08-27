@@ -2,7 +2,9 @@
 
 <img src="hardware/real.jpg" alt="Assembled Protective Stop remote with a red stop button, printed enclosure, and Ethernet side pod" width="380" />
 
-**[OSHW] [US002846](https://certification.oshwa.org/us002846.html) | OSHWA-certified open source hardware**
+<a href="https://certification.oshwa.org/us002846.html">
+  <img src="hardware/oshwa-certification-mark.svg" alt="OSHWA open source hardware certification mark, UID US002846" width="320" />
+</a>
 
 Protective Stop is an open hardware remote for robots and automation. A
 PoE- or USB-powered ESP32-S3 watches a physical stop switch and reports its
@@ -167,6 +169,10 @@ hardware on August 27, 2026:
 - Hardware: CERN-OHL-P-2.0
 - Software and firmware: Apache-2.0
 - Documentation: CC-BY-4.0 unless a file states otherwise
+
+<a href="https://oshwa.github.io/certification-mark-generator/facts">
+  <img src="hardware/oshw-license-facts.svg" alt="Open source license facts: hardware CERN-OHL-P-2.0, software Apache-2.0, documentation CC-BY-4.0" width="380" />
+</a>
 
 The source package, licensing map, and mark guidance are summarized in
 [`docs/OSHWA_COMPLIANCE.md`](docs/OSHWA_COMPLIANCE.md). Full license texts are
