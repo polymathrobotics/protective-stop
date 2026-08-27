@@ -30,7 +30,7 @@ set). Moves TLS working buffers to PSRAM → the DERP handshake stops competing 
 the last few KB of internal RAM.
 - **Risk:** LOW–MOD. TLS runs in the derp_tx/net_io tasks, not ISR/cache-disabled.
   HW AES/SHA DMA from PSRAM is supported by IDF (esp-tls uses it widely); crypto is
-  slightly slower, but DERP only carries tiny 10 Hz pstop frames — a *working*
+  slightly slower, but DERP only carries tiny, low-rate pstop frames — a *working*
   reconnect beats an OOM. Does NOT affect the WG/pstop datapath crypto.
 - **Validate:** reproduce the low-internal-RAM condition, force a DERP drop, confirm
   `derp_connected` returns true and a backend check-in lands.

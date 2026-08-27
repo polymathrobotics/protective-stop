@@ -201,7 +201,7 @@ Option A (LAN-IP peer) instead.
 2. `tailscale ping <remote>` from the same-LAN machine → expect
    `pong ... via 192.168.x.x:51820` (direct), not `via DERP`.
 3. `GET /admin/api/peers` → machine peer `direct:true`; `pstop_sent`/`replies`
-   advance at 10 Hz; ring goes blue→green on arm.
+   advance together at the configured rate; ring goes blue→green on arm.
 4. Repeat on **USB-NCM** and **WiFi** to confirm no regression on the transports
    that already worked.
 

@@ -195,8 +195,8 @@ for i in $(seq 1 60); do
 done
 ```
 
-If after 5 min `boot_count` is 0 and `pstop_sent` grows monotonically at
-10 Hz, the build is healthy.
+If after 5 min `boot_count` is 0 and `pstop_sent` grows monotonically at the
+configured heartbeat rate, the build is healthy.
 
 ## Required tools on the bench host
 

@@ -1212,8 +1212,8 @@ static void parse_peers_from_map_response(microlink_t * ml, cJSON * root)
          * under a peer-churn burst leaves a NAT'd unit unable to relay (DERP
          * down / homed on the wrong region -> unreachable inbound). Push pinned
          * peers to the FRONT and wait much longer so they are never dropped; the
-         * bulk of peers keep the paced back-of-queue send that protects the 10 Hz
-         * heartbeat. Coord is not the safety path and its watchdog is 120 s, so a
+         * bulk of peers keep the paced back-of-queue send that protects safety
+         * heartbeat traffic. Coord is not the safety path and its watchdog is 120 s, so a
          * bounded wait here is safe. */
     bool pinned = ml_wg_is_pinned_peer(ml, update->vpn_ip);
     BaseType_t sent = pinned ? xQueueSendToFront(ml->peer_update_queue, &update, pdMS_TO_TICKS(2000))

@@ -1648,7 +1648,7 @@ static void neg_pin_tick(microlink_t * ml)
 
 /* Consume the MBB executor's outcome (posted by the DERP I/O task). Runs on
  * the wg_mgr 3 s self-heal cadence — the advert/announce stays single-writer
- * (this task), off the 10 Hz safety send path. */
+ * (this task), off the safety send path. */
 static void neg_consume_mbb_outcome(microlink_t * ml)
 {
   uint8_t oc = ml->mbb_outcome;
@@ -4373,7 +4373,7 @@ static void self_heal_rehome(microlink_t * ml)
   s_diag_selfheal_calls++;
   /* §7: consume any MBB outcome first — commit => advert owner + announce;
    * rollback => region ban. Runs here (3 s cadence, wg_mgr task) so the
-   * negotiator stays single-writer and off the 10 Hz safety send path. */
+   * negotiator stays single-writer and off the safety send path. */
   neg_consume_mbb_outcome(ml);
   /* Stage-1 pin->MBB: converge the operator region pin gaplessly (same
    * cadence, same single-writer command interface as autoneg). */
