@@ -25,6 +25,7 @@
  *   POST /api/led_brightness?pct=N  Set + persist master LED brightness (0..100%)
  *   POST /api/ring_led1?on=0|1    Locate mode: only LED 1 white (auto-expires)
  *   POST /api/enter_download      Enter USB download (flashing) mode
+ *   GET/POST /api/role            Read or persist role; POST reboots to apply
  *
  * The admin routes (/admin/...) live in microlink (ml_config_httpd.c, ml_app.c).
  * Full reference for both servers: docs/API.md.
@@ -471,14 +472,13 @@ static esp_err_t page_state(httpd_req_t * req)
       n += snprintf(
         buf + n,
         cap - n,
-        "%s{\"id\":%lu,\"ip\":%lu,\"state\":%lu,\"stop_only\":%d,\"claimed_role\":\"%s\",\"age_ms\":%lu,"
-        "\"rtt_ms\":%lu,\"wg_rtt_ms\":%lu,\"wg_rtt_age_ms\":%lu,\"wg_direct\":%d}",
+        "%s{\"id\":%lu,\"ip\":%lu,\"state\":%lu,\"stop_only\":%d,\"age_ms\":%lu,\"rtt_ms\":%lu,"
+        "\"wg_rtt_ms\":%lu,\"wg_rtt_age_ms\":%lu,\"wg_direct\":%d}",
         first ? "" : ",",
         (unsigned long)rid,
         (unsigned long)rip,
         (unsigned long)atomic_load(&g_dcs_machn_r_state[i]),
         (int)atomic_load(&g_dcs_machn_r_stop_only[i]),
-        pstop_aux_role_str((pstop_aux_role_t)atomic_load(&g_dcs_machn_r_role[i])),
         (unsigned long)atomic_load(&g_dcs_machn_r_age_ms[i]),
         (unsigned long)atomic_load(&g_dcs_machn_r_rtt_ms[i]),
         (unsigned long)wg_rtt2,
@@ -1215,12 +1215,13 @@ static esp_err_t api_operators_post(httpd_req_t * req)
   return operators_send_list(req, true);
 }
 
+#ifndef DCS_PAGE_MACHINE
 /* Remote self-role config: this remote announces stop-only vs operator in every
  * pstop frame (see common/pstop_aux_channel.h). The machine ANDs an operator
  * claim with its own allowlist, so promoting a remote here only *enables* the
  * possibility of re-arm; the machine still gates it.
  *   GET  /api/role                            -> {"ok":true,"role":"stop_only"}
- *   POST /api/role?role=stop_only|operator    set + persist, applies live. */
+ *   POST /api/role?role=stop_only|operator    persist and reboot. */
 static esp_err_t role_send(httpd_req_t * req, bool ok)
 {
   char buf[64];
@@ -1269,8 +1270,18 @@ static esp_err_t api_role_post(httpd_req_t * req)
     (void)httpd_resp_set_status(req, "500 Internal Server Error");
     return httpd_resp_sendstr(req, "{\"ok\":false,\"error\":\"NVS write failed\"}");
   }
-  return role_send(req, true);
+  char resp[112];
+  int len = snprintf(
+    resp,
+    sizeof(resp),
+    "{\"ok\":true,\"role\":\"%s\",\"message\":\"rebooting to apply role\"}",
+    pstop_aux_role_str((pstop_aux_role_t)role));
+  (void)httpd_resp_send(req, resp, len);
+  vTaskDelay(pdMS_TO_TICKS(200));
+  esp_restart();
+  return ESP_OK;
 }
+#endif
 
 /* === Public registration =================================================== */
 void dcs_admin_pages_register(ml_app_t * app)
@@ -1302,6 +1313,8 @@ void dcs_admin_pages_register(ml_app_t * app)
   (void)ml_app_add_page(app, "/api/enter_download", HTTP_POST, api_enter_download);
   (void)ml_app_add_page(app, "/api/operators", HTTP_GET, api_operators_get);
   (void)ml_app_add_page(app, "/api/operators", HTTP_POST, api_operators_post);
+#ifndef DCS_PAGE_MACHINE
   (void)ml_app_add_page(app, "/api/role", HTTP_GET, api_role_get);
   (void)ml_app_add_page(app, "/api/role", HTTP_POST, api_role_post);
+#endif
 }

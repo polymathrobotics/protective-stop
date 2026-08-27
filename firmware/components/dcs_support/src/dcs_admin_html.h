@@ -200,7 +200,7 @@ static const char k_index_html[] =
   "<div id='btnstat' style='font-size:1.4em;font-weight:bold;margin:6px 0'>-</div>"
   "<div id='btn' class='bd'>-</div>"
   "<p style='margin-top:1em'><b>Remote role</b> "
-  "<small>(operator may re-arm the machine; stop-only may only STOP)</small></p>"
+  "<small>(operator may re-arm the machine; stop-only may only STOP; changing reboots)</small></p>"
   "<p>current: <span id='rolest'>-</span>"
   " &nbsp;<button class='btn' id='rolebtn' type='button'>toggle</button></p>"
 #endif
@@ -493,8 +493,8 @@ static const char k_index_html[] =
   "document.getElementById('rolebtn').addEventListener('click',async()=>{"
   "const cur=(document.getElementById('rolest').textContent||'').trim().toLowerCase();"
   "const next=(cur==='operator')?'stop_only':'operator';"
-  "if(!confirm('Set remote role to '+next+'?'))return;"
-  "try{await authFetch('/api/role?role='+next,{method:'POST'});poll();}catch(e){}"
+  "if(!confirm('Set remote role to '+next+' and reboot?'))return;"
+  "try{await authFetch('/api/role?role='+next,{method:'POST'});}catch(e){}"
   "});"
 #endif
   "document.getElementById('dbtn').addEventListener('click',async()=>{"

@@ -15,7 +15,6 @@
 #include <utility>
 
 #include "protective_stop_machine/json_lite.hpp"
-#include "pstop_aux_channel.h"
 
 namespace protective_stop_machine
 {
@@ -160,12 +159,6 @@ void HardwareMachineBackend::parse_state(const std::string & body, MachineSnapsh
         std::snprintf(buf, sizeof(buf), "%08x", id);
         r.device_id = buf;
         r.bond_state = static_cast<uint8_t>(item.num_at("state", 2));
-        r.stop_only = item.num_at("stop_only", 0) != 0.0;
-        // claimed_role is a string in the machn state.json; map to the enum.
-        const std::string role_str = item.str_at("claimed_role", "");
-        r.claimed_role = (role_str == "operator") ? PSTOP_AUX_ROLE_OPERATOR
-          : (role_str == "stop_only") ? PSTOP_AUX_ROLE_STOP_ONLY
-          : PSTOP_AUX_ROLE_UNSPECIFIED;
         r.reply_age_ms = static_cast<uint32_t>(item.num_at("age_ms", 0));
         r.loop_rtt_ms = static_cast<uint32_t>(item.num_at("rtt_ms", 0));
         r.disco_rtt_ms = static_cast<uint32_t>(item.num_at("wg_rtt_ms", 0));

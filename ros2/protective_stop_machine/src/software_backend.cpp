@@ -14,7 +14,6 @@
 #include <mutex>
 #include <string>
 #include <thread>
-#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -48,16 +47,10 @@ struct SoftwareMachineBackend::Impl
   MachineSnapshot snap;  // guarded
   MachineTiming timing;  // guarded (read by the C remote-details callback)
 
-  // Remote-announced role (aux uplink), keyed by remote id. Touched ONLY on the
-  // machine thread (written in run(), read from cb_remote_details and
-  // rebuild_snapshot, both of which run on that thread), so it needs no lock.
-  std::unordered_map<uint32_t, uint8_t> claimed_roles;
-  pstop_aux_role_t role_of(uint32_t id) const
-  {
-    auto it = claimed_roles.find(id);
-    return (it != claimed_roles.end()) ? static_cast<pstop_aux_role_t>(it->second)
-                                       : PSTOP_AUX_ROLE_UNSPECIFIED;
-  }
+  // The callback has no context argument. These fields expose only the BOND
+  // currently being processed; pstop_c latches stop_only into the client.
+  uint32_t bond_role_id{0};
+  pstop_aux_role_t bond_role{PSTOP_AUX_ROLE_UNSPECIFIED};
 
   void run();
   void rebuild_snapshot();  // caller holds no lock; locks internally
@@ -95,9 +88,11 @@ static remote_details_t cb_remote_details(const device_id_t * id)
       stop_only = software_remote_is_stop_only(g_impl->cfg, (id != nullptr) ? id->data : 0U);
     }
     // AND-rule: operator authority also requires an explicit OPERATOR
-    // announcement (aux uplink); otherwise fail safe to stop-only. The role map
-    // is machine-thread-only, so it is read outside the mtx.
-    if (!stop_only && !pstop_aux_role_is_operator(g_impl->role_of((id != nullptr) ? id->data : 0U))) {
+    // announcement in the BOND currently exposed by the machine thread.
+    const uint32_t remote_id = (id != nullptr) ? id->data : 0U;
+    const pstop_aux_role_t role =
+      (g_impl->bond_role_id == remote_id) ? g_impl->bond_role : PSTOP_AUX_ROLE_UNSPECIFIED;
+    if (!stop_only && !pstop_aux_role_is_operator(role)) {
       stop_only = true;
     }
   }
@@ -215,36 +210,24 @@ void SoftwareMachineBackend::Impl::run()
       // dereference before its NULL guard); a fresh BOND re-bonds.
       bool known = pstop_remote_get(&machine.remotes, &req_msg.id) != nullptr;
 
-      // Aux uplink: record the announced role BEFORE processing so the AND-rule
-      // in cb_remote_details sees it at bond. A role transition on an already-
-      // bonded remote is contained here (drop bond + STOP) so it must re-bond
-      // with the new authorization (invariant 3). Only a bonded remote (or an
-      // incoming BOND) may touch the table or trigger the STOP: the CRC is a
-      // public integrity check, not auth, so an arbitrary/spoofed id must not be
-      // able to force a STOP; rebuild_snapshot() prunes the table to bonded ids.
-      if (req_msg.checksum == req_msg.calculated_checksum &&
-          (known || req_msg.message == PSTOP_MESSAGE_BOND)) {
-        pstop_aux_role_t role = pstop_aux_decode_role(&req_msg);
-        auto it = claimed_roles.find(req_msg.id.data);
-        bool changed = (it != claimed_roles.end()) && (it->second != static_cast<uint8_t>(role));
-        claimed_roles[req_msg.id.data] = static_cast<uint8_t>(role);
-        if (changed && known) {
-          pstop_remote_data_t * c = pstop_remote_get(&machine.remotes, &req_msg.id);
-          if (c != nullptr) {
-            pstop_remote_deactivate(c);
-          }
-          machine_stop_robot(&machine);
-        }
-      }
-
       if (known || req_msg.message == PSTOP_MESSAGE_BOND) {
+        bond_role_id = 0U;
+        bond_role = PSTOP_AUX_ROLE_UNSPECIFIED;
+        if (req_msg.checksum == req_msg.calculated_checksum &&
+          req_msg.message == PSTOP_MESSAGE_BOND &&
+          req_msg.receiver_id.data == cfg.machine_id)
+        {
+          bond_role_id = req_msg.id.data;
+          bond_role = pstop_aux_decode_role(&req_msg);
+        }
+        pstop_message_init(&resp_msg);
         if (machine_process_message(&machine, &req_msg, &resp_msg) == PSTOP_OK) {
-          // Aux downlink (machine -> remote feedback): reserved today, emit zero.
-          pstop_aux_encode_feedback_none(&resp_msg);
           pstop_message_encode(&resp_msg, respbytes);
           transport_udp_write(&udp, respbytes, PSTOP_MESSAGE_SIZE,
               reinterpret_cast<struct sockaddr_in *>(&client));
         }
+        bond_role_id = 0U;
+        bond_role = PSTOP_AUX_ROLE_UNSPECIFIED;
       }
     }
     rebuild_snapshot();
@@ -285,21 +268,9 @@ void SoftwareMachineBackend::Impl::rebuild_snapshot()
       PSTOP_REMOTE_INITING ? 1 : (c->remote_state == PSTOP_REMOTE_STOPPED ? 3 : 2);
     r.in_use = rs->remote_stop_id == c->local_remote_id;
     r.stop_only = c->is_stop_only;
-    r.claimed_role = static_cast<uint8_t>(role_of(c->remote_data.remote_id.data));
     // reply_age / rtt / rebonds are microlink-side metrics not tracked by
     // pstop_c; left 0 on the software backend.
     s.remotes.push_back(std::move(r));
-  }
-
-  // Forget roles for remotes that are no longer bonded (the counterpart to
-  // machn's claimed_role_forget()): reconcile the table against the live bond
-  // set every iteration so it can never grow past the bond-slot count, even if
-  // a remote times out without an explicit unbond. Runs on this (machine)
-  // thread, the only accessor of claimed_roles.
-  for (auto it = claimed_roles.begin(); it != claimed_roles.end();) {
-    device_id_t did = {it->first};
-    it = (pstop_remote_get(&machine.remotes, &did) == nullptr) ? claimed_roles.erase(it)
-                                                               : std::next(it);
   }
 
   std::lock_guard<std::mutex> lk(mtx);

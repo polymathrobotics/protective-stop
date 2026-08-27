@@ -274,14 +274,7 @@ extern "C"
  */
 #define DCS_MACHN_MAX_REMOTES 8
   void dcs_publish_machn_remote(
-    int slot,
-    uint32_t remote_id,
-    uint32_t ip,
-    uint32_t state,
-    uint32_t age_ms,
-    uint32_t rtt_ms,
-    bool stop_only,
-    uint8_t claimed_role);
+    int slot, uint32_t remote_id, uint32_t ip, uint32_t state, uint32_t age_ms, uint32_t rtt_ms, bool stop_only);
 
   /**
  * @brief Publish the machine-role arming/restart state (comparator, once per
@@ -331,9 +324,8 @@ extern "C"
    * outbound pstop frame. Loaded from NVS at boot; stop_only until promoted. */
   uint8_t dcs_role_get(void);
 
-  /** @brief Set this remote's announced role (stop_only or operator). Validates
-   * the value, persists to NVS, and republishes the live RAM mirror only on a
-   * successful write. Returns ESP_ERR_INVALID_ARG for any other value. */
+  /** @brief Persist this remote's role for the next boot. The active role is
+   * immutable for a boot so every machine observes it through a fresh bond. */
   esp_err_t dcs_role_set(uint8_t role);
 
   /**

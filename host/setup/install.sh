@@ -12,9 +12,6 @@ D="$(cd "$(dirname "$0")" && pwd)"
 
 # --- manager-agnostic: stable interface name -------------------------------
 sudo cp "$D/70-esp-pstop.link" /etc/systemd/network/70-esp-pstop.link
-# Keep ModemManager off the pstop's serial ports so esptool can flash it
-# (MM grabs the ttyACM on each download-mode re-enumeration otherwise).
-sudo cp "$D/71-esp-pstop-mm-ignore.rules" /etc/udev/rules.d/71-esp-pstop-mm-ignore.rules
 sudo udevadm control --reload
 
 nm_active() { command -v nmcli >/dev/null 2>&1 && systemctl is-active --quiet NetworkManager 2>/dev/null; }

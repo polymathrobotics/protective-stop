@@ -361,7 +361,6 @@ void MachineBridgeNode::publish_tick()
     bonded_remote.bond_state = remote.bond_state;
     bonded_remote.in_use = remote.in_use;
     bonded_remote.stop_only = remote.stop_only;
-    bonded_remote.claimed_role = remote.claimed_role;
     bonded_remote.reply_age_ms = remote.reply_age_ms;
     bonded_remote.loop_rtt_ms = remote.loop_rtt_ms;
     bonded_remote.disco_rtt_ms = remote.disco_rtt_ms;

@@ -5,7 +5,7 @@
 
 Spins up the host-side machine (`host/machine_app_runner`, which links the
 unmodified pstop_c safety library) and drives it with N scripted software
-remotes that speak the real 40-byte wire protocol (CRC16 poly 0x8D95). Each
+remotes that speak the real 48-byte v2 wire protocol (CRC16 poly 0x8D95). Each
 remote carries its own device_id and counter sequence, so this exercises the
 library's real multi-remote bookkeeping — not a mock.
 
@@ -47,13 +47,15 @@ import time
 # id independently).
 # ---------------------------------------------------------------------------
 # Wire protocol — MUST track pstop_c (config.h PSTOP_VERSION, pstop_msg.h codewords).
-# v1 uses far-Hamming codewords so a zeroed/stuck/single-bit message -> invalid -> STOP.
-PSTOP_VERSION = 0x01
+# v2 retains the far-Hamming message codewords and adds two padding fields.
+PSTOP_VERSION = 0x02
 MSG_OK, MSG_STOP, MSG_BOND, MSG_UNBOND, MSG_UNKNOWN = 0x55, 0x92, 0xAD, 0x6A, 0x0F
 NAMES = {0x55: 'OK', 0x92: 'STOP', 0xAD: 'BOND', 0x6A: 'UNBOND', 0x0F: 'UNKNOWN'}
-SIZE = 40
+SIZE = 48
 MACHINE_ID = 0x01020304
 HEARTBEAT_MS = 1000
+AUX_VERSION = 0x01
+ROLE_STOP_ONLY, ROLE_OPERATOR = 1, 2
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 RUNNER = os.path.join(HERE, '..', 'host', 'machine_app_runner')
@@ -69,18 +71,31 @@ def crc16(data: bytes) -> int:
     return crc
 
 
-def encode(remote_id, message, stamp, received_stamp, counter, received_counter, corrupt=False):
+def encode(
+    remote_id,
+    message,
+    stamp,
+    received_stamp,
+    counter,
+    received_counter,
+    corrupt=False,
+    role=ROLE_OPERATOR,
+    receiver_id=MACHINE_ID,
+):
+    padding1 = AUX_VERSION | (role << 8)
     body = struct.pack(
-        '<BBQQIIIII',
+        '<BBQQIIIIIII',
         PSTOP_VERSION,
         message,
         stamp,
         received_stamp,
         remote_id,
-        MACHINE_ID,
+        receiver_id,
         HEARTBEAT_MS,
         counter,
         received_counter,
+        padding1,
+        0,
     )
     crc = crc16(body)
     if corrupt:
@@ -89,23 +104,29 @@ def encode(remote_id, message, stamp, received_stamp, counter, received_counter,
 
 
 def decode(data):
-    (_ver, message, stamp, _rs, _snd, _rcv, _hb, counter, received_counter) = struct.unpack('<BBQQIIIII', data[:38])
-    (checksum,) = struct.unpack('<H', data[38:40])
+    (version, message, stamp, _rs, _snd, _rcv, _hb, counter, received_counter, padding1, padding2) = struct.unpack(
+        '<BBQQIIIIIII', data[:46]
+    )
+    (checksum,) = struct.unpack('<H', data[46:48])
     return dict(
+        version=version,
         message=message,
         stamp=stamp,
         counter=counter,
         received_counter=received_counter,
-        crc_ok=(checksum == crc16(data[:38])),
+        padding1=padding1,
+        padding2=padding2,
+        crc_ok=(checksum == crc16(data[:46])),
     )
 
 
 class SoftRemote:
     """A single scripted remote holding its own counter handshake state."""
 
-    def __init__(self, remote_id, host, port, name=None):
+    def __init__(self, remote_id, host, port, name=None, role=ROLE_OPERATOR):
         self.id = remote_id
         self.name = name or f'0x{remote_id:08X}'
+        self.role = role
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.sock.connect((host, port))
         self.sock.settimeout(0.4)
@@ -121,7 +142,16 @@ class SoftRemote:
         """Send one message, absorb the machine reply, return reply dict/None."""
         self.counter += 1
         msg = bad_type if bad_type is not None else message
-        pkt = encode(self.id, msg, self._now(), self.last_rx_stamp, self.counter, self.last_rx_counter, corrupt=corrupt)
+        pkt = encode(
+            self.id,
+            msg,
+            self._now(),
+            self.last_rx_stamp,
+            self.counter,
+            self.last_rx_counter,
+            corrupt=corrupt,
+            role=self.role,
+        )
         try:
             self.sock.send(pkt)
             reply = decode(self.sock.recv(SIZE))
@@ -141,7 +171,7 @@ class SoftRemote:
         deadline = time.monotonic() + timeout_s
         while time.monotonic() < deadline:
             self.counter = 1
-            pkt = encode(self.id, MSG_BOND, self._now(), 0, 1, 0)
+            pkt = encode(self.id, MSG_BOND, self._now(), 0, 1, 0, role=self.role)
             try:
                 self.sock.send(pkt)
                 reply = decode(self.sock.recv(SIZE))
@@ -155,11 +185,21 @@ class SoftRemote:
             time.sleep(0.3)
         return False
 
-    def send_noreply(self, message, corrupt=False, bad_type=None):
+    def send_noreply(self, message, corrupt=False, bad_type=None, role=None, receiver_id=MACHINE_ID):
         """Fire a packet and do NOT wait for a reply (for flood/garbage tests)."""
         self.counter += 1
         msg = bad_type if bad_type is not None else message
-        pkt = encode(self.id, msg, self._now(), self.last_rx_stamp, self.counter, self.last_rx_counter, corrupt=corrupt)
+        pkt = encode(
+            self.id,
+            msg,
+            self._now(),
+            self.last_rx_stamp,
+            self.counter,
+            self.last_rx_counter,
+            corrupt=corrupt,
+            role=self.role if role is None else role,
+            receiver_id=receiver_id,
+        )
         try:
             self.sock.send(pkt)
         except OSError:
@@ -177,7 +217,7 @@ class SoftRemote:
             for k in keepalives:
                 k.send(MSG_OK)
             self.counter = 1
-            pkt = encode(self.id, MSG_BOND, self._now(), 0, 1, 0)
+            pkt = encode(self.id, MSG_BOND, self._now(), 0, 1, 0, role=self.role)
             try:
                 self.sock.send(pkt)
                 reply = decode(self.sock.recv(SIZE))
@@ -324,6 +364,12 @@ def group_a_single(verbose):
     with Machine(verbose=verbose) as m:
         a = SoftRemote(RID_A, '127.0.0.1', m.port)
         assert a.bond(), 'bond failed'
+        check(
+            a.last_reply['version'] == PSTOP_VERSION
+            and a.last_reply['padding1'] == 0
+            and a.last_reply['padding2'] == 0,
+            'A0 machine reply initializes version and aux padding',
+        )
         s = Session([a])
         r = s.run(1.2, {a: MSG_OK})
         check(r[a.id] == MSG_STOP, 'A1 OK-stream before arming stays STOP (I3)', NAMES.get(r[a.id]))
@@ -339,6 +385,9 @@ def group_a_single(verbose):
         check(r[a.id] == MSG_OK, 'A2b steady OK arms after min delay (#59)', NAMES.get(r[a.id]))
         r = arm(s, a, [])
         check(r[a.id] == MSG_OK, 'A3 800ms STOP->OK arms', NAMES.get(r[a.id]))
+        a.send_noreply(MSG_BOND, role=ROLE_STOP_ONLY, receiver_id=0xDEADBEEF)
+        r = s.run(0.6, {a: MSG_OK})
+        check(r[a.id] == MSG_OK, 'A3b wrong-target role claim cannot drop the live bond', NAMES.get(r[a.id]))
         s.run(0.2, {a: MSG_STOP})
         r = s.run(0.1, {a: MSG_OK})
         check(r[a.id] == MSG_STOP, 'A4a blip while armed stops, immediate OK refused', NAMES.get(r[a.id]))
@@ -489,6 +538,17 @@ def group_e_capacity_allow(verbose):
         r = s.run(1.0, {a: MSG_OK, so: MSG_STOP})
         check(r[a.id] == MSG_STOP, 'E3b stop_only remote can still STOP the robot (I1)', f'A={NAMES.get(r[a.id])}')
         a.close()
+        so.close()
+
+    # E4 remote-announced stop-only must deny authority even when host policy
+    # otherwise grants every unlisted remote operator eligibility.
+    with Machine(verbose=verbose) as m:
+        so = SoftRemote(RID_A, '127.0.0.1', m.port, 'claimed_stop_only', role=ROLE_STOP_ONLY)
+        assert so.bond(), 'stop-only claim bond failed'
+        s = Session([so])
+        s.run(0.8, {so: MSG_STOP})
+        r = s.run(1.2, {so: MSG_OK})
+        check(r[so.id] == MSG_STOP, 'E4 stop-only claim cannot arm despite host default policy', NAMES.get(r[so.id]))
         so.close()
 
 

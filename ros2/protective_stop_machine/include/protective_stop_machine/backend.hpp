@@ -24,7 +24,6 @@ struct RemoteInfo
   uint8_t bond_state{0};  // 0 empty, 1 connecting, 2 bonded
   bool in_use{false};  // owns the current arming cycle
   bool stop_only{false};
-  uint8_t claimed_role{0};  // remote-announced role (pstop_aux_role_t: 0 unspecified/1 stop-only/2 operator)
   uint32_t reply_age_ms{0};
   uint32_t loop_rtt_ms{0};
   uint32_t disco_rtt_ms{0};

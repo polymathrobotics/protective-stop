@@ -157,7 +157,6 @@ atomic_uint_fast32_t g_dcs_machn_r_age_ms[DCS_MACHN_MAX_REMOTES];
 atomic_uint_fast32_t g_dcs_machn_r_rtt_ms[DCS_MACHN_MAX_REMOTES];
 atomic_uint_fast32_t g_dcs_machn_r_ip[DCS_MACHN_MAX_REMOTES];
 atomic_uint_fast32_t g_dcs_machn_r_stop_only[DCS_MACHN_MAX_REMOTES];
-atomic_uint_fast32_t g_dcs_machn_r_role[DCS_MACHN_MAX_REMOTES]; /* remote-announced role (pstop_aux_role_t) */
 
 /* Operator allowlist RAM cache. Lock-free for readers: the safety cores scan
  * these atomics from their remote_details callback, never touching NVS/flash.
@@ -273,10 +272,7 @@ esp_err_t dcs_operator_del(uint32_t remote_id)
   return r;
 }
 
-/* Remote self-role RAM mirror. Lock-free for the safety cores: both cores read
- * this atomic each tick to encode the announced role into every pstop frame, so
- * the two cores stay byte-identical (the comparator memcmp still covers it). NVS
- * is the source of truth; the mirror is loaded at boot and updated on set. */
+/* Remote self-role RAM mirror, loaded once at boot and immutable until reboot. */
 static atomic_uint_fast32_t g_dcs_role;
 
 static void dcs_role_load_from_nvs(void)
@@ -296,15 +292,7 @@ esp_err_t dcs_role_set(uint8_t role)
   if ((role != PSTOP_AUX_ROLE_STOP_ONLY) && (role != PSTOP_AUX_ROLE_OPERATOR)) {
     return ESP_ERR_INVALID_ARG;
   }
-  /* NVS stays the source of truth: only publish to the live mirror once the
-   * persist succeeds, so a failed write leaves the announced role unchanged. */
-  esp_err_t r = dcs_nvs_write_role(role);
-  if (r != ESP_OK) {
-    return r;
-  }
-  atomic_store(&g_dcs_role, role);
-  ESP_LOGI(TAG, "remote role set -> %s", pstop_aux_role_str((pstop_aux_role_t)role));
-  return ESP_OK;
+  return dcs_nvs_write_role(role);
 }
 
 /* === DERP region auto-negotiation: §4.2 primary-machine feed ===============
@@ -640,14 +628,7 @@ void dcs_publish_relay_fault(uint32_t fault_a_ticks, uint32_t fault_b_ticks, boo
 }
 
 void dcs_publish_machn_remote(
-  int slot,
-  uint32_t remote_id,
-  uint32_t ip,
-  uint32_t state,
-  uint32_t age_ms,
-  uint32_t rtt_ms,
-  bool stop_only,
-  uint8_t claimed_role)
+  int slot, uint32_t remote_id, uint32_t ip, uint32_t state, uint32_t age_ms, uint32_t rtt_ms, bool stop_only)
 {
   if ((slot < 0) || (slot >= DCS_MACHN_MAX_REMOTES)) {
     return;
@@ -658,7 +639,6 @@ void dcs_publish_machn_remote(
   atomic_store(&g_dcs_machn_r_age_ms[slot], age_ms);
   atomic_store(&g_dcs_machn_r_rtt_ms[slot], rtt_ms);
   atomic_store(&g_dcs_machn_r_stop_only[slot], stop_only ? 1u : 0u);
-  atomic_store(&g_dcs_machn_r_role[slot], claimed_role);
 }
 
 void dcs_publish_machn_arm(uint32_t remote_stop_id, uint32_t restart_state)
