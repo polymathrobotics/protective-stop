@@ -1,97 +1,56 @@
-# OSHWA Certification Compliance Checklist
+# OSHWA certification
 
-Tracking progress toward **OSHWA Open Source Hardware certification** for
-the Polymath Protective Stop.
+Protective Stop is certified open source hardware through the Open Source
+Hardware Association certification program.
 
-- Certification process: <https://certification.oshwa.org/process.html>
-- Open Source Hardware definition: <https://www.oshwa.org/definition/>
+| Field | Value |
+|---|---|
+| Project | Protective Stop |
+| OSHWA UID | [`US002846`](https://certification.oshwa.org/us002846.html) |
+| Certified version | v1.2 |
+| Certification date | August 27, 2026 |
+| Responsible party | Open Source Safety Consortium |
+| Hardware license | CERN-OHL-P-2.0 |
+| Software license | Apache-2.0 |
+| Documentation license | CC-BY-4.0 |
 
-OSHWA certification is a **self-certification**: the creator attests, via
-an online license agreement, that the product meets the community
-[OSHW definition](https://www.oshwa.org/definition/), registers each
-unique product to receive a **UID** (e.g. `US000123`), and renews yearly.
-The bar is that everything **within our control** — hardware design,
-firmware, and documentation — is openly licensed and shared in editable
-form; third-party components are allowed but must have freely accessible,
-shareable datasheets.
+OSHWA certification confirms that the design meets the Open Source Hardware
+Definition and that the source needed to study, modify, make, and redistribute
+the hardware is available under open licenses. It is not a functional-safety
+certification and does not by itself establish SIL or PL performance.
 
-## Status legend
+## Published source
 
-- **Met** — satisfies the requirement today.
-- **Partial** — some artifacts exist but are incomplete or not in the
-  required editable form.
-- **TODO** — not yet done.
+The certified source package is maintained in this public repository:
 
-## Requirements
+- Editable enclosure source and exports: [`hardware/`](../hardware/)
+- Bill of materials and wiring: [`hardware/README.md`](../hardware/README.md)
+- Photographed build guide: [`hardware/ASSEMBLY.md`](../hardware/ASSEMBLY.md)
+- Firmware and host software: [`firmware/`](../firmware/) and [`host/`](../host/)
+- Design, API, testing, and safety documentation: [`docs/`](./)
+- License texts: [`LICENSE`](../LICENSE) and [`LICENSES/`](../LICENSES/)
 
-| # | Requirement (OSHWA) | This repo | Status |
-|---|---------------------|-----------|--------|
-| 1 | Product meets the OSHW definition (freely usable, modifiable, redistributable, no field-of-use restrictions) | Apache-2.0 (software) + CERN-OHL-P-2.0 (hardware) + CC-BY-4.0 (docs), texts in `LICENSES/` | Met |
-| 2 | **Design files released in the original, editable format** (native CAD, not just exports) | All custom parts live in the FreeCAD source (`casing.FCStd`); STL/3MF are its exports, STEP files are vendor fit references | Met |
-| 3 | **Schematics** available and, ideally, in editable EDA source | No custom electronics in the design; the off-the-shelf carrier board's schematic is included and linked to the vendor's copy (`hardware/README.md`) | Met |
-| 4 | **Bill of Materials (BOM)** — parts, quantities, references, sources | `hardware/README.md` BOM with pinned listings (board, ring, E-stop) | Met |
-| 5 | **Assembly / build instructions** | `hardware/ASSEMBLY.md`: photo build guide, print through commissioning | Met |
-| 6 | Clearly specify which portion of the design is released under which license | Root `README.md` states the split; per-file manifest in `hardware/README.md` | Met |
-| 7 | Firmware/software openly licensed (OSI-approved) or interfaces fully documented | Firmware + host are Apache-2.0 (OSI-approved); protocol documented in `docs/` | Met |
-| 8 | Third-party components documented with accessible, shareable datasheets | Datasheet list in `hardware/README.md` (ESP32-S3, W5500, board schematic, WS2812B, NKK FF01) | Met |
-| 9 | Documentation licensed (recommended CC-BY 4.0) | CC-BY-4.0 declared; text in `LICENSES/CC-BY-4.0.txt` | Met |
-| 10 | Hardware licensed (recommended CERN-OHL family) | CERN-OHL-P-2.0 declared; text in `LICENSES/CERN-OHL-P-2.0.txt` | Met |
-| 11 | Design files hosted in a public, accessible location | Repo is the intended host; must be public and complete | Partial |
-| 12 | Register each unique product with OSHWA and obtain a UID | Not started | TODO |
-| 13 | Complete the OSHWA license agreement / self-certification | Not started | TODO |
-| 14 | Correct use of the OSHWA certification mark + UID marking (on product/docs) once certified | Not started | TODO |
+The design uses an off-the-shelf ESP32-S3 Ethernet carrier, LED ring, and DPST
+normally closed stop switch. Their source links and freely accessible
+datasheets are listed in [`hardware/README.md`](../hardware/README.md).
 
-## Recommended license split
+## Certification mark
 
-OSHWA certification requires a license per element. The conventional,
-certification-friendly split is:
+The OSHW certification mark may be used with UID `US002846` on the enclosure,
+documentation, packaging, and project material. Follow the official
+[mark usage guidelines](https://certification.oshwa.org/mark-usage.html) and use
+the artwork generated from the
+[registry entry](https://certification.oshwa.org/us002846.html).
 
-- **Hardware** (enclosure CAD, mechanical design, any custom board):
-  **CERN-OHL-P-2.0** (permissive) or **CERN-OHL-S-2.0** (strongly
-  reciprocal). CERN-OHL-P pairs naturally with the permissive Apache-2.0
-  firmware; choose CERN-OHL-S if reciprocal share-alike on hardware is
-  wanted.
-- **Software / firmware:** **Apache-2.0** — already in place (`LICENSE`).
-- **Documentation:** **CC-BY-4.0** (attribution).
+OSHWA's approved plaintext form is:
 
-Recommendation: **CERN-OHL-P-2.0 (hardware) + Apache-2.0 (software) +
-CC-BY-4.0 (docs)** for a coherent permissive stack. Add a top-level note
-(e.g. in `README.md` or a `LICENSES/` set) stating which license governs
-which directory (requirement #6).
+```text
+[OSHW] US002846 | Certified open source hardware | oshwa.org/cert
+```
 
-## What's met vs. what remains
+## Maintenance
 
-**Met / close:**
-
-- Software licensing (Apache-2.0, OSI-approved) — requirement #7.
-- An editable enclosure source exists (`casing.FCStd`) — good progress on
-  #2.
-- Protocol/interface documentation exists in `docs/`.
-
-**Remaining before applying:**
-
-1. Finish and clean the hardware design (`hardware/` is WIP — see
-   `hardware/README.md`); ensure **every custom part ships editable
-   source**, not only STL/STEP exports (#2, #3).
-2. Author a complete **BOM** and **assembly instructions** (#4, #5).
-3. Declare the **hardware** and **documentation** licenses and add a
-   per-directory license statement (#1, #6, #9, #10).
-4. Collect/link **datasheets** for the commercial carrier board and any
-   third-party parts (#8).
-5. Make the repository fully **public and complete** (#11).
-6. Complete OSHWA **self-certification**, register the product for a
-   **UID**, and apply the **certification mark** to product + docs
-   (#12–#14).
-
-## Next steps (ordered)
-
-1. Land the hardware cleanup: editable CAD/EDA sources, BOM, assembly
-   docs.
-2. Adopt the license split above; add `LICENSES/` and per-directory
-   notices.
-3. Verify the whole design meets the OSHW definition end-to-end.
-4. Self-certify at <https://certification.oshwa.org/process.html>,
-   register for a UID, and mark the product.
-
-_This checklist is a living document; update the status column as
-hardware and licensing work lands._
+Keep the registry entry and this repository aligned when the certified hardware
+version, responsible party, project URL, or license mapping changes. Network
+heartbeat timing should be described as machine-controlled rather than as a
+fixed update frequency.
