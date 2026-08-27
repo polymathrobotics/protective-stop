@@ -113,8 +113,9 @@ restore.
 
 A transport claim needs, per transport (Ethernet / USB-NCM / WiFi):
 
-1. **30–40 min steady-state soak** at 10 Hz over Tailscale, machine
-   armed. Watch `/state.json`: `pstop_sent`/`pstop_replies` ratio,
+1. **30–40 min steady-state soak** at the commissioned heartbeat rate over
+   Tailscale, machine armed. Include the fastest supported rate as a stress
+   case. Watch `/state.json`: `pstop_sent`/`pstop_replies` ratio,
    `pstop_rebonds`, `pstop_mismatch`, `boot_count`, `heap_min_int`.
 2. The §3 protocol ladder and §4 underlay ladder.
 3. A wire-level audit: tcpdump the underlay and confirm no plaintext

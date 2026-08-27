@@ -110,7 +110,7 @@ class Remote:
         # so two messages emitted in the same millisecond (e.g. BOND then the
         # first STOP of an immediate arming gesture) would carry an identical
         # stamp and pstop_c would REJECT the second as out-of-order/replay
-        # (MSG_OUT_OF_ORDER) — correctly, since real 10 Hz hardware never emits
+        # (MSG_OUT_OF_ORDER) — correctly, since the real scheduler never emits
         # two frames inside one ms. Bump to last+1 to mirror that guarantee.
         stamp = time.monotonic_ns() // 1_000_000
         if stamp <= self.last_tx_stamp:
