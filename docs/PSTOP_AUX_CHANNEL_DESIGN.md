@@ -9,6 +9,13 @@ SPDX-License-Identifier: Apache-2.0
 message. Wrapper code uses `padding1` to let a remote announce whether it is an
 operator or stop-only. The certified `pstop_c` library remains unchanged.
 
+> **Forward-compatibility:** `padding1` is the remote-to-machine field and keeps
+> 16 bits reserved for future remote announcements. `padding2` is reserved in
+> full for a future machine-to-remote schema, such as machine state or stop
+> reason feedback. The planned convention for `padding2` is an 8-bit schema
+> version followed by 24 bits of direction-specific data. It remains zero and
+> uninterpreted in this version.
+
 ## Wire layout
 
 `padding1` is encoded by `common/pstop_aux_channel.h`:
@@ -16,8 +23,18 @@ operator or stop-only. The certified `pstop_c` library remains unchanged.
 ```text
 bits  0..7   schema version (1)
 bits  8..15  role: 0 unspecified, 1 stop-only, 2 operator
-bits 16..31  zero
+bits 16..31  reserved for future remote-to-machine additions (zero today)
 ```
+
+`padding2` is owned by machine replies but has no active schema yet:
+
+```text
+bits  0..7   reserved for a future machine-to-remote schema version (zero today)
+bits  8..31  reserved for future machine-to-remote data (zero today)
+```
+
+Senders must zero every reserved bit. Receivers must ignore `padding2` until a
+nonzero machine-to-remote schema version is defined and implemented.
 
 Unknown versions decode as unspecified. Unknown role values under version 1
 decode as stop-only. Only an explicit operator value can contribute operator
