@@ -36,7 +36,36 @@ add_custom_target(coverage-build
 #
 # Generates coverage${SUFFIX} and coverage${SUFFIX}-html.
 function(pstop_add_coverage_suite)
-  cmake_parse_arguments(ARG "" "SUFFIX;TEST;COVFILE" "" ${ARGN})
+  cmake_parse_arguments(ARG "" "SUFFIX;TEST;COVFILE;REGIONS" "TARGETS" ${ARGN})
+
+  # Optional per-suite reporting selection, narrowing the baseline's regions.
+  # covhtml and argument-less covsrc honour it; covsrc reports whatever files it
+  # is handed, so TARGETS below has to scope the per-file table to match.
+  set(_select "")
+  if(ARG_REGIONS)
+    set(_select
+      COMMAND ${CMAKE_COMMAND} -E env COVFILE=${ARG_COVFILE}
+              ${BULLSEYE_COVSELECT} --import ${CMAKE_SOURCE_DIR}/${ARG_REGIONS}
+    )
+  endif()
+
+  # The sources this suite reports on, taken from the library targets themselves
+  # rather than restated as globs. run-coverage.sh reads the list back.
+  set(_srcs "")
+  foreach(_target IN LISTS ARG_TARGETS)
+    get_target_property(_target_dir ${_target} SOURCE_DIR)
+    get_target_property(_target_srcs ${_target} SOURCES)
+    foreach(_src IN LISTS _target_srcs)
+      if(NOT IS_ABSOLUTE "${_src}")
+        set(_src "${_target_dir}/${_src}")
+      endif()
+      string(APPEND _srcs "${_src}\n")
+    endforeach()
+  endforeach()
+  file(GENERATE
+    OUTPUT  ${CMAKE_BINARY_DIR}/coverage-sources${ARG_SUFFIX}.txt
+    CONTENT "${_srcs}"
+  )
 
   # covsrc/covhtml read an absolute COVFILE as an empty report — the imported
   # regions stop matching — so the covfile is named relative to the build dir,
@@ -47,6 +76,7 @@ function(pstop_add_coverage_suite)
   # and link uninstrumented objects against the instrumented library.
   set(_run
     COMMAND ${CMAKE_COMMAND} -E copy ${PSTOP_COVFILE} ${ARG_COVFILE}
+    ${_select}
     COMMAND ${CMAKE_COMMAND} -E env COVFILE=${ARG_COVFILE}
             ${CMAKE_BINARY_DIR}/pstop/${ARG_TEST}
   )
@@ -78,12 +108,15 @@ pstop_add_coverage_suite(
   SUFFIX  "-unit"
   TEST    pstop_test
   COVFILE pstop_unit.cov
+  TARGETS pstop transport_udp
 )
 
 pstop_add_coverage_suite(
   SUFFIX  "-requirements"
   TEST    pstop_requirements_test
   COVFILE pstop_requirements.cov
+  REGIONS .bullseye/covselect-requirements.txt
+  TARGETS pstop
 )
 
 add_custom_target(coverage)

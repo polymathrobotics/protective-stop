@@ -67,18 +67,15 @@ cmake -S "${pstop_c_dir}" -B "${build_dir}" -DPSTOP_ENABLE_COVERAGE=ON
 [[ "${mode}" == "html" ]] && target="${target}-html"
 cmake --build "${build_dir}" --target "${target}"
 
-# Per-file table, for the reader and for the CI job summary.
+# Per-file table, for the reader and for the CI job summary. covsrc reports only
+# the files it is handed, so each suite's list comes from the TARGETS its
+# cmake/Coverage.cmake entry names.
 for suite in ${suites}; do
-  case "${suite}" in
-    unit)         covfile="pstop_unit.cov" ;;
-    requirements) covfile="pstop_requirements.cov" ;;
-  esac
+  mapfile -t srcs < "${build_dir}/coverage-sources-${suite}.txt"
   echo
   echo "== ${suite} =="
   (
     cd "${build_dir}"
-    COVFILE="${covfile}" covsrc \
-      "${pstop_c_dir}"/pstop/src/pstop/*.c \
-      "${pstop_c_dir}"/transport/src/transport/udp/*.c
+    COVFILE="pstop_${suite}.cov" covsrc "${srcs[@]}"
   ) | sed "s|${pstop_c_dir}/||" | tee "${build_dir}/coverage-summary-${suite}.txt"
 done

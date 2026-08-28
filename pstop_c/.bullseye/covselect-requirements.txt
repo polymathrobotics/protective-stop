@@ -1,0 +1,9 @@
+# Reporting-only selection, applied to the requirements suite's covfile after it
+# is copied from the shared instrumented build. The UDP transport is dropped:
+# pstop_requirements_test drives none of it.
+**/pstop/src/
+
+!**/transport/
+!**/pstop/test/
+!**/examples/
+!_deps/
