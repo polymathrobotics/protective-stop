@@ -89,12 +89,12 @@ req_3_18_test(void)
 
     // second sends OK, still stopped
     TEST_ASSERT_EQUAL(PSTOP_OK, send_ok(&machine, &resp2, &remote_id_2, &MACHINE, 11, 2500));
-    TEST_ASSERT_EQUAL(PSTOP_MESSAGE_STOP, resp.message);
+    TEST_ASSERT_EQUAL(PSTOP_MESSAGE_STOP, resp2.message);
     TEST_ASSERT_EQUAL(PSTOP_STATUS_STOP, get_last_status());
 
     // second sends stop, but it's not in control
     TEST_ASSERT_EQUAL(PSTOP_OK, send_stop(&machine, &resp2, &remote_id_2, &MACHINE, 12, 3000));
-    TEST_ASSERT_EQUAL(PSTOP_MESSAGE_STOP, resp.message);
+    TEST_ASSERT_EQUAL(PSTOP_MESSAGE_STOP, resp2.message);
     TEST_ASSERT_EQUAL(PSTOP_STATUS_STOP, get_last_status());
 
     robot = machine_get_robot_state(&machine);
@@ -104,7 +104,7 @@ req_3_18_test(void)
 
     // seconds sends ok, but it's not in control so still stopped
     TEST_ASSERT_EQUAL(PSTOP_OK, send_ok(&machine, &resp2, &remote_id_2, &MACHINE, 13, 3500));
-    TEST_ASSERT_EQUAL(PSTOP_MESSAGE_STOP, resp.message);
+    TEST_ASSERT_EQUAL(PSTOP_MESSAGE_STOP, resp2.message);
     TEST_ASSERT_EQUAL(PSTOP_STATUS_STOP, get_last_status());
 
     // first sends stop to start sequence
