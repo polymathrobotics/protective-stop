@@ -34,57 +34,30 @@ req_3_04_test(void)
 {
     pstop_machine_t machine;
     machine_init(&machine, &pstop_app, pstop_clients, MAX_CLIENTS);
-    configure_app_defaults(&pstop_app, &MACHINE, 0U, 0U, 1000U);
-
-    pstop_msg_t req;
-    pstop_message_init(&req);
-    req.message = PSTOP_MESSAGE_BOND;
-    req.counter = 10;
-    req.stamp = 100;
-    req.id.data = REMOTE_ID;
-    req.receiver_id.data = MACHINE_ID;
-    req.received_counter = 0U;
-    req.received_stamp = 0U;
-    req.checksum = 10U;
-    req.calculated_checksum = 10U;
-
-    pstop_msg_t resp;
-    pstop_message_init(&resp);
+    configure_app_defaults(&pstop_app, &MACHINE, 0U, 0U, 200U);
 
     set_operator_allowed(true, false, 5000U); // Allow this device ID
 
-    TEST_ASSERT_EQUAL(PSTOP_OK, machine_process_message(&machine, &req, &resp));
+    device_id_t remote_id = {
+        .data = REMOTE_ID
+    };
+
+    pstop_msg_t resp;
+
+    TEST_ASSERT_EQUAL(PSTOP_OK, send_bond(&machine, &resp, &remote_id, &MACHINE, 10, 1000));
     TEST_ASSERT_EQUAL(PSTOP_MESSAGE_BOND, resp.message);
 
     // send STOP
-    req.message = PSTOP_MESSAGE_STOP;
-    req.counter++;
-    req.stamp++;
-    req.received_counter = resp.counter;
-    req.received_stamp = resp.stamp;
-
-    TEST_ASSERT_EQUAL(PSTOP_OK, machine_process_message(&machine, &req, &resp));
+    TEST_ASSERT_EQUAL(PSTOP_OK, send_stop(&machine, &resp, &remote_id, &MACHINE, 11, 1500));
     TEST_ASSERT_EQUAL(PSTOP_MESSAGE_STOP, resp.message);
     TEST_ASSERT_EQUAL(PSTOP_STATUS_STOP, get_last_status()); // in a stopped state
 
     // send another stop
-    req.message = PSTOP_MESSAGE_STOP;
-    req.counter++;
-    req.stamp++;
-    req.received_counter = resp.counter;
-    req.received_stamp = resp.stamp;
-    TEST_ASSERT_EQUAL(PSTOP_OK, machine_process_message(&machine, &req, &resp));
+    TEST_ASSERT_EQUAL(PSTOP_OK, send_stop(&machine, &resp, &remote_id, &MACHINE, 12, 2000));
     TEST_ASSERT_EQUAL(PSTOP_MESSAGE_STOP, resp.message);
     TEST_ASSERT_EQUAL(PSTOP_STATUS_STOP, get_last_status()); // in a stopped state
 
-    req.message = PSTOP_MESSAGE_OK;
-    req.counter++;
-    req.stamp += 2000;
-    req.received_counter = resp.counter;
-    req.received_stamp = resp.stamp;
-
-    set_time(get_time() + 2000);
-    TEST_ASSERT_EQUAL(PSTOP_OK, machine_process_message(&machine, &req, &resp));
+    TEST_ASSERT_EQUAL(PSTOP_OK, send_ok(&machine, &resp, &remote_id, &MACHINE, 13, 2500));
     TEST_ASSERT_EQUAL(PSTOP_MESSAGE_OK, resp.message);
     TEST_ASSERT_EQUAL(PSTOP_STATUS_OK, get_last_status()); // in an OK state
 }
