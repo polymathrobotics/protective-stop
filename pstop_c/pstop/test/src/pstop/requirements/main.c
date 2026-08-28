@@ -34,6 +34,9 @@ extern void main_req_3_19_test(void);
 extern void main_req_3_20_test(void);
 extern void main_req_3_21_test(void);
 
+extern void main_req_3_22_test(void);
+extern void main_req_3_23_test(void);
+
 void setUp(void) {}
 
 void tearDown(void) {}
@@ -72,6 +75,9 @@ main(void)
     main_req_3_19_test();
     main_req_3_20_test();
     main_req_3_21_test();
+
+    main_req_3_22_test();
+    main_req_3_23_test();
 
     return UNITY_END();
 }
