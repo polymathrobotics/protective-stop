@@ -2,28 +2,46 @@
 # SPDX-FileCopyrightText: 2026 Polymath Robotics, Inc.
 # SPDX-License-Identifier: Apache-2.0
 #
-# Build pstop_c with BullseyeCoverage and produce a covsrc summary or
-# (with --html) a covhtml report at build/coverage-html/.
+# Build pstop_c once with BullseyeCoverage, then measure each test suite against
+# that build. Prints a per-file table per suite and writes it to
+# build/coverage-summary-<suite>.txt.
 #
 # Usage:
-#   scripts/run-coverage.sh           # covsrc summary
-#   scripts/run-coverage.sh --html    # HTML report
+#   scripts/run-coverage.sh                        # both suites, summary
+#   scripts/run-coverage.sh --html                 # both suites, HTML reports
+#   scripts/run-coverage.sh --suite requirements   # one suite
+#
+# Suites:
+#   unit          pstop_test               build/coverage-html-unit/
+#   requirements  pstop_requirements_test  build/coverage-html-requirements/
 
 set -euo pipefail
 
 mode="summary"
-case "${1:-}" in
-  ""|--summary) mode="summary" ;;
-  --html)       mode="html" ;;
-  -h|--help)
-    sed -n '2,/^$/p' "$0" | sed 's/^# \{0,1\}//'
-    exit 0
-    ;;
-  *)
-    echo "run-coverage.sh: unknown argument: $1" >&2
-    exit 2
-    ;;
-esac
+suites="unit requirements"
+target="coverage"
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --summary) mode="summary"; shift ;;
+    --html)    mode="html";    shift ;;
+    --suite)
+      case "${2:-}" in
+        unit|requirements) suites="$2"; target="coverage-$2"; shift 2 ;;
+        both)              suites="unit requirements"; target="coverage"; shift 2 ;;
+        *)
+          echo "run-coverage.sh: --suite needs unit, requirements, or both" >&2
+          exit 2
+          ;;
+      esac
+      ;;
+    -h|--help) sed -n '2,/^$/p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *)
+      echo "run-coverage.sh: unknown argument: $1" >&2
+      exit 2
+      ;;
+  esac
+done
 
 if ! command -v cov01 >/dev/null 2>&1; then
   cat >&2 <<'EOF'
@@ -46,7 +64,18 @@ trap 'cov01 --off >/dev/null 2>&1 || true' EXIT
 
 cmake -S "${pstop_c_dir}" -B "${build_dir}" -DPSTOP_ENABLE_COVERAGE=ON
 
-case "${mode}" in
-  summary) cmake --build "${build_dir}" --target coverage ;;
-  html)    cmake --build "${build_dir}" --target coverage-html ;;
-esac
+[[ "${mode}" == "html" ]] && target="${target}-html"
+cmake --build "${build_dir}" --target "${target}"
+
+# Per-file table, for the reader and for the CI job summary. covsrc reports only
+# the files it is handed, so each suite's list comes from the TARGETS its
+# cmake/Coverage.cmake entry names.
+for suite in ${suites}; do
+  mapfile -t srcs < "${build_dir}/coverage-sources-${suite}.txt"
+  echo
+  echo "== ${suite} =="
+  (
+    cd "${build_dir}"
+    COVFILE="pstop_${suite}.cov" covsrc "${srcs[@]}"
+  ) | sed "s|${pstop_c_dir}/||" | tee "${build_dir}/coverage-summary-${suite}.txt"
+done
