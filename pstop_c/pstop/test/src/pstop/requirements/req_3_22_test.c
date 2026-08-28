@@ -72,7 +72,7 @@ req_3_22_test(void)
     TEST_ASSERT_EQUAL(PSTOP_STATUS_STOP, get_last_status());
 
     device_id_t remote_id_2 = {
-        .data = REMOTE_ID
+        .data = REMOTE_ID + 1
     };
 
     // second remote takes control
