@@ -18,6 +18,7 @@ host/machine_app_runner
 host/test_clock_guard
 host/test_crypto_kat
 host/test_demote_veto
+host/test_aux_channel
 # cppcheck
 *.ctu-info
 cppcheck-build/
