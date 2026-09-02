@@ -39,58 +39,33 @@ req_3_01_test(void)
     machine_init(&machine, &pstop_app, pstop_clients, MAX_CLIENTS);
     configure_app_defaults(&pstop_app, &MACHINE, 0U, 0U, 1000U);
 
-    pstop_msg_t req;
-    pstop_message_init(&req);
-    req.message = PSTOP_MESSAGE_BOND;
-    req.counter = 10;
-    req.stamp = 100;
-    req.id.data = REMOTE_ID;
-    req.receiver_id.data = MACHINE_ID;
-    req.received_counter = 0U;
-    req.received_stamp = 0U;
-    req.checksum = 10U;
-    req.calculated_checksum = 10U;
-
-    pstop_msg_t resp;
-    pstop_message_init(&resp);
-
-    set_operator_allowed(true, false, 5000U); // 5 seconds
-
-    TEST_ASSERT_EQUAL(PSTOP_OK, machine_process_message(&machine, &req, &resp));
-    TEST_ASSERT_EQUAL(PSTOP_MESSAGE_BOND, resp.message);
-
-    pstop_message_init(&req);
-    req.message = PSTOP_MESSAGE_BOND;
-    req.counter = 10;
-    req.stamp = 100;
-    req.id.data = REMOTE_ID + 1;
-    req.receiver_id.data = MACHINE_ID;
-    req.received_counter = 0U;
-    req.received_stamp = 0U;
-    req.checksum = 10U;
-    req.calculated_checksum = 10U;
-
-    pstop_message_init(&resp);
-
-    set_operator_allowed(true, false, 10000U); // 10 seconds
-
-    TEST_ASSERT_EQUAL(PSTOP_OK, machine_process_message(&machine, &req, &resp));
-    TEST_ASSERT_EQUAL(PSTOP_MESSAGE_BOND, resp.message);
-
     device_id_t remote_id = {
         .data = REMOTE_ID
     };
+
+    pstop_msg_t resp;
+
+    set_operator_allowed(true, false, 5000U); // 5 seconds
+
+    TEST_ASSERT_EQUAL(PSTOP_OK, send_bond(&machine, &resp, &remote_id, &MACHINE, 10, 1000));
+    TEST_ASSERT_EQUAL(PSTOP_MESSAGE_BOND, resp.message);
+
+    set_operator_allowed(true, false, 10000U); // 10 seconds
+
+    device_id_t remote_id_2 = {
+        .data = REMOTE_ID + 1
+    };
+
+    TEST_ASSERT_EQUAL(PSTOP_OK, send_bond(&machine, &resp, &remote_id_2, &MACHINE, 10, 1000));
+    TEST_ASSERT_EQUAL(PSTOP_MESSAGE_BOND, resp.message);
 
     // validate first remote heartbeat time
     const protocol_data_t *remote = machine_get_protocol_data(&machine, &remote_id);
     TEST_ASSERT_NOT_NULL(remote);
     TEST_ASSERT_EQUAL(5000U, remote->heartbeat_ms);
 
-
     // validate second remote heartbeat time
-    remote_id.data = REMOTE_ID + 1;
-
-    remote = machine_get_protocol_data(&machine, &remote_id);
+    remote = machine_get_protocol_data(&machine, &remote_id_2);
     TEST_ASSERT_NOT_NULL(remote);
     TEST_ASSERT_EQUAL(10000U, remote->heartbeat_ms);
 }

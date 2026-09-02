@@ -90,7 +90,7 @@ CONFIG_FREERTOS_VTASKLIST_INCLUDE_COREID=y
 # PSRAM), so 16 pre-reserved ~25 KB; 6 frees ~16 KB back to the general internal
 # heap so WiFi fits alongside a resident USB-NCM tether stack — the condition
 # that OOM-panicked esp_wifi_init (see dcs_wifi.c WIFI_MIN_INTERNAL_HEAP guard).
-# TX-side only: 6 buffers are ample for the low-rate (10 Hz, tiny-frame) pstop
+# TX-side only: 6 buffers are ample for the low-rate, tiny-frame pstop
 # link, and TX buffers do NOT gate the WPA2 EAPOL 4-way handshake. The RX ring
 # is deliberately LEFT at stock (STATIC_RX=10, DYNAMIC_RX=32) because an earlier
 # over-trim starved the RX ring and broke EAPOL even at good signal.

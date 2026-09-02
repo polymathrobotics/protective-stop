@@ -302,8 +302,8 @@ static void net_liveness_task(void * arg)
              * deprioritise/rate-limit ICMP, especially under load, and that was
              * false-firing this watchdog (JTAG-confirmed abort here) under
              * Tailscale traffic while HTTP and the pstop link were both fine.
-             * pstop does continuous UDP send+recv every 100 ms, so a fresh pstop
-             * reply is hard proof lwIP is alive. Only a TOTAL loss — gateway
+             * pstop does continuous UDP send+recv at the machine-controlled
+             * heartbeat cadence, so a fresh reply is hard proof lwIP is alive. Only a TOTAL loss — gateway
              * silent AND pstop silent — is a genuine wedge worth rebooting for. */
       uint64_t ps_last = atomic_load(&g_dcs_pstop_last_reply_ms);
       /* pstop NEVER bonded -> the system never reached full operational

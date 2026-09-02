@@ -2,7 +2,7 @@
 
 Companion to the remote firmware in `firmware/`. The remote runs as a
 **pstop client** (lockstep verdict from cores 0 + 1, byte-compared, sent
-over UDP at 10 Hz); this runs the **pstop machine** that accepts those
+at the machine-controlled heartbeat rate); this runs the **pstop machine** that accepts those
 heartbeats and tells the robot to STOP when they say so — or when they
 stop coming.
 
@@ -43,8 +43,8 @@ disagrees for a tick. With `max_missed_heartbeats = 1` the timeout equals
 exactly two send slots, so a single withheld tick lands *on* the deadline
 and races the 10 ms liveness poll — observed on the bench (2026-07-27
 soak) as sporadic false `MISSED_HEARTBEATS` stops every ~15 min. **Do not
-use `max_missed_heartbeats = 1` with lockstep remotes.** The default is 3
-(six send slots of margin; ~1.2 s stop at `heartbeat_ms = 400`).
+use `max_missed_heartbeats = 1` with lockstep remotes.** The default is 5
+(ten send slots of margin; about 2.0 s at `heartbeat_ms = 400`).
 
 ## Build
 
@@ -146,8 +146,8 @@ The machine starts disarmed (NEED_STOP). Arm it: press and hold the
 E-stop switch ≥ `min_stop_ms` (500 ms), then release →
 `ARMED by 0x01020380`, `Robot Status = OK`, remote's ring turns green.
 
-On the remote, `/state.json` should show `pstop_sent` advancing at 10 Hz
-with `pstop_mismatch` flat:
+On the remote, `/state.json` should show `pstop_sent` advancing at the
+configured rate with `pstop_mismatch` flat:
 
 ```sh
 curl -s http://$CHIP/state.json | jq '.pstop_sent, .pstop_replies, .pstop_mismatch'

@@ -9,17 +9,17 @@ before opening a pull request.
 
 | Path          | What it is                                                                 |
 | ------------- | ------------------------------------------------------------------------- |
-| `pstop_c/`    | Certified C protocol library (Apache-2.0). **Do not modify here** — see below. |
+| `pstop_c/`    | Certification-track C protocol library (Apache-2.0). **Do not modify here** - see below. |
 | `firmware/`   | ESP-IDF v5.5 project; builds `pstop_remote.bin` for the ESP32-S3 remote.   |
 | `components/` | Shared ESP-IDF components (`microlink`, `ml_dev_tether`, `pstop`).         |
 | `host/`       | Plain-C `machine_app_runner` (robot-side pstop machine; no ESP-IDF).       |
 | `tools/`      | Python test tools and `misra_check.sh` (cppcheck MISRA pre-check).         |
 | `test/`       | Bash test ladders (chaos, netem, soak, recovery).                         |
 | `docs/`       | Design and test documentation.                                            |
-| `hardware/`   | Enclosure CAD, schematic, STEP files (WIP — see `hardware/README.md`).     |
+| `hardware/`   | Certified enclosure CAD, schematic, STEP files, BOM, and assembly guide.  |
 | `archive/`    | Deprecated ROS2 packages. Not built; do not extend.                        |
 
-## The certified library: `pstop_c/`
+## The certification-track library: `pstop_c/`
 
 `pstop_c/` is the certification-track protocol library. It is vendored
 into this repo unmodified and is **excluded from the linters/formatters**
@@ -101,5 +101,6 @@ Note `pstop_c/` is intentionally excluded from the C/C++ hooks.
 - **Clear commits.** Explain the design intent, not just the diff.
   Reference the relevant `docs/` design note where one applies.
 
-By contributing you agree that your contributions are licensed under the
-repository's Apache-2.0 license (see `LICENSE`).
+Contributions are licensed according to where they land: software and firmware
+under Apache-2.0, hardware design files under CERN-OHL-P-2.0, and documentation
+under CC-BY-4.0. The full texts are in `LICENSE` and `LICENSES/`.

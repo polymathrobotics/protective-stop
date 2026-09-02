@@ -2,7 +2,7 @@
 
 Raises the Tailscale peer capacity to 128 on the ESP32-S3 (8 MB PSRAM)
 **without** degrading the stability or latency of the one safety-critical
-peer (`priority_peer_ip`, the 10 Hz protective-stop link). All changes are
+peer (`priority_peer_ip`, the protective-stop link). All changes are
 in `components/microlink` (+ nested `wireguard_lwip`) and `firmware/`;
 `pstop_c` is untouched.
 

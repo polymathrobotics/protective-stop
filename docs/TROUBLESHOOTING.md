@@ -38,7 +38,7 @@ curl -s http://$CHIP/state.json | python3 -m json.tool
 | `rst_hist` | mostly 1/3 | ring of the 16 most recent reset reasons — repeated 4s/6s = crash pattern |
 | `ota_state` | valid | pending-verify right after an OTA until finalize marks it |
 | `active_iface` | 1 (eth) / 2 (usb) / 3 (wifi) | 0 = no uplink, 4 = SoftAP setup mode |
-| `pstop_sent` / `pstop_replies` | grow together at 10 Hz | replies lagging = path issue; `pstop_send_fail` climbing = chip can't TX (e.g. Tailscale peer while VPN down — fail-safe) |
+| `pstop_sent` / `pstop_replies` | grow together at the configured rate (5 Hz with the default 400 ms window) | replies lagging = path issue; `pstop_send_fail` climbing = chip can't TX (e.g. Tailscale peer while VPN down — fail-safe) |
 | `pstop_mismatch` | **0** | climbing = the cores disagree — usually one loop channel open/shorted; ring shows purple |
 | `pstop_rebonds` | 0 (rare 1s) | climbing = reply loss > ~2.0 s bursts (heartbeat_ms 400 × max_missed 5; was 1.2 s at max_missed 3) — link quality |
 | `e_hi0`/`e_lo0`/`e_hi1`/`e_lo1` | all 1 | per-channel loop diagnostics: `hi=0` = loop open (press/broken wire), `lo=0` = sense stuck high |

@@ -75,14 +75,11 @@ extern "C"
 /* Queue depths */
 #define ML_DERP_TX_QUEUE_DEPTH 16
 /* Separate FIFO queue for SAFETY (pinned/priority/health-tracked) + WG-handshake
- * frames, drained FIRST by the DERP task so the 5 Hz pstop heartbeat is never
- * stuck behind, or dropped by, a disco relay burst. Small: a handful of safety
- * peers, each 5 Hz. */
+ * frames, drained FIRST by the DERP task so configured pstop heartbeats are
+ * never stuck behind, or dropped by, a disco relay burst. */
 #define ML_DERP_TX_PRIO_DEPTH 16 /* headroom for path-diversity leg-2 mirrors */
 #define ML_DISCO_RX_QUEUE_DEPTH 8
-#define ML_WG_RX_QUEUE_DEPTH \
-  32 /* carries the 10 Hz pstop heartbeats;
-                                     * 8 was sheddable by one disco burst */
+#define ML_WG_RX_QUEUE_DEPTH 32 /* carries pstop heartbeats; 8 was sheddable by one disco burst */
 #define ML_STUN_RX_QUEUE_DEPTH 4
 #define ML_COORD_CMD_QUEUE_DEPTH 4
 #define ML_PEER_UPDATE_QUEUE_DEPTH 400

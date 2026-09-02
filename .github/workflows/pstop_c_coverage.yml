@@ -45,34 +45,45 @@ jobs:
           rm -rf "/tmp/BullseyeCoverage-${BULLSEYE_VERSION}"
           echo "${BULLSEYE_PREFIX}/bin" >> "${GITHUB_PATH}"
 
-      - name: Run coverage build + HTML report
+      - name: Run coverage build + HTML reports
         working-directory: pstop_c
-        run: |
-          scripts/run-coverage.sh --html
-          cd build
-          COVFILE=pstop.cov covsrc -q | tee coverage-summary.txt
+        run: scripts/run-coverage.sh --html
 
       - name: Publish coverage summary
         if: always()
         run: |
-          summary="pstop_c/build/coverage-summary.txt"
+          emit() {
+            echo "### $1"
+            echo
+            if [[ -s "$2" ]]; then
+              echo '```'
+              cat "$2"
+              echo '```'
+            else
+              echo '_No summary produced — see job logs._'
+            fi
+            echo
+          }
           {
             echo '## pstop_c coverage'
             echo
-            if [[ -s "${summary}" ]]; then
-              echo '```'
-              cat "${summary}"
-              echo '```'
-            else
-              echo '_No coverage summary produced — see job logs._'
-            fi
-            echo
-            echo 'Full HTML report: download the `pstop_c-coverage-html` artifact below.'
+            emit 'Full suite (pstop_test)' pstop_c/build/coverage-summary-unit.txt
+            emit 'Requirements only (pstop_requirements_test)' \
+                 pstop_c/build/coverage-summary-requirements.txt
+            echo 'Full HTML reports: the `pstop_c-coverage-html` and'
+            echo '`pstop_c-coverage-html-requirements` artifacts below.'
           } >> "${GITHUB_STEP_SUMMARY}"
 
       - name: Upload coverage HTML report
         uses: actions/upload-artifact@v7
         with:
           name: pstop_c-coverage-html
-          path: pstop_c/build/coverage-html
+          path: pstop_c/build/coverage-html-unit
+          if-no-files-found: error
+
+      - name: Upload requirements-only coverage HTML report
+        uses: actions/upload-artifact@v7
+        with:
+          name: pstop_c-coverage-html-requirements
+          path: pstop_c/build/coverage-html-requirements
           if-no-files-found: error

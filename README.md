@@ -1,299 +1,190 @@
-# Protective stop
+# Protective Stop
 
-<img src="hardware/real.jpg" alt="Assembled Protective Stop remote: red E-stop button on a printed enclosure with Ethernet in the side pod" width="380" />
+<img src="hardware/real.jpg" alt="Assembled Protective Stop remote with a red stop button, printed enclosure, and Ethernet side pod" width="380" />
 
-A low-cost, reliable protective stop for robots and automation. A
-PoE- or USB-powered ESP32-S3 remote heartbeats operator intent at 10 Hz
-over an encrypted tunnel to a machine process on the robot. If the
-heartbeats say STOP, or stop arriving at all, the machine brings the
-robot to a controlled stop.
+<a href="https://certification.oshwa.org/us002846.html">
+  <img src="hardware/oshwa-certification-mark.svg" alt="OSHWA open source hardware certification mark, UID US002846" width="320" />
+</a>
 
-Safety scope: this is a protective stop (a controlled, preventative
-shutdown), not an emergency stop. It is not a substitute for an E-stop
-where power is immediately physically removed from a machine.
+Protective Stop is an open hardware remote for robots and automation. A
+PoE- or USB-powered ESP32-S3 watches a physical stop switch and reports its
+state to machine-side pstop logic. A STOP message, a wiring fault, or a lost
+heartbeat causes the machine process to request STOP.
 
-The wire protocol and the machine-side safety state logic are the
-[`pstop_c`](pstop_c/) library, kept on its own certification track and
-never modified elsewhere in this repo. Everything around it (firmware,
-transport, sensing, supervision, and the machine wrapper) is the open
-engineering shell that turns `pstop_c` into a deployable device.
+Each machine sets its own heartbeat window; the remote normally transmits
+halfway through it. The network update rate is therefore configured, not fixed.
+
+> This is a protective stop, not an emergency stop. It does not replace a
+> required emergency-stop function, including hardwired power removal where
+> applicable. OSHWA certification covers open source hardware; it is not
+> functional-safety certification.
 
 ## How it works
 
-The remote (Waveshare ESP32-S3-ETH, W5500 PoE Ethernet) senses a
-physical DPST normally-closed E-stop switch through two independent
-loopback channels, one per CPU core. The two cores run in lockstep:
-each reads its own loop and independently builds the 40-byte pstop
-message, and a comparator transmits only when the two encodings are
-byte-identical (2oo2 to run, 1oo2 to stop). Any disagreement, loop
-fault, or stalled task sends nothing, and the machine's heartbeat
-timeout stops the robot. Every failure mode degrades to "no message,"
-and no message is a stop.
+The switch has two normally closed contacts, each wired to a separate GPIO loop
+and read by one CPU core. Each core builds the full pstop message independently;
+transmission occurs only when both encoded messages match exactly.
 
-pstop traffic rides Tailscale/WireGuard with automatic uplink failover
-(Ethernet, then USB-NCM, then WiFi) and DERP relay fallback. Egress is
-pinned to the tunnel, so a downed VPN fails safe instead of leaking
-plaintext. The remote establishes the link itself: it homes its DERP
-connection on the machine's region and initiates the handshake, so no
-manual `tailscale ping` from the robot side is needed, and it
-re-establishes on its own after either end reboots. On a shared subnet
-the remote also advertises its LAN address so peers can take the direct
-local path instead of the relay. The machine wrapper adds a
-minimum-hold arming policy so an electrical blip can never perform the
-arming gesture. A machine accepts every remote that bonds but treats it
-as stop-only by default — any remote can STOP, but only remotes on the
-machine's operator allowlist (empty by default) can re-arm it.
+Pressing the switch opens both loops and sends STOP. A broken wire or other
+fault in one loop makes the cores disagree, while a stalled task or loss of all
+network paths prevents transmission. In either case, the machine requests STOP
+when its silence timeout expires.
+
+The wire protocol and machine-side state logic come from vendored
+[`pstop_c`](pstop_c/), which remains unchanged and follows a separate
+certification track. The surrounding firmware handles sensing, networking, and
+recovery.
 
 ```mermaid
 flowchart LR
-    subgraph REMOTE["REMOTE — ESP32-S3 · firmware/"]
-        direction TB
-        SW["DPST E-stop switch<br/>pole1 IO39▸loopA▸IO40<br/>pole2 IO41▸loopB▸IO42"]
-        C0["core 0<br/>read loopA · build + encode"]
-        C1["core 1<br/>read loopB · build + encode"]
-        CMP{"comparator<br/>memcmp — transmit<br/>only on byte-match"}
+    subgraph REMOTE["REMOTE - ESP32-S3"]
+        SW["DPST NC stop switch"]
+        C0["core 0: read loop A and encode"]
+        C1["core 1: read loop B and encode"]
+        CMP{"byte-for-byte comparator"}
         SW --> C0 --> CMP
         SW --> C1 --> CMP
     end
 
-    NET(["Tailscale / WireGuard<br/>direct path · DERP relay fallback<br/>egress pinned to tunnel"])
+    NET(["Tailscale path<br/>WireGuard direct or DERP relay"])
 
-    subgraph MACHINE["MACHINE — robot host · host/"]
-        direction TB
-        WRAP["machine_app_runner<br/>machine.toml · min-hold arming<br/>status latch + anomaly log"]
-        LIB["pstop_c machine lib<br/>certified · UNMODIFIED<br/>bond · counters · CRC · timeout"]
-        STOP["heartbeat says STOP<br/>— or stops arriving —<br/>▶ robot stops"]
-        WRAP --> LIB --> STOP
+    subgraph MACHINE["MACHINE - robot host"]
+        APP["machine wrapper"]
+        LIB["pstop_c state machine"]
+        STOP["STOP request"]
+        APP --> LIB --> STOP
     end
 
-    CMP -->|"10 Hz pstop over UDP"| NET --> WRAP
+    CMP -->|"machine-controlled heartbeat"| NET --> APP
 ```
 
-## Repo layout
+Peers addressed directly over LAN or USB-NCM bypass Tailscale and are not
+WireGuard-encrypted. Tailscale peers use WireGuard, with DERP relay fallback
+when a direct path is unavailable. Their sockets are pinned to the tunnel, so
+losing the VPN causes silence instead of a plaintext downgrade. Ethernet is
+preferred, with USB-NCM and WiFi available as fallbacks.
 
-| Path | What |
+## What's included
+
+| Path | Contents |
 |---|---|
-| [`pstop_c/`](pstop_c/) | Certified protocol + machine-safety C library. Its own track; do not modify here, contribute upstream. |
-| `firmware/` | ESP-IDF 5.5 remote firmware (`pstop_remote`). `main/main.c` is the auditable lockstep core; `components/dcs_support/` is the shell (boot, OTA+rollback, admin UI, failover, telemetry). |
-| `components/` | [`microlink/`](https://github.com/CamM2325/microlink) (Tailscale/WireGuard/DERP), `ml_dev_tether/` (USB-CDC-NCM), `pstop/` (ESP-IDF glue that compiles `pstop_c/`). |
-| `host/` | `machine_app_runner` + `machine.toml`, the robot-side machine wrapper. |
-| `tools/` · `test/` | Wire-accurate test remote, chaos proxy, MISRA check, bulk USB flasher; bench chaos/soak/netem ladders. |
-| `docs/` | Design records, test reports, safety/recovery playbooks (`docs/archive/` holds historical records). |
-| `hardware/` | Enclosure CAD + board schematic (work in progress, see `hardware/README.md`). |
-| `archive/` | Deprecated ROS 2 / Foxglove packages, kept for reference pending removal. |
+| [`hardware/`](hardware/) | Editable FreeCAD enclosure, printable files, BOM, wiring, and photographed assembly guide |
+| [`firmware/`](firmware/) | ESP-IDF remote firmware and the dual-core sensing/comparison logic |
+| [`host/`](host/) | Plain-C machine process and its documented configuration |
+| [`ros2/`](ros2/) | ROS 2 machine node and messages |
+| [`components/`](components/) | Embedded networking, USB tether, and `pstop_c` integration |
+| [`docs/`](docs/) | API, recovery, testing, networking, and safety-case documentation |
+| [`tools/`](tools/) and [`test/`](test/) | Protocol, chaos, soak, flashing, and static-analysis tools |
 
-The encrypted transport is [microlink](https://github.com/CamM2325/microlink),
-an embedded Tailscale client by Malone Technologies. This work was made
-possible in part by Polymath Robotics funding microlink's open-source
-development.
+Tailscale support uses
+[`microlink`](https://github.com/CamM2325/microlink), an embedded client from
+Malone Technologies.
 
-## Quickstart
+## Build and run
 
-Remote firmware:
+### Remote firmware
 
-```sh
-cp firmware/sdkconfig.credentials.example firmware/sdkconfig.credentials   # WiFi + Tailscale creds
-cd firmware && source ~/esp-idf-5.5/export.sh && idf.py build
-```
-
-The first flash is over the wire. Hold BOOT and tap RST for ROM
-download mode, since TinyUSB owns USB-OTG at runtime:
+ESP-IDF 5.5 is required.
 
 ```sh
+cp firmware/sdkconfig.credentials.example firmware/sdkconfig.credentials
+$EDITOR firmware/sdkconfig.credentials
+cd firmware
+. /path/to/esp-idf-v5.5/export.sh
+idf.py build
 idf.py -p /dev/ttyACM0 flash
 ```
 
-Every update after that goes over the network:
+Later updates can be sent through the authenticated admin API:
 
 ```sh
-curl -u admin:<pw> --data-binary @build/pstop_remote.bin http://<chip>/admin/api/ota
+curl -u 'admin:<password>' \
+  --data-binary @build/pstop_remote.bin \
+  'http://<remote>/admin/api/ota'
 ```
 
-This direct upload is also the recovery path for a unit your management
-system can't reach or update, for example one wedged with a bad DERP
-home so its check-ins fail. If you can reach the unit's admin
-server at all (LAN, USB tether at `10.42.0.1`, or its Tailscale IP from
-a same-region or direct peer), push a known-good `pstop_remote.bin` and
-it flashes, reboots, and self-heals. Verified 2026-07-22 recovering a
-unit stuck advertising the wrong DERP region.
+### Machine process
 
-Machine (robot host), which needs only `cc` and `make`, no ESP-IDF:
+The host process needs only a C compiler and `make`:
 
 ```sh
-cd host && make && ./machine_app_runner machine.toml     # listens on 0.0.0.0:8890
-curl -X POST "http://<chip>/api/pstop_peer?ip=<machine-ip>&port=8890"
+cd host
+make
+./machine_app_runner machine.toml
 ```
 
-To use a unit over its USB cable, the host needs a one-time tether
-setup first — the chip serves no DHCP, so without it the USB link sits
-in "connecting…" forever and the unit falls back to WiFi. The full
-procedure is in the **USB-NCM setup guide,
-[`docs/USB_NCM_SETUP.md`](docs/USB_NCM_SETUP.md)**: verified Linux
-(NetworkManager) steps, plus notes on the equivalent Windows and macOS
-setup and the subnet gotcha that keeps the default machine bond from
-forming on those hosts.
+Point the remote at that machine:
 
-Arm by pressing and holding the switch for at least 0.5 s, then
-releasing. The runner logs `ARMED` and the ring turns green.
+```sh
+curl -X POST "http://<remote>/api/pstop_peer?ip=<machine-ip>&port=8890"
+```
 
-## Key facts
+For USB operation, complete the one-time host setup in
+[`docs/USB_NCM_SETUP.md`](docs/USB_NCM_SETUP.md). Hardware assembly starts with
+the [`hardware/README.md`](hardware/README.md) and the photographed
+[`hardware/ASSEMBLY.md`](hardware/ASSEMBLY.md) guide.
 
-- 10 Hz heartbeat; stop-on-silence is `heartbeat_ms ×
-  max_missed_heartbeats`, about 2.0 s as configured (400 ms × 5;
-  `max_missed_heartbeats` raised 3 → 5 on 2026-08-04).
-- One remote can heartbeat up to 4 machines (`/api/pstop_peers`), each an
-  independent session with its own bond and reply watchdog; one dead
-  machine never stalls the others. STOP and the arming gesture broadcast
-  to all bonded machines. The lockstep check still silences every session
-  on any core mismatch.
-- Arming: a STOP held shorter than `min_stop_ms` (default 500 ms) is
-  vetoed machine-side. The remote also debounces loop re-close by 3
-  ticks and holds all transmission until the loops settle at boot, so
-  an EMC blip can't arm.
-- Operator vs stop-only remote: every remote that bonds is accepted and
-  can command STOP (and its silence stops the machine), but by default
-  it is **stop-only** — it can never re-arm (STOP→OK). Only remotes on
-  the machine's **operator allowlist** may re-arm, and that allowlist is
-  **empty by default**, so out of the box every remote is stop-only
-  (maximally safe) and operators are named during configuration
-  (`docs/FAILOVER_AND_ARMING_DESIGN_2026-07-21.md`; enforced in
-  `pstop_c` `machine.c:135-142`).
-- Fail-safe silence: lockstep mismatch, loop fault, VPN-down
-  (source-bound socket), and comparator stall all result in no message,
-  which the machine treats as STOP.
-- Interfaces: Ethernet, then USB-NCM, then WiFi, supervised at 1 Hz
-  with automatic default-route failover. 128-peer Tailscale capacity
-  with priority-peer latency isolation. Nothing in this repo assumes a
-  particular LAN.
-- Identity: each remote derives a stable per-unit ID from its MAC. The
-  Tailscale node `pstop-01xxxxxx` matches its pstop device ID
-  `0x01xxxxxx`, and the node record and VPN IP persist across reboot
-  and OTA.
-- Recovery chain: task watchdog, then network-liveness watchdog, then
-  crash counter, then OTA rollback, all button-free
-  (`docs/SAFETY_CHAIN.md`, `docs/RECOVERY_PLAYBOOK.md`).
-- Status ring: white = no machine configured, pulsing red = machine
-  unreachable, blue = bonded, green = armed, solid red = STOP, purple =
-  lockstep mismatch (`docs/TROUBLESHOOTING.md`). With several machines
-  configured the ring splits into one segment per machine, in slot order
-  from LED 1. The ring mounts in any
-  of 16 rotations, so which pixel is "LED 1" is a per-device setting:
-  `POST /api/ring_offset?n=0..15`, with a locate mode
-  (`POST /api/ring_led1?on=1`) that lights only LED 1 for calibration.
-- HTTP API: diagnostic/config on port 80 plus password-protected
-  `/admin/*` routes. Full reference in [`docs/API.md`](docs/API.md).
+## Timing and arming
 
-## Testing and static analysis
+The network update rate and stop-on-silence time are machine-controlled:
 
-`docs/TESTING.md` documents the full harness:
-`tools/pstop_test_remote.py` (arming-policy suite over the real wire
-protocol), `tools/pstop_chaos_proxy.py` + `test/chaos_ladder.sh`
-(loss/delay/dup/corrupt ladder), and `test/netem_ladder.sh`
-(WireGuard-underlay chaos). The simulated-press endpoint (`pstop_sim`)
-was removed from production firmware; tests exercise the machine policy
-through the scripted test remote instead, and arming a real unit
-requires a physical press.
+```text
+remote send interval = clamp(heartbeat_ms / 2, 100 ms, 1000 ms)
+stop-on-silence time = heartbeat_ms * max_missed_heartbeats
+```
 
-For long-run remote-to-machine connectivity soaks over Tailscale,
-`tools/soak_disconnect_monitor.py` polls remotes and machines, records
-every disconnect with the context needed to localize its cause
-(`sf_route`/errno, `ml_reconnects`, `wg_direct`, `rebonds`), and supports
-an "N-hours-clean" acceptance exit
-([`docs/CONNECTIVITY_SOAK.md`](docs/CONNECTIVITY_SOAK.md)).
+The default configuration uses a 400 ms heartbeat window and five missed
+windows, giving a send interval of about 200 ms and a stop-on-silence threshold
+of about 2 seconds. Integrators should choose values within the validated limits
+so the timeout fits their process safety time and network conditions.
 
-`./tools/misra_check.sh` runs a free-cppcheck MISRA C:2012 pass over
-the code we own (`pstop_c` is excluded; see
-`docs/MISRA_COMPLIANCE_2026-07-21.md` for results and the deviation
-register).
+The machine starts stopped. To arm it, press and hold the switch for at least
+`min_stop_ms` (500 ms by default), then release it. Machine policy determines
+which remotes may re-arm: the hardware and ROS 2 machine implementations default
+to stop-only, while the included host configuration is permissive for bench use.
 
-Validated across USB, Ethernet, and WiFi with soaks and impairment
-ladders producing zero false stops and zero device crashes
-(`docs/archive/TRANSPORT_TEST_REPORT_2026-07-20.md`,
-`docs/archive/CHAOS_RESULTS_2026-07-20.md`), on a live 128-peer
-tailnet, and on a live two-site rig against a geographically remote
-machine. In that run a full blackhole of the direct WireGuard path was
-carried by DERP with zero gap and zero rebonds, any single-path failure
-left the heartbeat intact, and a total link loss degraded to STOP with
-autonomous recovery in about 3 to 6 s
-(`docs/TWO_SITE_FAILOVER_2026-07-21.md`). Many-remotes-to-one-machine
-logic is validated in `docs/MULTI_REMOTE_VALIDATION_2026-07-22.md`.
-**How to bond and operate multiple remotes and machines over Tailscale —
-including the 128-peer cap rule that governs whether a cross-site remote can
-reach a machine — is documented in
-[`docs/MULTI_REMOTE_MULTI_MACHINE.md`](docs/MULTI_REMOTE_MULTI_MACHINE.md).**
+One remote can maintain independent sessions with up to four machines. Each
+machine controls its own heartbeat window, timeout, and authorization policy.
 
-## Current status and open items (2026-08-07)
+## Testing
 
-Units self-provision (per-unit ID, auto-join Tailscale) and check in on
-boot and at least every 5 minutes. The check-in and OTA tooling is
-intended to pair with a centralized configuration management and OTA
-system of your own; none is included in this project. Inbound
-reachability from such a backend required a DERP-home fix so a NAT'd or
-tethered unit homes on the backend's region (`docs/TROUBLESHOOTING.md`).
-Bulk USB provisioning goes through `tools/flash_pstop.sh`.
+The repository includes host-side protocol tests, fault-injection and chaos
+ladders, transport soaks, ROS 2 tests, firmware builds, and a MISRA C:2012
+pre-check. Start with [`docs/TESTING.md`](docs/TESTING.md); long-run transport
+testing is documented in
+[`docs/CONNECTIVITY_SOAK.md`](docs/CONNECTIVITY_SOAK.md).
 
-Recently closed (post-2026-07-22 hardening, deployed and bench-verified):
-
-- Outbound cold-bond region routing — a remote now homes DERP on the
-  machine's region and self-initiates, so a cross-region unit bonds
-  without a manual `tailscale ping` from the robot side.
-- Half-open / black-holed direct path — a wedged direct WireGuard path
-  is detected and demoted to DERP with no lasting bond loss.
-- OTA lineage safety — an HTTP-upload OTA of a wrong-project image is
-  rejected at the first chunk (no needless reboot/rollback), symmetric
-  on remote and machine builds.
-- USB-NCM tether stability verified under a running safety bond
-  (`docs/USB_NCM_STABILITY.md`; host setup in `docs/USB_NCM_SETUP.md`).
-- `max_missed_heartbeats` default raised 3 → 5 (about 2.0 s stop-on-
-  silence) consistently across firmware, machine, and the ROS 2 node.
-
-Open items:
-
-- WiFi is the weakest transport, at roughly 98 % soak reply rate with a
-  fail-safe stop and self-heal burst every 10 to 15 minutes. Deployment
-  policy: Ethernet primary, WiFi fallback, USB-NCM for bench and
-  service.
-- Retune machine `max_lost_messages` (10 to about 20) so the heartbeat
-  timeout, not the counter gap, is the stop authority on WiFi.
-- Tailscale subnet-route caveat: a subnet router advertising the
-  robot's LAN hijacks operator-laptop traffic to the chip's LAN IP.
-  There is an `ip rule` workaround that needs documenting.
-- Under a heavy synthetic DISCO storm on a full 128-peer tailnet the
-  safety bond holds (zero stops), but a small reply-deficit and rebond
-  churn appears at load transitions — a peer-scaling budget tuning
-  follow-up (`docs/safety/OPEN_ITEMS.md`), not a safety failure.
-- Long-duration (24 h+) per-transport soaks before certification runs.
+```sh
+make -C host test
+./tools/misra_check.sh
+pre-commit run --all-files
+```
 
 ## Certification and licensing
 
-`pstop_c/` is on its own certification track and is never modified from
-this repo. Every policy the shell adds (arming veto, status latch,
-transport binding, loop debounce) uses only public library API and is
-designed so a shell bug can cost availability but never cause a
-spurious arm.
+The Protective Stop v1.2 hardware design was OSHWA-certified as open source
+hardware on August 27, 2026:
 
-The integrity target is **SIL 3 (IEC 61508)** with an equivalent
-**PL e (ISO 13849)** track — the project is pursuing both standards. The
-safety case lives in [`docs/safety/`](docs/safety/): system definition,
-HARA, safety requirements, FMEA/FMEDA, the diagnostic-coverage and
-common-cause arguments, and the traceability matrix, with residual gaps
-toward a full quantified claim tracked in
-[`docs/safety/OPEN_ITEMS.md`](docs/safety/OPEN_ITEMS.md). The earlier
-design record is `docs/PSTOP_SAFETY_DESIGN.md`, and the option of moving
-the arming policy into the library is analyzed in
-`docs/PSTOP_C_MIN_STOP_OPTION.md`. Deployment rule: a `pstop_c` bump
-that changes the CRC is a wire break, so update chip and machine
-together.
+- OSHWA UID: **[US002846](https://certification.oshwa.org/us002846.html)**
+- Hardware: CERN-OHL-P-2.0
+- Software and firmware: Apache-2.0
+- Documentation: CC-BY-4.0 unless a file states otherwise
 
-Software is Apache-2.0 (see [`LICENSE`](LICENSE)); the hardware design
-is CERN-OHL-P-2.0 and the documentation is CC-BY-4.0, with the full
-texts in [`LICENSES/`](LICENSES/) and a per-file manifest in
-[`hardware/README.md`](hardware/README.md). Open-hardware certification
-progress is tracked in `docs/OSHWA_COMPLIANCE.md`.
+<a href="https://oshwa.github.io/certification-mark-generator/facts">
+  <img src="hardware/oshw-license-facts.svg" alt="Open source license facts: hardware CERN-OHL-P-2.0, software Apache-2.0, documentation CC-BY-4.0" width="380" />
+</a>
+
+The source package, licensing map, and mark guidance are summarized in
+[`docs/OSHWA_COMPLIANCE.md`](docs/OSHWA_COMPLIANCE.md). Full license texts are
+in [`LICENSE`](LICENSE) and [`LICENSES/`](LICENSES/).
+
+The design target for the on-demand stop function is SIL 3 under IEC 61508 and
+PL e under ISO 13849. These are engineering targets, not current
+functional-safety certifications. The safety case and remaining evidence gaps
+are tracked in [`docs/safety/`](docs/safety/) and
+[`docs/safety/OPEN_ITEMS.md`](docs/safety/OPEN_ITEMS.md).
 
 ## Contributing
 
-See [`CONTRIBUTING.md`](CONTRIBUTING.md). In short: CI must be green,
-`pre-commit` clean, and changes to protocol or safety behavior belong
-upstream in `pstop_c`, not here. Security reports go to
-[`SECURITY.md`](SECURITY.md).
+See [`CONTRIBUTING.md`](CONTRIBUTING.md) for development requirements. Report
+security issues through [`SECURITY.md`](SECURITY.md).

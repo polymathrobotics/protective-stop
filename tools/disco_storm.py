@@ -12,8 +12,8 @@ box-open (~30 ms X25519, recomputed every time). This is the load a real
 tailnet isn't available on the bench, so we generate the pressure directly.
 
 The chip should ABSORB it: ML_DISCO_OPENS_PER_PASS budgets box-opens per
-wg_mgr pass and the priority peer's key is exempt, so the concurrent 10 Hz
-pstop link must keep zero heartbeat-timeout STOPs throughout. Run the pstop
+wg_mgr pass and the priority peer's key is exempt, so the concurrent pstop
+link must keep zero heartbeat-timeout STOPs throughout. Run the pstop
 machine + a soak alongside and watch for STOPs / rebonds.
 
     python3 disco_storm.py --host 192.168.107.189 --pps 40 --secs 300

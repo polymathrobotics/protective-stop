@@ -316,7 +316,7 @@ static esp_err_t wifi_set_enabled_locked(bool on)
       atomic_store(&s_enabled, false);
       return r;
     }
-    /* Modem power-save MUST be off for the 10 Hz protective-stop link.
+    /* Modem power-save MUST be off for the latency-sensitive protective-stop link.
          * The boot-time ml_app WiFi path already does this; this runtime
          * enable path didn't — with default WIFI_PS_MIN_MODEM the radio
          * sleeps between DTIM beacons and drops most unicast RX: measured

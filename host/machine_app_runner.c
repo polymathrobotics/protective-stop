@@ -394,8 +394,7 @@ static remote_details_t is_operator_allowed(const device_id_t * device_id)
   return d;
 }
 
-/* Print transitions only — keeps the stderr stream readable when the chip
- * is hammering us at 10 Hz. */
+/* Print transitions only so the configured heartbeat stream stays readable. */
 static pstop_status_message_t s_last_status = PSTOP_STATUS_OK;
 static int s_status_initialized = 0;
 
@@ -926,8 +925,8 @@ int main(int argc, char * argv[])
              * Two directions, both surfaced even when recoverable (no stop):
              *   req.counter / req.stamp     — the remote's own outgoing sequence
              *   err below (MSG_LOST/...)    — its echo of the machine's data.
-             * NB the chip increments its counter every 10 Hz tick but only
-             * SENDS on lockstep agreement, so a counter gap means N messages
+             * NB the chip increments its counter on each scheduled transmit
+             * opportunity but only SENDS on lockstep agreement, so a counter gap means N messages
              * were dropped OR withheld (mismatch / boot-priming hold) and the
              * link is recovering — not necessarily a wire loss. */
       if (req_msg.checksum != req_msg.calculated_checksum) {
