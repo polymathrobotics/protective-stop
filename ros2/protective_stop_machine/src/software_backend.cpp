@@ -23,6 +23,7 @@ extern "C"
 #include "pstop/pstop_application.h"
 #include "pstop/pstop_msg.h"
 #include "pstop/pstop_remote_data.h"
+#include "pstop_aux_channel.h"
 #include "transport/udp/udp_transport.h"
 }
 
@@ -45,6 +46,11 @@ struct SoftwareMachineBackend::Impl
   mutable std::mutex mtx;
   MachineSnapshot snap;  // guarded
   MachineTiming timing;  // guarded (read by the C remote-details callback)
+
+  // The callback has no context argument. These fields expose only the BOND
+  // currently being processed; pstop_c latches stop_only into the client.
+  uint32_t bond_role_id{0};
+  pstop_aux_role_t bond_role{PSTOP_AUX_ROLE_UNSPECIFIED};
 
   void run();
   void rebuild_snapshot();  // caller holds no lock; locks internally
@@ -75,10 +81,20 @@ static remote_details_t cb_remote_details(const device_id_t * id)
   // which accepted every remote as a full operator.
   bool stop_only = true;
   if (g_impl) {
-    std::lock_guard<std::mutex> lk(g_impl->mtx);
-    hb = g_impl->timing.heartbeat_ms;
-    allow = g_impl->cfg.allow_unlisted;
-    stop_only = software_remote_is_stop_only(g_impl->cfg, (id != nullptr) ? id->data : 0U);
+    {
+      std::lock_guard<std::mutex> lk(g_impl->mtx);
+      hb = g_impl->timing.heartbeat_ms;
+      allow = g_impl->cfg.allow_unlisted;
+      stop_only = software_remote_is_stop_only(g_impl->cfg, (id != nullptr) ? id->data : 0U);
+    }
+    // AND-rule: operator authority also requires an explicit OPERATOR
+    // announcement in the BOND currently exposed by the machine thread.
+    const uint32_t remote_id = (id != nullptr) ? id->data : 0U;
+    const pstop_aux_role_t role =
+      (g_impl->bond_role_id == remote_id) ? g_impl->bond_role : PSTOP_AUX_ROLE_UNSPECIFIED;
+    if (!stop_only && !pstop_aux_role_is_operator(role)) {
+      stop_only = true;
+    }
   }
   remote_detail_set(&d, allow, hb, stop_only);
   return d;
@@ -193,12 +209,25 @@ void SoftwareMachineBackend::Impl::run()
       // Drop a non-BOND from an unknown/timed-out remote (upstream would
       // dereference before its NULL guard); a fresh BOND re-bonds.
       bool known = pstop_remote_get(&machine.remotes, &req_msg.id) != nullptr;
+
       if (known || req_msg.message == PSTOP_MESSAGE_BOND) {
+        bond_role_id = 0U;
+        bond_role = PSTOP_AUX_ROLE_UNSPECIFIED;
+        if (req_msg.checksum == req_msg.calculated_checksum &&
+          req_msg.message == PSTOP_MESSAGE_BOND &&
+          req_msg.receiver_id.data == cfg.machine_id)
+        {
+          bond_role_id = req_msg.id.data;
+          bond_role = pstop_aux_decode_role(&req_msg);
+        }
+        pstop_message_init(&resp_msg);
         if (machine_process_message(&machine, &req_msg, &resp_msg) == PSTOP_OK) {
           pstop_message_encode(&resp_msg, respbytes);
           transport_udp_write(&udp, respbytes, PSTOP_MESSAGE_SIZE,
               reinterpret_cast<struct sockaddr_in *>(&client));
         }
+        bond_role_id = 0U;
+        bond_role = PSTOP_AUX_ROLE_UNSPECIFIED;
       }
     }
     rebuild_snapshot();

@@ -779,7 +779,23 @@ static esp_err_t handler_post_allowed(httpd_req_t * req)
     return ESP_FAIL;
   }
 
+  /* Track whether any ip is NEW relative to the previous list. A newly listed
+   * peer that add_peer() rejected earlier has no WG slot, and steady-state
+   * OmitPeers=true map deltas never re-offer it — so it would stay unreachable
+   * until the next periodic re-register (up to ML_COORD_REREGISTER_MS, 5 min).
+   * Removals and already-admitted peers need nothing: every gate reads the
+   * live list. Snapshot failure => assume new (conservative, hitless). */
+  bool added_new = false;
   if (xSemaphoreTake(ctx->peer_mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+    int old_count = ctx->peer_list.count;
+    uint32_t * old_ips = (old_count > 0) ? (uint32_t *)malloc((size_t)old_count * sizeof(uint32_t)) : NULL;
+    if (old_ips) {
+      for (int i = 0; i < old_count; i++) {
+        old_ips[i] = ctx->peer_list.entries[i].vpn_ip;
+      }
+    } else if (old_count > 0) {
+      added_new = true;
+    }
     ctx->peer_list.count = 0;
     int arr_size = cJSON_GetArraySize(peers);
     for (int i = 0; i < arr_size && i < ML_CONFIG_MAX_ALLOWED_PEERS; i++) {
@@ -790,6 +806,17 @@ static esp_err_t handler_post_allowed(httpd_req_t * req)
 
       uint32_t vpn_ip = microlink_parse_ip(ip->valuestring);
       if (vpn_ip == 0) continue;
+
+      if (!added_new) {
+        bool was_listed = false;
+        for (int k = 0; old_ips && k < old_count; k++) {
+          if (old_ips[k] == vpn_ip) {
+            was_listed = true;
+            break;
+          }
+        }
+        if (!was_listed) added_new = true;
+      }
 
       ml_config_peer_entry_t * e = &ctx->peer_list.entries[ctx->peer_list.count];
       e->vpn_ip = vpn_ip;
@@ -821,12 +848,23 @@ static esp_err_t handler_post_allowed(httpd_req_t * req)
     }
     ctx->filter_enabled = (ctx->peer_list.count > 0);
     xSemaphoreGive(ctx->peer_mutex);
+    free(old_ips);
   }
   cJSON_Delete(json);
 
   config_save_peers(ctx);
 
   ESP_LOGI(TAG, "Allowlist updated: %d peers, filter %s", ctx->peer_list.count, ctx->filter_enabled ? "ON" : "OFF");
+
+  /* Make a NEW ip reachable now, not at the next 5-min periodic re-register:
+   * the same recipe the pin-absent heal uses (ml_wg_mgr.c) — full peer
+   * redelivery on the next MapRequest, and that MapRequest immediately via
+   * the hitless re-register path (peers/WG sessions preserved, not a flap). */
+  if (added_new) {
+    ESP_LOGI(TAG, "Allowlist gained a new ip — requesting immediate coord re-register");
+    ml_coord_request_full_peers();
+    ml_coord_request_reregister();
+  }
 
   cJSON * resp = cJSON_CreateObject();
   cJSON_AddBoolToObject(resp, "ok", true);

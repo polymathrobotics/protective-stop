@@ -9,7 +9,9 @@
 #  Clean:   make clean
 
 PSTOP_ROOT  := ../pstop_c
-PSTOP_INC   := -I$(PSTOP_ROOT)/pstop/include -I$(PSTOP_ROOT)/transport/include
+# ../common holds the non-certified aux-channel schema header shared by all
+# wrappers (remote, machn, host, ros2). See common/pstop_aux_channel.h.
+PSTOP_INC   := -I$(PSTOP_ROOT)/pstop/include -I$(PSTOP_ROOT)/transport/include -I../common
 
 PSTOP_SRCS  := $(wildcard $(PSTOP_ROOT)/pstop/src/pstop/*.c)
 TRANS_SRCS  := $(PSTOP_ROOT)/transport/src/transport/udp/udp_transport.c
@@ -28,6 +30,11 @@ machine_app_runner: machine_app_runner.c clock_guard.c $(PSTOP_SRCS) $(TRANS_SRC
 # Host unit test for the clock guard — no hardware, no pstop_c needed.
 test_clock_guard: test_clock_guard.c clock_guard.c
 	$(CC) $(CFLAGS) -o $@ $^
+
+# Aux-channel codec test (common/pstop_aux_channel.h): header-only static
+# inline logic, needs the pstop + common include paths but no pstop_c .c files.
+test_aux_channel: test_aux_channel.c
+	$(CC) $(CFLAGS) $(PSTOP_INC) -o $@ $^
 
 # Golden-vector KATs for the safety-path crypto primitives switched to -O3.
 # The primitive .c files are compiled straight into the test at -O3 (matching
@@ -52,10 +59,11 @@ test_demote_veto: test_demote_veto.c $(MICROLINK)/include/ml_demote_verdict.h
 	$(CC) $(CFLAGS) -I$(MICROLINK)/include -o $@ test_demote_veto.c
 
 .PHONY: test clean
-test: test_clock_guard test_crypto_kat test_demote_veto
+test: test_clock_guard test_crypto_kat test_demote_veto test_aux_channel
 	./test_clock_guard
 	./test_crypto_kat
 	./test_demote_veto
+	./test_aux_channel
 
 clean:
-	rm -f machine_app_runner test_clock_guard test_crypto_kat test_demote_veto
+	rm -f machine_app_runner test_clock_guard test_crypto_kat test_demote_veto test_aux_channel

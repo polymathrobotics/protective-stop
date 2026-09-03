@@ -25,6 +25,7 @@
  *   POST /api/led_brightness?pct=N  Set + persist master LED brightness (0..100%)
  *   POST /api/ring_led1?on=0|1    Locate mode: only LED 1 white (auto-expires)
  *   POST /api/enter_download      Enter USB download (flashing) mode
+ *   GET/POST /api/role            Read or persist role; POST reboots to apply
  *
  * The admin routes (/admin/...) live in microlink (ml_config_httpd.c, ml_app.c).
  * Full reference for both servers: docs/API.md.
@@ -56,6 +57,7 @@
 #include "microlink.h"
 #include "ml_app.h"
 #include "panic_log.h"
+#include "pstop_aux_channel.h"
 #include "soc/rtc_cntl_reg.h"
 #include "wireguardif.h"
 
@@ -499,7 +501,9 @@ static esp_err_t page_state(httpd_req_t * req)
       CLAMP_N();
     }
   }
-  n += snprintf(buf + n, cap - n, "],\"tk0\":");
+  /* Remote self-role (informational): the role this device announces to
+     * machines. Inert on machine-role builds, which do not announce a role. */
+  n += snprintf(buf + n, cap - n, "],\"role\":\"%s\",\"tk0\":", pstop_aux_role_str((pstop_aux_role_t)dcs_role_get()));
   CLAMP_N();
   n += emit_bucket(buf + n, cap - n, &snap.b[0]);
   CLAMP_N();
@@ -1211,6 +1215,74 @@ static esp_err_t api_operators_post(httpd_req_t * req)
   return operators_send_list(req, true);
 }
 
+#ifndef DCS_PAGE_MACHINE
+/* Remote self-role config: this remote announces stop-only vs operator in every
+ * pstop frame (see common/pstop_aux_channel.h). The machine ANDs an operator
+ * claim with its own allowlist, so promoting a remote here only *enables* the
+ * possibility of re-arm; the machine still gates it.
+ *   GET  /api/role                            -> {"ok":true,"role":"stop_only"}
+ *   POST /api/role?role=stop_only|operator    persist and reboot. */
+static esp_err_t role_send(httpd_req_t * req, bool ok)
+{
+  char buf[64];
+  int len = snprintf(
+    buf,
+    sizeof(buf),
+    "{\"ok\":%s,\"role\":\"%s\"}",
+    ok ? "true" : "false",
+    pstop_aux_role_str((pstop_aux_role_t)dcs_role_get()));
+  (void)httpd_resp_set_type(req, "application/json");
+  return httpd_resp_send(req, buf, len);
+}
+
+static esp_err_t api_role_get(httpd_req_t * req)
+{
+  if (!operators_require_admin(req)) {
+    return ESP_OK;
+  }
+  return role_send(req, true);
+}
+
+static esp_err_t api_role_post(httpd_req_t * req)
+{
+  if (!operators_require_admin(req)) {
+    return ESP_OK;
+  }
+  (void)httpd_resp_set_type(req, "application/json");
+  char query[48], val[16];
+  if (
+    (httpd_req_get_url_query_str(req, query, sizeof(query)) != ESP_OK) ||
+    (httpd_query_key_value(query, "role", val, sizeof(val)) != ESP_OK))
+  {
+    (void)httpd_resp_set_status(req, "400 Bad Request");
+    return httpd_resp_sendstr(req, "{\"ok\":false,\"error\":\"need ?role=stop_only|operator\"}");
+  }
+  uint8_t role;
+  if (strcmp(val, "operator") == 0) {
+    role = PSTOP_AUX_ROLE_OPERATOR;
+  } else if (strcmp(val, "stop_only") == 0) {
+    role = PSTOP_AUX_ROLE_STOP_ONLY;
+  } else {
+    (void)httpd_resp_set_status(req, "400 Bad Request");
+    return httpd_resp_sendstr(req, "{\"ok\":false,\"error\":\"role must be stop_only or operator\"}");
+  }
+  if (dcs_role_set(role) != ESP_OK) {
+    (void)httpd_resp_set_status(req, "500 Internal Server Error");
+    return httpd_resp_sendstr(req, "{\"ok\":false,\"error\":\"NVS write failed\"}");
+  }
+  char resp[112];
+  int len = snprintf(
+    resp,
+    sizeof(resp),
+    "{\"ok\":true,\"role\":\"%s\",\"message\":\"rebooting to apply role\"}",
+    pstop_aux_role_str((pstop_aux_role_t)role));
+  (void)httpd_resp_send(req, resp, len);
+  vTaskDelay(pdMS_TO_TICKS(200));
+  esp_restart();
+  return ESP_OK;
+}
+#endif
+
 /* === Public registration =================================================== */
 void dcs_admin_pages_register(ml_app_t * app)
 {
@@ -1241,4 +1313,8 @@ void dcs_admin_pages_register(ml_app_t * app)
   (void)ml_app_add_page(app, "/api/enter_download", HTTP_POST, api_enter_download);
   (void)ml_app_add_page(app, "/api/operators", HTTP_GET, api_operators_get);
   (void)ml_app_add_page(app, "/api/operators", HTTP_POST, api_operators_post);
+#ifndef DCS_PAGE_MACHINE
+  (void)ml_app_add_page(app, "/api/role", HTTP_GET, api_role_get);
+  (void)ml_app_add_page(app, "/api/role", HTTP_POST, api_role_post);
+#endif
 }

@@ -45,6 +45,7 @@
 #include "pstop/machine.h"
 #include "pstop/pstop_msg.h"
 #include "pstop/pstop_remote_data.h"
+#include "pstop_aux_channel.h"
 #include "transport/udp/udp_transport.h"
 
 /* CLOCK_BOOTTIME is Linux-specific; fall back to MONOTONIC_RAW / REALTIME on
@@ -361,22 +362,35 @@ static void on_sig(int signo)
   s_running = 0;
 }
 
-/* Consults the configured allowlist. A remote listed in [[operator]] uses its
- * entry; an unlisted remote uses [policy] (allow_unlisted + defaults). */
+/* The callback has no context pointer. Expose only the BOND currently being
+ * processed; pstop_c latches the effective stop_only policy into the client. */
+static uint32_t s_bond_role_id;
+static pstop_aux_role_t s_bond_role = PSTOP_AUX_ROLE_UNSPECIFIED;
+
+/* Consults the configured allowlist, ANDed with the remote's announced role. A
+ * remote listed in [[operator]] uses its entry; an unlisted remote uses [policy]
+ * (allow_unlisted + defaults). Operator authority additionally requires the
+ * remote to announce the OPERATOR role (aux uplink); otherwise it is stop-only
+ * (fail-safe) — strictly more conservative than config alone. */
 static remote_details_t is_operator_allowed(const device_id_t * device_id)
 {
   remote_details_t d;
+  d.allowed = g_cfg.allow_unlisted;
+  d.stop_only = g_cfg.default_stop_only;
+  d.heartbeat_ms = g_cfg.default_heartbeat_ms;
   for (int i = 0; i < g_cfg.n_operators; i++) {
     if (g_cfg.operators[i].device_id == device_id->data) {
       d.allowed = g_cfg.operators[i].allowed;
       d.stop_only = g_cfg.operators[i].stop_only;
       d.heartbeat_ms = g_cfg.operators[i].heartbeat_ms ? g_cfg.operators[i].heartbeat_ms : g_cfg.default_heartbeat_ms;
-      return d;
+      break;
     }
   }
-  d.allowed = g_cfg.allow_unlisted;
-  d.stop_only = g_cfg.default_stop_only;
-  d.heartbeat_ms = g_cfg.default_heartbeat_ms;
+  /* AND-rule: operator authority requires an explicit OPERATOR announcement. */
+  pstop_aux_role_t role = (device_id->data == s_bond_role_id) ? s_bond_role : PSTOP_AUX_ROLE_UNSPECIFIED;
+  if (!d.stop_only && !pstop_aux_role_is_operator(role)) {
+    d.stop_only = 1;
+  }
   return d;
 }
 
@@ -962,7 +976,19 @@ int main(int argc, char * argv[])
       int prev_restart = machine.robot_state.restart_state;
       uint32_t prev_sid = machine.robot_state.remote_stop_id;
 
+      s_bond_role_id = 0u;
+      s_bond_role = PSTOP_AUX_ROLE_UNSPECIFIED;
+      if (
+        req_msg.checksum == req_msg.calculated_checksum && req_msg.message == PSTOP_MESSAGE_BOND &&
+        req_msg.receiver_id.data == g_cfg.machine_device_id)
+      {
+        s_bond_role_id = req_msg.id.data;
+        s_bond_role = pstop_aux_decode_role(&req_msg);
+      }
+      pstop_message_init(&resp_msg);
       pstop_error_t err = machine_process_message(&machine, &req_msg, &resp_msg);
+      s_bond_role_id = 0u;
+      s_bond_role = PSTOP_AUX_ROLE_UNSPECIFIED;
 
       /* --- Min-STOP-duration arming policy (LIBRARY-native, pstop_c #59) --
              * The library refuses an OK arriving sooner than

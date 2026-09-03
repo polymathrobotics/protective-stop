@@ -319,6 +319,15 @@ extern "C"
    * absent). */
   esp_err_t dcs_operator_del(uint32_t remote_id);
 
+  /** @brief This remote's announced role (a pstop_aux_role_t value: stop_only or
+   * operator). Lock-free — safe to call from the safety cores when encoding the
+   * outbound pstop frame. Loaded from NVS at boot; stop_only until promoted. */
+  uint8_t dcs_role_get(void);
+
+  /** @brief Persist this remote's role for the next boot. The active role is
+   * immutable for a boot so every machine observes it through a fresh bond. */
+  esp_err_t dcs_role_set(uint8_t role);
+
   /**
  * @brief Tell the transport whether the pstop link to the machine is alive.
  *

@@ -62,6 +62,7 @@
 #include "pstop/machine.h"
 #include "pstop/pstop_msg.h"
 #include "pstop/pstop_remote_data.h"
+#include "pstop_aux_channel.h"
 
 static const char * TAG = "machn";
 
@@ -192,6 +193,17 @@ typedef struct
 
 static machn_seen_t g_seen[DCS_MACHN_MAX_REMOTES];
 
+/* The callbacks have no context argument. Expose only the BOND staged for the
+ * current core window; pstop_c latches stop_only into each accepted client. */
+static atomic_uint_fast32_t g_bond_role_id;
+static atomic_uint_fast32_t g_bond_role;
+
+static pstop_aux_role_t bond_role_get(uint32_t id)
+{
+  return ((uint32_t)atomic_load(&g_bond_role_id) == id) ? (pstop_aux_role_t)atomic_load(&g_bond_role)
+                                                        : PSTOP_AUX_ROLE_UNSPECIFIED;
+}
+
 static void seen_note(uint32_t id, uint32_t ip, uint64_t now, uint64_t received_stamp)
 {
   int free_slot = -1;
@@ -286,7 +298,15 @@ static remote_details_t details_default(const device_id_t * device_id)
      * safety cores). Latched onto the client at bond (pstop_c machine.c
      * add_new_client) — an operator added later applies on the remote's next
      * bond. */
-  const bool is_operator = (device_id != NULL) && dcs_operator_is_listed(device_id->data);
+  const bool is_listed = (device_id != NULL) && dcs_operator_is_listed(device_id->data);
+  /* AND-rule: a remote may re-arm only if it BOTH announces the operator role
+     * (aux uplink) AND is on the machine allowlist. A stop-only/unspecified
+     * claim, or an unlisted id, stays stop-only. Strictly more conservative than
+     * the allowlist alone: a provisioning gap surfaces as stop-only, never as an
+     * unexpected operator. The role is immutable for the remote's boot and is
+     * latched with is_stop_only at bond. */
+  const pstop_aux_role_t claimed = (device_id != NULL) ? bond_role_get(device_id->data) : PSTOP_AUX_ROLE_UNSPECIFIED;
+  const bool is_operator = is_listed && pstop_aux_role_is_operator(claimed);
   remote_detail_set(&d, true, MACHN_DEFAULT_HEARTBEAT_MS, !is_operator);
   return d;
 }
@@ -353,7 +373,7 @@ static void core_task(void * arg)
     if (g_rx_pending != 0) {
       pstop_msg_t req;
       pstop_message_decode(&req, g_rx_bytes);
-      memset(&mc->resp, 0, sizeof(mc->resp));
+      pstop_message_init(&mc->resp);
       mc->err = machine_process_message(&mc->machine, &req, &mc->resp);
       if (mc->err == PSTOP_OK) {
         pstop_message_encode(&mc->resp, mc->resp_bytes);
@@ -577,8 +597,24 @@ static void comparator_task(void * arg)
         last_rx_ms = now_ms();
       }
       /* Short/garbage datagrams are dropped silently (fail-safe: no
-             * reply). Additional queued datagrams are handled on subsequent
-             * ticks — remotes publish at >= 200 ms spacing per unit. */
+              * reply). Additional queued datagrams are handled on subsequent
+              * ticks — remotes publish at >= 200 ms spacing per unit. */
+    }
+
+    /* Publish only a valid BOND's role for the upcoming core window. Invalid
+         * requests leave no persistent role state to pollute or exhaust. */
+    atomic_store(&g_bond_role_id, 0u);
+    atomic_store(&g_bond_role, PSTOP_AUX_ROLE_UNSPECIFIED);
+    if (g_rx_pending != 0) {
+      pstop_msg_t rx;
+      pstop_message_decode(&rx, g_rx_bytes);
+      if (
+        rx.checksum == rx.calculated_checksum && rx.message == PSTOP_MESSAGE_BOND &&
+        rx.receiver_id.data == MACHN_MACHINE_ID)
+      {
+        atomic_store(&g_bond_role, pstop_aux_decode_role(&rx));
+        atomic_store(&g_bond_role_id, rx.id.data);
+      }
     }
 
     /* Run both cores against the staged op (or a bare liveness tick).
