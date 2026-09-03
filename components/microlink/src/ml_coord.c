@@ -54,6 +54,18 @@ void ml_coord_request_full_peers(void)
   s_want_full_peers = true;
 }
 
+/* One-shot: run the periodic hitless re-register NOW instead of waiting out
+ * ML_COORD_REREGISTER_MS. Set by the allowlist editor when a NEW ip is added:
+ * a peer add_peer() previously rejected holds no WG slot and steady-state
+ * OmitPeers=true deltas never re-offer it, so without this the operator waits
+ * up to 5 min (bbd8, 2026-09-02: +286 s). Pair with request_full_peers. */
+static volatile bool s_want_rereg;
+
+void ml_coord_request_reregister(void)
+{
+  s_want_rereg = true;
+}
+
 /* The next successful connect is a scheduled re-register, not a flap: keep it
  * out of connect_count so ml_reconnects stays a pure flap signal for soaks.
  * Any GENUINE reconnect trigger clears it so a real flap is never masked. */
@@ -2917,11 +2929,15 @@ void ml_coord_task(void * arg)
          * hitless), so run it on a timer as the standing cure. */
         {
           if (s_last_rereg_ms == 0) s_last_rereg_ms = now;
-          if (now - s_last_rereg_ms > ML_COORD_REREGISTER_MS) {
+          bool requested = s_want_rereg;
+          if (requested || (now - s_last_rereg_ms > ML_COORD_REREGISTER_MS)) {
+            s_want_rereg = false;
             s_last_rereg_ms = now;
             s_diag_coord_reregisters++;
             s_rereg_skip_count = true;
-            ESP_LOGI(TAG, "Periodic coord re-register #%u", (unsigned)s_diag_coord_reregisters);
+            ESP_LOGI(
+              TAG, "%s coord re-register #%u", requested ? "Requested" : "Periodic",
+              (unsigned)s_diag_coord_reregisters);
             state = COORD_RECONNECTING;
             break;
           }

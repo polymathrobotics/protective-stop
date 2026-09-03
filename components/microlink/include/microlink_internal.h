@@ -1079,6 +1079,9 @@ extern "C"
   /* One-shot: the next long-poll MapRequest sends OmitPeers=false so the
    * control plane re-delivers the FULL peer list (pin-absent heal fallback). */
   void ml_coord_request_full_peers(void);
+  /* One-shot: run the hitless periodic coord re-register on the next coord
+   * tick instead of waiting out ML_COORD_REREGISTER_MS (allowlist add). */
+  void ml_coord_request_reregister(void);
   /* True when vpn_ip is the priority peer or an extra pin — consumed by
    * ml_config_peer_is_allowed()'s centralized pin exemption. */
   bool ml_wg_ip_is_pinned(uint32_t vpn_ip);
