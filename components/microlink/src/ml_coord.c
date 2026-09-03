@@ -2936,7 +2936,9 @@ void ml_coord_task(void * arg)
             s_diag_coord_reregisters++;
             s_rereg_skip_count = true;
             ESP_LOGI(
-              TAG, "%s coord re-register #%u", requested ? "Requested" : "Periodic",
+              TAG,
+              "%s coord re-register #%u",
+              requested ? "Requested" : "Periodic",
               (unsigned)s_diag_coord_reregisters);
             state = COORD_RECONNECTING;
             break;
