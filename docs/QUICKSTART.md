@@ -119,8 +119,6 @@ seconds into boot and the serial console goes quiet by design.
 Unplug and replug the remote after flashing (so the tether re-enumerates
 under the new interface name).
 
-<!-- VERIFY: ring colour and time-to-tailnet on a fresh unit -->
-
 ```sh
 ip addr show esp-pstop0              # expect: inet 10.42.0.1/24  (within ~10 s)
 tailscale status | grep pstop-       # expect: 100.a.b.c  pstop-01xxxxxx  …  (within ~60 s)
@@ -275,6 +273,9 @@ The remote tries uplinks in order: Ethernet (6 s DHCP wait), USB tether, WiFi.
 - **Ethernet / PoE**: plug into any DHCP LAN with internet; skip step 3. Find
   the remote's LAN IP from your router or, once Tailscale is up, just use
   `$REMOTE`. Every command in steps 5–8 works over the tailnet address.
+  Ethernet wins over USB whenever both are connected, including hot-plug on a
+  running unit; pulling it falls back to USB with one ~5 s Tailscale
+  re-register that a bonded machine rides through.
 - **WiFi**: set `CONFIG_ML_WIFI_SSID` / `CONFIG_ML_WIFI_PASSWORD` in
   `sdkconfig.credentials` before building. If WiFi fails for 60 s the remote
   opens its own access point `microlink-XXYYZZ` (password `microlink`) with the
