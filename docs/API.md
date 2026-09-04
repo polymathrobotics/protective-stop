@@ -21,9 +21,9 @@ Query parameters are shown where required. Unless noted, POST bodies are empty.
 | POST | `/api/derp_delay?ms=N` | Set the DERP loop yield (ms) |
 | POST | `/api/wg` | **Removed** — returns `410 Gone`. The runtime suspend could park `ml_wg_mgr` while it held the lwIP core lock, wedging all networking until a task-WDT panic (bench-proven 2026-08-09). Use `/api/ts_boot` (persistent, safe boot-path pause) or `/api/derp` instead. The `/state.json` `wg_paused` field still reports the boot-path suspend state |
 | POST | `/api/wifi_tx_power?q=N` | Set WiFi max TX power (quarter-dBm) |
-| POST | `/api/iface/eth` | Select the Ethernet uplink |
-| POST | `/api/iface/wifi` | Select the WiFi uplink |
-| POST | `/api/iface/usb` | Select the USB-NCM uplink |
+| POST | `/api/iface/eth` | **Toggle** the Ethernet driver on/off (not a selector; no GET). Reply `{"enabled":0\|1}` is the resulting state. Runtime only, not persisted. Uplink preference is automatic: Ethernet > USB-NCM > WiFi (`active_iface` in `/state.json`) |
+| POST | `/api/iface/wifi` | **Toggle** the WiFi STA driver on/off. Same semantics |
+| POST | `/api/iface/usb` | **Toggle** the USB-NCM tether on/off (installs/removes TinyUSB; the host sees a DHCP Release and a USB disconnect). Same semantics. Bench-verified 2026-09-04: Eth->USB fallback costs one Tailscale re-register (~5 s), USB->Eth is seamless; a bonded machine with the default 2 s timeout stays armed through both |
 | POST | `/api/usb_enable` | Flip the USB-NCM NVS flag and reboot |
 | POST | `/api/ts_boot` | Flip the Tailscale-on-boot NVS flag (effective next reboot) |
 | POST | `/api/pstop_peer?ip=A.B.C.D&port=N` | Set + persist the pstop machine target (= peer slot 0, legacy single-machine call) |
@@ -31,7 +31,9 @@ Query parameters are shown where required. Unless noted, POST bodies are empty.
 | POST | `/api/pstop_num?n=N` | Set the USB "PSTOPxx" unit number (0 = auto) |
 | POST | `/api/ring_offset?n=N` | Set + persist the LED-ring rotation offset (0..15) — which physical pixel is "LED 1". Applies immediately, survives reboots and firmware updates (NVS `ring_off`) |
 | POST | `/api/ring_led1?on=0\|1` | Locate mode: light ONLY LED 1 solid white (overrides state colours) so the offset can be verified during install; auto-expires after 5 min |
-| POST | `/api/enter_download` | Enter USB download (flashing) mode |
+| POST | `/api/enter_download?confirm=1` | Enter USB download (flashing) mode (**admin auth**) |
+| GET  | `/api/role` | Remote self-role (**admin auth**): `{"ok":true,"role":"stop_only"\|"operator"}`. Announced in every pstop frame; the machine ANDs an `operator` claim with its own operator allowlist. Default `stop_only`. Remote only |
+| POST | `/api/role?role=stop_only\|operator` | Persist the self-role to NVS and **reboot** to apply (**admin auth**). Promoting to `operator` is one of the two gates for re-arm; the other is the machine's allowlist (`software.operators` on the ROS node, `[[operator]]` in `machine.toml`, `/api/operators` on machn). Remote only |
 
 ### Multi-machine (one remote, up to 4 machines)
 

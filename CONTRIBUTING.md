@@ -41,8 +41,13 @@ Requires ESP-IDF v5.5.
 cd firmware
 cp sdkconfig.credentials.example sdkconfig.credentials   # then edit with real values
 idf.py build            # produces build/pstop_remote.bin
-idf.py flash monitor    # to a connected board
+idf.py flash            # to a connected board
 ```
+
+`idf.py monitor` only shows the first seconds of boot: the USB port becomes the
+network tether once TinyUSB starts and the serial console goes quiet. Use
+`http://<remote>/state.json` and `/api/last_log` instead, or wire a USB-UART
+adapter to the UART0 pins. Full first-time walkthrough: `docs/QUICKSTART.md`.
 
 `sdkconfig.credentials` holds secrets (Wi-Fi, Tailscale auth key, admin
 password) and is gitignored — never commit it.

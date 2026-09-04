@@ -3,13 +3,20 @@
 # SPDX-License-Identifier: Apache-2.0
 """Scripted pstop remote for machine-side policy testing.
 
-Speaks the pstop_c wire protocol (40-byte messages, CRC16 poly 0x8D95,
-little-endian fields, protocol @ d9f4970) well enough to bond and run
-timed STOP/OK sequences against machine_app_runner — used to verify the
-wrapper's min-STOP-duration arming policy without touching a chip:
+Speaks the pstop_c v2 wire protocol (48-byte messages, CRC16 poly 0x8D95,
+little-endian fields, far-Hamming message codewords, aux channel in
+padding1) well enough to bond and run timed STOP/OK sequences against a
+machine — used to verify the min-STOP-duration arming policy without
+touching a chip. Works against host/machine_app_runner and the ROS 2
+machine_bridge_node alike (same pstop_c, same UDP port):
 
     ./machine_app_runner test.toml &          # dedicated instance
     python3 pstop_test_remote.py --port 8893  # runs the test script
+
+Arming needs BOTH gates open: this script announces role OPERATOR in its
+aux channel (--role stop_only to test the refusal), and the machine must
+list REMOTE_ID (0x01020381 = 16909185) as an operator — or run with
+default_stop_only = false, as host/machine.toml does for the bench.
 
 Test script (asserts on the machine's replies; library-native min-delay
 semantics from pstop_c #59 — an OK sooner than delay_between_stop_ms after
@@ -32,10 +39,17 @@ import struct
 import sys
 import time
 
-PSTOP_VERSION = 0x00
-MSG_OK, MSG_STOP, MSG_BOND, MSG_UNBOND = 0, 1, 2, 3
-NAMES = {0: 'OK', 1: 'STOP', 2: 'BOND', 3: 'UNBOND'}
-SIZE = 40
+# Wire protocol — MUST track pstop_c (config.h PSTOP_VERSION / PSTOP_MESSAGE_SIZE,
+# pstop_msg.h codewords) and common/pstop_aux_channel.h (padding1 layout).
+PSTOP_VERSION = 0x02
+MSG_OK, MSG_STOP, MSG_BOND, MSG_UNBOND = 0x55, 0x92, 0xAD, 0x6A
+NAMES = {0x55: 'OK', 0x92: 'STOP', 0xAD: 'BOND', 0x6A: 'UNBOND', 0x0F: 'UNKNOWN'}
+SIZE = 48
+FMT = '<BBQQIIIIIII'  # 46 bytes + u16 CRC
+AUX_VERSION = 0x01
+ROLE_STOP_ONLY, ROLE_OPERATOR = 1, 2
+ROLES = {'stop_only': ROLE_STOP_ONLY, 'operator': ROLE_OPERATOR}
+ROLE = ROLE_OPERATOR  # set from --role
 
 REMOTE_ID = 0x01020381  # distinct from the chip's 0x01020380
 MACHINE_ID = 0x01020304
@@ -54,7 +68,7 @@ def crc16(data: bytes) -> int:
 
 def encode(message, stamp, received_stamp, counter, received_counter):
     body = struct.pack(
-        '<BBQQIIIII',
+        FMT,
         PSTOP_VERSION,
         message,
         stamp,
@@ -64,11 +78,15 @@ def encode(message, stamp, received_stamp, counter, received_counter):
         HEARTBEAT_MS,
         counter,
         received_counter,
+        AUX_VERSION | (ROLE << 8),  # padding1 = aux channel: version + self-role
+        0,  # padding2
     )
     return body + struct.pack('<H', crc16(body))
 
 
 def decode(data):
+    if len(data) != SIZE:
+        return dict(message=None, stamp=0, counter=0, received_counter=0, crc_ok=False)
     (
         version,
         message,
@@ -79,9 +97,11 @@ def decode(data):
         hb,
         counter,
         received_counter,
-    ) = struct.unpack('<BBQQIIIII', data[:38])
-    (checksum,) = struct.unpack('<H', data[38:40])
-    ok = checksum == crc16(data[:38])
+        _padding1,
+        _padding2,
+    ) = struct.unpack(FMT, data[:46])
+    (checksum,) = struct.unpack('<H', data[46:48])
+    ok = checksum == crc16(data[:46])
     return dict(
         message=message,
         stamp=stamp,
@@ -165,7 +185,15 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--host', default='127.0.0.1')
     ap.add_argument('--port', type=int, default=8893)
+    ap.add_argument(
+        '--role',
+        choices=sorted(ROLES),
+        default='operator',
+        help='self-role announced in the aux channel (default operator; stop_only must never arm)',
+    )
     args = ap.parse_args()
+    global ROLE
+    ROLE = ROLES[args.role]
 
     r = Remote(args.host, args.port)
     ok = True
@@ -178,6 +206,17 @@ def main():
         last and last['message'] == MSG_STOP,
         'OK stream answered with STOP before any arming cycle',
     )
+
+    if ROLE == ROLE_STOP_ONLY:
+        print('2s. stop-only remote: a full press-and-release must NOT arm')
+        r.stream(MSG_STOP, 0.8)
+        last = r.stream(MSG_OK, 1.5)
+        ok &= expect(
+            last and last['message'] == MSG_STOP,
+            'held STOP->OK from a stop_only remote stays STOP (re-arm refused)',
+        )
+        print('ALL PASS' if ok else 'FAILURES PRESENT')
+        sys.exit(0 if ok else 1)
 
     print('2. blip: STOP 200 ms then OK — early OK refused, arms after min delay')
     r.stream(MSG_STOP, 0.2)
