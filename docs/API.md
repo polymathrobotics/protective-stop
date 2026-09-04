@@ -31,7 +31,9 @@ Query parameters are shown where required. Unless noted, POST bodies are empty.
 | POST | `/api/pstop_num?n=N` | Set the USB "PSTOPxx" unit number (0 = auto) |
 | POST | `/api/ring_offset?n=N` | Set + persist the LED-ring rotation offset (0..15) — which physical pixel is "LED 1". Applies immediately, survives reboots and firmware updates (NVS `ring_off`) |
 | POST | `/api/ring_led1?on=0\|1` | Locate mode: light ONLY LED 1 solid white (overrides state colours) so the offset can be verified during install; auto-expires after 5 min |
-| POST | `/api/enter_download` | Enter USB download (flashing) mode |
+| POST | `/api/enter_download?confirm=1` | Enter USB download (flashing) mode (**admin auth**) |
+| GET  | `/api/role` | Remote self-role (**admin auth**): `{"ok":true,"role":"stop_only"\|"operator"}`. Announced in every pstop frame; the machine ANDs an `operator` claim with its own operator allowlist. Default `stop_only`. Remote only |
+| POST | `/api/role?role=stop_only\|operator` | Persist the self-role to NVS and **reboot** to apply (**admin auth**). Promoting to `operator` is one of the two gates for re-arm; the other is the machine's allowlist (`software.operators` on the ROS node, `[[operator]]` in `machine.toml`, `/api/operators` on machn). Remote only |
 
 ### Multi-machine (one remote, up to 4 machines)
 
