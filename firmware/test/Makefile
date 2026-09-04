@@ -17,12 +17,21 @@ CFLAGS  ?= -O0 -g -Wall -Wextra --coverage -fcondition-coverage
 INC     := -I../main -I../../pstop_c/pstop/include
 SRCS    := ../main/estop_verdict.c test_estop_verdict.c
 
+# Lifetime health counters: pure logic (edge detectors, blob codec, wear
+# thresholds) split out of dcs_support for the same host-test reason.
+HEALTH_INC  := -I../components/dcs_support/include
+HEALTH_SRCS := ../components/dcs_support/src/dcs_health_logic.c test_dcs_health_logic.c
+
 test_estop_verdict: $(SRCS)
 	$(CC) $(CFLAGS) $(INC) -o $@ $(SRCS)
 
+test_dcs_health_logic: $(HEALTH_SRCS)
+	$(CC) $(CFLAGS) $(HEALTH_INC) -o $@ $(HEALTH_SRCS)
+
 .PHONY: run coverage clean
-run: test_estop_verdict
+run: test_estop_verdict test_dcs_health_logic
 	./test_estop_verdict
+	./test_dcs_health_logic
 
 coverage: run
 	$(GCOVR) --root .. --gcov-executable $(GCOV) \
@@ -31,4 +40,4 @@ coverage: run
 	  --json-summary-pretty -o coverage-summary.json
 
 clean:
-	rm -f test_estop_verdict *.gcda *.gcno *.gcov coverage-summary.json
+	rm -f test_estop_verdict test_dcs_health_logic *.gcda *.gcno *.gcov coverage-summary.json

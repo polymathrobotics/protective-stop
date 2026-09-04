@@ -532,3 +532,37 @@ int dcs_nvs_read_reset_history(uint8_t * out, int max)
   (void)memcpy(out, hist, (size_t)n);
   return n;
 }
+
+/* Lifetime health counters: one versioned blob (layout in dcs_health_logic.h)
+ * so a flush is a single commit. Absent/corrupt -> false, caller keeps zeroed
+ * counters ("new unit"); never a hard failure. */
+bool dcs_nvs_read_health(dcs_health_counters_t * out)
+{
+  uint8_t blob[DCS_HEALTH_BLOB_LEN] = {0};
+  size_t len = sizeof(blob);
+  nvs_handle_t h;
+  esp_err_t r = ESP_FAIL;
+  if (nvs_open(DCS_NVS_NS, NVS_READONLY, &h) == ESP_OK) {
+    r = nvs_get_blob(h, DCS_NVS_KEY_HEALTH, blob, &len);
+    nvs_close(h);
+  }
+  if (r != ESP_OK) {
+    return false;
+  }
+  return dcs_health_decode(blob, len, out);
+}
+
+esp_err_t dcs_nvs_write_health(const dcs_health_counters_t * c)
+{
+  uint8_t blob[DCS_HEALTH_BLOB_LEN];
+  dcs_health_encode(c, blob);
+  nvs_handle_t h;
+  esp_err_t r = nvs_open(DCS_NVS_NS, NVS_READWRITE, &h);
+  if (r != ESP_OK) return r;
+  r = nvs_set_blob(h, DCS_NVS_KEY_HEALTH, blob, sizeof(blob));
+  if (r == ESP_OK) {
+    r = nvs_commit(h);
+  }
+  nvs_close(h);
+  return r;
+}
