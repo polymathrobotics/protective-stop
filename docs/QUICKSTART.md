@@ -288,7 +288,8 @@ The remote tries uplinks in order: Ethernet (6 s DHCP wait), USB tether, WiFi.
 |---|---|---|---|
 | Tailscale auth key, WiFi, admin password | firmware image (from `sdkconfig.credentials`) or NVS if set via `/admin/` | yes (NVS wins over image) | no |
 | Tailscale node identity | NVS | yes | no (new machine on tailnet) |
-| Machine peer, role, operators | NVS | yes | no |
+| Machine peer, self-role | NVS | yes | no |
+| Operator allowlist (`operators`) | laptop: `pstop_machine.yaml` / `machine.toml` | n/a (not on the remote) | n/a |
 
 Changing the key baked into a new image does not replace a key that was ever
 saved through the admin page; NVS takes priority at boot.
