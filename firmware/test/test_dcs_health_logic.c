@@ -161,6 +161,10 @@ int main(void)
     CHECK(dcs_health_flush_due(true, 60, 60, 600), "dirty, 60 s: yes");
     CHECK(!dcs_health_flush_due(false, 599, 60, 600), "clean, 599 s: no");
     CHECK(dcs_health_flush_due(false, 600, 60, 600), "clean, 600 s: yes (uptime)");
+    // MIN > MAX misconfiguration: the throttle wins, MAX stretches to MIN.
+    CHECK(!dcs_health_flush_due(true, 600, 3600, 600), "min 3600 > max 600: dirty at 600 s still throttled");
+    CHECK(!dcs_health_flush_due(false, 3599, 3600, 600), "min > max: clean at 3599 s no");
+    CHECK(dcs_health_flush_due(false, 3600, 3600, 600), "min > max: clean at 3600 s yes");
   }
 
   printf("dcs_health_logic: %d checks, %d failures\n", g_checks, g_fails);

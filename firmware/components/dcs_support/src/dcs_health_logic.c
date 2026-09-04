@@ -117,6 +117,12 @@ int dcs_health_mismatch_level(uint32_t mismatch_events, uint32_t presses, uint32
 
 bool dcs_health_flush_due(bool dirty, uint32_t since_last_flush_s, uint32_t min_interval_s, uint32_t max_interval_s)
 {
+  /* Kconfig validates the two ranges independently; MIN > MAX would let the
+   * unconditional MAX rule silently defeat the configured MIN throttle. The
+   * throttle wins: stretch MAX up to MIN. */
+  if (max_interval_s < min_interval_s) {
+    max_interval_s = min_interval_s;
+  }
   if (since_last_flush_s >= max_interval_s) {
     return true;
   }

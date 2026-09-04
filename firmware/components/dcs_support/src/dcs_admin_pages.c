@@ -1290,7 +1290,10 @@ static esp_err_t api_role_post(httpd_req_t * req)
  * destroys retirement evidence. */
 static esp_err_t api_health_get(httpd_req_t * req)
 {
-  dcs_health_snapshot_t * snap = calloc(1, sizeof(*snap));
+  /* PSRAM first, internal as fallback: same rule as page_state — the internal
+   * heap runs tight on this build and this route is unauthenticated. */
+  dcs_health_snapshot_t * snap = heap_caps_calloc(1, sizeof(*snap), MALLOC_CAP_SPIRAM);
+  if (snap == NULL) snap = calloc(1, sizeof(*snap));
   if (snap == NULL) {
     (void)httpd_resp_set_status(req, "500 Internal Server Error");
     return httpd_resp_sendstr(req, "{\"ok\":false,\"error\":\"oom\"}");
@@ -1302,7 +1305,8 @@ static esp_err_t api_health_get(httpd_req_t * req)
     CAP = 512 + (DCS_HEALTH_MAX_WARNINGS * (DCS_HEALTH_SRC_LEN + DCS_HEALTH_MSG_LEN + 80))
   };
 
-  char * buf = malloc(CAP);
+  char * buf = heap_caps_malloc(CAP, MALLOC_CAP_SPIRAM);
+  if (buf == NULL) buf = malloc(CAP);
   if (buf == NULL) {
     free(snap);
     (void)httpd_resp_set_status(req, "500 Internal Server Error");

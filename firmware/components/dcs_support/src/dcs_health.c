@@ -108,6 +108,13 @@ static void recompute_overall(void)
  * not zeroed, so a failed write keeps them for the next attempt. */
 static esp_err_t flush_locked(void)
 {
+  /* Clear dirty BEFORE taking the deltas. The edge hook does fetch_add then
+   * store(dirty=true) with no lock; an edge landing after this clear either
+   * gets captured by the exchange below (dirty stays true: one harmless early
+   * re-flush) or does not (dirty true: flushed within FLUSH_MIN_S). Clearing
+   * after the exchange could overwrite that store and defer the event to the
+   * FLUSH_MAX_S boundary (review). */
+  atomic_store(&s_dirty, false);
   dcs_health_counters_t c = s_base;
   uint32_t p = (uint32_t)atomic_exchange(&s_presses_delta, 0);
   uint32_t m = (uint32_t)atomic_exchange(&s_mismatch_delta, 0);
@@ -117,7 +124,6 @@ static esp_err_t flush_locked(void)
   uint32_t up_now = this_boot_uptime_s();
   c.uptime_s += (up_now - s_uptime_in_base_s);
 
-  atomic_store(&s_dirty, false);
   esp_err_t r = dcs_nvs_write_health(&c);
   if (r == ESP_OK) {
     s_base = c;
@@ -176,7 +182,27 @@ void dcs_health_init(void)
   const esp_app_desc_t * desc = esp_app_get_description();
   if (desc != NULL) {
     if (memcmp(s_base.fw_sha, desc->app_elf_sha256, sizeof(s_base.fw_sha)) != 0) {
-      s_base.flashes++;
+      /* Rollback, not a flash: the safety ladder marked the image we counted
+       * last boot INVALID and the bootloader reverted to this one. The SHA
+       * changes back, but nobody flashed anything; counting it would report a
+       * phantom cable flash (flashes - otas). Detect: the last-invalid
+       * partition carries the SHA we have on record (review). */
+      bool rollback = false;
+      const esp_partition_t * bad = esp_ota_get_last_invalid_partition();
+      if (bad != NULL) {
+        esp_app_desc_t bad_desc;
+        if (
+          (esp_ota_get_partition_description(bad, &bad_desc) == ESP_OK) &&
+          (memcmp(s_base.fw_sha, bad_desc.app_elf_sha256, sizeof(s_base.fw_sha)) == 0))
+        {
+          rollback = true;
+        }
+      }
+      if (!rollback) {
+        s_base.flashes++;
+      } else {
+        ESP_LOGW(TAG, "image changed by OTA rollback, not counted as a flash");
+      }
       (void)memcpy(s_base.fw_sha, desc->app_elf_sha256, sizeof(s_base.fw_sha));
 
       /* OTA vs cable: an OTA-delivered image boots PENDING_VERIFY (rollback
@@ -185,7 +211,10 @@ void dcs_health_init(void)
        * flash writes otadata "valid" directly. */
       esp_ota_img_states_t st = ESP_OTA_IMG_UNDEFINED;
       const esp_partition_t * run = esp_ota_get_running_partition();
-      if ((run != NULL) && (esp_ota_get_state_partition(run, &st) == ESP_OK) && (st == ESP_OTA_IMG_PENDING_VERIFY)) {
+      if (
+        !rollback && (run != NULL) && (esp_ota_get_state_partition(run, &st) == ESP_OK) &&
+        (st == ESP_OTA_IMG_PENDING_VERIFY))
+      {
         s_base.otas++;
       }
     }
@@ -362,6 +391,11 @@ esp_err_t dcs_health_reset_button(void)
   if (xSemaphoreTake(s_lock, pdMS_TO_TICKS(500)) != pdTRUE) {
     return ESP_ERR_TIMEOUT;
   }
+  /* Mutate a copy of the live state; commit to RAM only if NVS took it, so a
+   * 500 from the handler never leaves /api/health showing a reset that did not
+   * happen (review). Pending deltas are discarded either way: they belong to
+   * the switch being replaced. */
+  const dcs_health_counters_t saved = s_base;
   atomic_store(&s_presses_delta, 0);
   atomic_store(&s_mismatch_delta, 0);
   s_base.presses = 0;
@@ -370,9 +404,14 @@ esp_err_t dcs_health_reset_button(void)
     s_base.button_swaps++;
   }
   esp_err_t r = flush_locked();
+  if (r != ESP_OK) {
+    s_base = saved;
+  }
   xSemaphoreGive(s_lock);
-  dcs_health_clear("button_wear");
-  dcs_health_clear("loop_mismatch");
+  if (r == ESP_OK) {
+    dcs_health_clear("button_wear");
+    dcs_health_clear("loop_mismatch");
+  }
   ESP_LOGW(TAG, "button counters reset (swap #%u): %s", (unsigned)s_base.button_swaps, esp_err_to_name(r));
   return r;
 }
@@ -385,6 +424,8 @@ esp_err_t dcs_health_reset_all(void)
   if (xSemaphoreTake(s_lock, pdMS_TO_TICKS(500)) != pdTRUE) {
     return ESP_ERR_TIMEOUT;
   }
+  const dcs_health_counters_t saved = s_base;
+  const uint32_t saved_uptime_base = s_uptime_in_base_s;
   atomic_store(&s_presses_delta, 0);
   atomic_store(&s_mismatch_delta, 0);
   uint8_t sha[8];
@@ -392,10 +433,21 @@ esp_err_t dcs_health_reset_all(void)
   (void)memset(&s_base, 0, sizeof(s_base));
   (void)memcpy(s_base.fw_sha, sha, sizeof(sha)); /* keep: otherwise next boot counts a phantom flash */
   s_base.boots = 1; /* this boot */
+  /* uptime_s restarts from zero NOW: everything of this boot up to this point
+   * is treated as already accounted (review: without this, flush re-added the
+   * seconds since the previous flush and the "zeroed" uptime came back as a
+   * small stale number). */
+  s_uptime_in_base_s = this_boot_uptime_s();
   esp_err_t r = flush_locked();
+  if (r != ESP_OK) {
+    s_base = saved;
+    s_uptime_in_base_s = saved_uptime_base;
+  }
   xSemaphoreGive(s_lock);
-  dcs_health_clear("button_wear");
-  dcs_health_clear("loop_mismatch");
+  if (r == ESP_OK) {
+    dcs_health_clear("button_wear");
+    dcs_health_clear("loop_mismatch");
+  }
   ESP_LOGW(TAG, "all lifetime counters reset: %s", esp_err_to_name(r));
   return r;
 }
@@ -475,10 +527,15 @@ static void health_task(void * arg)
 
     /* Built-in checks: once shortly after boot, then every minute. */
     if ((secs == 5u) || ((secs % 60u) == 0u)) {
-      dcs_health_counters_t c;
-      snapshot_counters(&c);
-      check_button_wear(&c);
-      check_loop_mismatch(&c);
+      /* Under the lock: the admin resets rewrite s_base wholesale, and a torn
+       * read here could publish a bogus wear level (review). */
+      if (xSemaphoreTake(s_lock, pdMS_TO_TICKS(200)) == pdTRUE) {
+        dcs_health_counters_t c;
+        snapshot_counters(&c);
+        xSemaphoreGive(s_lock);
+        check_button_wear(&c);
+        check_loop_mismatch(&c);
+      }
     }
   }
 }
