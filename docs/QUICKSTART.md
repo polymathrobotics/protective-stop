@@ -229,6 +229,10 @@ curl -s "http://$REMOTE/api/health"                 # lifetime counters: presses
 
 `pstop_sent` and `pstop_replies` climbing together means the bond is healthy.
 
+No hardware yet? `python3 tools/pstop_test_remote.py --port 8890` is a
+software remote that runs the same arming sequence against the node (add its
+id `16909185` to `operators` first); see [`TESTING.md`](TESTING.md).
+
 ## 9. Troubleshooting
 
 | Symptom | Check |
