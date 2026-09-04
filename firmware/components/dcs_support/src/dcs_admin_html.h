@@ -105,7 +105,9 @@ static const char k_index_html[] =
   "<span>LAN <span id='localip' class='mono'>-</span></span>"
   "<span>public <span id='publicip' class='mono'>-</span></span>"
   "<span>DERP region <span id='derpreg' class='mono'>-</span> "
-  "<span id='derplock' class='chip'></span></span></div></div>"
+  "<span id='derplock' class='chip'></span></span>"
+  "<a href='/api/health' id='hchip' class='chip off' title='lifetime wear counters (/api/health)'>health "
+  "-</a></div></div>"
 #ifdef DCS_PAGE_MACHINE
   /* Machine-role: operator allowlist is the add/remove-peer equivalent —
    * which remotes may re-arm this machine (empty => every remote stop-only). */
@@ -399,7 +401,10 @@ static const char k_index_html[] =
   "mc.textContent=MLN[j.ml_state]||('state '+j.ml_state);"
   "mc.className='chip '+(j.ml_state===4?'idle':(j.ml_state===6?'red':'warn'));"
   "document.getElementById('hdrml').textContent='tailnet: '+(MLN[j.ml_state]||j.ml_state);"
-  "document.getElementById('hdrfw').textContent=j.fw_ver||'';}"
+  "document.getElementById('hdrfw').textContent=j.fw_ver||'';"
+  "const hc=document.getElementById('hchip');"
+  "hc.textContent='health '+(['ok','WARN','CRITICAL'][j.health]||'-');"
+  "hc.className='chip '+(j.health===0?'idle':(j.health===2?'red':'warn'));}"
   "async function poll(){"
   "try{"
   "const r=await fetch('/state.json',{cache:'no-store'});"

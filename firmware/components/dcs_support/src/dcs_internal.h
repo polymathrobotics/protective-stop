@@ -13,6 +13,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "dcs_health.h" /* lifetime health counters + warning board */
 #include "dcs_support.h" /* DCS_PSTOP_MAX_MACHINES + public telemetry API */
 #include "esp_err.h"
 #include "esp_netif.h"
@@ -41,6 +42,7 @@ extern "C"
 #define DCS_NVS_KEY_WIFI_TXP "wifi_txp" /* WiFi max TX power, quarter-dBm (8..84); 0/absent = config default */
 #define DCS_NVS_KEY_LED_BRIGHT "led_bri" /* master LED brightness, 0..100%; absent = default */
 #define DCS_NVS_KEY_ROLE "role" /* remote self-role: pstop_aux_role_t value (1=stop_only default, 2=operator) */
+#define DCS_NVS_KEY_HEALTH "health" /* lifetime wear counters (blob, see dcs_health_logic.h) */
 
 #define DCS_LED_BRIGHTNESS_DEFAULT 50 /* master ring brightness when the NVS key is absent */
 #define DCS_LED_BRIGHTNESS_MIN \
@@ -364,6 +366,19 @@ extern "C"
    * Write persists the given ids. See dcs_operator_* in dcs_support.h. */
   int dcs_nvs_read_operators(uint32_t out[DCS_MAX_OPERATORS]);
   esp_err_t dcs_nvs_write_operators(const uint32_t ids[DCS_MAX_OPERATORS], int count);
+
+  /* Lifetime health counters blob (dcs_health.c owns the RAM copy). */
+  bool dcs_nvs_read_health(dcs_health_counters_t * out);
+  esp_err_t dcs_nvs_write_health(const dcs_health_counters_t * c);
+
+  /* dcs_health.c */
+  void dcs_health_init(void); /* load NVS, account boot/flash/OTA. Call after
+                               * dcs_safety_account_boot() and BEFORE anything
+                               * can mark the OTA image valid. */
+  void dcs_health_start(void); /* spawn the flush/check task (internal stack) */
+  /* Fed from the dcs_publish_core_tick sink (remote only): both cores' latest
+   * tick + verdict. Short critical section; no blocking. */
+  void dcs_health_note_core_tick(int core_id, uint32_t tick, uint8_t verdict);
 
   /* dcs_safety.c */
   void dcs_safety_account_boot(void); /* increments crash counter + applies

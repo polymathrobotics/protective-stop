@@ -222,6 +222,7 @@ Remote-side counters, if a step does not match:
 
 ```sh
 curl -s "http://$REMOTE/state.json" | python3 -m json.tool | grep -E 'pstop_(sent|replies)|ml_state|role'
+curl -s "http://$REMOTE/api/health"                 # lifetime counters: presses, uptime, boots
 ```
 
 `pstop_sent` and `pstop_replies` climbing together means the bond is healthy.
@@ -242,7 +243,7 @@ id `16909185` to `operators` first); see [`TESTING.md`](TESTING.md).
 | Ring red pulsing (slow) | Peer configured but unreachable: node down, wrong `$LAPTOP_TS`, or ufw. `tailscale ping $REMOTE` from the laptop. |
 | Ring purple | One switch loop open while the other is closed: wiring fault. See [`hardware/README.md`](../hardware/README.md). |
 | Need to reflash a running unit | It has no serial port. Hold BOOT, tap RESET, then `idf.py -p /dev/ttyACM0 flash`; or `curl -u admin:PW -X POST "http://$REMOTE/api/enter_download?confirm=1"`. Settings in flash (key, peer, role) survive a reflash. |
-| Start over | `idf.py -p /dev/ttyACM0 erase-flash` wipes everything including the Tailscale identity; the remote comes back as a new machine on the tailnet. |
+| Start over | `idf.py -p /dev/ttyACM0 erase-flash` wipes everything including the Tailscale identity and health counters; the remote comes back as a new machine on the tailnet. |
 
 More: [`TROUBLESHOOTING.md`](TROUBLESHOOTING.md), [`API.md`](API.md).
 
@@ -290,6 +291,7 @@ The remote tries uplinks in order: Ethernet (6 s DHCP wait), USB tether, WiFi.
 | Tailscale auth key, WiFi, admin password | firmware image (from `sdkconfig.credentials`) or NVS if set via `/admin/` | yes (NVS wins over image) | no |
 | Tailscale node identity | NVS | yes | no (new machine on tailnet) |
 | Machine peer, self-role | NVS | yes | no |
+| Lifetime health counters (`/api/health`) | NVS | yes | no |
 | Operator allowlist (`operators`) | laptop: `pstop_machine.yaml` / `machine.toml` | n/a (not on the remote) | n/a |
 
 Changing the key baked into a new image does not replace a key that was ever

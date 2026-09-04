@@ -34,6 +34,39 @@ Query parameters are shown where required. Unless noted, POST bodies are empty.
 | POST | `/api/enter_download?confirm=1` | Enter USB download (flashing) mode (**admin auth**) |
 | GET  | `/api/role` | Remote self-role (**admin auth**): `{"ok":true,"role":"stop_only"\|"operator"}`. Announced in every pstop frame; the machine ANDs an `operator` claim with its own operator allowlist. Default `stop_only`. Remote only |
 | POST | `/api/role?role=stop_only\|operator` | Persist the self-role to NVS and **reboot** to apply (**admin auth**). Promoting to `operator` is one of the two gates for re-arm; the other is the machine's allowlist (`software.operators` on the ROS node, `[[operator]]` in `machine.toml`, `/api/operators` on machn). Remote only |
+| GET  | `/api/health` | Lifetime wear/health counters (see [Health](#health-lifetime-counters-and-warnings)) |
+| POST | `/api/health/reset?what=button\|all&confirm=1` | Zero the button counters after a switch replacement (`button`, bumps `button_swaps`) or everything (`all`, refurbished unit). **Admin auth** |
+
+### Health: lifetime counters and warnings
+
+`GET /api/health` returns counters that persist across reboots, `idf.py flash`
+and OTA (NVS blob `dcs_app/health`, flushed at most once per minute and at
+least every 10 minutes, plus on controlled restart). They do **not** survive
+`erase-flash` or an NVS auto-erase (`ESP_ERR_NVS_NO_FREE_PAGES` /
+`NEW_VERSION_FOUND` at boot).
+
+```json
+{"ok":true,"level":0,"presses":1234,"mismatch_events":2,"uptime_s":864000,
+ "boots":41,"flashes":7,"otas":5,"button_swaps":0,
+ "button_rated_ops":100000,"button_wear_pct":1,
+ "fw_sha":"a1b2c3d4e5f60718","nvs_flushes":3,"last_flush_age_s":17,
+ "warnings":[{"src":"button_wear","level":1,"msg":"82% of rated 100000 ops","count":4,"age_s":120}],
+ "dropped":0}
+```
+
+| Field | Meaning |
+|---|---|
+| `level` | Worst active warning: `0` ok, `1` warn, `2` critical. Also mirrored as `health` in `/state.json` |
+| `presses` | Button operations: rising edges of *both* lockstep cores reading STOP. A single-loop STOP (wiring fault) is not a press. Remote only |
+| `mismatch_events` | Rising edges of the two cores disagreeing on the same tick (one loop open, the other closed): contact bounce or a degrading loop. Remote only |
+| `uptime_s` | Cumulative powered time, accumulated from the monotonic clock; loses at most the last flush interval on power pull |
+| `boots` | Every boot (lifetime; unlike the crash-ladder `boot_count` in `/state.json`, never auto-cleared) |
+| `flashes` | Boots where the running image's ELF SHA differs from the last one seen: cable **and** OTA updates |
+| `otas` | Boots where the image was `PENDING_VERIFY`, i.e. delivered by OTA. Cable flashes = `flashes - otas` |
+| `button_swaps` | Times `reset?what=button` was used |
+| `button_rated_ops` | `CONFIG_DCS_BUTTON_RATED_OPS`, default 100000 (NKK FF01 datasheet: mechanical and electrical life, 100,000 operations minimum) |
+| `warnings[]` | Every active warning published through `dcs_health_publish()` from anywhere in the firmware, one entry per source. Built-in sources: `button_wear` (warn at `CONFIG_DCS_BUTTON_WARN_PCT` %, critical at 100 %), `loop_mismatch` (warn when `mismatch_events` exceeds `CONFIG_DCS_MISMATCH_WARN_PER_1000` per 1000 presses after at least `CONFIG_DCS_MISMATCH_WARN_MIN` events) |
+| `dropped` | Publishes refused because the 8-entry table was full |
 
 ### Multi-machine (one remote, up to 4 machines)
 
@@ -168,6 +201,8 @@ bonded remote is commanding.
 ## Source of truth
 
 - Diagnostic/config routes: `firmware/components/dcs_support/src/dcs_admin_pages.c`
+- Health counters and the publish API: `firmware/components/dcs_support/src/dcs_health.c`,
+  `firmware/components/dcs_support/include/dcs_health.h`
 - Admin routes: `components/microlink/src/ml_config_httpd.c` (`/admin` prefix) and
   `components/microlink/src/ml_app.c` (managed OTA, verbose).
 
