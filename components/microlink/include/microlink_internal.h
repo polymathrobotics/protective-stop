@@ -1048,6 +1048,7 @@ extern "C"
   int ml_derp_get_stall_events(ml_derp_stall_event_t * out, int max);
   /* Periodic idempotent coord re-registrations executed. */
   uint32_t ml_coord_get_reregisters(void);
+  void ml_coord_get_disconnect_causes(uint32_t out[6]); /* DIAG, see ml_coord.c */
   /* Stage-0 gauges: out[0]=worst single DERP-task iteration ms, out[1]=worst
    * gap between consecutive rx-poll passes ms (both since boot). */
   void ml_derp_get_iter_diag(uint32_t out[2]);

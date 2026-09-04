@@ -1151,6 +1151,13 @@ static esp_err_t handler_monitor(httpd_req_t * req)
       cJSON_AddNumberToObject(json, "derp_rx_stale_reaps", ml_derp_get_rx_stale_reaps());
       cJSON_AddNumberToObject(json, "coord_reregisters", ml_coord_get_reregisters());
       {
+        uint32_t dc[6];
+        ml_coord_get_disconnect_causes(dc);
+        cJSON * arr = cJSON_CreateArray();
+        for (int i = 0; i < 6; i++) cJSON_AddItemToArray(arr, cJSON_CreateNumber(dc[i]));
+        cJSON_AddItemToObject(json, "coord_disc_causes", arr); /* [goaway, recv_err, watchdog, ping_fail, stream_refresh, last_errno] */
+      }
+      {
         /* Stall-class closure telemetry (docs/STALL_EVENT_CLOSURE_DESIGN.md) */
         uint32_t hs[2] = {0};
         ml_wg_get_hs_budget_diag(hs);

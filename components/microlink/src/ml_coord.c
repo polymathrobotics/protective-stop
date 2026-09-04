@@ -80,6 +80,17 @@ uint32_t ml_coord_get_reregisters(void)
   return s_diag_coord_reregisters;
 }
 
+/* DIAG: why the long-poll left COORD_LONG_POLL for COORD_RECONNECTING.
+ * [0] GOAWAY from control, [1] noise_recv/TCP error ("Long-poll connection
+ * lost"), [2] control-plane watchdog, [3] H2 PING send failed,
+ * [4] map stream ended (END_STREAM/RST_STREAM/trailers -> soft refresh, not a
+ * reconnect, counted for completeness), [5] last noise_recv errno. */
+static uint32_t s_diag_disc_cause[6];
+void ml_coord_get_disconnect_causes(uint32_t out[6])
+{
+  for (int i = 0; i < 6; i++) out[i] = s_diag_disc_cause[i];
+}
+
 /* Effective control plane host: NVS override or compiled default */
 #define CTRL_HOST(ml) ((ml)->ctrl_host[0] ? (ml)->ctrl_host : ML_CTRL_HOST)
 
@@ -2327,6 +2338,8 @@ static int poll_map_update(microlink_t * ml, ml_noise_state_t * noise)
     int saved_errno = errno;
     /* EAGAIN/EWOULDBLOCK = no data yet = not an error */
     if (saved_errno == EAGAIN || saved_errno == EWOULDBLOCK) return 0;
+    s_diag_disc_cause[1]++;
+    s_diag_disc_cause[5] = (uint32_t)saved_errno;
     return frame_len; /* Real error or connection closed */
   }
 
@@ -2410,6 +2423,7 @@ static int poll_map_update(microlink_t * ml, ml_noise_state_t * noise)
                   ((uint32_t)frame_buf[pos + 6] << 8) | (uint32_t)frame_buf[pos + 7];
       }
       ESP_LOGW(TAG, "Map long-poll GOAWAY from control (err=0x%lx) — reconnecting", (unsigned long)errcode);
+      s_diag_disc_cause[0]++;
       conn_lost = 1;
     } else if ((f_type == 0x03) && (f_stream == ml->map_stream_id)) {
       /* RST_STREAM on the map stream: control killed the long-poll. */
@@ -2758,6 +2772,7 @@ void ml_coord_task(void * arg)
         /* Check control plane watchdog (120s) */
         if (now - last_activity_ms > ml->t_ctrl_watchdog_ms) {
           ESP_LOGW(TAG, "Control plane watchdog timeout");
+          s_diag_disc_cause[2]++;
           state = COORD_RECONNECTING;
           break;
         }
@@ -3007,6 +3022,7 @@ void ml_coord_task(void * arg)
                          * reconnects on its own. */
           } else {
             ESP_LOGW(TAG, "H2 PING send failed, reconnecting");
+            s_diag_disc_cause[3]++;
             state = COORD_RECONNECTING;
             break;
           }
@@ -3024,6 +3040,7 @@ void ml_coord_task(void * arg)
            * EXCEPT when the pin-absent heal's s_want_full_peers one-shot is
            * pending, which turns exactly one refresh into a full redelivery. */
           ESP_LOGI(TAG, "Map long-poll stream refresh (connection preserved)");
+          s_diag_disc_cause[4]++;
           if (do_start_long_poll(ml, &noise) < 0) {
             state = COORD_RECONNECTING;
             break;
