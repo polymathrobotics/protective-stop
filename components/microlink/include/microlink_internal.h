@@ -378,6 +378,16 @@ extern "C"
  * endpoints (steady-state coord updates are OmitPeers=true and never do), so the
  * relay-retry ping-sweep can then land and re-hole-punch. Control-plane only. */
 #define ML_RELAY_REFETCH_MIN_MS 90000
+/* The re-fetch fixes the TRANSIENT case (mapping died, endpoints stale). A
+ * peer that is PERMANENTLY relay-bound (symmetric NAT both ends, or a machine
+ * that simply has no direct route) never benefits, and at a flat 90 s cadence
+ * the cost is ~40 full control-plane reconnects/h, each a 5-7 s blackout of
+ * the coord session plus a full netmap re-ingest (PSTOP06 bench, 2026-09-04:
+ * 1822 reconnects in 46 h, 95 % from this path). So the interval doubles per
+ * unsuccessful re-fetch up to this cap, and resets the moment any safety
+ * peer regains direct. 90,180,360,720,1440,1800,... = still four fast rounds
+ * in the first 10 min for the transient case, then ~2/h. */
+#define ML_RELAY_REFETCH_MAX_MS 1800000
 
 /* Bench regression of the second cut (2026-08-09, all 3 devices on the fix
  * build): direct_regains oscillated in bursts (machn 131+ over 90 min) and
