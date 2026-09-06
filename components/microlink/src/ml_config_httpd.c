@@ -1127,6 +1127,12 @@ static esp_err_t handler_monitor(httpd_req_t * req)
       cJSON_AddNumberToObject(json, "remove_vetoes", rg[3]);
       cJSON_AddNumberToObject(json, "evict_safety_skips", rg[4]);
       cJSON_AddNumberToObject(json, "relay_disco_resets", rg[5]);
+      {
+        extern uint32_t ml_wg_get_relay_refetch_reqs(void);
+        /* ML_CMD_FORCE_RECONNECT requests issued by the relay-stuck safety-peer
+         * recovery: each one is a full control-plane reconnect (~5-7 s). */
+        cJSON_AddNumberToObject(json, "relay_refetch_reqs", ml_wg_get_relay_refetch_reqs());
+      }
 
       /* WG session health (run-20/21 ENOTCONN forensics). The failure
        * signature to watch: wg_kp_age_max climbing past 120000 (rekey

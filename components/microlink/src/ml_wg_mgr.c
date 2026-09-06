@@ -1035,6 +1035,11 @@ void ml_wg_get_disco_obs_diag(uint32_t out[4])
   out[3] = s_diag_demote_vetoes;
 }
 
+uint32_t ml_wg_get_relay_refetch_reqs(void)
+{
+  return s_diag_relay_refetch_reqs;
+}
+
 void ml_wg_get_direct_retry_diag(microlink_t * ml, uint32_t out[4])
 {
   out[0] = s_diag_relay_retries;
