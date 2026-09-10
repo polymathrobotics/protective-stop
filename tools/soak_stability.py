@@ -317,9 +317,23 @@ def normalize_peer_status(raw, remote_id, received_epoch, dut_vpn_ip=None, machi
         ages[label] = age
 
     def snapshot_age(obj, epoch_key, age_key):
+        observed_epoch = number(obj.get(epoch_key), 'peer.' + epoch_key)
+        absolute_age = receipt_snapshot_age(observed_epoch, received_epoch)
+        declared = obj.get(age_key)
+        if isinstance(declared, (int, float)) and not isinstance(declared, bool) and declared < 0:
+            # A publisher can atomically replace a snapshot after the HTTP
+            # handler timestamps its envelope. Validate that exact race, then
+            # use the absolute observation aged to RECEIPT; never certify age 0
+            # merely by clamping a negative or accept a future observation.
+            expected = raw['epoch'] - observed_epoch
+            require(
+                math.isfinite(declared) and -HTTP_TIMEOUT <= expected < 0 and abs(declared - expected) <= 0.001,
+                'peer.' + age_key + ': inconsistent envelope/snapshot race',
+            )
+            return absolute_age
         return max(
-            receipt_snapshot_age(obj.get(epoch_key), received_epoch),
-            ages['snapshot'] + number(obj.get(age_key), 'peer.' + age_key),
+            absolute_age,
+            ages['snapshot'] + number(declared, 'peer.' + age_key),
         )
 
     ros_age = snapshot_age(node, 'ros_snapshot_epoch', 'ros_snapshot_age_s')
@@ -378,7 +392,11 @@ def normalize_peer_status(raw, remote_id, received_epoch, dut_vpn_ip=None, machi
         counters['collector.' + name + '.restarts'] = decimal_counter(item.get('restarts'), 'peer.collector.restarts')
         if name == 'pcap' and 'age_s' in item and item['age_s'] is None:
             raise SchemaPending('peer.pcap: awaiting first capture timestamp')
-        age = ages['snapshot'] + number(item.get('age_s'), 'peer.collector.' + name + '.age_s')
+        if name in ('observer', 'ros_journal') and isinstance(item.get('age_s'), (int, float)) and item['age_s'] < 0:
+            source, epoch_key = (wire, 'snapshot_epoch') if name == 'observer' else (node, 'ros_snapshot_epoch')
+            age = snapshot_age({epoch_key: source[epoch_key], 'age_s': item['age_s']}, epoch_key, 'age_s')
+        else:
+            age = ages['snapshot'] + number(item.get('age_s'), 'peer.collector.' + name + '.age_s')
         if name == 'node':
             age = max(age, ages['topic.state'])
         elif name == 'observer':
@@ -787,9 +805,12 @@ class Evidence:
         self.closing_verified = {}
         self.closing_fence = None
         self.closing_witness = None
+        self.frontier_certificates = {}
+        self.frontier_observation = {}
 
     def invalidate(self, now, reasons):
         self.gate.update(now, reasons)
+        self.frontier_certificates = {}
         self.closing_cutoff = self.closing_fence = None
         self.closing_verified = {}
         self.closing_witness = None
@@ -944,6 +965,7 @@ class Evidence:
         normalized = normalize_peer_status(
             raw, self.args.remote_id, record['end']['epoch'], self.expected_vpn, self.args.machine_id
         )
+        normalized['journal_seq_committed'] = raw['watermarks']['journal_seq_committed']
         failures, warnings = list(normalized['failures']), []
         caps, missing = self.capabilities('peer_counters', normalized['counters'], normalized['counters'])
         failures.extend(missing)
@@ -957,6 +979,17 @@ class Evidence:
                 failures.append('peer: stale JSON/clock reset')
             if normalized['processed_mono'] < old['processed_mono']:
                 failures.append('peer: processing watermark regressed')
+            # Check each native fence, not just the minimum or maximum: another
+            # advancing source must never conceal an epoch/sequence rollback.
+            for name, mark in normalized['watermarks'].items():
+                for field, value in mark.items():
+                    if value < old['watermarks'][name][field]:
+                        failures.append('peer.watermark.' + name + '.' + field + ': regressed')
+            for field in ('status_seq', 'journal_seq_committed'):
+                if normalized[field] < old[field]:
+                    failures.append('peer.' + field + ': regressed')
+            if abs((normalized['epoch'] - old['epoch']) - (normalized['mono'] - old['mono'])) > 2 * CLOCK_UNCERTAINTY:
+                failures.append('peer: epoch/monotonic clock discontinuity')
             if normalized['event_seq'] < old['event_seq']:
                 failures.append('peer: event sequence reset')
                 self.journal = PeerEvents()
@@ -979,7 +1012,9 @@ class Evidence:
         failures.extend(bad)
         warnings.extend(notices)
         self.generated['peer_status'] = now - normalized['ages']['snapshot']
-        self.previous_peer = dict(normalized, _mono=now)
+        self.previous_peer = dict(
+            normalized, _mono=now, _request_timebase={'start': record['start'], 'end': record['end']}
+        )
         return failures, warnings
 
     def health(self, raw, record):
@@ -1096,6 +1131,53 @@ class Evidence:
         self.last_warnings[source] = warnings
         return new_warnings, events
 
+    def frontier_components(self):
+        """Conservative fast-source bounds, with both peer conversion branches.
+
+        Keep the native evidence and HTTP timebase alongside the conversion so
+        an unchanged source timestamp can be distinguished from a clock reset.
+        Slow acceptance constraints and the closing fences are independent.
+        """
+        components = []
+        for source in ('dut_state', 'peer_events'):
+            rec = self.latest.get(source)
+            if rec:
+                components.append(
+                    dict(
+                        source=source,
+                        field='start.mono',
+                        raw_value=rec['start']['mono'],
+                        converted_mono=rec['start']['mono'],
+                        request_timebase={'start': rec['start'], 'end': rec['end']},
+                    )
+                )
+        peer = self.previous_peer
+        if peer:
+            # A rejected/failed latest HTTP record must not re-time the last
+            # successfully normalized peer snapshot (or raise during diagnosis).
+            rec = peer['_request_timebase']
+            for name, mark in peer['watermarks'].items():
+                ages = {
+                    'mono': peer['ages']['snapshot'] + max(0, peer['mono'] - mark['mono']),
+                    'epoch': receipt_snapshot_age(mark['epoch'], rec['end']['epoch']),
+                }
+                for field, age in ages.items():
+                    components.append(
+                        dict(
+                            source='peer.watermark.' + name,
+                            field='input_' + field,
+                            raw_value=mark[field],
+                            converted_mono=peer['_mono'] - age,
+                            request_timebase={
+                                'start': rec['start'],
+                                'end': rec['end'],
+                                'peer_mono': peer['mono'],
+                                'peer_epoch': peer['epoch'],
+                            },
+                        )
+                    )
+        return components
+
     def evaluate(self, now, periods, external=()):
         if self.started is None:
             self.started = now
@@ -1160,25 +1242,57 @@ class Evidence:
         if LIVE_PEER_SCHEMA_ACK != PEER_SCHEMA_CANDIDATE:
             waiting.append('peer: live schema not acknowledged')
         self.wait_reasons = sorted(set(waiting))
-        critical = [self.latest[s]['start']['mono'] for s in ('dut_state', 'peer_events') if s in self.latest]
-        if peer:
-            critical.append(peer['_mono'] - peer['ages']['watermark'])
-        frontier = min(critical) if len(critical) == 3 else now
+        components = self.frontier_components()
+        certificates = {}
+        for component in components:
+            key = (component['source'], component['field'])
+            old = self.frontier_certificates.get(key)
+            converted = component['converted_mono']
+            origin = component.copy()
+            if old:
+                if component['raw_value'] < old['raw_value']:
+                    failures.append('.'.join(key) + ': raw frontier regressed')
+                # An already certified native watermark is immutable. Repeating
+                # its HTTP conversion must neither revoke nor add microseconds.
+                # Advancing evidence can extend (never shrink) its covered prefix,
+                # but only after all native reset/coverage checks have succeeded.
+                if component['raw_value'] == old['raw_value'] or converted <= old['certified_mono']:
+                    converted, origin = old['certified_mono'], old['certified_from']
+            certificates[key] = dict(component, certified_mono=converted, certified_from=origin)
+        candidate_argmin = min(components, key=lambda c: c['converted_mono']) if len(components) == 6 else None
+        argmin = min(certificates.values(), key=lambda c: c['certified_mono']) if candidate_argmin else None
+        frontier = argmin['certified_mono'] if argmin else now
         # A 1-Hz publisher plus 1-Hz HTTP has a bounded phase offset: already
         # certified historical input must not become a synthetic fault between
         # reads. HOLD credit/PASS while that receipt ages out. A stale NEW
         # snapshot is rejected by normalize_peer_status; missing HTTP coverage
         # still resets at 1.6 s. A later committed input watermark and consumed
         # journal prove the intervening interval before any further credit.
-        ready = reconciled and not self.receipt_holds
-        if self.gate.last_frontier is not None and frontier < self.gate.last_frontier:
-            failures.append('collector: certified frontier regressed')
+        ready = reconciled and not self.receipt_holds and argmin is not None
+        previous = self.frontier_observation
+        self.frontier_observation = dict(
+            evaluated_mono=now,
+            previous_mono=previous.get('certified_mono'),
+            previous_argmin=previous.get('certified_argmin'),
+            candidate_mono=candidate_argmin['converted_mono'] if candidate_argmin else None,
+            candidate_argmin=candidate_argmin,
+            new_mono=frontier if argmin else None,
+            argmin=argmin,
+            components=list(certificates.values()),
+            ready=ready,
+        )
         if failures or waiting:
             self.invalidate(now, failures or waiting)
         else:
             self.gate.update(frontier, [], ready=ready)
+            if ready:
+                self.frontier_certificates = certificates
             if ready and self.gate.clean_s >= self.gate.target:
                 self.close_window(now)
+        self.frontier_observation['certified_mono'] = self.gate.last_frontier
+        self.frontier_observation['certified_argmin'] = (
+            (argmin if ready else previous.get('certified_argmin')) if self.gate.last_frontier is not None else None
+        )
         return sorted(set(failures)), ready
 
     def close_window(self, now):
@@ -1606,6 +1720,7 @@ def status_document(evidence, store, failures, warnings, reasons, state=None):
         },
         provenance=evidence.provenance,
         latest_sample_time=latest,
+        frontier=copy.deepcopy(evidence.frontier_observation),
         last_reasons=reasons + evidence.wait_reasons + evidence.receipt_holds + closing_reasons,
         event_seq=evidence.journal.cursor,
         stage='CLOSING'
@@ -1634,6 +1749,7 @@ def run(args, stop=None):
     require(bool(user) and bool(password), 'ML_ADMIN_USER and ML_ADMIN_PASSWORD are required')
     store = Artifacts(args.out, Redactor(user, password))
     hook = FailureHook(args.failure_hook)
+    peer_poll_sec = getattr(args, 'peer_poll_sec', args.poll_sec)
     intent = {
         'dut': args.dut,
         'peer': args.peer,
@@ -1643,14 +1759,15 @@ def run(args, stop=None):
         'iface': args.iface,
         'clean_seconds': args.clean_seconds,
         'poll_sec': args.poll_sec,
+        'peer_poll_sec': peer_poll_sec,
         'dut_vpn_ip': getattr(args, 'dut_vpn_ip', None),
         'peer_schema': LIVE_PEER_SCHEMA_ACK,
     }
     evidence = Evidence(args)
     periods = {
         'dut_state': args.poll_sec,
-        'peer_status': args.poll_sec,
-        'peer_events': args.poll_sec,
+        'peer_status': peer_poll_sec,
+        'peer_events': peer_poll_sec,
         'monitor': 5.0,
         'dut_role': 5.0,
         'health': 30.0,
@@ -1757,7 +1874,12 @@ def run(args, stop=None):
             reasons, ready = evidence.evaluate(now, periods, external)
             new_reasons = set(reasons) - active_reasons
             if new_reasons:
-                emit('failure', 'acceptance_fault', sorted(new_reasons))
+                emit(
+                    'failure',
+                    'acceptance_fault',
+                    sorted(new_reasons),
+                    {'frontier': copy.deepcopy(evidence.frontier_observation)},
+                )
             active_reasons = set(reasons)
             scheduler.schedule(time.monotonic(), evidence, store.diagnostic_batch)
             provenance_digest = digest(evidence.provenance)
@@ -1906,7 +2028,13 @@ def build_parser():
     parser.add_argument('--iface', choices=('usb', 'ethernet'), required=True)
     parser.add_argument('--clean-seconds', type=positive, default=14400)
     parser.add_argument('--max-duration', type=positive)
-    parser.add_argument('--poll-sec', type=positive, default=1.0, help='critical cadence in seconds, at most 1')
+    parser.add_argument('--poll-sec', type=positive, default=1.0, help='DUT state cadence in seconds, at most 1')
+    parser.add_argument(
+        '--peer-poll-sec',
+        type=positive,
+        default=0.5,
+        help='peer status/event cadence; 0.5s leaves margin for HTTP jitter without increasing DUT load',
+    )
     parser.add_argument('--out', type=Path, required=True)
     parser.add_argument(
         '--failure-hook', type=Path, help='executable called asynchronously with event.json; 10s limit, 60s cooldown'
@@ -1919,6 +2047,8 @@ def main(argv=None):
     args = parser.parse_args(argv)
     if not 0.1 <= args.poll_sec <= 1.0:
         parser.error('--poll-sec must be between 0.1 and 1 seconds')
+    if not 0.1 <= args.peer_poll_sec <= 1.0:
+        parser.error('--peer-poll-sec must be between 0.1 and 1 seconds')
     if args.failure_hook and (not args.failure_hook.is_file() or not os.access(args.failure_hook, os.X_OK)):
         parser.error('--failure-hook must be an executable file')
     stop = threading.Event()

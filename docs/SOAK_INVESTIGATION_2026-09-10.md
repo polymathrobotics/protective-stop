@@ -104,6 +104,25 @@ unresolved. Separate host-uplink capture was added to compare NAT mappings and
 packet provenance on recurrence. The source address of an RST alone does not
 establish which device generated it.
 
+### Subsequent correlation: the bench host also loses its connections
+
+The bench's own `tailscaled` journal independently records resets to its DERP,
+control-plane and log-upload TCP connections at **05:23:57–59Z** and
+**05:25:01–02Z**, in the same windows. Its advertised STUN endpoint changes from
+`192.184.222.186` to `104.59.120.100` and then back; cached endpoints remain in the
+reported list. Its local interface/default route did not change.
+
+No DUT SYN precedes the first reset in either window: the new DERP connections
+start after those resets. Bench conntrack occupancy was 403/262144, established
+timeout 432000 seconds, and the live nftables rules contained no TCP-reject rule.
+RST TTLs were 41–50; IP-ID 0/DF/window 0 are not unique middlebox fingerprints.
+
+These observations strongly favor a **shared upstream WAN/NAT disruption** over
+a DUT-only peer-table or USB-masquerade fault. They do not yet identify the router
+policy or prove a particular failover mechanism. No safety timeout or firmware
+hot path was changed to compensate. Uplink capture and continuous bench
+`tailscaled` logs were added for the next occurrence.
+
 ## Separate old-image OTA watchdog event
 
 The first USB HTTP OTA attempt reset the old `6f51532` image before switching OTA
@@ -138,8 +157,52 @@ The peer generation after these observer corrections is
 `5c5a7064726185f11b5a53cb9bc7ff2fca8e06e400f7d3f18e4dbf10e1af8946`.
 The node binary/parameters remain unchanged. Each qualification freezes the
 actual live generation, hashes, identities and firmware before counting time.
+The peer subsequently removed historical active probing loops and the active
+ping from its diagnostic collector, announcing generation
+`5e6bd5394329cb92886e9d1dc7ffce507a2a5b357fb5918fca2321c2d4780b50`.
 
 ## Evidence and continuation
+
+### Qualification-collector replay correction
+
+The 05:37Z campaign was paused at 06:39Z after repeated collector alerts while
+the peer independently observed continuous ACTIVE/OK traffic. Arrival-order
+replay of 12,779 retained records over 3685 seconds established:
+
+- 31 false frontier regressions: converting an unchanged native watermark
+  through successive HTTP epoch/monotonic receipt pairs shifted the bound by
+  only 0.067–0.499 microseconds in the inspected cases. Certificates now retain
+  their original bound for the same cumulative watermark; native source-clock,
+  sequence, counter and coverage regressions are still rejected.
+- Three negative-age alerts: the peer timestamped its HTTP envelope before
+  reading an atomically replaced snapshot. Its writer now reads first, then
+  timestamps. Receiver validation also handles the precisely bounded legacy
+  race using absolute observation time at receipt, never a blind zero clamp.
+- One remaining 1.672-second HTTP-receipt coverage gap is retained as an
+  **observation gap**, not a DUT fault or an accepted clean interval.
+
+The corrected collector's full replay has zero frontier/negative-age false
+failures. Compact real-timebase regression fixtures plus mutations verify that
+genuine clock rollbacks, counter loss and coverage loss still fail. Acceptance
+events now retain previous/candidate/certified bounds and the limiting component.
+Original event files remain immutable; separate assessments classify the alerts
+as `COLLECTOR_FAULT`, `PEER_STATUS_ENVELOPE_RACE` or
+`OBSERVATION_COVERAGE_GAP`. No firmware or machine timeout changed for these fixes.
+Peer generation after the timestamp-order correction is
+`4f188f43319437a37c351041f6f009555c92b8122f2834e7f705f7b47a9b5df0`.
+
+Live validation then exposed insufficient freshness margin from the original
+1.00–1.25-second snapshot cadence plus topic age, network delay and the retained
+100 ms clock-uncertainty allowance. The peer now publishes snapshots every
+250 ms (generation
+`09d12a820f2a06806ce5d32ec9ad754cb619073301dbc8cba35b5c24df932b21`),
+and the bench polls peer status/events every 500 ms while DUT state remains at
+1 Hz. No machine deadline or evidence-age bound was increased. The corrected
+collector passed 95 offline tests and a **303.316-second live clean window with
+zero failures**; one control-plane reconnect was retained as a warning without
+any safety interruption. Fresh four-hour qualifications follow this validation.
+
+### Artifact locations
 
 Bench evidence is under `/tmp/opencode/pstop-soak-20260910/`: action journal,
 raw state/monitor/health and peer samples, per-event prehistory and diagnostics,
@@ -155,3 +218,6 @@ hardware or firmware intervention while that controller owns the rig.
 
 **Setup results above are not four-hour passes.** The campaign manifest and
 per-phase `status.json` files are the authority for subsequent qualification.
+The supervised campaign started at **05:37Z**, directory
+`campaign-20260910T053721Z`, with USB first and a 14400-second clean target for
+each phase. This start record is not a completion result.

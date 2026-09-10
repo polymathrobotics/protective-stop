@@ -1481,6 +1481,7 @@ class RunTests(unittest.TestCase):
         mutate=None,
         history=None,
         clean_seconds=3,
+        peer_poll_sec=1.0,
     ):
         clock = FakeClock()
         stop = FakeStop(clock, interrupt_at)
@@ -1499,10 +1500,20 @@ class RunTests(unittest.TestCase):
             mock.patch.dict(os.environ, {'ML_ADMIN_USER': 'test-user', 'ML_ADMIN_PASSWORD': 'test-password'}),
             mock.patch.object(soak.Artifacts, 'disk_check'),
         ):
+            args = arguments(out, max_duration=max_duration, clean_seconds=clean_seconds, peer_poll_sec=peer_poll_sec)
             if atomic:
                 with mock.patch.object(soak.Artifacts, 'atomic', atomic):
-                    return soak.run(arguments(out, max_duration=max_duration, clean_seconds=clean_seconds), stop)
-            return soak.run(arguments(out, max_duration=max_duration, clean_seconds=clean_seconds), stop)
+                    return soak.run(args, stop)
+            return soak.run(args, stop)
+
+    def test_faster_peer_observation_does_not_increase_dut_http_load(self):
+        history = []
+        with tempfile.TemporaryDirectory() as out:
+            self.assertEqual(self.execute(out, peer_poll_sec=0.5, history=history), 0)
+        dut_reads = [row['start'] for row in history if row['source'] == 'dut_state']
+        peer_reads = [row['start'] for row in history if row['source'] == 'peer_status']
+        self.assertGreater(len(peer_reads), 1.5 * len(dut_reads))
+        self.assertTrue(all(b - a >= 0.95 for a, b in zip(dut_reads, dut_reads[1:])))
 
     def test_full_run_only_exits_zero_on_clean_target_and_retains_restart(self):
         with tempfile.TemporaryDirectory() as out:
@@ -1570,6 +1581,44 @@ class RunTests(unittest.TestCase):
                 ]),
                 143,
             )
+
+
+class SnapshotEnvelopeRaceTests(unittest.TestCase):
+    def raced_snapshot(self, delta=0.003):
+        raw = peer(10)
+        raw['wire']['snapshot_epoch'] = raw['epoch'] + delta
+        raw['wire']['snapshot_age_s'] = -delta
+        raw['collector']['observer']['age_s'] = -delta
+        raw['watermarks']['observer']['input_epoch'] = raw['epoch'] + delta
+        raw['watermarks']['observer']['input_mono'] = raw['mono'] + delta
+        return raw
+
+    def test_atomic_snapshot_replacement_after_envelope_uses_receipt_age(self):
+        # Real events 58/105: the file was replaced 2-3ms after the server took
+        # its envelope timestamp, but before our HTTP response was received.
+        for delta in (0.002, 0.003):
+            with self.subTest(delta=delta):
+                raw = self.raced_snapshot(delta)
+                received = raw['epoch'] + 0.020
+                result = soak.normalize_peer_status(raw, REMOTE, received, VPN, MACHINE)
+                actual = soak.receipt_snapshot_age(raw['wire']['snapshot_epoch'], received)
+                self.assertAlmostEqual(result['ages']['wire_snapshot'], actual)
+                self.assertAlmostEqual(result['ages']['collector.observer'], actual)
+                self.assertGreater(actual, 0)
+
+    def test_negative_age_cannot_hide_inconsistent_or_future_evidence(self):
+        cases = []
+        bad = self.raced_snapshot()
+        bad['wire']['snapshot_age_s'] = -0.5
+        cases.append(bad)
+        cases.append(self.raced_snapshot(0.5))
+        bad = peer(10)
+        bad['wire']['snapshot_age_s'] = -0.003
+        cases.append(bad)
+        for raw in cases:
+            with self.subTest(snapshot=raw['wire']['snapshot_epoch']):
+                with self.assertRaises(ValueError):
+                    soak.normalize_peer_status(raw, REMOTE, raw['epoch'] + 0.020, VPN, MACHINE)
 
 
 if __name__ == '__main__':
