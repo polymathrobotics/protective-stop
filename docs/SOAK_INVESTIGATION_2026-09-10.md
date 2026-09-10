@@ -1,5 +1,30 @@
 # PSTOP06 USB / Ethernet stability investigation
 
+## Verified milestone: Ethernet four-hour pass
+
+The `campaign-20260910T100027Z/ethernet` window **PASSED 14405.500 seconds**
+of consecutive clean armed operation, completing closing checks at approximately
+14:00:58 UTC. The independent machine-side review concurs: no machine state
+changes, remote drops or rebonds; capture coverage spans the complete window.
+The transport was Ethernet with a direct WireGuard path throughout.
+
+DUT slot-3 deltas: sent +71119, replies +71116, send failures +0, rebonds +0.
+No new boots, comparator/lifetime mismatch events, button presses, Ethernet
+recoveries or health-flush failures were recorded. There were 42 warning records,
+including seven isolated reordered-frame incidents and their duplicate reporting
+channels, recovered driver retries, and control-plane reconnects; these were not
+42 connection outages. Closing health/configuration/event-watermark checks passed.
+
+Firmware remained `v1.2-29-g901cafd` / ELF `89a1018c1`, operator role; peer
+generation remained `c51a8398c7f761436af2a397febc40a4df415abdb8ea06bea39931184ac8f074`.
+See the phase's `result-summary.json`, `status.json` and campaign manifest.
+
+The controller then transitioned to USB, settled and re-armed, and started the
+USB phase at **14:01:25 UTC**. USB four-hour acceptance is still pending at this
+milestone. A future clean window documents observed behavior on this build; it
+does not resolve the open USB deferred-send defect hypothesis. Any firmware fix
+requires both modes to be qualified again on that new build.
+
 ## Acceptance and ownership
 
 The target is **four consecutive armed hours on each transport**, on one final
@@ -296,7 +321,7 @@ controller handles labelled transitions, evidence-before-rearm, supervision and
 notifications to both agents. A local `PAUSE` marker is required before manual
 hardware or firmware intervention while that controller owns the rig.
 
-**Setup results above are not four-hour passes.** The campaign manifest and
+**Only explicitly verified windows are passes.** The campaign manifest and
 per-phase `status.json` files are the authority for subsequent qualification.
 The supervised campaign started at **05:37Z**, directory
 `campaign-20260910T053721Z`, with USB first and a 14400-second clean target for
