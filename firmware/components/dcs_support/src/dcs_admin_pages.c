@@ -887,8 +887,11 @@ static esp_err_t api_last_log(httpd_req_t * req)
   if (!panic_log_has_snapshot()) {
     return httpd_resp_sendstr(req, "");
   }
-  size_t cap = 4096;
-  char * buf = malloc(cap);
+  /* Copy the FULL retained ring. A 4096-byte prefix discarded the newest
+   * ~3 KiB, including the panic banner/backtrace we need after a reset.
+   * HTTP-only scratch belongs in PSRAM, like the boot snapshot itself. */
+  size_t cap = PANIC_LOG_BUF_SIZE + 1u;
+  char * buf = heap_caps_malloc(cap, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
   if (!buf) {
     (void)httpd_resp_set_status(req, "500 Internal Server Error");
     return httpd_resp_sendstr(req, "malloc failed");

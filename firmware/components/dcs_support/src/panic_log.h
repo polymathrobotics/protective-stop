@@ -6,6 +6,9 @@
 #include <stddef.h>
 #include <stdint.h>
 
+/* Retained bytes, excluding the NUL needed when exporting the full snapshot. */
+#define PANIC_LOG_BUF_SIZE 7168u
+
 /* Wires a ringbuffer in RTC_NOINIT memory into esp_log so the previous boot's
  * tail-of-log survives panic/WDT/esp_restart and can be read out on the next
  * boot. Call once at the start of app_main, before anything else logs. */
