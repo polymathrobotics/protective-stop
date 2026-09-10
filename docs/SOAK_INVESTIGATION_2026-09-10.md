@@ -256,7 +256,33 @@ recurring USB-path disruptions do not prevent long-duration coverage of the
 other transport. Both still require four consecutive clean hours on the same
 build/configuration; WAN events are not excluded.
 
-### Artifact locations
+### USB management-response loss during Ethernet qualification
+
+At **09:38:57Z**, Ethernet pstop remained healthy, but a USB `/state.json`
+response took 1.513 seconds and expired the preceding observation. Header-only
+capture shows a missing 1440-byte TCP body segment, duplicate header/later-body
+segments, repeated ACKs for the missing byte sequence, and gap recovery about
+1.3 seconds later. USBmon places the two later-body copies in one 3048-byte IN
+completion, preceded by a 180 ms IN-completion gap with requests still pending.
+USB completion statuses and host receive-error counters did not change.
+
+Independent source review identifies plausible stale deferred-work and completion
+races in `tinyusb_net_send_sync`. Abstract schedules reproduce omission and
+duplication, but callback-generation/NTB-content evidence is still needed to
+establish the exact hardware interleaving. A proposed pointer-clear-only patch
+was rejected because it can lose a semaphore token and deadlock the TCPIP caller;
+clearing an event bit at entry is also insufficient. No component patch was
+applied.
+
+Qualifying telemetry now follows the selected underlay: Ethernet uses
+`http://10.74.30.17`, USB uses `http://10.43.0.122`. This separates the Ethernet
+test from the demonstrated USB management fault; the USB defect remains open
+and USB still requires its own full qualification. The prior reset stands.
+The aligned Ethernet observation path passed a 123.746-second live check with
+zero failures; five recoverable/diagnostic warnings were retained. Firmware,
+machine settings and all timing limits remain unchanged.
+
+### Current artifact locations
 
 Bench evidence is under `/tmp/opencode/pstop-soak-20260910/`: action journal,
 raw state/monitor/health and peer samples, per-event prehistory and diagnostics,
