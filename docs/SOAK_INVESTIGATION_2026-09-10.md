@@ -202,6 +202,60 @@ collector passed 95 offline tests and a **303.316-second live clean window with
 zero failures**; one control-plane reconnect was retained as a warning without
 any safety interruption. Fresh four-hour qualifications follow this validation.
 
+### Later observation and transport events
+
+- **07:37:18Z:** a 1.457-second DUT HTTP response delay expired the previous
+  observation, while peer pcap showed uninterrupted OK/OK traffic. Frame stamps
+  localized the main jitter after generation; USB/uplink captures showed a
+  shared outgoing payload pause already at the USB boundary and only
+  microseconds of host forwarding delay. Exact scheduling/TCP/TinyUSB cause is
+  unresolved. Header-only HTTP capture, usbmon metadata and host counters were
+  added for recurrence; no firmware behavior was changed.
+- **08:07:16Z:** a recorder-freshness alert was traced to libpcap delivering
+  packets in approximately one-second batches despite `tcpdump -U`. An earlier
+  inode-timestamp explanation was superseded by syscall timing and size-growth
+  measurements. The peer now uses `--immediate-mode`, an independent 4 Hz
+  file-size progression sampler, and timestamped background status refresh.
+  Recorder configuration is included in provenance without volatile runtime
+  fields. Generation
+  `c51a8398c7f761436af2a397febc40a4df415abdb8ea06bea39931184ac8f074`
+  passed a 303.75-second live gate check with zero failures.
+- **08:29:13–08:30:22Z:** a second shared upstream disruption pair occurred,
+  approximately 68 seconds apart. Bench STUN endpoints again changed public IP;
+  its own DERP/control/log connections also reset. Matching reset packets
+  appeared on the uplink before USB by 7–20 microseconds. No interface change
+  occurred at qualification start. The first outage added seven local send
+  failures per DUT slot, caused a rebond and machine STOP, and required the
+  controller's documented gesture. The second included a genuine approximately
+  two-second return gap. USBmon showed successful transfers in both directions,
+  at least three tracked bulk-IN requests pending, and no completion errors.
+  This is not evidence of a global USB freeze. Gateway logs are still needed to
+  establish the exact WAN/NAT policy causing the repeated disruption.
+- **08:32:41Z:** a smaller return-delay bubble combined with observation aging:
+  671 ms raw DUT reply age plus 976 ms local elapsed time exceeded 1.6 seconds.
+  The following sample showed 149 ms age and catch-up replies. It is retained
+  as a return-delay/observation gap, not a demonstrated machine silence STOP.
+
+### Review annotations are not new measurements
+
+Peer journal sequences 806/807/817 incorrectly marked reviews of prior events
+as ERROR. Their publication, and the watcher bundles generated in response
+(808/818), caused duplicate qualification resets. Original records remain;
+corrections classify them as `ANNOTATION_SEVERITY_FAULT`.
+
+The receiver retains the four explicit annotation types from `machine_agent`
+(`INDEPENDENT_RESULT`, `SOAK_PHASE`, `INSTRUMENTATION_FIX`, `PREFLIGHT_ACTION`)
+without treating them as fresh failures. The same applies narrowly to
+`EVIDENCE_COLLECTED` records explicitly attributed to those annotations. Genuine
+packet, ROS, DUT and recorder-exit alarms, and unknown failure types, remain
+failure-bearing. Regression tests replay the observed shapes and verify that
+actual silence/recorder failures still reset qualification.
+
+After this correction, the next attempt order is **Ethernet, then USB**, so
+recurring USB-path disruptions do not prevent long-duration coverage of the
+other transport. Both still require four consecutive clean hours on the same
+build/configuration; WAN events are not excluded.
+
 ### Artifact locations
 
 Bench evidence is under `/tmp/opencode/pstop-soak-20260910/`: action journal,

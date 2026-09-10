@@ -974,6 +974,54 @@ class LiveAdapterTests(unittest.TestCase):
         self.assertEqual(soak.normalize_peer_event(event, REMOTE, credit_epoch=EPOCH)[0], 'failure')
         self.assertEqual(soak.normalize_peer_event(event, REMOTE, credit_epoch=EPOCH + 5)[0], 'info')
 
+    def test_review_annotation_does_not_reset_armed_window(self):
+        s = Scenario().prime()
+        review = dict(
+            peer_event(1, 'INDEPENDENT_RESULT', 'failure'),
+            src='machine_agent',
+            epoch=EPOCH + 8,
+            mono=10008,
+            data={'bench_event': 'previous outage', 'msg': 'STOP'},
+        )
+        self.assertFalse(s.step(8, events=[review]))
+        self.assertGreater(s.evidence.gate.clean_s, 1)
+        self.assertEqual(s.evidence.journal.cursor, 1)
+        self.assertEqual(s.events[-1][0], 'warning')
+
+    def test_actual_review_sequence_and_its_evidence_bundle_are_annotations(self):
+        # Sanitized shapes of real peer seq806/807/808 at08:33:01Z, reviewing
+        # already-recorded08:29/08:30 outages. They are not new wire failures.
+        records = [
+            dict(peer_event(seq, 'INDEPENDENT_RESULT', 'failure'), src='machine_agent', data={'bench_event': ref})
+            for seq, ref in ((806, '000003'), (807, '000057'))
+        ]
+        records.append(
+            dict(
+                peer_event(808, 'EVIDENCE_COLLECTED', 'failure'),
+                src='collector',
+                data={'reason': 'FAIL_INDEPENDENT_RESULT', 'detail': 'seq=806 src=machine_agent'},
+            )
+        )
+        journal = soak.PeerEvents(baseline_required=True)
+        journal.baseline(805)
+        outcomes = journal.consume(records, REMOTE)
+        self.assertEqual([row[0] for row in outcomes], ['warning'] * 3)
+        self.assertEqual(journal.cursor, 808)
+        actual = dict(peer_event(809, 'REMOTE_SILENT', 'failure'), src='pkt_observer')
+        self.assertEqual(journal.consume([actual], REMOTE)[0][0], 'failure')
+
+    def test_annotation_filter_cannot_hide_observer_or_recorder_faults(self):
+        for source, kind, data in (
+            ('pkt_observer', 'INDEPENDENT_RESULT', {}),
+            ('machine_agent', 'REMOTE_DROPPED', {}),
+            ('collector', 'EVIDENCE_COLLECTED', {'reason': 'OBSERVER_EXIT', 'detail': 'src=machine_agent'}),
+            ('collector', 'EVIDENCE_COLLECTED', {'reason': 'FAIL_MACHINE_STALL', 'detail': 'src=pkt_observer'}),
+            ('collector', 'EVIDENCE_COLLECTED', {'reason': 'FAIL_INDEPENDENT_RESULT', 'detail': 'src=pkt_observer'}),
+        ):
+            with self.subTest(source=source, kind=kind, data=data):
+                event = dict(peer_event(1, kind, 'failure'), src=source, data=data)
+                self.assertEqual(soak.normalize_peer_event(event, REMOTE)[0], 'failure')
+
     def test_all_captured_watermark_sequences_are_reconciled_not_emission_times(self):
         s = Scenario().prime()
         raw = peer(8, seq=1)

@@ -638,6 +638,22 @@ def normalize_peer_event(event, remote_id=None, credit_epoch=None, negative_evid
     data = event.get('data', {})
     require(isinstance(data, dict), 'peer.event: data must be an object')
     upper = kind.upper()
+    annotation_types = {'INDEPENDENT_RESULT', 'SOAK_PHASE', 'INSTRUMENTATION_FIX', 'PREFLIGHT_ACTION'}
+    if event.get('src') == 'machine_agent' and upper in annotation_types:
+        # Reviews describe earlier evidence; their publication time is not a
+        # fresh observation. Retain them without restarting a clean window.
+        return ('warning' if level == 'failure' else level), 'peer.annotation.' + kind
+    if (
+        event.get('src') == 'collector'
+        and upper == 'EVIDENCE_COLLECTED'
+        and data.get('reason') in {'FAIL_' + name for name in annotation_types}
+        and 'src=machine_agent' in str(data.get('detail', '')).split()
+    ):
+        # The peer watcher also captured bundles for mislabelled reviews (real
+        # journal seq808/818). This explicitly attributed consequence is still
+        # annotation metadata. Actual recorder exits and unknown alarms remain
+        # failures below.
+        return ('warning' if level == 'failure' else level), 'peer.annotation_evidence.' + kind
     global_types = {
         'MACHINE_UNEXPECTED_STOP',
         'MACHINE_UNSTABLE',
