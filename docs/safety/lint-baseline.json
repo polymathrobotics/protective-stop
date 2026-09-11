@@ -1,0 +1,76 @@
+{
+  "generated": "2026-09-11",
+  "note": "Pre-existing findings accepted at linter introduction. Each entry needs an exact finding message, owner, and reason. Removing a fixed entry is required; CI fails on a stale entry.",
+  "findings": [
+    {
+      "check_id": "C4",
+      "subject": "SR-M-01",
+      "finding": "test_timing_floors: cited evidence file does not exist",
+      "reason": "TRACEABILITY.md section 2.4 cites test_timing_floors, but test_timing_floors.cpp was added by 1f226be and deleted by 9a28d4a during ROS2 convention restoration. This records broken citation resolution only and does not decide SR-M-01 verification status.",
+      "owner": "raj"
+    },
+    {
+      "check_id": "C8",
+      "subject": "F-H-04",
+      "finding": "function has no allocated safety requirement",
+      "reason": "TRACEABILITY.md section 5.2 declares Robot status output + logging has no SR and identifies it as an undeclared requirements-coverage hole.",
+      "owner": "raj"
+    },
+    {
+      "check_id": "C8",
+      "subject": "F-M-01",
+      "finding": "function has no allocated safety requirement",
+      "reason": "TRACEABILITY.md section 5.3 declares Lifecycle node management has no SR and identifies it as an undeclared requirements-coverage hole.",
+      "owner": "raj"
+    },
+    {
+      "check_id": "C8",
+      "subject": "F-M-06",
+      "finding": "function has no allocated safety requirement",
+      "reason": "TRACEABILITY.md section 5.3 declares ROS topic publication has no SR and identifies it as an undeclared requirements-coverage hole.",
+      "owner": "raj"
+    },
+    {
+      "check_id": "C8",
+      "subject": "F-P-04",
+      "finding": "reverse map ['SR-I-04', 'SR-R-14', 'SR-SYS-02', 'SR-SYS-04', 'SR-SYS-08'] != allocated SRs ['SR-I-04', 'SR-SYS-02', 'SR-SYS-04', 'SR-SYS-08']",
+      "reason": "TRACEABILITY.md section 5.4 includes SR-R-14 via F-R-06 in the F-P-04 reverse map although the SRS allocation for SR-R-14 names only F-R-06/07.",
+      "owner": "raj"
+    },
+    {
+      "check_id": "C8",
+      "subject": "F-R-02",
+      "finding": "reverse map ['SR-R-02', 'SR-R-03', 'SR-R-04', 'SR-SYS-02'] != allocated SRs ['SR-R-02', 'SR-R-03', 'SR-R-04', 'SR-SYS-01', 'SR-SYS-02']",
+      "reason": "TRACEABILITY.md section 5.1 omits SR-SYS-01 from F-R-02 although the SRS range allocation F-R-01..05 includes it.",
+      "owner": "raj"
+    },
+    {
+      "check_id": "C8",
+      "subject": "F-R-03",
+      "finding": "reverse map ['SR-R-05', 'SR-R-06', 'SR-SYS-03', 'SR-SYS-06'] != allocated SRs ['SR-R-05', 'SR-R-06', 'SR-SYS-01', 'SR-SYS-03', 'SR-SYS-06']",
+      "reason": "TRACEABILITY.md section 5.1 omits SR-SYS-01 from F-R-03 although the SRS range allocation F-R-01..05 includes it.",
+      "owner": "raj"
+    },
+    {
+      "check_id": "C8",
+      "subject": "F-R-04",
+      "finding": "reverse map ['SR-R-07', 'SR-R-08'] != allocated SRs ['SR-R-07', 'SR-R-08', 'SR-SYS-01']",
+      "reason": "TRACEABILITY.md section 5.1 omits SR-SYS-01 from F-R-04 although the SRS range allocation F-R-01..05 includes it.",
+      "owner": "raj"
+    },
+    {
+      "check_id": "C8",
+      "subject": "F-R-08",
+      "finding": "function has no allocated safety requirement",
+      "reason": "TRACEABILITY.md section 5.1 explicitly declares Status LED ring non-safety with no allocated SR.",
+      "owner": "raj"
+    },
+    {
+      "check_id": "C8",
+      "subject": "F-R-10",
+      "finding": "function has no allocated safety requirement",
+      "reason": "TRACEABILITY.md sections 5.1 and 5.5 explicitly declare Admin/web non-safety with no allocated SR while retaining a separate non-interference obligation gap.",
+      "owner": "raj"
+    }
+  ]
+}
