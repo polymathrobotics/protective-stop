@@ -170,6 +170,20 @@ Expected if the STOP episode was shorter than the arming policy minimum
 (≥0.5 s) then release. Also expected after any link outage ≥1 s: the
 machine latches NEED_STOP and requires a fresh press→release.
 
+### `/api/health` says WARN or CRITICAL
+
+`GET /api/health` → `warnings[]`. `button_wear` at ≥ 80 % of the switch's
+rated 100,000 operations (`CONFIG_DCS_BUTTON_RATED_OPS`) is a plan-to-replace
+notice; CRITICAL at 100 % means replace the switch, then
+`POST /api/health/reset?what=button&confirm=1` (admin) so the count restarts
+and `button_swaps` records the service. `loop_mismatch` means one switch loop
+has been reading open while the other read closed, more than
+`CONFIG_DCS_MISMATCH_WARN_PER_1000` times per 1000 presses: reseat both
+terminal pairs and the header, then watch `mismatch_events` for a week; if it
+keeps climbing the switch contacts are bouncing and it is due for
+replacement. The counters survive reflash and OTA; `erase-flash` zeroes them.
+Field semantics: `docs/MONITORING.md`.
+
 ### `pstop_mismatch` climbing / ring purple
 
 The two cores' encodings disagree — check the loop diagnostics

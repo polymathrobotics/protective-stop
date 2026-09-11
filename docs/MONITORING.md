@@ -34,6 +34,29 @@ semantics here (or in source) before building a monitor or a conclusion on it.**
 | `crash_present` / `crash_pc` / `crash_task` / `crash_sha` | Boot-time summary of the coredump in flash (persists until the NEXT crash — vintage may predate this boot's build; `crash_sha` names the crashing build, match it against `ops/elf-archive/`). |
 | `log_lines_s` / `log_lines_s_peak` / `log_console_skipped` | ESP_LOG line rate (last full second / since-boot peak / console lines dropped by the 40-line/s budget). Storm context: 147 lines/s was measured at a core-stall; UART0 drains ~115 lines/s at 100 chars — the budget exists so logging can never block a core again. |
 
+## Lifetime health / wear (`/api/health`, `health` in `/state.json`)
+
+Counters that survive reboot, `idf.py flash` and OTA (NVS blob
+`dcs_app/health`). Purpose: decide when a unit is retired. Full field list in
+[`API.md`](API.md#health-lifetime-counters-and-warnings).
+
+| Field | Meaning |
+|-------|---------|
+| `health` (`/state.json`) / `level` | Worst active warning: 0 ok, 1 warn, 2 critical. Poll this one field fleet-wide; open `/api/health` only when it is nonzero. |
+| `presses` | Physical stop operations: rising edges of BOTH cores reading STOP. Compare against `button_rated_ops` (NKK FF01: 100,000). |
+| `mismatch_events` | Rising edges of the two cores disagreeing on the same tick (one loop open, the other closed). The leading indicator of switch/wiring wear; it climbs before `presses` gets anywhere near the rating. Distinct from `pstop_mismatch` in `/state.json`, which is this boot's comparator count including publish timeouts. |
+| `uptime_s` | Cumulative powered seconds. Trap: lags live time by up to `CONFIG_DCS_HEALTH_FLUSH_MAX_S` (600 s) after a power pull. Not wall-clock; no SNTP involved. |
+| `boots` | Lifetime boot count. Trap: NOT `boot_count` in `/state.json`, which is the crash-ladder counter and is zeroed after 120 s of healthy uptime. |
+| `flashes` / `otas` | Boots on which the image SHA changed / on which the image was OTA-delivered. `flashes - otas` = cable flashes. A brand-new unit shows `flashes: 1`. |
+| `nvs_flushes` / `last_flush_age_s` | This boot's successful blob writes and the seconds since the last one. `last_flush_age_s` stuck above 600 with `nvs_flush_fails` climbing = NVS trouble. |
+| `warnings[]` | One entry per publishing source (`src`), with `count` (re-publishes) and `age_s` (since first raised this boot). Built-in: `button_wear`, `loop_mismatch`. |
+
+**Retire when:** `level` is 2 (button at or past rated life), or `loop_mismatch`
+persists after the wiring has been inspected and reseated. **Data loss:** an
+`erase-flash`, a partition-table change that moves NVS, or the boot-time
+NVS auto-erase on `ESP_ERR_NVS_NO_FREE_PAGES`/`NEW_VERSION_FOUND` (an IDF
+major upgrade) zeroes everything; record `/api/health` before those.
+
 ## Path / DERP diagnostics (`/admin/api/monitor`)
 
 | Field | Meaning |
