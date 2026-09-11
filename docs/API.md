@@ -21,9 +21,9 @@ Query parameters are shown where required. Unless noted, POST bodies are empty.
 | POST | `/api/derp_delay?ms=N` | Set the DERP loop yield (ms) |
 | POST | `/api/wg` | **Removed** — returns `410 Gone`. The runtime suspend could park `ml_wg_mgr` while it held the lwIP core lock, wedging all networking until a task-WDT panic (bench-proven 2026-08-09). Use `/api/ts_boot` (persistent, safe boot-path pause) or `/api/derp` instead. The `/state.json` `wg_paused` field still reports the boot-path suspend state |
 | POST | `/api/wifi_tx_power?q=N` | Set WiFi max TX power (quarter-dBm) |
-| POST | `/api/iface/eth` | Select the Ethernet uplink |
-| POST | `/api/iface/wifi` | Select the WiFi uplink |
-| POST | `/api/iface/usb` | Select the USB-NCM uplink |
+| POST | `/api/iface/eth` | **Toggle** the Ethernet driver on/off (not a selector; no GET). Reply `{"enabled":0\|1}` is the resulting state. Runtime only, not persisted. Uplink preference is automatic: Ethernet > USB-NCM > WiFi (`active_iface` in `/state.json`) |
+| POST | `/api/iface/wifi` | **Toggle** the WiFi STA driver on/off. Same semantics |
+| POST | `/api/iface/usb` | **Toggle** the USB-NCM tether on/off (installs/removes TinyUSB; the host sees a DHCP Release and a USB disconnect). Same semantics. Bench-verified 2026-09-04: Eth->USB fallback costs one Tailscale re-register (~5 s), USB->Eth is seamless; a bonded machine with the default 2 s timeout stays armed through both |
 | POST | `/api/usb_enable` | Flip the USB-NCM NVS flag and reboot |
 | POST | `/api/ts_boot` | Flip the Tailscale-on-boot NVS flag (effective next reboot) |
 | POST | `/api/pstop_peer?ip=A.B.C.D&port=N` | Set + persist the pstop machine target (= peer slot 0, legacy single-machine call) |
@@ -31,7 +31,42 @@ Query parameters are shown where required. Unless noted, POST bodies are empty.
 | POST | `/api/pstop_num?n=N` | Set the USB "PSTOPxx" unit number (0 = auto) |
 | POST | `/api/ring_offset?n=N` | Set + persist the LED-ring rotation offset (0..15) — which physical pixel is "LED 1". Applies immediately, survives reboots and firmware updates (NVS `ring_off`) |
 | POST | `/api/ring_led1?on=0\|1` | Locate mode: light ONLY LED 1 solid white (overrides state colours) so the offset can be verified during install; auto-expires after 5 min |
-| POST | `/api/enter_download` | Enter USB download (flashing) mode |
+| POST | `/api/enter_download?confirm=1` | Enter USB download (flashing) mode (**admin auth**) |
+| GET  | `/api/role` | Remote self-role (**admin auth**): `{"ok":true,"role":"stop_only"\|"operator"}`. Announced in every pstop frame; the machine ANDs an `operator` claim with its own operator allowlist. Default `stop_only`. Remote only |
+| POST | `/api/role?role=stop_only\|operator` | Persist the self-role to NVS and **reboot** to apply (**admin auth**). Promoting to `operator` is one of the two gates for re-arm; the other is the machine's allowlist (`software.operators` on the ROS node, `[[operator]]` in `machine.toml`, `/api/operators` on machn). Remote only |
+| GET  | `/api/health` | Lifetime wear/health counters (see [Health](#health-lifetime-counters-and-warnings)) |
+| POST | `/api/health/reset?what=button\|all&confirm=1` | Zero the button counters after a switch replacement (`button`, bumps `button_swaps`) or everything (`all`, refurbished unit). **Admin auth** |
+
+### Health: lifetime counters and warnings
+
+`GET /api/health` returns counters that persist across reboots, `idf.py flash`
+and OTA (NVS blob `dcs_app/health`, flushed at most once per minute and at
+least every 10 minutes, plus on controlled restart). They do **not** survive
+`erase-flash` or an NVS auto-erase (`ESP_ERR_NVS_NO_FREE_PAGES` /
+`NEW_VERSION_FOUND` at boot).
+
+```json
+{"ok":true,"level":0,"presses":1234,"mismatch_events":2,"uptime_s":864000,
+ "boots":41,"flashes":7,"otas":5,"button_swaps":0,
+ "button_rated_ops":100000,"button_wear_pct":1,
+ "fw_sha":"a1b2c3d4e5f60718","nvs_flushes":3,"last_flush_age_s":17,
+ "warnings":[{"src":"button_wear","level":1,"msg":"82% of rated 100000 ops","count":4,"age_s":120}],
+ "dropped":0}
+```
+
+| Field | Meaning |
+|---|---|
+| `level` | Worst active warning: `0` ok, `1` warn, `2` critical. Also mirrored as `health` in `/state.json` |
+| `presses` | Button operations: rising edges of *both* lockstep cores reading STOP. A single-loop STOP (wiring fault) is not a press. Remote only |
+| `mismatch_events` | Rising edges of the two cores disagreeing on the same tick (one loop open, the other closed): contact bounce or a degrading loop. Remote only |
+| `uptime_s` | Cumulative powered time, accumulated from the monotonic clock; loses at most the last flush interval on power pull |
+| `boots` | Every boot (lifetime; unlike the crash-ladder `boot_count` in `/state.json`, never auto-cleared) |
+| `flashes` | Boots where the running image's ELF SHA differs from the last one seen: cable **and** OTA updates |
+| `otas` | Boots where the image was `PENDING_VERIFY`, i.e. delivered by OTA. Cable flashes = `flashes - otas` |
+| `button_swaps` | Times `reset?what=button` was used |
+| `button_rated_ops` | `CONFIG_DCS_BUTTON_RATED_OPS`, default 100000 (NKK FF01 datasheet: mechanical and electrical life, 100,000 operations minimum) |
+| `warnings[]` | Every active warning published through `dcs_health_publish()` from anywhere in the firmware, one entry per source. Built-in sources: `button_wear` (warn at `CONFIG_DCS_BUTTON_WARN_PCT` %, critical at 100 %), `loop_mismatch` (warn when `mismatch_events` exceeds `CONFIG_DCS_MISMATCH_WARN_PER_1000` per 1000 presses after at least `CONFIG_DCS_MISMATCH_WARN_MIN` events) |
+| `dropped` | Publishes refused because the 8-entry table was full |
 
 ### Multi-machine (one remote, up to 4 machines)
 
@@ -166,6 +201,8 @@ bonded remote is commanding.
 ## Source of truth
 
 - Diagnostic/config routes: `firmware/components/dcs_support/src/dcs_admin_pages.c`
+- Health counters and the publish API: `firmware/components/dcs_support/src/dcs_health.c`,
+  `firmware/components/dcs_support/include/dcs_health.h`
 - Admin routes: `components/microlink/src/ml_config_httpd.c` (`/admin` prefix) and
   `components/microlink/src/ml_app.c` (managed OTA, verbose).
 

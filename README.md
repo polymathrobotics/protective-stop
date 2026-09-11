@@ -82,47 +82,27 @@ Malone Technologies.
 
 ## Build and run
 
-### Remote firmware
-
-ESP-IDF 5.5 is required.
+**[`docs/QUICKSTART.md`](docs/QUICKSTART.md)** walks a fresh laptop through
+the whole thing: Tailscale account and key, USB tether, build and flash,
+the ROS 2 machine node, pairing, and a bench test through STOP and ARM.
+The short version (ESP-IDF 5.5 required):
 
 ```sh
 cp firmware/sdkconfig.credentials.example firmware/sdkconfig.credentials
-$EDITOR firmware/sdkconfig.credentials
-cd firmware
-. /path/to/esp-idf-v5.5/export.sh
-idf.py build
-idf.py -p /dev/ttyACM0 flash
+$EDITOR firmware/sdkconfig.credentials            # Tailscale auth key + admin password
+cd firmware && . /path/to/esp-idf-v5.5/export.sh
+idf.py build && idf.py -p /dev/ttyACM0 flash
+
+cd ../ros2 && colcon build --packages-up-to protective_stop_machine
+ros2 run protective_stop_machine machine_bridge_node
+curl -X POST "http://<remote>/api/pstop_peer?ip=<laptop-tailscale-ip>&port=8890"
 ```
 
-Later updates can be sent through the authenticated admin API:
-
-```sh
-curl -u 'admin:<password>' \
-  --data-binary @build/pstop_remote.bin \
-  'http://<remote>/admin/api/ota'
-```
-
-### Machine process
-
-The host process needs only a C compiler and `make`:
-
-```sh
-cd host
-make
-./machine_app_runner machine.toml
-```
-
-Point the remote at that machine:
-
-```sh
-curl -X POST "http://<remote>/api/pstop_peer?ip=<machine-ip>&port=8890"
-```
-
-For USB operation, complete the one-time host setup in
-[`docs/USB_NCM_SETUP.md`](docs/USB_NCM_SETUP.md). Hardware assembly starts with
-the [`hardware/README.md`](hardware/README.md) and the photographed
-[`hardware/ASSEMBLY.md`](hardware/ASSEMBLY.md) guide.
+A plain-C machine process (`cd host && make && ./machine_app_runner`) is the
+non-ROS alternative. Later firmware updates go over the authenticated admin
+API (`POST /admin/api/ota`). Hardware assembly starts with
+[`hardware/README.md`](hardware/README.md) and the photographed
+[`hardware/ASSEMBLY.md`](hardware/ASSEMBLY.md).
 
 ## Timing and arming
 

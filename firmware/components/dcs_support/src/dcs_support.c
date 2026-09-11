@@ -386,6 +386,11 @@ dcs_boot_state_t dcs_support_init(void)
      * decides to invoke esp_ota_mark_app_invalid_rollback_and_reboot(). */
   dcs_safety_account_boot();
 
+  /* Lifetime health counters: boots/flash/OTA accounting. Must run before
+     * ml_app_start (which may mark the OTA image valid on connect) so the
+     * PENDING_VERIFY state is still observable. */
+  dcs_health_init();
+
   /* Resolve NVS-backed user toggles. */
   g_dcs.usb_enabled = dcs_nvs_read_usb_enabled();
   g_dcs.ts_boot_en = dcs_nvs_read_ts_boot_en();
@@ -437,10 +442,11 @@ dcs_boot_state_t dcs_support_init(void)
      * API + fleet-ota + verbose) and dcs_admin_pages registers 18; at 16 the
      * total overflowed 32 and the LAST-registered app routes silently failed
      * to register (observed: /api/pstop_num and /api/enter_download 404'd on
-     * shipped firmware). dcs now registers 21 (incl. /api/operators GET+POST);
-     * 30 gives 46 total slots with headroom — re-check this
+     * shipped firmware). dcs now registers 29 on the remote (incl.
+     * /api/operators + /api/role GET+POST, /api/health GET + reset POST);
+     * 36 gives 52 total slots with headroom — re-check this
      * arithmetic whenever a route is added on either side. */
-  cfg.max_user_uri_handlers = 30;
+  cfg.max_user_uri_handlers = 36;
   g_dcs.app = ml_app_start(&cfg);
   g_dcs.ml_handle = ml_app_get_microlink(g_dcs.app);
 
@@ -531,6 +537,7 @@ dcs_boot_state_t dcs_support_init(void)
   esp_log_level_set("microlink", ESP_LOG_INFO);
 
   dcs_telemetry_start_sampler();
+  dcs_health_start(); /* 1 Hz: NVS flush of lifetime counters + wear checks */
   dcs_net_supervisor_start(); /* 1 Hz Eth>USB>WiFi default-route enforcer */
   dcs_net_liveness_start();
   dcs_net_inet_start(); /* internet reachability -> red LED when down */
@@ -586,6 +593,8 @@ void dcs_publish_core_tick(int core_id, uint32_t tick, uint8_t verdict)
   }
   atomic_store(&g_dcs_core_tick[core_id], tick);
   atomic_store(&g_dcs_core_verdict[core_id], verdict);
+  /* Lifetime press / mismatch edge counting (non-safety telemetry). */
+  dcs_health_note_core_tick(core_id, tick, verdict);
 }
 
 void dcs_publish_xcheck(uint32_t fault, uint32_t hb0, uint32_t hb1)

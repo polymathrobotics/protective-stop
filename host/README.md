@@ -100,9 +100,9 @@ mode. Two files fix it permanently:
    ```
 
 Replug the unit. The host takes `10.42.0.1`, the chip DHCPs to
-`10.42.0.x`, switches its active uplink to USB, and — because the
-chip's factory-default machine peer is `10.42.0.1:8890` — it will bond
-to a `machine_app_runner` on this host with zero further configuration.
+`10.42.0.x` and switches its active uplink to USB. A fresh unit has no
+machine peer configured (ring white); point it at this host with the
+`pstop_peer` call below.
 
 Caveat: only the first unit plugged in gets `esp-pstop0`; simultaneous
 extra units fall back to `enx<mac>` names and need their own profiles.
@@ -110,7 +110,7 @@ extra units fall back to `enx<mac>` names and need their own profiles.
 ## Point the remote at this host
 
 USB-NCM (host side of the tether is `10.42.0.1` after the one-time
-setup above — the chip's factory default, so usually nothing to do):
+setup above):
 
 ```sh
 curl -X POST "http://$CHIP/api/pstop_peer?ip=10.42.0.1&port=8890"

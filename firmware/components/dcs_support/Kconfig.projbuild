@@ -1,0 +1,64 @@
+# SPDX-FileCopyrightText: 2026 Polymath Robotics
+# SPDX-License-Identifier: Apache-2.0
+
+menu "Protective Stop: lifetime health"
+
+    config DCS_BUTTON_RATED_OPS
+        int "Stop switch rated operations (datasheet mechanical life)"
+        default 100000
+        range 0 1000000000
+        help
+            Rated mechanical/electrical life of the stop switch on the BOM.
+            The default is the NKK Switches FF01 series (FF0126BBCAEA01):
+            "Mechanical Life: 100,000 operations minimum; Electrical Life:
+            100,000 operations minimum" (FF01 datasheet, Other Ratings).
+            The firmware compares the lifetime press counter against this
+            and publishes a health warning. Set to your switch's rating if
+            you substitute a part. 0 disables the check.
+
+    config DCS_BUTTON_WARN_PCT
+        int "Button wear warning threshold (percent of rated operations)"
+        default 80
+        range 0 99
+        help
+            GET /api/health reports level WARN once presses reach this
+            percentage of DCS_BUTTON_RATED_OPS, and CRITICAL at 100%.
+            0 disables the WARN step (CRITICAL still fires at 100%).
+
+    config DCS_MISMATCH_WARN_MIN
+        int "Loop-mismatch warning: minimum lifetime events"
+        default 50
+        range 1 1000000
+        help
+            A lockstep mismatch is one switch loop reading open while the
+            other reads closed on the same tick: contact bounce, a loose
+            terminal or a degrading wire. Below this lifetime count the
+            rate check is not applied, so a handful of bench events never
+            trips a warning.
+
+    config DCS_MISMATCH_WARN_PER_1000
+        int "Loop-mismatch warning: events per 1000 presses"
+        default 20
+        range 0 1000
+        help
+            Publish WARN when lifetime mismatch events exceed this many per
+            1000 presses (presses floored at 1000 for the ratio). 0 disables.
+
+    config DCS_HEALTH_FLUSH_MIN_S
+        int "Health counters: minimum seconds between NVS flushes"
+        default 60
+        range 5 3600
+        help
+            A dirty counter (new press or mismatch) is written to NVS no
+            sooner than this after the previous flush. Bounds flash wear
+            and the cache-stall each commit costs both cores.
+
+    config DCS_HEALTH_FLUSH_MAX_S
+        int "Health counters: maximum seconds between NVS flushes"
+        default 600
+        range 30 86400
+        help
+            Cumulative uptime is written at least this often, so a power
+            pull loses at most this much uptime.
+
+endmenu

@@ -111,8 +111,9 @@ and the chip, seeing no usable USB uplink, falls back to its
 provisioned WiFi. Fix (two files, once per host): install
 `host/70-esp-pstop.link` and add the shared profile — full steps in
 `host/README.md` → "USB tether — one-time host setup". After replug
-the chip DHCPs to `10.42.0.x`, prefers the USB uplink, and bonds to a
-machine node on the host via its factory-default peer `10.42.0.1:8890`.
+the chip DHCPs to `10.42.0.x` and prefers the USB uplink. Point it at a
+machine node on the host with `POST /api/pstop_peer?ip=10.42.0.1&port=8890`
+(a fresh unit has no peer configured).
 
 ### `tailscale ping $CHIP_TS` shows tx climbing, rx 0
 
@@ -168,6 +169,20 @@ Expected if the STOP episode was shorter than the arming policy minimum
 "ANOMALY: arming VETOED". Re-arm with a deliberate press-and-hold
 (≥0.5 s) then release. Also expected after any link outage ≥1 s: the
 machine latches NEED_STOP and requires a fresh press→release.
+
+### `/api/health` says WARN or CRITICAL
+
+`GET /api/health` → `warnings[]`. `button_wear` at ≥ 80 % of the switch's
+rated 100,000 operations (`CONFIG_DCS_BUTTON_RATED_OPS`) is a plan-to-replace
+notice; CRITICAL at 100 % means replace the switch, then
+`POST /api/health/reset?what=button&confirm=1` (admin) so the count restarts
+and `button_swaps` records the service. `loop_mismatch` means one switch loop
+has been reading open while the other read closed, more than
+`CONFIG_DCS_MISMATCH_WARN_PER_1000` times per 1000 presses: reseat both
+terminal pairs and the header, then watch `mismatch_events` for a week; if it
+keeps climbing the switch contacts are bouncing and it is due for
+replacement. The counters survive reflash and OTA; `erase-flash` zeroes them.
+Field semantics: `docs/MONITORING.md`.
 
 ### `pstop_mismatch` climbing / ring purple
 

@@ -266,7 +266,7 @@ static esp_err_t page_state(httpd_req_t * req)
     "\"boot_count\":%u,\"reset_reason\":%u,\"ctrl_reset_cause\":%u,"
     "\"crash_present\":%d,\"crash_pc\":%lu,\"crash_task\":\"%s\",\"crash_sha\":\"%s\","
     "\"xcheck_last_detail\":%u,\"log_lines_s\":%lu,\"log_lines_s_peak\":%lu,\"log_console_skipped\":%lu,"
-    "\"fw_ver\":\"%s\",\"fw_sha\":\"%s\","
+    "\"health\":%d,\"fw_ver\":\"%s\",\"fw_sha\":\"%s\","
     "\"ml_state\":%d,\"ml_reconnects\":%lu,\"vpn_ip\":%lu,\"public_ip\":%lu,\"derp_region\":%d,"
     "\"derp_region_locked\":%d,"
     "\"derp_region_source\":\"%s\",\"derp_region_auto_applied\":%d,"
@@ -341,6 +341,7 @@ static esp_err_t page_state(httpd_req_t * req)
     (unsigned long)lograte[0],
     (unsigned long)lograte[1],
     (unsigned long)lograte[2],
+    (int)dcs_health_overall(),
     (app_desc != NULL) ? app_desc->version : "",
     fw_sha,
     ml_state,
@@ -1283,6 +1284,136 @@ static esp_err_t api_role_post(httpd_req_t * req)
 }
 #endif
 
+/* === GET /api/health, POST /api/health/reset ================================
+ * Lifetime wear counters + the process-wide warning board (dcs_health.h).
+ * GET is unauthenticated like /state.json; reset is admin-gated because it
+ * destroys retirement evidence. */
+static esp_err_t api_health_get(httpd_req_t * req)
+{
+  /* PSRAM first, internal as fallback: same rule as page_state — the internal
+   * heap runs tight on this build and this route is unauthenticated. */
+  dcs_health_snapshot_t * snap = heap_caps_calloc(1, sizeof(*snap), MALLOC_CAP_SPIRAM);
+  if (snap == NULL) snap = calloc(1, sizeof(*snap));
+  if (snap == NULL) {
+    (void)httpd_resp_set_status(req, "500 Internal Server Error");
+    return httpd_resp_sendstr(req, "{\"ok\":false,\"error\":\"oom\"}");
+  }
+  dcs_health_get_snapshot(snap);
+
+  enum
+  {
+    CAP = 512 + (DCS_HEALTH_MAX_WARNINGS * (DCS_HEALTH_SRC_LEN + DCS_HEALTH_MSG_LEN + 80))
+  };
+
+  char * buf = heap_caps_malloc(CAP, MALLOC_CAP_SPIRAM);
+  if (buf == NULL) buf = malloc(CAP);
+  if (buf == NULL) {
+    free(snap);
+    (void)httpd_resp_set_status(req, "500 Internal Server Error");
+    return httpd_resp_sendstr(req, "{\"ok\":false,\"error\":\"oom\"}");
+  }
+  const dcs_health_counters_t * c = &snap->counters;
+  int n = snprintf(
+    buf,
+    CAP,
+    "{\"ok\":true,\"level\":%d,"
+#ifndef DCS_PAGE_MACHINE
+    "\"presses\":%lu,\"mismatch_events\":%lu,\"button_swaps\":%u,"
+    "\"button_rated_ops\":%lu,\"button_wear_pct\":%lu,"
+#endif
+    "\"uptime_s\":%lu,\"boots\":%lu,\"flashes\":%lu,\"otas\":%lu,"
+    "\"fw_sha\":\"%02x%02x%02x%02x%02x%02x%02x%02x\","
+    "\"nvs_flushes\":%lu,\"nvs_flush_fails\":%lu,\"last_flush_age_s\":%lu,"
+    "\"dropped\":%lu,\"warnings\":[",
+    (int)snap->level,
+#ifndef DCS_PAGE_MACHINE
+    (unsigned long)c->presses,
+    (unsigned long)c->mismatch_events,
+    (unsigned)c->button_swaps,
+    (unsigned long)snap->button_rated_ops,
+    (unsigned long)snap->button_wear_pct,
+#endif
+    (unsigned long)c->uptime_s,
+    (unsigned long)c->boots,
+    (unsigned long)c->flashes,
+    (unsigned long)c->otas,
+    c->fw_sha[0],
+    c->fw_sha[1],
+    c->fw_sha[2],
+    c->fw_sha[3],
+    c->fw_sha[4],
+    c->fw_sha[5],
+    c->fw_sha[6],
+    c->fw_sha[7],
+    (unsigned long)snap->nvs_flushes,
+    (unsigned long)snap->nvs_flush_fails,
+    (unsigned long)snap->last_flush_age_s,
+    (unsigned long)snap->dropped);
+  if (n < 0) {
+    n = 0;
+  } else if (n > (CAP - 1)) {
+    n = CAP - 1;
+  }
+  uint64_t now = (uint64_t)esp_timer_get_time() / 1000ULL;
+  for (int i = 0; (i < snap->n_warnings) && (n < (CAP - 1)); i++) {
+    const dcs_health_warning_t * w = &snap->warnings[i];
+    /* src/msg are firmware-authored ASCII (no quotes); no escaping needed. */
+    n += snprintf(
+      buf + n,
+      (size_t)(CAP - n),
+      "%s{\"src\":\"%s\",\"level\":%d,\"msg\":\"%s\",\"count\":%lu,\"age_s\":%lu}",
+      (i != 0) ? "," : "",
+      w->src,
+      (int)w->level,
+      w->msg,
+      (unsigned long)w->count,
+      (unsigned long)((now > w->first_ms) ? ((now - w->first_ms) / 1000ULL) : 0ULL));
+    if (n > (CAP - 1)) {
+      n = CAP - 1;
+    }
+  }
+  if (n < (CAP - 3)) {
+    n += snprintf(buf + n, (size_t)(CAP - n), "]}");
+  }
+  free(snap);
+  (void)httpd_resp_set_type(req, "application/json");
+  (void)httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+  esp_err_t r = httpd_resp_send(req, buf, n);
+  free(buf);
+  return r;
+}
+
+static esp_err_t api_health_reset(httpd_req_t * req)
+{
+  if (!operators_require_admin(req)) {
+    return ESP_OK;
+  }
+  (void)httpd_resp_set_type(req, "application/json");
+  char query[48], what[12], confirm[4];
+  if (
+    (httpd_req_get_url_query_str(req, query, sizeof(query)) != ESP_OK) ||
+    (httpd_query_key_value(query, "what", what, sizeof(what)) != ESP_OK) ||
+    (httpd_query_key_value(query, "confirm", confirm, sizeof(confirm)) != ESP_OK) || (strcmp(confirm, "1") != 0))
+  {
+    (void)httpd_resp_set_status(req, "400 Bad Request");
+    return httpd_resp_sendstr(req, "{\"ok\":false,\"error\":\"need ?what=button|all&confirm=1\"}");
+  }
+  esp_err_t r;
+  if (strcmp(what, "button") == 0) {
+    r = dcs_health_reset_button();
+  } else if (strcmp(what, "all") == 0) {
+    r = dcs_health_reset_all();
+  } else {
+    (void)httpd_resp_set_status(req, "400 Bad Request");
+    return httpd_resp_sendstr(req, "{\"ok\":false,\"error\":\"what must be button or all\"}");
+  }
+  if (r != ESP_OK) {
+    (void)httpd_resp_set_status(req, "500 Internal Server Error");
+    return httpd_resp_sendstr(req, "{\"ok\":false,\"error\":\"NVS write failed\"}");
+  }
+  return api_health_get(req);
+}
+
 /* === Public registration =================================================== */
 void dcs_admin_pages_register(ml_app_t * app)
 {
@@ -1313,6 +1444,8 @@ void dcs_admin_pages_register(ml_app_t * app)
   (void)ml_app_add_page(app, "/api/enter_download", HTTP_POST, api_enter_download);
   (void)ml_app_add_page(app, "/api/operators", HTTP_GET, api_operators_get);
   (void)ml_app_add_page(app, "/api/operators", HTTP_POST, api_operators_post);
+  (void)ml_app_add_page(app, "/api/health", HTTP_GET, api_health_get);
+  (void)ml_app_add_page(app, "/api/health/reset", HTTP_POST, api_health_reset);
 #ifndef DCS_PAGE_MACHINE
   (void)ml_app_add_page(app, "/api/role", HTTP_GET, api_role_get);
   (void)ml_app_add_page(app, "/api/role", HTTP_POST, api_role_post);
