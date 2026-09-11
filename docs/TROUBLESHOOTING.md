@@ -111,8 +111,9 @@ and the chip, seeing no usable USB uplink, falls back to its
 provisioned WiFi. Fix (two files, once per host): install
 `host/70-esp-pstop.link` and add the shared profile — full steps in
 `host/README.md` → "USB tether — one-time host setup". After replug
-the chip DHCPs to `10.42.0.x`, prefers the USB uplink, and bonds to a
-machine node on the host via its factory-default peer `10.42.0.1:8890`.
+the chip DHCPs to `10.42.0.x` and prefers the USB uplink. Point it at a
+machine node on the host with `POST /api/pstop_peer?ip=10.42.0.1&port=8890`
+(a fresh unit has no peer configured).
 
 ### `tailscale ping $CHIP_TS` shows tx climbing, rx 0
 

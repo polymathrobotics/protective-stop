@@ -7,27 +7,42 @@ script takes them as environment variables or flags.
 
 ## 1. Machine arming-policy suite — `tools/pstop_test_remote.py`
 
-A scripted pstop remote that speaks the real wire protocol (40-byte
-messages, CRC16 poly 0x8D95, pstop_c @ d9f4970) well enough to bond and
-run timed STOP/OK sequences — verifies the wrapper's min-STOP-duration
-arming policy without a chip. Run it against a **dedicated** runner
-instance (never the one bonded to a real remote):
+A scripted pstop remote that speaks the real v2 wire protocol (48-byte
+messages, CRC16 poly 0x8D95, far-Hamming codewords, self-role in the aux
+channel) well enough to bond and run timed STOP/OK sequences — verifies the
+min-STOP-duration arming policy and the two-gate re-arm rule without a chip.
+It works against either machine implementation, since both host the same
+`pstop_c`. Use a **dedicated** port, never the one a real remote is bonded to.
+
+Plain-C runner (`host/machine.toml` accepts any OPERATOR-announcing remote):
 
 ```sh
 cd host && make
-./machine_app_runner machine.toml 8893 &      # dedicated port
+./machine_app_runner machine.toml 8893 &
 python3 ../tools/pstop_test_remote.py --port 8893
+```
+
+ROS 2 node (the script's id `0x01020381` = `16909185` must be an operator):
+
+```sh
+printf '/machine_bridge:\n  ros__parameters:\n    software:\n      port: 8894\n      operators: [16909185]\n' > /tmp/pstop_test.yaml
+ros2 run protective_stop_machine machine_bridge_node --ros-args --params-file /tmp/pstop_test.yaml &
+python3 tools/pstop_test_remote.py --port 8894
 ```
 
 Asserts (exit 0 = all pass):
 1. bond + OK stream → machine replies STOP (NEED_STOP, nothing armed yet)
-2. 200 ms STOP blip → arming VETOED (replies stay STOP)
-3. 800 ms STOP press → ARMS (replies turn OK)
-4. blip while armed → robot stops, short release does NOT re-arm
+2. 200 ms STOP blip → immediate OK refused; a steady OK stream arms once the
+   library's min delay has elapsed
+3. 800 ms STOP press → ARMS on release (replies turn OK)
+4. blip while armed → robot stops; immediate OK refused; self-re-arms after
+   the delay
 5. press again → re-arms
 
-Run this after any change to `host/machine_app_runner.c` or a pstop_c
-submodule bump (it will catch a CRC/wire break immediately).
+`--role stop_only` announces a stop-only remote instead and asserts the
+inverse: a full press-and-release must **not** arm. Run both after any change
+to `host/machine_app_runner.c`, `ros2/`, `common/pstop_aux_channel.h` or a
+`pstop_c` update (a CRC/wire break fails at step 1).
 
 ## 1b. Many-remotes-to-one-machine matrix — `tools/pstop_multi_remote_test.py`
 

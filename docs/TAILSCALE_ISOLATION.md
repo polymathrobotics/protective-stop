@@ -59,7 +59,7 @@ UDP port; the admin grant uses TCP 80 for the HTTP admin/OTA surface.
 
 ```jsonc
 {
-  "groups": { "group:pstop-admins": ["ilia@polymathrobotics.com"] },
+  "groups": { "group:pstop-admins": ["you@example.com"] },
 
   "tagOwners": {
     "tag:pstop-remote":  ["group:pstop-admins"],

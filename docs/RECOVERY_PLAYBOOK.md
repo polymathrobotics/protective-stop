@@ -66,7 +66,7 @@ Rules learned the hard way:
 - Optional quiesce (rarely needed): `curl -X POST http://$CHIP/api/derp`
   and `curl -X POST http://$CHIP/api/wg` pause Tailscale before the
   upload; the reboot after OTA restores clean state.
-- If the upstream pstop_c submodule was bumped, remember the wire rule:
+- If the vendored pstop_c was updated, remember the wire rule:
   a CRC change means chip and machine MUST be updated together.
 
 ## Recover from a wedge (chip unreachable > 30 s)
