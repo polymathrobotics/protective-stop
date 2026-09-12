@@ -692,6 +692,9 @@ static bool fleet_ota_download_and_apply(
       last_pct = pct;
       ESP_LOGI(TAG, "OTA: %3d%%  (%d / %d bytes)", pct, total, content_len);
     }
+    /* Match HTTP-push OTA: a fast source must not keep this receive/write loop
+     * continuously runnable and starve idle-task watchdog feeders. */
+    vTaskDelay(1);
   }
 
   free(buf);

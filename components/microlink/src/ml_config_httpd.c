@@ -1461,6 +1461,11 @@ static esp_err_t handler_ota(httpd_req_t * req)
       ESP_LOGI(
         TAG, "OTA: %3d%%  (%d / %d bytes, %d KB remaining)", pct, total_written, req->content_len, remaining / 1024);
     }
+    /* A fast sender can keep recv/write continuously runnable and starve an
+     * idle-task watchdog feeder. Block for one RTOS tick after each chunk;
+     * taskYIELD() alone would not let lower-priority idle tasks run. Keep the
+     * watchdog enabled: this provides scheduling progress, not extra grace. */
+    vTaskDelay(1);
   }
 
   free(buf);
