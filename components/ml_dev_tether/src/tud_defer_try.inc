@@ -2,13 +2,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #include "ml_usb_defer.h"
+#include "ml_usb_tx_limits.h"
 
 /* Appended to the audited TinyUSB usbd.c translation unit in the build tree.
  * Unlike usbd_defer_func(), return queue acceptance and never block TCPIP.
  * Preserve queue_event()'s event hook after successful enqueue. Task context only. */
 #if CFG_TUD_ENABLED && CFG_TUSB_OS == OPT_OS_FREERTOS
-  #if CFG_TUD_TASK_QUEUE_SZ < 16
-    #error "Owned USB TX requires at least 16 shared events; its closure cap reserves DCD headroom"
+  #if CFG_TUD_TASK_QUEUE_SZ < 4 * ML_USB_TX_DEFER_CAP
+    #error "Shared USB event queue must reserve three quarters for DCD/other events"
   #endif
 bool tud_defer_func_try(void (*func)(void *), void * param)
 {

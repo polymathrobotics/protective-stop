@@ -39,9 +39,10 @@ the new netif epoch.
 ## Bounded resources and queue headroom
 
 There are 16 slots of 1536 bytes: **24KiB of PSRAM**, allocated once before
-netif startup, with fixed metadata. At most **four of our callbacks** may be
-pending in TinyUSB's shared queue. The extension requires a queue of at least
-16 entries, leaving most capacity for DCD events. This does not guarantee that
+netif startup, with fixed metadata. At most **16 of our callbacks** may be
+pending in TinyUSB's **64-entry** shared queue. The cap is derived as queue/4
+from a shared limits header and checked in both the host test and extension,
+leaving 48 entries for DCD/other events. This does not guarantee that
 other producers cannot fill the remaining space.
 
 Capacity rejection is counted, never waited out. If the USB task stops draining
@@ -123,7 +124,7 @@ queue/clock: owned-buffer isolation, delayed callback after later submissions,
 TTL boundaries, rejected enqueue, no hook on rejection, IRQ headroom cap,
 stalled-queue drain/recovery, NCM capacity failure/recovery, epoch changes,
 callback completion before enqueue returns, reentrant producer rejection,
-legacy forwarding and error counters. The current suite has **284 checks** and
+legacy forwarding and error counters. The queue-tuned suite has **358 checks** and
 passes warnings-as-errors with Address/UndefinedBehaviorSanitizers.
 
 The soak suite includes a regression for deferred drops while the peer stays
@@ -141,3 +142,27 @@ and accepted. The next step is a fresh committed build and controlled DUT test.
 
 Both four-hour windows must use the same final reviewed firmware/configuration;
 these software tests and build checks are not hardware soak passes.
+
+## Hardware-driven admission tuning
+
+The first deployed build `9333e7314` used a 16-entry USB event queue and a
+four-closure cap. Controlled Ethernet/USB isolation tests demonstrated STOP
+within 2 seconds, but nominal USB polling exposed persistent admission loss.
+The corrected-auth baseline, 22:46:07.507968-22:47:07.535763 UTC September 12,
+recorded 2225 submissions/copies and **161 cap rejections**, with no other drop
+increments or HTTP errors. Callback histogram delta was `[2101,121,3,0]`.
+Peer capture saw 299 accepted heartbeat frames with contiguous counters and a
+296ms maximum arrival gap: TCP recovery masked the lower-layer drops, which
+correctly remained qualification failures.
+
+The next candidate changes only queue headroom/admission: queue 64, cap 16,
+same resident payload pool and 100ms TTL. The wrapper sets the queue macro
+before including the guarded original `usbd.c`, inside its original target;
+conflicting configuration fails compilation. No vendor files are modified.
+
+TinyUSB priority **5**, affinity **core 1**, and NCM buffers **IN 4 / OUT 2**
+remain unchanged. Raising USB above TCPIP 18 would also outrank both roles'
+safety tasks at priority 8. The steady baseline had no >=100ms expirations,
+so such a scheduling change is not justified by this measurement. Repeat the
+same 60-second protocol on the queue-only candidate before pilots; keep every
+drop/error counter hard-gated according to its existing mode scope.

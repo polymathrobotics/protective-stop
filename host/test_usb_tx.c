@@ -27,7 +27,7 @@ static bool mounted = true, can_xmit = true, fail_alloc, inline_callback, skip_c
 static bool restart_at_timestamp;
 static int64_t can_xmit_delay;
 static dcd_event_t queue_events[32];
-static unsigned queue_count, queue_limit = 16, hooks, legacy_calls, allocations;
+static unsigned queue_count, queue_limit = ML_USB_TX_EVENT_QUEUE_SIZE, hooks, legacy_calls, allocations;
 static unsigned frame_count;
 static uint8_t frames[64][TX_FRAME_MAX];
 static uint16_t lengths[64];
@@ -131,7 +131,7 @@ static void reset_fixture(void)
   mounted = can_xmit = true;
   inline_callback = skip_copy = reenter = false;
   can_xmit_delay = 0;
-  queue_limit = 16;
+  queue_limit = ML_USB_TX_EVENT_QUEUE_SIZE;
   frame_count = hooks = legacy_calls = 0;
 }
 
@@ -142,6 +142,8 @@ int main(void)
   fail_alloc = false;
   CHECK(ml_usb_tx_init() == ESP_OK && ml_usb_tx_init() == ESP_OK, "resident init is idempotent");
   CHECK(allocations == 1, "one fixed pool allocation");
+  CHECK(TX_DEFER_CAP == 16 && CFG_TUD_TASK_QUEUE_SZ == 64, "reviewed admission/queue limits");
+  CHECK(CFG_TUD_TASK_QUEUE_SZ - TX_DEFER_CAP >= 48, "DCD/other events retain shared queue headroom");
   CHECK(ml_usb_tx_send("A", 1) == ESP_ERR_INVALID_STATE, "disabled netif rejects send");
   reset_fixture();
 
@@ -183,9 +185,11 @@ int main(void)
   uint32_t cap = diag().defer_cap;
   for (unsigned i = 0; i < TX_DEFER_CAP; i++) CHECK(ml_usb_tx_send("Q", 1) == ESP_OK, "bounded closures accepted");
   CHECK(ml_usb_tx_send("overflow", 8) == ESP_ERR_NO_MEM, "producer leaves DCD queue headroom");
-  CHECK(queue_count == 4 && diag().pending == 4 && diag().defer_cap == cap + 1, "closure cap and counter enforced");
+  CHECK(
+    queue_count == TX_DEFER_CAP && diag().pending == TX_DEFER_CAP && diag().defer_cap == cap + 1,
+    "closure cap and counter enforced");
   clock_us += 500000;
-  CHECK(diag().used == 4 && diag().oldest_ms == 500, "stalled USB backlog is observable and bounded");
+  CHECK(diag().used == TX_DEFER_CAP && diag().oldest_ms == 500, "stalled USB backlog is observable and bounded");
   drain_all();
   CHECK(diag().used == 0 && frame_count == 0, "drain releases every expired request");
   CHECK(ml_usb_tx_send("recovered", 9) == ESP_OK, "pool recovers without reset");

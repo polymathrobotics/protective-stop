@@ -8,6 +8,7 @@
 #include <string.h>
 
 #include "ml_usb_defer.h"
+#include "ml_usb_tx_limits.h"
 
 #ifdef ML_USB_TX_HOST_TEST
   #include "usb_tx_test_platform.h"
@@ -18,9 +19,11 @@
 #endif
 
 #define TX_SLOTS 16
-#define TX_DEFER_CAP 4 /* leave most of TinyUSB's shared event queue for DCD IRQs */
+#define TX_DEFER_CAP ML_USB_TX_DEFER_CAP
 #define TX_FRAME_MAX 1536 /* Ethernet MTU plus link-layer headers. */
 #define TX_TTL_US 100000
+
+_Static_assert(TX_SLOTS >= TX_DEFER_CAP, "The owned pool must cover the admitted USB closures");
 
 enum tx_state
 {

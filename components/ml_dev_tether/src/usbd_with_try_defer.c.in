@@ -2,5 +2,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /* Compile inside the original TinyUSB target, retaining its private flags. */
+#include "ml_usb_tx_limits.h"
+#if defined(CFG_TUD_TASK_QUEUE_SZ) && CFG_TUD_TASK_QUEUE_SZ != ML_USB_TX_EVENT_QUEUE_SIZE
+  #error "Conflicting TinyUSB event queue setting"
+#endif
+#ifndef CFG_TUD_TASK_QUEUE_SZ
+  #define CFG_TUD_TASK_QUEUE_SZ ML_USB_TX_EVENT_QUEUE_SIZE
+#endif
 #include "@usbd_source@"
 #include "@extension@"

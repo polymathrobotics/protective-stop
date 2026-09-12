@@ -5,10 +5,12 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "ml_usb_tx_limits.h"
+
 #define MALLOC_CAP_SPIRAM 1
 #define MALLOC_CAP_8BIT 2
 #define CFG_TUD_ENABLED 1
-#define CFG_TUD_TASK_QUEUE_SZ 16
+#define CFG_TUD_TASK_QUEUE_SZ ML_USB_TX_EVENT_QUEUE_SIZE
 #define CFG_TUSB_OS 1
 #define OPT_OS_FREERTOS 1
 #define USBD_EVENT_FUNC_CALL 7
