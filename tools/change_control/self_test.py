@@ -755,6 +755,14 @@ class CliTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertNotIn('POST repos/acme/project/issues/7/comments', calls)
 
+    def test_warn_mode_survives_comment_permission_failure(self):
+        """Warn-mode findings remain visible in logs when GitHub denies advisory comment writes."""
+        responses = self._responses()
+        responses.pop('POST repos/acme/project/issues/7/comments')
+        result = self._run_cli('warn', {'responses': responses})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('comment publication warning', result.stderr)
+
     def _responses(self):
         data = snapshot()
         data['pr']['labels'] = []

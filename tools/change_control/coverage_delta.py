@@ -137,7 +137,10 @@ def main(argv=None):
         report = compare_reports(report_at_revision(root, args.base), report_at_revision(root, args.head))
         print(report)
         if not args.no_comment:
-            upsert_coverage_comment(GhApi(args.gh, args.repository), args.repository, args.pr, report)
+            try:
+                upsert_coverage_comment(GhApi(args.gh, args.repository), args.repository, args.pr, report)
+            except RuntimeError as error:
+                print(f'coverage-delta: comment publication warning: {error}', file=sys.stderr)
         return 0
     except (OSError, RuntimeError, ValueError) as error:
         print(f'coverage-delta: cannot run: {error}', file=sys.stderr)

@@ -347,7 +347,9 @@ def evaluate(root, data):
 def render_report(mode, results):
     """Render one deterministic PR comment with the active mode visible."""
     lines = [f'mode: {mode}', '', '| Check | Result | Explanation |', '|---|---|---|']
-    lines.extend(f'| {item.check_id} | {item.status} | {item.message.replace("|", "\\|")} |' for item in results)
+    for item in results:
+        message = item.message.replace('|', '\\|')
+        lines.append(f'| {item.check_id} | {item.status} | {message} |')
     lines.extend([
         '',
         'These checks verify artifact existence and ordering only, not truth, adequacy, or safety sufficiency.',

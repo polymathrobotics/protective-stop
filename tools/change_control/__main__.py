@@ -33,7 +33,8 @@ class GhApi:
                 command.extend(['--field', f'{key}={value}'])
         result = subprocess.run(command, check=False, capture_output=True, text=True)
         if result.returncode:
-            raise RuntimeError(result.stderr.strip() or f'gh api failed for {endpoint}')
+            detail = result.stderr.strip() or 'no error detail'
+            raise RuntimeError(f'gh api failed for {endpoint}: {detail}')
         try:
             response = json.loads(result.stdout or '{}')
         except json.JSONDecodeError as error:
@@ -126,9 +127,14 @@ def main(argv=None):
         results = evaluate(Path(args.root), data)
         report = render_report(mode, results)
         print(report)
-        if not args.no_comment:
-            upsert_comment(api, args.pr, report, data['pr_comments'])
         findings = any(item.status == 'fail' for item in results)
+        if not args.no_comment:
+            try:
+                upsert_comment(api, args.pr, report, data['pr_comments'])
+            except RuntimeError as error:
+                print(f'change-control: comment publication warning: {error}', file=sys.stderr)
+                if mode == 'enforce':
+                    return 2
         return 1 if findings and mode == 'enforce' else 0
     except (OSError, RuntimeError, ValueError, KeyError, LintError) as error:
         print(f'change-control: cannot run: {error}', file=sys.stderr)
