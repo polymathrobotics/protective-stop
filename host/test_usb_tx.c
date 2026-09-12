@@ -144,6 +144,7 @@ int main(void)
   CHECK(allocations == 1, "one fixed pool allocation");
   CHECK(TX_DEFER_CAP == 16 && CFG_TUD_TASK_QUEUE_SZ == 64, "reviewed admission/queue limits");
   CHECK(CFG_TUD_TASK_QUEUE_SZ - TX_DEFER_CAP >= 48, "DCD/other events retain shared queue headroom");
+  CHECK(ML_USB_TASK_PRIORITY == 7, "reviewed USB priority remains below the application safety tasks");
   CHECK(ml_usb_tx_send("A", 1) == ESP_ERR_INVALID_STATE, "disabled netif rejects send");
   reset_fixture();
 

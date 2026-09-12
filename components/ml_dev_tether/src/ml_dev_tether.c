@@ -35,6 +35,7 @@
 #include "freertos/semphr.h"
 #include "lwip/esp_netif_net_stack.h"
 #include "ml_usb_tx.h"
+#include "ml_usb_tx_limits.h"
 #include "tinyusb.h"
 #include "tinyusb_cdc_acm.h"
 #include "tinyusb_console.h"
@@ -165,7 +166,8 @@ esp_err_t ml_dev_tether_try_start(uint32_t timeout_ms)
 
   /* --- TinyUSB up --- */
   if (!s_tusb_installed) {
-    const tinyusb_config_t tusb_cfg = TINYUSB_DEFAULT_CONFIG();
+    tinyusb_config_t tusb_cfg = TINYUSB_DEFAULT_CONFIG();
+    tusb_cfg.task.priority = ML_USB_TASK_PRIORITY;
     err = tinyusb_driver_install(&tusb_cfg);
     if (err != ESP_OK) {
       ESP_LOGE(TAG, "tinyusb_driver_install: %s", esp_err_to_name(err));

@@ -10,3 +10,7 @@
   #error "USB event queue size must be a positive multiple of four"
 #endif
 #define ML_USB_TX_DEFER_CAP (ML_USB_TX_EVENT_QUEUE_SIZE / 4)
+
+/* Keep USB below the safety tasks (checked by both applications), while
+ * sharing priority with the WG workers that previously delayed its callbacks. */
+#define ML_USB_TASK_PRIORITY 7

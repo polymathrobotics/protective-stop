@@ -160,9 +160,30 @@ same resident payload pool and 100ms TTL. The wrapper sets the queue macro
 before including the guarded original `usbd.c`, inside its original target;
 conflicting configuration fails compilation. No vendor files are modified.
 
-TinyUSB priority **5**, affinity **core 1**, and NCM buffers **IN 4 / OUT 2**
-remain unchanged. Raising USB above TCPIP 18 would also outrank both roles'
+For the queue-only build `1e4c97c6e`, TinyUSB priority **5**, affinity **core 1**,
+and NCM buffers **IN 4 / OUT 2** remained unchanged. Raising USB above TCPIP 18 would also outrank both roles'
 safety tasks at priority 8. The steady baseline had no >=100ms expirations,
 so such a scheduling change is not justified by this measurement. Repeat the
 same 60-second protocol on the queue-only candidate before pilots; keep every
 drop/error counter hard-gated according to its existing mode scope.
+
+## Bounded priority experiment
+
+The queue-only B window at 22:59:38.886832-23:00:38.926777 UTC had **zero drop
+increments**, 2169 submissions/copies and histogram `[1984,175,10,0]`. The peer
+confirmed 300 accepted, contiguous heartbeats with maximum gap 279ms. Admission
+loss was fixed, but the agreed zero->=50ms-callback goal was not met. A separate
+peer sample immediately after that window observed three pool-exhaustion events;
+those are not attributed to the B window itself.
+
+The next experiment sets only TinyUSB task priority to **7**, leaving it on
+core 1 with the same stack, queue/cap, payload pool, TTL and NCM buffers. Both
+applications compile-time check that USB stays strictly below their actual
+`SAFETY_TASK_PRIO` (currently 8). This makes USB equal-priority with WG workers
+and above coord/HTTP work without outranking the safety encoders/comparator.
+It remains below TCPIP 18. Repeat the same steady-load test before pilots;
+do not assume that priority alone fixes every source of callback delay.
+
+CDC is enumerated, but the tether explicitly does not call
+`tinyusb_console_init`: ESP_LOG is not redirected to USB merely by enabling CDC.
+No logging change is included in this experiment.
