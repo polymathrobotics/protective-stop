@@ -43,3 +43,4 @@ endif()
 
 # Same panic-banner tee as the remote (panic_log.c lives in dcs_support).
 target_link_options(${CMAKE_PROJECT_NAME}.elf PRIVATE "-Wl,--wrap=panic_print_char")
+include("../components/ml_dev_tether/verify_link.cmake")

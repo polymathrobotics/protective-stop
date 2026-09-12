@@ -67,9 +67,29 @@ MAX_BODY = 1024 * 1024
 MIN_FREE_BYTES = 256 * 1024 * 1024
 HOOK_TIMEOUT = 10.0
 HOOK_COOLDOWN = 60.0
+DUT_REFRESH_LIMITS = {
+    'minimum_interval_s': 0.5,
+    'minimum_lead_s': 0.2,
+    'latency_allowance_s': 0.1,
+    'per_minute': 6,
+    'per_hour': 60,
+}
 FAULT_BITS = ('xcheck_fault', 'gpio_cfg_fault')
 WARNING_COUNTERS = ('ml_reconnects', 'pstop_sf_txdrv', 'pstop_sf_txdrv_recovered')
-FAILURE_COUNTERS = ('pstop_mismatch', 'eth_recoveries', 'relay_fault_a', 'relay_fault_b')
+USB_MODE_FAILURE_COUNTERS = ('usb_tx_rejected_unavailable', 'usb_tx_unmounted_drop')
+FAILURE_COUNTERS = (
+    'pstop_mismatch',
+    'eth_recoveries',
+    'relay_fault_a',
+    'relay_fault_b',
+    'usb_tx_cancelled',
+    'usb_tx_errors',
+    'usb_tx_exhausted',
+    'usb_tx_defer_full',
+    'usb_tx_can_xmit_fail',
+    'usb_tx_integrity_errors',
+    'usb_tx_defer_cap',
+)
 HEALTH_COUNTERS = ('presses', 'mismatch_events', 'nvs_flush_fails', 'dropped', 'boots', 'flashes', 'otas')
 
 
@@ -860,11 +880,15 @@ class Evidence:
         if self.expected_vpn is not None:
             self.freeze('dut_vpn_ip', self.expected_vpn)
         capabilities, missing = self.capabilities(
-            'dut', raw, FAILURE_COUNTERS + WARNING_COUNTERS + ('health', 'role', 'relay_stop'), ('pstop_mismatch',)
+            'dut',
+            raw,
+            FAILURE_COUNTERS + WARNING_COUNTERS + USB_MODE_FAILURE_COUNTERS + ('health', 'role', 'relay_stop'),
+            ('pstop_mismatch',),
         )
         failures.extend(missing)
-        counter_keys = capabilities & set(FAILURE_COUNTERS + WARNING_COUNTERS)
-        bad, notices = self.counters.observe('dut', raw, counter_keys, WARNING_COUNTERS)
+        counter_keys = capabilities & set(FAILURE_COUNTERS + WARNING_COUNTERS + USB_MODE_FAILURE_COUNTERS)
+        warning_keys = WARNING_COUNTERS + (USB_MODE_FAILURE_COUNTERS if self.args.iface == 'ethernet' else ())
+        bad, notices = self.counters.observe('dut', raw, counter_keys, warning_keys)
         failures.extend(bad)
         warnings.extend(notices)
         slots = raw.get('pstop_machines')
@@ -1497,8 +1521,14 @@ class RequestScheduler:
     acceptance polls. Peer requests have their own independent workers.
     """
 
-    def __init__(self, workers, diagnostics, now):
+    def __init__(self, workers, diagnostics, now, adaptive_dut_poll=False):
         self.workers, self.diagnostics = workers, diagnostics
+        self.adaptive_dut_poll = adaptive_dut_poll
+        self.dut_refresh_times = deque()
+        self.dut_early_refreshes = 0
+        self.dut_refresh_cap_hits = 0
+        self.last_capped_sample = None
+        self.events = deque()
         self.last_start = {}
         self.batch = None
         self.diagnostic_queue = deque()
@@ -1506,6 +1536,57 @@ class RequestScheduler:
         offsets = {'monitor': 0.2, 'dut_role': 0.8, 'health': 1.4, 'peer_config': 0.5}
         for name, worker in workers.items():
             worker.next_due = now + offsets.get(name, 0)
+
+    def early_dut_context(self, now, evidence):
+        """Request newer evidence before its existing deadline; never extend it."""
+        worker = self.workers['dut_state']
+        record = evidence.latest.get('dut_state')
+        dut = evidence.previous_dut
+        if (
+            not self.adaptive_dut_poll
+            or worker.pending is not None
+            or now >= worker.next_due
+            or not record
+            or not dut
+            or record.get('error')
+            or evidence.reasons.get('dut_state')
+        ):
+            return None
+        age = (dut['uptime_ms'] - dut['_slot']['last_reply_ms']) / 1000
+        generated = max(record['start']['mono'], evidence.generated.get('dut_state', -math.inf))
+        expires = generated + FRESH_SECONDS - age
+        if not 0 <= age <= FRESH_SECONDS or now >= expires:
+            return None  # Already expired/invalid evidence is still a gate failure.
+        lead = max(
+            DUT_REFRESH_LIMITS['minimum_lead_s'], record['latency_s'] + DUT_REFRESH_LIMITS['latency_allowance_s']
+        )
+        earliest = max(record['start']['mono'], self.last_start.get('dut_state', -math.inf))
+        earliest += DUT_REFRESH_LIMITS['minimum_interval_s']
+        if now < max(earliest, expires - lead):
+            return None
+        while self.dut_refresh_times and self.dut_refresh_times[0] <= now - 3600:
+            self.dut_refresh_times.popleft()
+        minute = sum(when > now - 60 for when in self.dut_refresh_times)
+        context = {
+            'reason': 'dut_reply_deadline_refresh',
+            'decision_mono': now,
+            'sample_start_mono': record['start']['mono'],
+            'raw_reply_age_s': age,
+            'projected_age_now_s': age + now - generated,
+            'evidence_expires_mono': expires,
+            'regular_due_mono': worker.next_due,
+            'lead_s': lead,
+            'minimum_start_mono': earliest,
+            'early_last_minute': minute,
+            'early_last_hour': len(self.dut_refresh_times),
+        }
+        if minute >= DUT_REFRESH_LIMITS['per_minute'] or len(self.dut_refresh_times) >= DUT_REFRESH_LIMITS['per_hour']:
+            if self.last_capped_sample != record['start']['mono']:
+                self.last_capped_sample = record['start']['mono']
+                self.dut_refresh_cap_hits += 1
+                self.events.append(dict(context, type='dut_refresh_capped'))
+            return None
+        return context
 
     def schedule(self, now, evidence, batch=None):
         if batch is not None and batch != self.batch:
@@ -1523,16 +1604,32 @@ class RequestScheduler:
             forced = name in refresh and name in self.last_start and now - self.last_start[name] >= 2.0
             return worker.pending is None and (now >= worker.next_due or forced)
 
-        def submit(name):
+        def submit(name, context=None):
             suffix = f'?after={evidence.journal.cursor}&limit=1000' if name == 'peer_events' else ''
-            if self.workers[name].submit(now, suffix):
+            if self.workers[name].submit(now, suffix, context=context):
                 self.last_start[name] = now
+                return True
+            return False
 
         for name in ('dut_state', 'peer_status', 'peer_events', 'peer_config'):
             if name == 'peer_events' and not evidence.journal.initialized:
                 continue
             if due(name):
                 submit(name)
+            elif name == 'dut_state':
+                context = self.early_dut_context(now, evidence)
+                if context is not None:
+                    worker = self.workers[name]
+                    regular_due = worker.next_due
+                    # Re-phase from this START, not completion; do not leave a
+                    # closely following regular tick after an early refresh.
+                    worker.next_due = now
+                    if submit(name, context):
+                        self.dut_refresh_times.append(time.monotonic())
+                        self.dut_early_refreshes += 1
+                        self.events.append(dict(context, type='dut_early_refresh'))
+                    else:
+                        worker.next_due = regular_due
         aux = ('monitor', 'dut_role', 'health')
         if now < self.next_aux or any(self.workers[name].pending is not None for name in aux):
             return
@@ -1766,6 +1863,7 @@ def run(args, stop=None):
     store = Artifacts(args.out, Redactor(user, password))
     hook = FailureHook(args.failure_hook)
     peer_poll_sec = getattr(args, 'peer_poll_sec', args.poll_sec)
+    adaptive_dut_poll = getattr(args, 'adaptive_dut_poll', False)
     intent = {
         'dut': args.dut,
         'peer': args.peer,
@@ -1776,6 +1874,8 @@ def run(args, stop=None):
         'clean_seconds': args.clean_seconds,
         'poll_sec': args.poll_sec,
         'peer_poll_sec': peer_poll_sec,
+        'adaptive_dut_poll': adaptive_dut_poll,
+        'dut_refresh_limits': DUT_REFRESH_LIMITS if adaptive_dut_poll else None,
         'dut_vpn_ip': getattr(args, 'dut_vpn_ip', None),
         'peer_schema': LIVE_PEER_SCHEMA_ACK,
     }
@@ -1850,7 +1950,7 @@ def run(args, stop=None):
             )
             for name in ('peers', 'monitor', 'last_log')
         }
-        scheduler = RequestScheduler(workers, diagnostics, time.monotonic())
+        scheduler = RequestScheduler(workers, diagnostics, time.monotonic(), adaptive_dut_poll)
         while not stop.is_set():
             now, epoch = time.monotonic(), time.time()
             external = []
@@ -1867,6 +1967,39 @@ def run(args, stop=None):
                 for record in worker.drain(now):
                     store.sample(record)
                     new_warnings, observed_events = evidence.accept(record)
+                    context = record.get('context')
+                    if (
+                        name == 'dut_state'
+                        and isinstance(context, dict)
+                        and context.get('reason') == 'dut_reply_deadline_refresh'
+                    ):
+                        processed = time.monotonic()
+                        expiry = context['evidence_expires_mono']
+                        missed_expiry = record['end']['mono'] > expiry
+                        if missed_expiry:
+                            # A late response must not hide the old expiry by
+                            # replacing its sample between supervisor ticks.
+                            issue = 'dut.slot: reply evidence aged out'
+                            evidence.invalidate(processed, [issue])
+                            external.append(issue)
+                        store.append(
+                            'scheduler.jsonl',
+                            dict(
+                                timestamp(),
+                                run_id=store.run_id,
+                                type='dut_refresh_result',
+                                request_start=record['start'],
+                                response_end=record['end'],
+                                processed_mono=processed,
+                                evidence_expires_mono=expiry,
+                                completed_before_expiry=record['end']['mono'] <= expiry,
+                                processed_before_expiry=processed <= expiry,
+                                prior_expiry_failure=missed_expiry,
+                                sample_valid=not bool(evidence.reasons[name]),
+                                error=record.get('error'),
+                                context=context,
+                            ),
+                        )
                     # Invalidate immediately, before another result can replace
                     # a transient bad sample or a peer failure batch with [] .
                     if evidence.reasons[name]:
@@ -1898,6 +2031,8 @@ def run(args, stop=None):
                 )
             active_reasons = set(reasons)
             scheduler.schedule(time.monotonic(), evidence, store.diagnostic_batch)
+            while scheduler.events:
+                store.append('scheduler.jsonl', dict(timestamp(), run_id=store.run_id, **scheduler.events.popleft()))
             provenance_digest = digest(evidence.provenance)
             if provenance_digest != frozen_digest:
                 store.atomic('phase.json', {'schema_version': 1, 'intent': intent, 'provenance': evidence.provenance})
@@ -1906,7 +2041,17 @@ def run(args, stop=None):
                 store.disk_check()
                 store.append(
                     'collector.jsonl',
-                    dict(timestamp(), run_id=store.run_id, loop_lag_s=lag, event_caught_up=ready, reasons=reasons),
+                    dict(
+                        timestamp(),
+                        run_id=store.run_id,
+                        loop_lag_s=lag,
+                        event_caught_up=ready,
+                        reasons=reasons,
+                        dut_early_refreshes=scheduler.dut_early_refreshes,
+                        dut_refresh_cap_hits=scheduler.dut_refresh_cap_hits,
+                        dut_early_last_minute=sum(t > now - 60 for t in scheduler.dut_refresh_times),
+                        dut_early_last_hour=sum(t > now - 3600 for t in scheduler.dut_refresh_times),
+                    ),
                 )
                 # Recheck after storage/diagnostics; a delayed write cannot buy time.
                 reasons, ready = evidence.evaluate(time.monotonic(), periods, external)
@@ -2045,6 +2190,11 @@ def build_parser():
     parser.add_argument('--clean-seconds', type=positive, default=14400)
     parser.add_argument('--max-duration', type=positive)
     parser.add_argument('--poll-sec', type=positive, default=1.0, help='DUT state cadence in seconds, at most 1')
+    parser.add_argument(
+        '--adaptive-dut-poll',
+        action='store_true',
+        help='allow capped early DUT reads before reply evidence expires; validity/deadline rules stay unchanged',
+    )
     parser.add_argument(
         '--peer-poll-sec',
         type=positive,

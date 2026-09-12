@@ -470,6 +470,51 @@ class AcceptanceTests(unittest.TestCase):
 
 
 class DUTFailureTests(unittest.TestCase):
+    def test_deferred_usb_drops_reset_clean_time_even_when_peer_is_healthy(self):
+        fields = (
+            'usb_tx_cancelled',
+            'usb_tx_errors',
+            'usb_tx_exhausted',
+            'usb_tx_defer_full',
+            'usb_tx_can_xmit_fail',
+            'usb_tx_integrity_errors',
+            'usb_tx_defer_cap',
+        )
+        for iface in ('usb', 'ethernet'):
+            for field in fields:
+                with self.subTest(iface=iface, field=field):
+                    s = Scenario(iface=iface)
+                    for t in range(8):
+                        raw = dut(t, iface)
+                        raw[field] = 0
+                        s.step(t, state=raw)
+                    self.assertGreater(s.evidence.gate.clean_s, 0)
+                    raw = dut(8, iface)
+                    raw[field] = 1
+                    reasons = s.step(8, state=raw)
+                    self.assertIn('dut.' + field + ': increment', reasons)
+                    self.assertEqual(s.evidence.gate.clean_s, 0)
+
+    def test_usb_availability_losses_fail_usb_window_and_only_warn_in_ethernet(self):
+        for iface in ('usb', 'ethernet'):
+            for field in ('usb_tx_rejected_unavailable', 'usb_tx_unmounted_drop'):
+                with self.subTest(iface=iface, field=field):
+                    s = Scenario(iface=iface)
+                    for t in range(8):
+                        raw = dut(t, iface)
+                        raw[field] = 0
+                        s.step(t, state=raw)
+                    raw = dut(8, iface)
+                    raw[field] = 1
+                    reasons = s.step(8, state=raw)
+                    if iface == 'usb':
+                        self.assertIn('dut.' + field + ': increment', reasons)
+                        self.assertEqual(s.evidence.gate.clean_s, 0)
+                    else:
+                        self.assertFalse(reasons)
+                        self.assertGreater(s.evidence.gate.clean_s, 0)
+                        self.assertEqual(len(s.warnings), 1)
+
     def test_missing_optional_counter_cannot_erase_its_previous_value(self):
         for source, key in (('dut_state', 'eth_recoveries'), ('health', 'nvs_flush_fails')):
             with self.subTest(source=source):
@@ -1473,11 +1518,14 @@ class RunTests(unittest.TestCase):
             def submit(self, now, suffix='', context=None):
                 if self.pending is not None:
                     return False
+                delay = delays.get(self.source, 0.05)
+                if callable(delay):
+                    delay = delay(now, context)
                 self.pending = {
                     'start': now,
                     'context': context,
                     'suffix': suffix,
-                    'ready': now + delays.get(self.source, 0.05),
+                    'ready': now + delay,
                 }
                 history.append(dict(self.pending, source=self.source))
                 if self.period:
@@ -1530,6 +1578,7 @@ class RunTests(unittest.TestCase):
         history=None,
         clean_seconds=3,
         peer_poll_sec=1.0,
+        adaptive_dut_poll=False,
     ):
         clock = FakeClock()
         stop = FakeStop(clock, interrupt_at)
@@ -1548,7 +1597,13 @@ class RunTests(unittest.TestCase):
             mock.patch.dict(os.environ, {'ML_ADMIN_USER': 'test-user', 'ML_ADMIN_PASSWORD': 'test-password'}),
             mock.patch.object(soak.Artifacts, 'disk_check'),
         ):
-            args = arguments(out, max_duration=max_duration, clean_seconds=clean_seconds, peer_poll_sec=peer_poll_sec)
+            args = arguments(
+                out,
+                max_duration=max_duration,
+                clean_seconds=clean_seconds,
+                peer_poll_sec=peer_poll_sec,
+                adaptive_dut_poll=adaptive_dut_poll,
+            )
             if atomic:
                 with mock.patch.object(soak.Artifacts, 'atomic', atomic):
                     return soak.run(args, stop)
@@ -1562,6 +1617,197 @@ class RunTests(unittest.TestCase):
         peer_reads = [row['start'] for row in history if row['source'] == 'peer_status']
         self.assertGreater(len(peer_reads), 1.5 * len(dut_reads))
         self.assertTrue(all(b - a >= 0.95 for a, b in zip(dut_reads, dut_reads[1:])))
+
+    def test_adaptive_healthy_path_keeps_nominal_dut_cadence(self):
+        history = []
+        with tempfile.TemporaryDirectory() as out:
+            self.assertEqual(self.execute(out, adaptive_dut_poll=True, history=history), 0)
+            phase = json.loads((Path(out) / 'phase.json').read_text())
+            self.assertTrue(phase['intent']['adaptive_dut_poll'])
+            self.assertEqual(phase['intent']['dut_refresh_limits']['per_hour'], 60)
+        reads = [row for row in history if row['source'] == 'dut_state']
+        self.assertTrue(all(row['context'] is None for row in reads))
+        self.assertTrue(all(b['start'] - a['start'] >= 0.95 for a, b in zip(reads, reads[1:])))
+
+    def test_adaptive_refresh_samples_recovery_before_existing_certificate_expires(self):
+        # Recorded 482/786/794 age/HTTP pairs. Responses are simulated, not
+        # invented intermediate hardware observations: this tests scheduling.
+        for age_ms, latency in ((670, 0.131), (590, 0.264), (686, 0.147)):
+
+            def mutate(source, data, t):
+                if source == 'dut_state' and 10 <= t < 10.4:
+                    data['pstop_machines'][3]['last_reply_ms'] = data['uptime_ms'] - age_ms
+
+            for adaptive in (False, True):
+                with self.subTest(age_ms=age_ms, adaptive=adaptive), tempfile.TemporaryDirectory() as out:
+                    history = []
+                    self.assertEqual(
+                        self.execute(
+                            out,
+                            mutate=mutate,
+                            delays={'dut_state': latency},
+                            history=history,
+                            max_duration=22,
+                            clean_seconds=10000,
+                            adaptive_dut_poll=adaptive,
+                        ),
+                        2,
+                    )
+                    status = json.loads((Path(out) / 'status.json').read_text())
+                    text = (Path(out) / 'events.jsonl').read_text()
+                    if not adaptive:
+                        self.assertGreater(status['failures'], 0)
+                        self.assertIn('dut.slot: reply evidence aged out', text)
+                        continue
+                    self.assertEqual(status['failures'], 0)
+                    reads = [row for row in history if row['source'] == 'dut_state']
+                    early = [row for row in reads if row['context'] is not None]
+                    self.assertEqual(len(early), 1)
+                    self.assertLess(early[0]['ready'], early[0]['context']['evidence_expires_mono'])
+                    following = reads[reads.index(early[0]) + 1]
+                    self.assertGreaterEqual(following['start'] - early[0]['start'], 0.99)
+                    self.assertTrue(all(b['start'] - a['start'] >= 0.4999 for a, b in zip(reads, reads[1:])))
+                    schedule = [json.loads(line) for line in (Path(out) / 'scheduler.jsonl').read_text().splitlines()]
+                    self.assertEqual(sum(row['type'] == 'dut_early_refresh' for row in schedule), 1)
+
+    def test_adaptive_caps_fail_closed_without_starving_auxiliary_polls(self):
+        def mutate(source, data, t):
+            if source == 'dut_state' and t >= 8:
+                data['pstop_machines'][3]['last_reply_ms'] = data['uptime_ms'] - 900
+
+        history = []
+        with tempfile.TemporaryDirectory() as out:
+            self.assertEqual(
+                self.execute(
+                    out,
+                    mutate=mutate,
+                    history=history,
+                    max_duration=75,
+                    clean_seconds=10000,
+                    adaptive_dut_poll=True,
+                ),
+                2,
+            )
+            schedule = [json.loads(line) for line in (Path(out) / 'scheduler.jsonl').read_text().splitlines()]
+            self.assertTrue(any(row['type'] == 'dut_refresh_capped' for row in schedule))
+            text = (Path(out) / 'events.jsonl').read_text()
+            self.assertIn('dut.slot: reply evidence aged out', text)
+            self.assertGreater(json.loads((Path(out) / 'status.json').read_text())['failures'], 0)
+        early = [row['start'] for row in history if row['source'] == 'dut_state' and row['context']]
+        self.assertGreater(len(early), 6)  # Minute budget eventually recovers.
+        for when in early:
+            self.assertLessEqual(sum(when - 60 + 0.00001 < t <= when for t in early), 6)
+        for source in ('monitor', 'dut_role'):
+            starts = [row['start'] for row in history if row['source'] == source]
+            self.assertGreater(len(starts), 12)
+            self.assertLess(max(b - a for a, b in zip(starts, starts[1:])), 5.2)
+        self.assertGreaterEqual(sum(row['source'] == 'health' for row in history), 3)
+
+    def test_adaptive_hour_budget_and_expiration(self):
+        clock = FakeClock()
+        worker_type = self.fake_worker(clock)
+        workers = {name: worker_type(name, 'http://unused', period) for name, period in PERIODS.items()}
+        scheduler = soak.RequestScheduler(workers, {}, 5000, adaptive_dut_poll=True)
+        state = dut(4000)
+        state['pstop_machines'][3]['last_reply_ms'] = state['uptime_ms'] - 700
+        scenario = Scenario()
+        scenario.step(4000, state=state)
+        workers['dut_state'].next_due = 5001
+        now = 5000.75
+        scheduler.dut_refresh_times.extend(sorted(now - 100 - 50 * i for i in range(60)))
+        self.assertIsNone(scheduler.early_dut_context(now, scenario.evidence))
+        self.assertEqual(scheduler.dut_refresh_cap_hits, 1)
+        self.assertIsNone(scheduler.early_dut_context(now + 0.01, scenario.evidence))
+        self.assertEqual(scheduler.dut_refresh_cap_hits, 1)  # Same sample, no log storm.
+        scheduler.dut_refresh_times.clear()
+        scheduler.dut_refresh_times.extend([now - 3601] * 60)
+        context = scheduler.early_dut_context(now, scenario.evidence)
+        self.assertIsNotNone(context)
+        self.assertEqual(context['early_last_hour'], 0)
+
+    def test_adaptive_does_not_rescue_future_or_stale_reply_values(self):
+        for age_ms in (-1, 1700):
+
+            def mutate(source, data, t):
+                if source == 'dut_state' and 10 <= t < 10.4:
+                    data['pstop_machines'][3]['last_reply_ms'] = data['uptime_ms'] - age_ms
+
+            with self.subTest(age_ms=age_ms), tempfile.TemporaryDirectory() as out:
+                self.assertEqual(
+                    self.execute(
+                        out,
+                        mutate=mutate,
+                        max_duration=15,
+                        clean_seconds=10000,
+                        adaptive_dut_poll=True,
+                    ),
+                    2,
+                )
+                self.assertGreater(json.loads((Path(out) / 'status.json').read_text())['failures'], 0)
+                self.assertIn('dut.slot: stale/future reply', (Path(out) / 'events.jsonl').read_text())
+
+    def test_blocked_early_request_keeps_single_worker_and_expiry_failure(self):
+        delays = {'dut_state': 0.05}
+
+        def mutate(source, data, t):
+            if source == 'dut_state' and 10 <= t < 10.4:
+                data['pstop_machines'][3]['last_reply_ms'] = data['uptime_ms'] - 700
+                delays['dut_state'] = 3.0  # The next, early request stays blocked.
+
+        history = []
+        with tempfile.TemporaryDirectory() as out:
+            self.assertEqual(
+                self.execute(
+                    out,
+                    mutate=mutate,
+                    delays=delays,
+                    history=history,
+                    max_duration=12,
+                    clean_seconds=10000,
+                    adaptive_dut_poll=True,
+                ),
+                2,
+            )
+            self.assertIn('dut.slot: reply evidence aged out', (Path(out) / 'events.jsonl').read_text())
+            self.assertGreater(json.loads((Path(out) / 'status.json').read_text())['failures'], 0)
+        reads = [row for row in history if row['source'] == 'dut_state']
+        early = [row for row in reads if row['context']]
+        self.assertEqual(len(early), 1)
+        self.assertEqual(reads[-1], early[0])  # No replacement while it is pending.
+
+    def test_early_result_just_after_expiry_cannot_hide_gap_between_loop_ticks(self):
+        def mutate(source, data, t):
+            if source == 'dut_state' and 10 <= t < 10.4:
+                data['pstop_machines'][3]['last_reply_ms'] = data['uptime_ms'] - 686
+
+        for offset in (-0.001, 0, 0.001):
+
+            def delay(now, context):
+                return context['evidence_expires_mono'] - now + offset if context else 0.05
+
+            # All three responses are processed on the same next supervisor
+            # tick. Capture time, not arrival at that tick, decides lateness.
+            with self.subTest(offset=offset), tempfile.TemporaryDirectory() as out:
+                self.assertEqual(
+                    self.execute(
+                        out,
+                        mutate=mutate,
+                        delays={'dut_state': delay},
+                        max_duration=12,
+                        clean_seconds=10000,
+                        adaptive_dut_poll=True,
+                    ),
+                    2,
+                )
+                records = [json.loads(line) for line in (Path(out) / 'scheduler.jsonl').read_text().splitlines()]
+                result = next(r for r in records if r['type'] == 'dut_refresh_result')
+                self.assertAlmostEqual(result['response_end']['mono'] - result['evidence_expires_mono'], offset)
+                status = json.loads((Path(out) / 'status.json').read_text())
+                if offset > 0:
+                    self.assertGreater(status['failures'], 0)
+                    self.assertIn('dut.slot: reply evidence aged out', (Path(out) / 'events.jsonl').read_text())
+                else:
+                    self.assertEqual(status['failures'], 0)
 
     def test_full_run_only_exits_zero_on_clean_target_and_retains_restart(self):
         with tempfile.TemporaryDirectory() as out:

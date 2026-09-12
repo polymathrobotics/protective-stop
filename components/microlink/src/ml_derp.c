@@ -23,6 +23,7 @@
 #include "mbedtls/error.h"
 #include "mbedtls/net_sockets.h"
 #include "microlink_internal.h"
+#include "ml_safety_retry.h"
 #include "nacl_box.h"
 
 /* Runtime-tunable inner-loop yield. 1 ms = original behaviour (high CPU,
@@ -1332,20 +1333,13 @@ void ml_derp_tx_task(void * arg)
              * settled and a retry succeeds. One attempt per minute. */
       {
         static uint64_t s_last_derp_retry_ms = 0;
-        /* When a priority (safety) peer is configured, DERP is the
-                 * failover path for its heartbeat — a 60 s reconnect wall is
-                 * far too long. Retry fast for the first few attempts (5s,
-                 * 5s, 10s) then fall back to the calm 60 s cadence so a
-                 * genuinely-down DERP server isn't hammered. Non-priority
-                 * builds keep the original 60 s. */
-        bool has_prio = (ml->config.priority_peer_ip != 0);
-        uint64_t retry_gap = 60000;
-        if (has_prio) {
-          retry_gap = (s_home_retry_burst < 2) ? 5000u : (s_home_retry_burst < 3) ? 10000u : 60000u;
-        }
+        /* DERP carries the heartbeat of configured priority AND dynamically
+         * health-tracked safety peers. Registration, not current health,
+         * selects the existing 5s/5s/10s/60s retry ladder: an outage must not
+         * demote an unhealthy safety target to the management-only policy. */
         if (
           !home->connected && home->cstate == DERP_CS_IDLE && ml->state == ML_STATE_CONNECTED &&
-          loop_start - s_last_derp_retry_ms > retry_gap)
+          ml_derp_retry_due(loop_start, s_last_derp_retry_ms, ml_wg_has_safety_peers(ml), (uint32_t)s_home_retry_burst))
         {
           s_last_derp_retry_ms = loop_start;
           if (s_home_retry_burst < 100) {
@@ -1358,7 +1352,6 @@ void ml_derp_tx_task(void * arg)
            * reachable region (a live aux conn is the reachability oracle).
            * A LOCK is never silently abandoned. */
           uint16_t home_region = ml_effective_home_region(ml);
-          bool locked = (ml->derp_region_override != 0);
           bool try_fallback = (s_home_retry_burst >= ML_DERP_HOME_FALLBACK_AFTER);
           uint16_t fb = try_fallback ? derp_pick_fallback_region(ml, home_region) : 0;
 
@@ -1368,7 +1361,8 @@ void ml_derp_tx_task(void * arg)
            * there is no cross-task ping-pong. eff_home + relay routing follow the
            * new region immediately; inbound PreferredDERP advert (default region)
            * is unaffected. */
-          if (try_fallback && !locked && ml->priority_peer_region == 0 && fb != 0) {
+          if (ml_derp_home_fallback_allowed(try_fallback, ml->derp_region_override, ml->priority_peer_region, fb != 0))
+          {
             ESP_LOGW(
               TAG,
               "DERP home region %u unreachable after %d tries; falling back to reachable region %u",
@@ -1399,7 +1393,7 @@ void ml_derp_tx_task(void * arg)
                   break;
                 }
               }
-              int slot = (any_up || s_rescue_slot >= 0) ? -1 : derp_free_aux_slot(ml);
+              int slot = ml_derp_rescue_aux_slot(try_fallback, fb != 0, any_up, s_rescue_slot, derp_free_aux_slot(ml));
               if (slot >= 0) { /* slot 0 is a legit aux once home migrated off it */
                 ESP_LOGW(
                   TAG,

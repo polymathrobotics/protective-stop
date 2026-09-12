@@ -1,0 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Polymath Robotics
+// SPDX-License-Identifier: Apache-2.0
+
+/* Compile inside the original TinyUSB target, retaining its private flags. */
+#include "@usbd_source@"
+#include "@extension@"

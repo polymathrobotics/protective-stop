@@ -39,3 +39,4 @@ endif()
 # real handler. Without this the panic banner + backtrace go to the
 # console only — which on this board is nowhere.
 target_link_options(${CMAKE_PROJECT_NAME}.elf PRIVATE "-Wl,--wrap=panic_print_char")
+include("../components/ml_dev_tether/verify_link.cmake")

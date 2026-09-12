@@ -58,12 +58,22 @@ test_crypto_kat: test_crypto_kat.c $(CRYPTO_SRCS)
 test_demote_veto: test_demote_veto.c $(MICROLINK)/include/ml_demote_verdict.h
 	$(CC) $(CFLAGS) -I$(MICROLINK)/include -o $@ test_demote_veto.c
 
+# Health-aware home DERP retry eligibility and existing backoff ladder.
+test_safety_retry: test_safety_retry.c $(MICROLINK)/include/ml_safety_retry.h
+	$(CC) $(CFLAGS) -std=c11 -I$(MICROLINK)/include -o $@ test_safety_retry.c
+
+USB_TX := ../components/ml_dev_tether
+test_usb_tx: test_usb_tx.c $(USB_TX)/src/ml_usb_tx.c $(USB_TX)/include/ml_usb_tx.h $(USB_TX)/include/ml_usb_defer.h $(USB_TX)/src/tud_defer_try.inc usb_tx_stubs/esp_err.h usb_tx_stubs/usb_tx_test_platform.h
+	$(CC) $(CFLAGS) -std=c11 -DML_USB_TX_HOST_TEST -Iusb_tx_stubs -I$(USB_TX)/include -o $@ test_usb_tx.c
+
 .PHONY: test clean
-test: test_clock_guard test_crypto_kat test_demote_veto test_aux_channel
+test: test_clock_guard test_crypto_kat test_demote_veto test_safety_retry test_usb_tx test_aux_channel
 	./test_clock_guard
 	./test_crypto_kat
 	./test_demote_veto
+	./test_safety_retry
+	./test_usb_tx
 	./test_aux_channel
 
 clean:
-	rm -f machine_app_runner test_clock_guard test_crypto_kat test_demote_veto test_aux_channel
+	rm -f machine_app_runner test_clock_guard test_crypto_kat test_demote_veto test_safety_retry test_usb_tx test_aux_channel
