@@ -1,0 +1,32 @@
+---
+name: Change control
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled, edited]
+  pull_request_review:
+    types: [submitted, dismissed]
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: read
+  checks: read
+  actions: read
+
+jobs:
+  change-control:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Run tests
+        run: python3 tools/change_control/self_test.py
+      - name: Check modification records
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          CAN_COMMENT: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
+        run: |-
+          args=()
+          [ "$CAN_COMMENT" = 'true' ] || args+=(--no-comment)
+          python3 -m tools.change_control --repository '${{ github.repository }}' --pr "$PR_NUMBER" "${args[@]}"

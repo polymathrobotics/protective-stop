@@ -90,6 +90,13 @@ Note `pstop_c/` is intentionally excluded from the C/C++ hooks.
 
 ## Pull request expectations
 
+### Maintainer-owned change records
+
+You do not need to understand or write the project's safety Change Request or
+Impact Analysis before contributing. If a pull request arrives without one, a
+maintainer follows [`docs/process/EXTERNAL_CONTRIBUTIONS.md`](docs/process/EXTERNAL_CONTRIBUTIONS.md),
+opens and assesses the record, and then starts review.
+
 - **CI green.** Firmware build, host build, `pstop_c` build + tests, and
   pre-commit must all pass.
 - **Pre-commit clean.** Run it locally before pushing; do not disable
