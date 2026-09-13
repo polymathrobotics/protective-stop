@@ -24,12 +24,13 @@ extern "C"
     uint32_t exhausted;
     uint32_t defer_full;
     uint32_t can_xmit_fail;
+    uint32_t ncm_busy_retries; /* retained head; not a dropped frame */
     uint32_t integrity_errors;
     uint32_t defer_cap;
     uint32_t pending;
     uint32_t callbacks;
     uint32_t callback_age_ms; /* TX-callback progress, not an idle-task heartbeat */
-    uint32_t latency[4]; /* enqueue->callback: <10, <50, <100, >=100 ms */
+    uint32_t latency[4]; /* enqueue->retirement, including waits: <10, <50, <100, >=100 ms */
     uint32_t used;
     uint32_t oldest_ms;
   } ml_usb_tx_diag_t;
@@ -40,8 +41,9 @@ extern "C"
   void ml_usb_tx_set_enabled(int enabled);
 
   /* Nonblocking owned-copy enqueue. ESP_OK means accepted, not wire delivery.
-   * The callback discards requests older than 100ms. One producer and the USB
-   * FIFO preserve order; expired/unavailable requests are dropped, never retried.
+   * The consumer discards requests older than 100ms. A single drain preserves
+   * FIFO order while retaining an NCM-busy head for bounded periodic retry.
+   * Expired/disabled/unmounted requests are dropped, never resurrected.
    * All deferred drops are counted and must be monitored during qualification. */
   esp_err_t ml_usb_tx_send(const void * buffer, size_t len);
   void ml_usb_tx_get_diag(ml_usb_tx_diag_t * out);

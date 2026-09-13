@@ -106,6 +106,7 @@ static uint32_t netif_ip_by_key(const char * key)
   "\"usb_tx_errors\":%lu,\"usb_tx_exhausted\":%lu,\"usb_tx_defer_full\":%lu,"              \
   "\"usb_tx_can_xmit_fail\":%lu,\"usb_tx_integrity_errors\":%lu,\"usb_tx_defer_cap\":%lu," \
   "\"usb_tx_rejected_unavailable\":%lu,\"usb_tx_unmounted_drop\":%lu,"                     \
+  "\"usb_tx_ncm_busy_retries\":%lu,"                                                       \
   "\"usb_tx_latency\":[%lu,%lu,%lu,%lu],\"usb_tx_used\":%lu,\"usb_tx_pending\":%lu,"       \
   "\"usb_tx_oldest_ms\":%lu,\"usb_tx_callbacks\":%lu,\"usb_tx_callback_age_ms\":%lld"
 
@@ -135,6 +136,7 @@ static int emit_usb_tx(char * buf, size_t cap)
     (unsigned long)d.defer_cap,
     (unsigned long)d.rejected_unavailable,
     (unsigned long)d.unmounted_drop,
+    (unsigned long)d.ncm_busy_retries,
     (unsigned long)d.latency[0],
     (unsigned long)d.latency[1],
     (unsigned long)d.latency[2],

@@ -20,11 +20,26 @@ def main():
     for caller, target in (
         ('tud_network_xmit', '__wrap_tud_network_xmit_cb'),
         ('__wrap_tud_network_xmit_cb', 'tud_network_xmit_cb'),
-        ('ml_usb_tx_send', 'tud_defer_func_try'),
     ):
         output = disassemble(caller)
         if not re.search(r'<' + re.escape(target) + r'(?:\+0x[0-9a-f]+)?>', output):
             raise SystemExit(f'USB TX link check failed: {caller} does not reference {target}')
+
+    def reaches_defer(symbol, visited):
+        if symbol in visited:
+            return False
+        visited.add(symbol)
+        output = disassemble(symbol)
+        if re.search(r'<tud_defer_func_try(?:\+0x[0-9a-f]+)?>', output):
+            return True
+        # Producer and timer share usb_kick. GCC may inline it in the producer
+        # or outline a .part/.constprop clone; follow only this helper family.
+        helpers = re.findall(r'<(usb_kick(?:\.[A-Za-z0-9_.]+)?)(?:\+0x[0-9a-f]+)?>', output)
+        return any(reaches_defer(helper, visited) for helper in helpers)
+
+    for entry in ('ml_usb_tx_send', 'usb_kick'):
+        if not reaches_defer(entry, set()):
+            raise SystemExit(f'USB TX link check failed: {entry} has no verified nonblocking kick path')
     print('USB TX link check: NCM wrapper, legacy forwarding and nonblocking defer verified')
 
 

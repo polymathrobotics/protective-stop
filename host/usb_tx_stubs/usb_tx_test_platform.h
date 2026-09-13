@@ -29,6 +29,28 @@ typedef struct
 } dcd_event_t;
 
 void * heap_caps_malloc(size_t size, unsigned caps);
+void heap_caps_free(void * ptr);
+typedef struct test_timer * esp_timer_handle_t;
+
+enum
+{
+  ESP_TIMER_TASK
+};
+
+typedef struct
+{
+  void (*callback)(void *);
+  void * arg;
+  int dispatch_method;
+  const char * name;
+  bool skip_unhandled_events;
+} esp_timer_create_args_t;
+
+int esp_timer_create(const esp_timer_create_args_t * args, esp_timer_handle_t * timer);
+int esp_timer_start_periodic(esp_timer_handle_t timer, uint64_t period_us);
+int esp_timer_delete(esp_timer_handle_t timer);
+void usb_tx_test_before_idle(void);
+void usb_tx_test_after_full_check(void);
 int64_t esp_timer_get_time(void);
 bool tud_mounted(void);
 bool tud_network_can_xmit(uint16_t len);
