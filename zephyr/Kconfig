@@ -1,0 +1,46 @@
+# SPDX-FileCopyrightText: 2026 Polymath Robotics, Inc.
+# SPDX-License-Identifier: Apache-2.0
+
+config PSTOP
+	bool "pstop protective-stop protocol library"
+	help
+	  Build pstop_c: the 48-byte wire format, message encode/decode, and
+	  the protocol state machines used by the protective-stop system.
+
+	  Defaults to n so that merely having this repository in west.yml does
+	  not add code to an image that does not ask for it.
+
+if PSTOP
+
+config PSTOP_MACHINE
+	bool "Machine-side protocol state machine"
+	help
+	  Compile the machine half of the library: machine.c, protocol.c,
+	  pstop_application.c and pstop_remote_data.c.
+
+	  A remote — the unit carrying the stop switch — needs none of these,
+	  and leaving them out keeps its image smaller. Enable this only when
+	  building the machine side.
+
+config PSTOP_ZEPHYR_TIME
+	bool "Provide time_get_now() from the Zephyr kernel clock"
+	default y
+	help
+	  pstop_c/pstop/src/pstop/time.c implements time_get_now() only under
+	  __linux__ and returns 0 on every other target. A Zephyr build that
+	  linked it would silently get a clock that never advances, which
+	  disables every heartbeat and timeout in the protocol — a failure that
+	  looks like a network problem, not a build problem.
+
+	  With this option the module compiles a Zephyr implementation backed
+	  by k_uptime_get() instead, and excludes upstream's time.c. Turn it
+	  off only if the application defines time_get_now() itself.
+
+config PSTOP_TRANSPORT_UDP
+	bool "UDP transport helpers"
+	depends on NET_SOCKETS
+	help
+	  Compile pstop_c's optional BSD-socket UDP transport. Applications
+	  that manage their own sockets do not need it.
+
+endif # PSTOP
