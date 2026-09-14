@@ -260,7 +260,7 @@ static esp_err_t page_state(httpd_req_t * req)
     "\"eth_en\":%d,\"wifi_en\":%d,\"usbncm_en\":%d,"
     "\"wifi_disc\":%d,\"wifi_conn\":%d,\"wifi_idx\":%d,\"wifi_n\":%d,"
     "\"eth_ip\":%lu,\"usb_ip\":%lu,\"wifi_ip\":%lu,\"local_ip\":%lu,"
-    "\"rgb_cycles\":%lu,\"uptime_ms\":%llu,"
+    "\"rgb_cycles\":%lu,"
     "\"derp_paused\":%d,\"derp_delay_ms\":%d,\"wg_paused\":%d,"
     "\"usb_enabled\":%d,\"ts_boot_en\":%d,\"derp_only\":%d,"
     "\"boot_count\":%u,\"reset_reason\":%u,\"ctrl_reset_cause\":%u,"
@@ -323,7 +323,6 @@ static esp_err_t page_state(httpd_req_t * req)
     (unsigned long)netif_ip_by_key("WIFI_STA_DEF"),
     (unsigned long)local_ip,
     (unsigned long)atomic_load(&g_dcs_rgb_cycles),
-    (unsigned long long)esp_timer_get_time() / 1000ULL,
     microlink_is_derp_paused() ? 1 : 0,
     microlink_get_derp_loop_delay_ms(),
     atomic_load(&g_dcs_wg_paused),
@@ -524,7 +523,14 @@ static esp_err_t page_state(httpd_req_t * req)
   CLAMP_N();
   n += emit_bucket(buf + n, cap - n, &snap.b[2]);
   CLAMP_N();
-  n += snprintf(buf + n, cap - n, ",\"oths\":%lu}", (unsigned long)snap.b[2].other_pct);
+  /* Sample uptime after reply timestamps so concurrent RX cannot put them
+   * in the future. Older reply samples only overestimate their age. */
+  n += snprintf(
+    buf + n,
+    cap - n,
+    ",\"oths\":%lu,\"uptime_ms\":%llu}",
+    (unsigned long)snap.b[2].other_pct,
+    (unsigned long long)esp_timer_get_time() / 1000ULL);
   CLAMP_N();
 #undef CLAMP_N
 
@@ -906,8 +912,11 @@ static esp_err_t api_last_log(httpd_req_t * req)
   if (!panic_log_has_snapshot()) {
     return httpd_resp_sendstr(req, "");
   }
-  size_t cap = 4096;
-  char * buf = malloc(cap);
+  /* Copy the FULL retained ring. A 4096-byte prefix discarded the newest
+   * ~3 KiB, including the panic banner/backtrace we need after a reset.
+   * HTTP-only scratch belongs in PSRAM, like the boot snapshot itself. */
+  size_t cap = PANIC_LOG_BUF_SIZE + 1u;
+  char * buf = heap_caps_malloc(cap, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
   if (!buf) {
     (void)httpd_resp_set_status(req, "500 Internal Server Error");
     return httpd_resp_sendstr(req, "malloc failed");
