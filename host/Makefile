@@ -66,14 +66,19 @@ test_relay_refetch: test_relay_refetch.c $(MICROLINK)/include/ml_relay_refetch.h
 test_recv_outcome: test_recv_outcome.c $(MICROLINK)/include/ml_recv_outcome.h
 	$(CC) $(CFLAGS) -I$(MICROLINK)/include -o $@ test_recv_outcome.c
 
+# Health-aware DERP home-retry policy and fallback guards.
+test_safety_retry: test_safety_retry.c $(MICROLINK)/include/ml_safety_retry.h
+	$(CC) $(CFLAGS) -std=c11 -I$(MICROLINK)/include -o $@ test_safety_retry.c
+
 .PHONY: test clean
-test: test_clock_guard test_crypto_kat test_demote_veto test_relay_refetch test_recv_outcome test_aux_channel
+test: test_clock_guard test_crypto_kat test_demote_veto test_relay_refetch test_recv_outcome test_safety_retry test_aux_channel
 	./test_clock_guard
 	./test_crypto_kat
 	./test_demote_veto
 	./test_relay_refetch
 	./test_recv_outcome
+	./test_safety_retry
 	./test_aux_channel
 
 clean:
-	rm -f machine_app_runner test_clock_guard test_crypto_kat test_demote_veto test_relay_refetch test_recv_outcome test_aux_channel
+	rm -f machine_app_runner test_clock_guard test_crypto_kat test_demote_veto test_relay_refetch test_recv_outcome test_safety_retry test_aux_channel

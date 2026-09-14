@@ -1157,6 +1157,8 @@ extern "C"
   /* Diagnostic predicates: does this peer feed collect_safety_regions? */
   bool ml_wg_is_pinned_peer(microlink_t * ml, uint32_t vpn_ip);
   bool ml_wg_is_health_tracked(uint32_t vpn_ip);
+  /* Configured priority or registered health peer, independent of liveness. */
+  bool ml_wg_has_safety_peers(const microlink_t * ml);
   /* §6 live_bond_active(): true while ANY health-tracked safety peer is
    * currently healthy (heartbeat replies flowing). Both roles feed this today:
    * the remote comparator reports per-machine-slot health each tick, and machn

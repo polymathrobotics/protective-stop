@@ -34,6 +34,7 @@
 #include "microlink_internal.h"
 #include "ml_config_httpd.h"
 #include "ml_demote_verdict.h"
+#include "ml_safety_retry.h"
 #include "nacl_box.h"
 #include "wireguard.h"
 #include "wireguardif.h"
@@ -643,20 +644,11 @@ uint32_t microlink_get_peer_rtt(microlink_t * ml, uint32_t vpn_ip, uint32_t * ag
  * re-bonds in seconds instead of waiting out WG rekey timers. Without
  * this, only an ALL-machines-silent device recovered fast (the aggregate
  * kick deliberately refused to churn a partially-healthy transport). */
-typedef struct
-{
-  uint32_t ip;
-  volatile bool healthy;
-} ml_health_ent_t;
-
 static ml_health_ent_t s_health_peers[ML_EXTRA_PINS];
 
 static bool is_health_tracked(uint32_t vpn_ip)
 {
-  for (int i = 0; i < ML_EXTRA_PINS; i++) {
-    if ((s_health_peers[i].ip != 0) && (s_health_peers[i].ip == vpn_ip)) return true;
-  }
-  return false;
+  return ml_health_peer_registered(s_health_peers, ML_EXTRA_PINS, vpn_ip);
 }
 
 void microlink_untrack_peer_health(microlink_t * ml, uint32_t vpn_ip)
@@ -769,7 +761,12 @@ bool ml_wg_is_health_tracked(uint32_t vpn_ip)
  * pinned covers reachability armor (fleet anchor etc.), not heartbeat carriage. */
 static bool is_safety_peer(microlink_t * ml, uint32_t vpn_ip)
 {
-  return (ml->config.priority_peer_ip != 0 && vpn_ip == ml->config.priority_peer_ip) || is_health_tracked(vpn_ip);
+  return ml_safety_peer_matches(ml->config.priority_peer_ip, s_health_peers, ML_EXTRA_PINS, vpn_ip);
+}
+
+bool ml_wg_has_safety_peers(const microlink_t * ml)
+{
+  return ml != NULL && ml_safety_peers_present(ml->config.priority_peer_ip, s_health_peers, ML_EXTRA_PINS);
 }
 
 /* DERP home region of a peer identified by its 32-byte WG public key.
