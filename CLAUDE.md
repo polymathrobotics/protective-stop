@@ -117,7 +117,8 @@ class.**
 | **C** | Direct: a safety requirement, safety-module interface, wire protocol or CRC, timing budget, bond/arming state machine, lockstep comparator, diagnostic coverage, or hardware in the stop path | **Two-person, before implementation** | Above + every test exercising an affected SR + traceability re-check + relevant HIL/ladder |
 
 Automatic Class C: any `pstop_c` bump that changes the CRC (wire break); anything
-touching the verdict, priming, debounce, or comparator paths in `firmware/main/main.c`.
+touching verdict, priming, or debounce logic in `firmware/main/estop_verdict.c` or
+`firmware/main/estop_verdict.h`; or the comparator path in `firmware/main/main.c`.
 Argue down from C, never up into it.
 
 **Class C also owes an impact analysis before implementation** — modules changed,
