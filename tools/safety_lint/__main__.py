@@ -7,7 +7,7 @@ import json
 import sys
 from pathlib import Path
 
-from .checks import apply_baseline, check_summary_prose, run_checks
+from .checks import apply_baseline, check_numeric_coverage_claims, check_summary_prose, run_checks
 from .coverage import compute_coverage
 from .model import LintError
 from .render import render_traceability
@@ -63,7 +63,10 @@ def main(argv=None):
         coverage = compute_coverage(analysis)
         trace_path = root / 'docs/safety/TRACEABILITY.md'
         original = trace_path.read_text(encoding='utf-8')
-        active, suppressed = apply_baseline(run_checks(analysis) + check_summary_prose(original, coverage), baseline)
+        active, suppressed = apply_baseline(
+            run_checks(analysis) + check_numeric_coverage_claims(original) + check_summary_prose(original, coverage),
+            baseline,
+        )
         rendered = render_traceability(original, coverage)
         stale = rendered != original
         active_errors = [finding for finding in active if finding.severity == 'error']
@@ -100,7 +103,9 @@ def main(argv=None):
             for area, data in coverage.areas.items():
                 print(f'  SR-{area}: {data["count"]} total, {data["cited"]} cited, {data["Verified"]} Verified')
             if args.check and stale:
-                print('docs/safety/TRACEABILITY.md: generated regions are stale')
+                print(
+                    'docs/safety/TRACEABILITY.md: generated regions are stale; run python3 -m tools.safety_lint --write'
+                )
         failed = bool(active_errors) or (args.check and stale)
         return 1 if failed else 0
     except (LintError, OSError) as error:

@@ -10,6 +10,21 @@ from .model import Finding
 SRS_STATUSES = ('Partially satisfied', 'Residual-accepted', 'Satisfied', 'Gap')
 TRACE_STATUSES = ('Partially-verified', 'Residual-accepted', 'Unverified-gap', 'Verified')
 
+_GENERATED_REGION = re.compile(
+    r'<!-- BEGIN GENERATED: safety-lint (?P<name>[\w-]+) -->.*?'
+    r'<!-- END GENERATED: safety-lint (?P=name) -->',
+    re.DOTALL,
+)
+_COVERAGE_CLAIM = re.compile(
+    r'\d+\s*/\s*\d+\s*=\s*~?\d+(?:\.\d+)?\s*%'
+    r'|\d+\s*/\s*\d+'
+    r'|~?\d+(?:\.\d+)?\s*%'
+    r'|\d+\s+(?:Partially-verified|Residual-with-test|Residual-accepted|'
+    r'Unverified-gap(?:\s+SRs?)?|Verified|Partials?)\b',
+    re.IGNORECASE,
+)
+_COMPACT_SAFETY_ID = re.compile(r'\b(?:SR-[A-Z]+-\d+(?:/\d+)*|DU-\d+(?:/\d+)*)\b')
+
 
 def _finding(check, severity, subject, message, file, line=1):
     return Finding(check, severity, subject, message, file, line)
@@ -237,7 +252,9 @@ def check_summary_prose(text, coverage):
     findings = []
     for pattern, wanted, subject in expected:
         match = re.search(pattern, text, re.IGNORECASE)
-        actual = tuple(map(int, match.groups())) if match else None
+        if match is None:
+            continue
+        actual = tuple(map(int, match.groups()))
         if actual != wanted:
             findings.append(
                 _finding(
@@ -249,6 +266,42 @@ def check_summary_prose(text, coverage):
                 )
             )
     return tuple(findings)
+
+
+def check_numeric_coverage_claims(text):
+    """Reject numeric section-3 coverage claims outside generated regions."""
+    heading = re.search(r'^## 3\. Requirements coverage summary\s*$', text, re.MULTILINE)
+    if heading is None:
+        return ()
+    remainder = text[heading.end() :]
+    boundaries = [
+        match.start()
+        for pattern in (r'^\*\*Reading:\*\*', r'^## (?!3\.)')
+        if (match := re.search(pattern, remainder, re.MULTILINE)) is not None
+    ]
+    end = heading.end() + min(boundaries) if boundaries else len(text)
+    section = text[heading.start() : end]
+    section = _GENERATED_REGION.sub('', section)
+    section = _COMPACT_SAFETY_ID.sub(lambda match: ' ' * len(match.group()), section)
+
+    claims = []
+    for match in _COVERAGE_CLAIM.finditer(section):
+        claim = re.sub(r'\s*/\s*', ' / ', match.group())
+        claim = re.sub(r'\s*=\s*', ' = ', claim)
+        claim = re.sub(r'\s*%', ' %', claim)
+        claims.append(' '.join(claim.split()))
+    if not claims:
+        return ()
+    return (
+        _finding(
+            'C10',
+            'error',
+            'section 3 outside generated regions',
+            f'numeric coverage claims outside generated regions: [{", ".join(claims)}]',
+            'docs/safety/TRACEABILITY.md',
+            text.count('\n', 0, heading.start()) + 1,
+        ),
+    )
 
 
 def apply_baseline(findings, baseline):

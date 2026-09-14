@@ -21,6 +21,7 @@ from tools.safety_lint.checks import (  # noqa: E402
     SRS_STATUSES,
     TRACE_STATUSES,
     apply_baseline,
+    check_numeric_coverage_claims,
     check_summary_prose,
     run_checks,
 )
@@ -40,6 +41,14 @@ class FixtureRepo(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)
         shutil.copytree(FIXTURE, self.root, dirs_exist_ok=True)
+        self.replace(
+            'docs/safety/TRACEABILITY.md',
+            '- **(a) SRs with ≥1 passing verifying test: 2 / 2 = 100 %**\n'
+            '- **Strict, fully-verified only: 1 / 2 = 50.0 %.**\n'
+            '- **(b) Safety functions F-xx traced to ≥1 SR: 1 / 1 = 100 %.**\n'
+            '  Excluding the two declared-non-safety functions: 1 / 1 = 100 %.\n',
+            'Coverage values are owned by the generated regions above.\n',
+        )
 
     def tearDown(self):
         self.temp.cleanup()
@@ -368,6 +377,89 @@ class ConsistencyTests(FixtureRepo):
         self.assertTrue([f for f in findings if f.check_id == 'C2' and f.severity == 'info'])
 
 
+class NumericCoverageOwnershipTests(unittest.TestCase):
+    def test_current_section_emits_one_exact_c10_finding(self):
+        """Today's outside-marker claims aggregate into one exact baseline discriminator."""
+        text = (REPO / 'docs/safety/TRACEABILITY.md').read_text(encoding='utf-8')
+        findings = check_numeric_coverage_claims(text)
+        self.assertEqual(len(findings), 1)
+        self.assertEqual(
+            (findings[0].check_id, findings[0].severity, findings[0].subject, findings[0].message),
+            (
+                'C10',
+                'error',
+                'section 3 outside generated regions',
+                'numeric coverage claims outside generated regions: '
+                '[32 / 40 = 80.0 %, 17 Verified, 14 Partially-verified, '
+                '1 Residual-with-test, 7 Unverified-gap SRs, 17 / 40 = 42.5 %, '
+                '14 Partials, 22 / 27 = 81.5 %, 22 / 25 = 88.0 %, 5 / 6 = 83.3 %]',
+            ),
+        )
+
+    def test_marker_bounded_numeric_claims_are_ignored(self):
+        """Generated coverage regions exclusively own every numeric claim they contain."""
+        text = """## 3. Requirements coverage summary
+<!-- BEGIN GENERATED: safety-lint headline -->
+32 / 40 = 80.0 %; 17 Verified; 14 Partially-verified
+<!-- END GENERATED: safety-lint headline -->
+<!-- BEGIN GENERATED: safety-lint areas -->
+22 / 27 = 81.5 %
+<!-- END GENERATED: safety-lint areas -->
+**Reading:** 56.8 % branch coverage
+"""
+        self.assertEqual(check_numeric_coverage_claims(text), ())
+
+    def test_new_outside_claim_changes_exact_message(self):
+        """Any added outside-marker ratio or percentage breaks an exact C10 baseline."""
+        base = """## 3. Requirements coverage summary
+Legacy coverage: 2 / 3 = 66.7 %.
+**Reading:** details
+"""
+        changed = base.replace('**Reading:**', 'Another claim: 75 %.\n**Reading:**')
+        before = check_numeric_coverage_claims(base)[0]
+        after = check_numeric_coverage_claims(changed)[0]
+        self.assertEqual(before.subject, after.subject)
+        self.assertNotEqual(before.message, after.message)
+        self.assertIn('75 %', after.message)
+
+    def test_identifiers_date_and_reconciliation_delta_do_not_trigger(self):
+        """Compact IDs, dates, and reconciliation deltas are not coverage values."""
+        text = """## 3. Requirements coverage summary
+Reconciled 2026-08-07: +4 for SR-M-01/03/05 and DU-1/2/3/4.
+**Reading:** details
+"""
+        self.assertEqual(check_numeric_coverage_claims(text), ())
+
+    def test_structural_percentages_after_reading_do_not_trigger(self):
+        """Structural coverage in Reading is outside C10's requirements-summary scope."""
+        text = """## 3. Requirements coverage summary
+Coverage details are generated above.
+**Reading:** MC-DC 100 %, branch 56.8 %, line ~89 %.
+"""
+        self.assertEqual(check_numeric_coverage_claims(text), ())
+
+    def test_later_sections_are_not_scanned_without_reading_paragraph(self):
+        """Coverage-like numbers in section 4 cannot become section-3 ownership findings."""
+        text = """## 3. Requirements coverage summary
+Coverage details are generated above.
+## 4. Test-gap register
+Historical result: 4 / 5 = 80 %.
+"""
+        self.assertEqual(check_numeric_coverage_claims(text), ())
+
+    def test_clean_pointer_and_reconciliation_section_has_no_finding(self):
+        """Pointers and nonnumeric history may remain outside generated coverage regions."""
+        text = """## 3. Requirements coverage summary
+<!-- BEGIN GENERATED: safety-lint headline -->
+32 / 40 = 80.0 %
+<!-- END GENERATED: safety-lint headline -->
+See the generated headline and area table. Reconciled 2026-08-07: +4 for
+SR-M-01/03/05 and DU-1/2/3/4 after evidence review.
+**Reading:** structural coverage is discussed here at 100 %.
+"""
+        self.assertEqual(check_numeric_coverage_claims(text), ())
+
+
 class CoverageRenderCliTests(FixtureRepo):
     def test_coverage_matches_committed_summary(self):
         """Real citation and status counts reproduce the ratified committed summary."""
@@ -393,6 +485,14 @@ class CoverageRenderCliTests(FixtureRepo):
         proc = self.run_cli('--check')
         self.assertEqual(proc.returncode, 1)
 
+    def test_stale_check_names_exact_write_remedy(self):
+        """Stale check output gives the exact command that refreshes generated regions."""
+        proc = self.run_cli('--check')
+        self.assertIn(
+            'docs/safety/TRACEABILITY.md: generated regions are stale; run python3 -m tools.safety_lint --write',
+            proc.stdout,
+        )
+
     def test_render_does_not_touch_prose_outside_markers(self):
         """Rendering preserves hand-authored Reading prose byte-for-byte."""
         path = self.root / 'docs/safety/TRACEABILITY.md'
@@ -409,11 +509,14 @@ class CoverageRenderCliTests(FixtureRepo):
         stale = text.replace('22 / 27 = 81.5 %', '21 / 27 = 77.8 %')
         self.assertTrue(check_summary_prose(stale, compute_coverage(result)))
 
+    def test_missing_legacy_summary_claims_do_not_trigger_summary(self):
+        """Removing superseded hand-authored headlines does not create SUMMARY errors."""
+        coverage = compute_coverage(analyze(self.root))
+        self.assertEqual(check_summary_prose('No hand-authored numeric coverage claims.\n', coverage), ())
+
     def test_cli_exit_code_zero_on_clean_tree(self):
-        """The real repository passes with its checked-in baseline and current generated regions."""
-        proc = subprocess.run(
-            [sys.executable, '-m', 'tools.safety_lint'], cwd=REPO, capture_output=True, text=True, check=False
-        )
+        """A repository with no active or stale findings returns the clean exit code."""
+        proc = self.run_cli()
         self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
 
     def test_cli_exit_code_one_on_injected_error(self):
