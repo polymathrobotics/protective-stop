@@ -18,7 +18,6 @@ host/machine_app_runner
 host/test_clock_guard
 host/test_crypto_kat
 host/test_demote_veto
-host/test_usb_tx
 host/test_aux_channel
 # cppcheck
 *.ctu-info
@@ -61,3 +60,4 @@ build/
 install/
 log/
 tools/fleet.env
+host/test_usb_tx

@@ -58,17 +58,24 @@ test_crypto_kat: test_crypto_kat.c $(CRYPTO_SRCS)
 test_demote_veto: test_demote_veto.c $(MICROLINK)/include/ml_demote_verdict.h
 	$(CC) $(CFLAGS) -I$(MICROLINK)/include -o $@ test_demote_veto.c
 
+.PHONY: test clean
+test: test_clock_guard test_crypto_kat test_demote_veto test_aux_channel
+	./test_clock_guard
+	./test_crypto_kat
+	./test_demote_veto
+	./test_aux_channel
+
+clean:
+	rm -f machine_app_runner test_clock_guard test_crypto_kat test_demote_veto test_aux_channel
+
 USB_TX := ../components/ml_dev_tether
 test_usb_tx: test_usb_tx.c $(USB_TX)/src/ml_usb_tx.c $(USB_TX)/include/ml_usb_tx.h $(USB_TX)/include/ml_usb_defer.h $(USB_TX)/include/ml_usb_tx_limits.h $(USB_TX)/src/tud_defer_try.inc usb_tx_stubs/esp_err.h usb_tx_stubs/usb_tx_test_platform.h
 	$(CC) $(CFLAGS) -std=c11 -DML_USB_TX_HOST_TEST -Iusb_tx_stubs -I$(USB_TX)/include -o $@ test_usb_tx.c
 
-.PHONY: test clean
-test: test_clock_guard test_crypto_kat test_demote_veto test_usb_tx test_aux_channel
-	./test_clock_guard
-	./test_crypto_kat
-	./test_demote_veto
+.PHONY: check_usb_tx clean_usb_tx
+test: check_usb_tx
+check_usb_tx: test_usb_tx
 	./test_usb_tx
-	./test_aux_channel
-
-clean:
-	rm -f machine_app_runner test_clock_guard test_crypto_kat test_demote_veto test_usb_tx test_aux_channel
+clean: clean_usb_tx
+clean_usb_tx:
+	rm -f test_usb_tx
