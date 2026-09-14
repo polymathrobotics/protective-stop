@@ -139,6 +139,10 @@ Test-file shorthand:
 - **(a) Requirements coverage:** See the generated citation and fully-verified figures above. [Reconciled
   2026-08-07: +4 as DU-1/2/3/4 closures gained tests — SR-H-03/SR-H-04 now
   Verified, SR-R-03/SR-R-09 now Partially-verified].
+  The Partially-verified requirements each leave a named leg untested — end-to-end,
+  quantification, golden-vector/replay, fault-injection divergence, or the
+  operator-list config plumbing. SR-M-04 is Residual and inspection-only; the
+  Unverified-gap requirements have no test at all.
 
 - **(b) Function traceability:** See the generated figures above. Section 5 records
   functions with no requirement and distinguishes declared non-safety functions
