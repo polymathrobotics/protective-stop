@@ -56,6 +56,7 @@
 #include "freertos/task.h"
 #include "microlink.h"
 #include "ml_app.h"
+#include "ml_usb_tx.h"
 #include "panic_log.h"
 #include "pstop_aux_channel.h"
 #include "soc/rtc_cntl_reg.h"
@@ -98,6 +99,53 @@ static uint32_t netif_ip_by_key(const char * key)
   esp_netif_ip_info_t ip;
   if (esp_netif_get_ip_info(n, &ip) != ESP_OK) return 0;
   return ip.ip.addr;
+}
+
+#define USB_TX_JSON_FORMAT                                                                 \
+  ",\"usb_tx_submitted\":%lu,\"usb_tx_copied\":%lu,\"usb_tx_cancelled\":%lu,"              \
+  "\"usb_tx_errors\":%lu,\"usb_tx_exhausted\":%lu,\"usb_tx_defer_full\":%lu,"              \
+  "\"usb_tx_can_xmit_fail\":%lu,\"usb_tx_integrity_errors\":%lu,\"usb_tx_defer_cap\":%lu," \
+  "\"usb_tx_rejected_unavailable\":%lu,\"usb_tx_unmounted_drop\":%lu,"                     \
+  "\"usb_tx_ncm_busy_retries\":%lu,"                                                       \
+  "\"usb_tx_latency\":[%lu,%lu,%lu,%lu],\"usb_tx_used\":%lu,\"usb_tx_pending\":%lu,"       \
+  "\"usb_tx_oldest_ms\":%lu,\"usb_tx_callbacks\":%lu,\"usb_tx_callback_age_ms\":%lld"
+
+enum
+{
+  /* Literal bytes plus ten digits per uint32 field is a conservative bound;
+   * format placeholders are deliberately not subtracted. Callback age -1 fits. */
+  USB_TX_JSON_CAP = sizeof(USB_TX_JSON_FORMAT) + 10 * sizeof(ml_usb_tx_diag_t) / sizeof(uint32_t)
+};
+
+static int emit_usb_tx(char * buf, size_t cap)
+{
+  ml_usb_tx_diag_t d;
+  ml_usb_tx_get_diag(&d);
+  return snprintf(
+    buf,
+    cap,
+    USB_TX_JSON_FORMAT,
+    (unsigned long)d.submitted,
+    (unsigned long)d.copied,
+    (unsigned long)d.cancelled,
+    (unsigned long)d.errors,
+    (unsigned long)d.exhausted,
+    (unsigned long)d.defer_full,
+    (unsigned long)d.can_xmit_fail,
+    (unsigned long)d.integrity_errors,
+    (unsigned long)d.defer_cap,
+    (unsigned long)d.rejected_unavailable,
+    (unsigned long)d.unmounted_drop,
+    (unsigned long)d.ncm_busy_retries,
+    (unsigned long)d.latency[0],
+    (unsigned long)d.latency[1],
+    (unsigned long)d.latency[2],
+    (unsigned long)d.latency[3],
+    (unsigned long)d.used,
+    (unsigned long)d.pending,
+    (unsigned long)d.oldest_ms,
+    (unsigned long)d.callbacks,
+    d.callbacks ? (long long)d.callback_age_ms : -1LL);
 }
 
 static esp_err_t page_state(httpd_req_t * req)
@@ -229,7 +277,7 @@ static esp_err_t page_state(httpd_req_t * req)
    */
   enum
   {
-    JSON_CAP = 4096 /* eth-watchdog fields + bonded-remote stop_only + operator list
+    JSON_CAP = 5120 /* USB TX diagnostics + eth-watchdog fields + bonded-remote stop_only + operator list
                        + instantaneous internal-heap fields (heap_free_int/heap_lfb_int).
                        remote_stop_id + restart_state add <= 47 B worst case against
                        ~940 B live headroom (measured 2026-08-09). derp_region_locked
@@ -514,6 +562,8 @@ static esp_err_t page_state(httpd_req_t * req)
   n += snprintf(buf + n, cap - n, ",\"oth1\":%lu,\"tks\":", (unsigned long)snap.b[1].other_pct);
   CLAMP_N();
   n += emit_bucket(buf + n, cap - n, &snap.b[2]);
+  CLAMP_N();
+  n += emit_usb_tx(buf + n, cap - n);
   CLAMP_N();
   /* Sample uptime after reply timestamps so concurrent RX cannot put them
    * in the future. Older reply samples only overestimate their age. */
@@ -1311,7 +1361,7 @@ static esp_err_t api_health_get(httpd_req_t * req)
 
   enum
   {
-    CAP = 512 + (DCS_HEALTH_MAX_WARNINGS * (DCS_HEALTH_SRC_LEN + DCS_HEALTH_MSG_LEN + 80))
+    CAP = 512 + USB_TX_JSON_CAP + (DCS_HEALTH_MAX_WARNINGS * (DCS_HEALTH_SRC_LEN + DCS_HEALTH_MSG_LEN + 80))
   };
 
   char * buf = heap_caps_malloc(CAP, MALLOC_CAP_SPIRAM);
@@ -1358,16 +1408,12 @@ static esp_err_t api_health_get(httpd_req_t * req)
     (unsigned long)snap->nvs_flush_fails,
     (unsigned long)snap->last_flush_age_s,
     (unsigned long)snap->dropped);
-  if (n < 0) {
-    n = 0;
-  } else if (n > (CAP - 1)) {
-    n = CAP - 1;
-  }
+  if (n < 0 || n >= CAP) goto overflow;
   uint64_t now = (uint64_t)esp_timer_get_time() / 1000ULL;
   for (int i = 0; (i < snap->n_warnings) && (n < (CAP - 1)); i++) {
     const dcs_health_warning_t * w = &snap->warnings[i];
     /* src/msg are firmware-authored ASCII (no quotes); no escaping needed. */
-    n += snprintf(
+    int written = snprintf(
       buf + n,
       (size_t)(CAP - n),
       "%s{\"src\":\"%s\",\"level\":%d,\"msg\":\"%s\",\"count\":%lu,\"age_s\":%lu}",
@@ -1377,19 +1423,28 @@ static esp_err_t api_health_get(httpd_req_t * req)
       w->msg,
       (unsigned long)w->count,
       (unsigned long)((now > w->first_ms) ? ((now - w->first_ms) / 1000ULL) : 0ULL));
-    if (n > (CAP - 1)) {
-      n = CAP - 1;
-    }
+    if (written < 0 || written >= CAP - n) goto overflow;
+    n += written;
   }
-  if (n < (CAP - 3)) {
-    n += snprintf(buf + n, (size_t)(CAP - n), "]}");
-  }
+  if (n >= CAP - 2) goto overflow;
+  buf[n++] = ']';
+  int written = emit_usb_tx(buf + n, (size_t)(CAP - n - 1)); /* reserve closing brace */
+  if (written < 0 || written >= CAP - n - 1) goto overflow;
+  n += written;
+  buf[n++] = '}';
+  buf[n] = '\0';
   free(snap);
   (void)httpd_resp_set_type(req, "application/json");
   (void)httpd_resp_set_hdr(req, "Cache-Control", "no-store");
   esp_err_t r = httpd_resp_send(req, buf, n);
   free(buf);
   return r;
+overflow:
+  free(snap);
+  free(buf);
+  (void)httpd_resp_set_status(req, "500 Internal Server Error");
+  (void)httpd_resp_set_type(req, "application/json");
+  return httpd_resp_sendstr(req, "{\"ok\":false,\"error\":\"health response overflow\"}");
 }
 
 static esp_err_t api_health_reset(httpd_req_t * req)
