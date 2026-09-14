@@ -36,6 +36,7 @@
 #include "lwip/sockets.h"
 #include "mbedtls/base64.h"
 #include "microlink_internal.h"
+#include "ml_recv_outcome.h"
 #include "x25519.h"
 
 static const char * TAG = "ml_coord";
@@ -78,6 +79,20 @@ static uint64_t s_last_rereg_ms;
 uint32_t ml_coord_get_reregisters(void)
 {
   return s_diag_coord_reregisters;
+}
+
+/* DIAG: why the long-poll left COORD_LONG_POLL for COORD_RECONNECTING.
+ * [0] GOAWAY from control, [1] noise_recv/TCP error ("Long-poll connection
+ * lost"), [2] control-plane watchdog, [3] H2 PING send failed,
+ * [4] map stream ended (END_STREAM/RST_STREAM/trailers -> soft refresh, not a
+ * reconnect, counted for completeness), [5] errno of the last [1] event
+ * (0 = peer closed, ETIMEDOUT = partial frame never completed), [6] Noise
+ * protocol/decrypt/alloc failure (errno meaningless, not counted in [1]). */
+static uint32_t s_diag_disc_cause[7];
+
+void ml_coord_get_disconnect_causes(uint32_t out[7])
+{
+  for (int i = 0; i < 7; i++) out[i] = s_diag_disc_cause[i];
 }
 
 /* Effective control plane host: NVS override or compiled default */
@@ -150,32 +165,48 @@ static int coord_send(microlink_t * ml, const uint8_t * data, size_t len)
   return 0;
 }
 
+/* Negative results shared by coord_recv() (0 = ok) and noise_recv() (>= 0 =
+ * plaintext length). Only RECV_SOCKET_ERR leaves a meaningful errno. */
+enum
+{
+  RECV_WOULD_BLOCK = -1, /* nothing of the unit consumed; harmless */
+  RECV_PROTO_ERR = -2, /* Noise frame type / length / alloc / decrypt failure */
+  RECV_SOCKET_ERR = -3, /* recv() failed, errno restored to its value */
+  RECV_EOF = -4, /* peer closed */
+  RECV_ALIGNMENT_LOST = -5 /* partial unit consumed, retry budget exhausted */
+};
+
+#define COORD_RECV_MAX_RETRIES 300 /* retry budget for a partial unit; each retry also waits out SO_RCVTIMEO */
+
 static int coord_recv(microlink_t * ml, uint8_t * buf, size_t len)
 {
   size_t recvd = 0;
   int retries = 0;
   while (recvd < len) {
     int n = ml_recv(ml->coord_sock, buf + recvd, len - recvd, 0);
-    if (n <= 0) {
-      if (errno == EAGAIN || errno == EWOULDBLOCK) {
-        if (recvd == 0) {
-          /* No data consumed yet — timeout is fine, caller can retry */
-          return -1;
-        }
-        /* Partial data consumed — we MUST finish this read or the
-                 * Noise frame stream will be misaligned. Retry with backoff. */
-        if (++retries > 300) { /* ~3 seconds */
-          ESP_LOGE(TAG, "coord_recv partial timeout: %d/%d bytes", (int)recvd, (int)len);
-          return -1;
-        }
+    int err = errno; /* before any logging can clobber it */
+    switch (ml_recv_classify(n, err, recvd, retries, COORD_RECV_MAX_RETRIES)) {
+      case ML_RECV_OK:
+        recvd += (size_t)n;
+        retries = 0;
+        break;
+      case ML_RECV_EOF:
+        return RECV_EOF;
+      case ML_RECV_WOULD_BLOCK:
+        return RECV_WOULD_BLOCK;
+      case ML_RECV_RETRY:
+        retries++;
         vTaskDelay(pdMS_TO_TICKS(10));
-        continue;
-      }
-      ESP_LOGE(TAG, "coord_recv failed: %d (errno %d, recvd %d/%d)", n, errno, (int)recvd, (int)len);
-      return -1;
+        break;
+      case ML_RECV_ALIGNMENT_LOST:
+        ESP_LOGE(TAG, "coord_recv partial unit abandoned: %d/%d bytes", (int)recvd, (int)len);
+        return RECV_ALIGNMENT_LOST;
+      case ML_RECV_ERROR:
+      default:
+        ESP_LOGE(TAG, "coord_recv failed: %d (errno %d, recvd %d/%d)", n, err, (int)recvd, (int)len);
+        errno = err;
+        return RECV_SOCKET_ERR;
     }
-    recvd += n;
-    retries = 0; /* Reset on successful read */
   }
   return 0;
 }
@@ -206,50 +237,51 @@ static int noise_send(microlink_t * ml, ml_noise_state_t * noise, const uint8_t 
   return ret;
 }
 
-/* Receive and decrypt a Noise transport frame, returns plaintext length */
+/* Receive and decrypt a Noise transport frame: >= 0 plaintext length (0 is a
+ * valid empty frame) or a negative RECV_* result. */
 static int noise_recv(microlink_t * ml, ml_noise_state_t * noise, uint8_t * plaintext, size_t max_len)
 {
-  /* Read 3-byte frame header */
   uint8_t hdr[3];
-  if (coord_recv(ml, hdr, 3) < 0) return -1;
+  int rc = coord_recv(ml, hdr, 3);
+  if (rc < 0) return rc;
 
   if (hdr[0] != 0x04) {
     ESP_LOGE(TAG, "Unexpected Noise frame type: 0x%02x", hdr[0]);
-    return -1;
+    return RECV_PROTO_ERR;
   }
-
   uint16_t ct_len = (hdr[1] << 8) | hdr[2];
-  if (ct_len < 16) return -1;
+  if (ct_len < 16) return RECV_PROTO_ERR;
   size_t pt_len = ct_len - 16;
   if (pt_len > max_len) {
     ESP_LOGE(TAG, "Noise frame too large: %d > %d", (int)pt_len, (int)max_len);
-    return -1;
+    return RECV_PROTO_ERR;
   }
-
   uint8_t * ciphertext = ml_psram_malloc(ct_len);
-  if (!ciphertext) return -1;
+  if (!ciphertext) return RECV_PROTO_ERR;
 
-  /* Header already consumed — payload read MUST complete or stream
-     * alignment is permanently lost. Retry EAGAIN (coord_recv returns -1
-     * with errno==EAGAIN if recvd==0 on first byte). */
+  /* Header consumed: the payload must complete or the stream is misaligned.
+   * A would-block with nothing of the payload consumed is retried on the same
+   * budget; any other failure is final. */
   int payload_retries = 0;
-  while (coord_recv(ml, ciphertext, ct_len) < 0) {
-    if ((errno == EAGAIN || errno == EWOULDBLOCK) && ++payload_retries <= 300) {
+  while ((rc = coord_recv(ml, ciphertext, ct_len)) < 0) {
+    if (rc == RECV_WOULD_BLOCK && ++payload_retries <= COORD_RECV_MAX_RETRIES) {
       vTaskDelay(pdMS_TO_TICKS(10));
       continue;
     }
-    ESP_LOGE(TAG, "noise_recv payload failed: ct_len=%d retries=%d errno=%d", ct_len, payload_retries, errno);
+    int err = (rc == RECV_SOCKET_ERR) ? errno : 0;
+    if (rc == RECV_WOULD_BLOCK) rc = RECV_ALIGNMENT_LOST; /* payload never arrived */
+    ESP_LOGE(TAG, "noise_recv payload failed: rc=%d ct_len=%d retries=%d errno=%d", rc, ct_len, payload_retries, err);
     free(ciphertext);
-    return -1;
+    errno = err;
+    return rc;
   }
 
   if (ml_noise_decrypt(noise->rx_key, noise->rx_nonce, NULL, 0, ciphertext, ct_len, plaintext) != ESP_OK) {
     ESP_LOGE(TAG, "Noise decrypt failed (nonce=%llu)", (unsigned long long)noise->rx_nonce);
     free(ciphertext);
-    return -1;
+    return RECV_PROTO_ERR;
   }
   noise->rx_nonce++;
-
   free(ciphertext);
   return (int)pt_len;
 }
@@ -2323,11 +2355,30 @@ static int poll_map_update(microlink_t * ml, ml_noise_state_t * noise)
   int frame_len = noise_recv(ml, noise, frame_buf, 65536);
 
   if (frame_len <= 0) {
+    int err = errno; /* meaningful only for RECV_SOCKET_ERR; captured before free() */
     free(frame_buf);
-    int saved_errno = errno;
-    /* EAGAIN/EWOULDBLOCK = no data yet = not an error */
-    if (saved_errno == EAGAIN || saved_errno == EWOULDBLOCK) return 0;
-    return frame_len; /* Real error or connection closed */
+    /* 0 = nothing to process, -1 = connection lost (caller reconnects). Never
+     * -2: the caller reserves it for a stream refresh. */
+    switch (frame_len) {
+      case 0: /* valid empty frame */
+      case RECV_WOULD_BLOCK:
+        return 0;
+      case RECV_PROTO_ERR:
+        s_diag_disc_cause[6]++;
+        return -1;
+      case RECV_EOF:
+        s_diag_disc_cause[1]++;
+        s_diag_disc_cause[5] = 0; /* orderly close */
+        return -1;
+      case RECV_ALIGNMENT_LOST:
+        s_diag_disc_cause[1]++;
+        s_diag_disc_cause[5] = (uint32_t)ETIMEDOUT;
+        return -1;
+      default: /* RECV_SOCKET_ERR */
+        s_diag_disc_cause[1]++;
+        s_diag_disc_cause[5] = (uint32_t)err;
+        return -1;
+    }
   }
 
   /* Extract DATA frame payload from H2 frames, track flow control.
@@ -2410,6 +2461,7 @@ static int poll_map_update(microlink_t * ml, ml_noise_state_t * noise)
                   ((uint32_t)frame_buf[pos + 6] << 8) | (uint32_t)frame_buf[pos + 7];
       }
       ESP_LOGW(TAG, "Map long-poll GOAWAY from control (err=0x%lx) — reconnecting", (unsigned long)errcode);
+      s_diag_disc_cause[0]++;
       conn_lost = 1;
     } else if ((f_type == 0x03) && (f_stream == ml->map_stream_id)) {
       /* RST_STREAM on the map stream: control killed the long-poll. */
@@ -2758,6 +2810,7 @@ void ml_coord_task(void * arg)
         /* Check control plane watchdog (120s) */
         if (now - last_activity_ms > ml->t_ctrl_watchdog_ms) {
           ESP_LOGW(TAG, "Control plane watchdog timeout");
+          s_diag_disc_cause[2]++;
           state = COORD_RECONNECTING;
           break;
         }
@@ -3007,6 +3060,7 @@ void ml_coord_task(void * arg)
                          * reconnects on its own. */
           } else {
             ESP_LOGW(TAG, "H2 PING send failed, reconnecting");
+            s_diag_disc_cause[3]++;
             state = COORD_RECONNECTING;
             break;
           }
@@ -3024,6 +3078,7 @@ void ml_coord_task(void * arg)
            * EXCEPT when the pin-absent heal's s_want_full_peers one-shot is
            * pending, which turns exactly one refresh into a full redelivery. */
           ESP_LOGI(TAG, "Map long-poll stream refresh (connection preserved)");
+          s_diag_disc_cause[4]++;
           if (do_start_long_poll(ml, &noise) < 0) {
             state = COORD_RECONNECTING;
             break;

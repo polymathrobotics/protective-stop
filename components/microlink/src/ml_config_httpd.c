@@ -1127,6 +1127,15 @@ static esp_err_t handler_monitor(httpd_req_t * req)
       cJSON_AddNumberToObject(json, "remove_vetoes", rg[3]);
       cJSON_AddNumberToObject(json, "evict_safety_skips", rg[4]);
       cJSON_AddNumberToObject(json, "relay_disco_resets", rg[5]);
+      {
+        extern uint32_t ml_wg_get_relay_refetch_reqs(void);
+        /* ML_CMD_FORCE_RECONNECT requests issued by the relay-stuck safety-peer
+         * recovery: each one is a full control-plane reconnect (~5-7 s). */
+        cJSON_AddNumberToObject(json, "relay_refetch_reqs", ml_wg_get_relay_refetch_reqs());
+        extern uint32_t ml_wg_get_relay_refetch_interval_s(void);
+        /* Current escalated interval (90 s -> 1800 s cap); resets on a safety-peer direct regain. */
+        cJSON_AddNumberToObject(json, "relay_refetch_interval_s", ml_wg_get_relay_refetch_interval_s());
+      }
 
       /* WG session health (run-20/21 ENOTCONN forensics). The failure
        * signature to watch: wg_kp_age_max climbing past 120000 (rekey
@@ -1150,6 +1159,16 @@ static esp_err_t handler_monitor(httpd_req_t * req)
       cJSON_AddNumberToObject(json, "derp_connect_steps", ml_derp_get_connect_steps());
       cJSON_AddNumberToObject(json, "derp_rx_stale_reaps", ml_derp_get_rx_stale_reaps());
       cJSON_AddNumberToObject(json, "coord_reregisters", ml_coord_get_reregisters());
+      {
+        uint32_t dc[7];
+        ml_coord_get_disconnect_causes(dc);
+        cJSON * arr = cJSON_CreateArray();
+        for (int i = 0; i < 7; i++) cJSON_AddItemToArray(arr, cJSON_CreateNumber(dc[i]));
+        cJSON_AddItemToObject(
+          json,
+          "coord_disc_causes",
+          arr); /* [goaway, recv_err, watchdog, ping_fail, stream_refresh, last_socket_errno, proto_err] */
+      }
       {
         /* Stall-class closure telemetry (docs/STALL_EVENT_CLOSURE_DESIGN.md) */
         uint32_t hs[2] = {0};
