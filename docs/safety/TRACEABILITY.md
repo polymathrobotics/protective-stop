@@ -156,7 +156,7 @@ Test-file shorthand:
 ### 3.2 Breakdown by area
 
 <!-- BEGIN GENERATED: safety-lint areas -->
-| Area | Count | Verified | Partially-verified | Unverified-gap | Residual-accepted | >=1 cited test % | Fully-verified % |
+| Area | Count | Verified | Partially-verified | Unverified-gap | Residual-accepted | ≥1 cited test % | Fully-verified % |
 |---|---|---|---|---|---|---|---|
 | SR-SYS | 9 | 2 | 6 | 1 | 0 | 88.9 % | 22.2 % |
 | SR-R | 15 | 6 | 3 | 6 | 0 | 60.0 % | 40.0 % |

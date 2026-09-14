@@ -502,6 +502,13 @@ class CoverageRenderCliTests(FixtureRepo):
         )[1]
         self.assertEqual(after, before)
 
+    def test_renderer_uses_unicode_greater_than_or_equal(self):
+        """The generated area heading preserves the document's Unicode comparison symbol."""
+        text = (self.root / 'docs/safety/TRACEABILITY.md').read_text(encoding='utf-8')
+        rendered = render_traceability(text, compute_coverage(analyze(self.root)))
+        self.assertIn('≥1 cited test %', rendered)
+        self.assertNotIn('>=', rendered)
+
     def test_mixed_numeric_prose_is_checked_not_generated(self):
         """A stale number outside generated markers remains a check failure."""
         result = analyze(REPO)

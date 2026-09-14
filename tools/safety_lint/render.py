@@ -34,7 +34,7 @@ def render_traceability(text, coverage):
         '‡ Citation resolution, not test execution or passing state, is checked by the linter.'
     )
     lines = [
-        '| Area | Count | Verified | Partially-verified | Unverified-gap | Residual-accepted | >=1 cited test % | Fully-verified % |',
+        '| Area | Count | Verified | Partially-verified | Unverified-gap | Residual-accepted | ≥1 cited test % | Fully-verified % |',
         '|---|---|---|---|---|---|---|---|',
     ]
     for area in ('SYS', 'R', 'H', 'M', 'I'):
