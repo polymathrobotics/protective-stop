@@ -21,7 +21,7 @@ from tools.safety_lint.checks import (  # noqa: E402
     SRS_STATUSES,
     TRACE_STATUSES,
     apply_baseline,
-    check_summary_prose,
+    check_numeric_coverage_claims,
     run_checks,
 )
 from tools.safety_lint.coverage import compute_coverage  # noqa: E402
@@ -40,6 +40,14 @@ class FixtureRepo(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)
         shutil.copytree(FIXTURE, self.root, dirs_exist_ok=True)
+        self.replace(
+            'docs/safety/TRACEABILITY.md',
+            '- **(a) SRs with ≥1 passing verifying test: 2 / 2 = 100 %**\n'
+            '- **Strict, fully-verified only: 1 / 2 = 50.0 %.**\n'
+            '- **(b) Safety functions F-xx traced to ≥1 SR: 1 / 1 = 100 %.**\n'
+            '  Excluding the two declared-non-safety functions: 1 / 1 = 100 %.\n',
+            'Coverage values are owned by the generated regions above.\n',
+        )
 
     def tearDown(self):
         self.temp.cleanup()
@@ -79,6 +87,29 @@ class ParserTests(FixtureRepo):
     def test_allocated_to_slash_expansion(self):
         """Compact slash allocations expand to complete function IDs."""
         self.assertEqual(expand_allocations('F-M-03/04'), ('F-M-03', 'F-M-04'))
+
+    def test_allocated_to_arbitrary_slash_chain_expansion(self):
+        """Every member of an arbitrary compact slash chain becomes a complete function ID."""
+        self.assertEqual(
+            expand_allocations('F-R-01/02/03'),
+            ('F-R-01', 'F-R-02', 'F-R-03'),
+        )
+
+    def test_descending_allocation_range_fails_with_source_location(self):
+        """A descending allocation range fails at its document location instead of becoming empty."""
+        with self.assertRaisesRegex(LintError, r'doc.md:17:.*descending.*F-R-03\.\.01'):
+            expand_allocations('F-R-03..01', 'doc.md', 17)
+
+    def test_malformed_trailing_slash_allocation_fails_with_source_location(self):
+        """A malformed trailing slash member fails at its document location instead of being truncated."""
+        with self.assertRaisesRegex(LintError, r'doc.md:19:.*F-R-01/02/XX'):
+            expand_allocations('F-R-01/02/XX', 'doc.md', 19)
+
+    def test_trace_parser_reports_malformed_allocation_row_location(self):
+        """A truncated trace allocation fails at the exact matrix row rather than yielding partial data."""
+        self.replace('docs/safety/TRACEABILITY.md', '| SR-R-01 | F-R-01 |', '| SR-R-01 | F-R-01/02/XX |')
+        with self.assertRaisesRegex(LintError, r'TRACEABILITY\.md:11: malformed allocation'):
+            parse_traceability(self.root)
 
     def test_status_longest_match_wins(self):
         """A partial SRS status is never inflated to a fully satisfied status."""
@@ -156,6 +187,26 @@ class ParserTests(FixtureRepo):
         """The authoritative function decomposition yields a nonempty function set."""
         self.assertTrue(parse_system_definition(REPO / 'docs/safety/SYSTEM_DEFINITION.md'))
 
+    def test_duplicate_system_function_ids_fail_with_both_lines(self):
+        """A duplicate authoritative function ID fails and identifies both defining lines."""
+        self.replace(
+            'docs/safety/SYSTEM_DEFINITION.md',
+            '| F-R-01 | Sense | code.c |',
+            '| F-R-01 | Sense | code.c |\n| F-R-01 | Duplicate | code.c |',
+        )
+        with self.assertRaisesRegex(LintError, r'F-R-01.*lines 10 and 11'):
+            parse_system_definition(self.root / 'docs/safety/SYSTEM_DEFINITION.md')
+
+    def test_duplicate_reverse_map_ids_fail_with_both_lines(self):
+        """A duplicate reverse-map function ID fails and identifies both defining lines."""
+        self.replace(
+            'docs/safety/TRACEABILITY.md',
+            '| F-R-01 | Sense | SR-SYS-01, SR-R-01 |',
+            '| F-R-01 | Sense | SR-SYS-01, SR-R-01 |\n| F-R-01 | Duplicate | SR-R-01 |',
+        )
+        with self.assertRaisesRegex(LintError, r'F-R-01.*lines 26 and 27'):
+            parse_traceability(self.root)
+
     def test_unique_repository_wide_stem_resolves(self):
         """A repository-wide unique test stem resolves without directory guessing."""
         decoy = self.root / 'tools/safety_lint/fixtures/repository/tests/test_unique_probe.py'
@@ -187,6 +238,93 @@ class ParserTests(FixtureRepo):
         self.replace('docs/safety/TRACEABILITY.md', 'test_unique_probe.py', 'docs/evidence.md')
         _, _, issues = parse_traceability(self.root)
         self.assertTrue([i for i in issues if i.kind == 'report-does-not-name-sr'])
+
+    def test_docs_markdown_report_naming_sr_is_evidence(self):
+        """A non-README Markdown report under docs counts when its content names the cited SR."""
+        (self.root / 'docs/evidence.md').write_text('# Evidence for SR-R-01\n', encoding='utf-8')
+        self.replace('docs/safety/TRACEABILITY.md', 'test_unique_probe.py', 'docs/evidence.md')
+        rows, _, issues = parse_traceability(self.root)
+        self.assertEqual(rows[1].test_refs, ('docs/evidence.md',))
+        self.assertFalse([issue for issue in issues if issue.literal == 'docs/evidence.md'])
+
+    def test_test_artifact_directory_and_source_naming_are_evidence(self):
+        """Both test-directory membership and test-source naming independently identify test artifacts."""
+        (self.root / 'tests/probe.c').write_text('/* test */\n', encoding='utf-8')
+        (self.root / 'tools/probe_test.c').write_text('/* test */\n', encoding='utf-8')
+        self.replace(
+            'docs/safety/TRACEABILITY.md',
+            'test_unique_probe.py',
+            'tests/probe.c, tools/probe_test.c',
+        )
+        rows, _, issues = parse_traceability(self.root)
+        self.assertEqual(rows[1].test_refs, ('tests/probe.c', 'tools/probe_test.c'))
+        self.assertFalse([issue for issue in issues if issue.literal in {'tests/probe.c', 'tools/probe_test.c'}])
+
+    def test_readme_never_counts_as_evidence_even_under_tests(self):
+        """A README is never evidence even when its path contains a test-artifact segment."""
+        (self.root / 'tests/README.md').write_text('SR-R-01\n', encoding='utf-8')
+        self.replace('docs/safety/TRACEABILITY.md', 'test_unique_probe.py', 'tests/README.md')
+        rows, _, issues = parse_traceability(self.root)
+        self.assertFalse(rows[1].test_refs)
+        self.assertTrue([issue for issue in issues if issue.literal == 'tests/README.md'])
+
+    def test_check_script_is_evidence(self):
+        """An existing scripts/check_*.sh guard counts as verifying evidence."""
+        scripts = self.root / 'scripts'
+        scripts.mkdir()
+        (scripts / 'check_guard.sh').write_text('#!/bin/sh\n', encoding='utf-8')
+        self.replace('docs/safety/TRACEABILITY.md', 'test_unique_probe.py', 'scripts/check_guard.sh')
+        rows, _, issues = parse_traceability(self.root)
+        self.assertEqual(rows[1].test_refs, ('scripts/check_guard.sh',))
+        self.assertFalse([issue for issue in issues if issue.literal == 'scripts/check_guard.sh'])
+
+    def test_explicit_non_evidence_paths_are_rejected_with_reason(self):
+        """Existing source, workflow, and README paths each produce a reasoned evidence rejection."""
+        candidates = {
+            'code.c': 'src/code.c',
+            'workflow.yml': '.github/workflows/example.yml',
+            'README.md': 'docs/README.md',
+        }
+        (self.root / 'src').mkdir()
+        (self.root / 'src/code.c').write_text('/* production */\n', encoding='utf-8')
+        (self.root / '.github/workflows').mkdir(parents=True)
+        (self.root / '.github/workflows/example.yml').write_text('name: example\n', encoding='utf-8')
+        (self.root / 'docs/README.md').write_text('SR-R-01\n', encoding='utf-8')
+        for label, citation in candidates.items():
+            with self.subTest(label=label):
+                copy = self.root / 'docs/safety/TRACEABILITY.md'
+                original = copy.read_text(encoding='utf-8')
+                try:
+                    copy.write_text(original.replace('test_unique_probe.py', citation), encoding='utf-8')
+                    rows, _, issues = parse_traceability(self.root)
+                    rejected = [
+                        issue for issue in issues if issue.literal == citation and issue.kind == 'rejected-evidence'
+                    ]
+                    self.assertFalse(rows[1].test_refs)
+                    self.assertEqual(len(rejected), 1)
+                    self.assertIn(citation, f'{rejected[0].literal}: {rejected[0].message}')
+                    self.assertRegex(
+                        rejected[0].message,
+                        r'not an approved evidence class|README files are not approved',
+                    )
+                finally:
+                    copy.write_text(original, encoding='utf-8')
+
+    def test_rejected_evidence_becomes_c4_error(self):
+        """A rejected existing path is exposed as a C4 error rather than silently discarded."""
+        source = self.root / 'src'
+        source.mkdir()
+        (source / 'implementation.c').write_text('/* production */\n', encoding='utf-8')
+        self.replace('docs/safety/TRACEABILITY.md', 'test_unique_probe.py', 'src/implementation.c')
+        findings = [finding for finding in self.findings() if finding.check_id == 'C4']
+        self.assertTrue([
+            finding
+            for finding in findings
+            if finding.subject == 'SR-R-01'
+            and finding.severity == 'error'
+            and 'src/implementation.c' in finding.message
+            and 'not an approved evidence class' in finding.message
+        ])
 
     def test_prose_does_not_infer_evidence(self):
         """Words describing a successful test never become a test-file citation."""
@@ -290,8 +428,35 @@ class ConsistencyTests(FixtureRepo):
 
     def test_c6_flags_unknown_function(self):
         """C6 rejects allocations outside the authoritative function decomposition."""
-        self.replace('docs/safety/SAFETY_REQUIREMENTS.md', 'F-R-01 |', 'F-X-99 |')
-        self.assert_check('C6', 'F-X-99')
+        self.replace(
+            'docs/safety/SAFETY_REQUIREMENTS.md',
+            '| **SR-R-01** | Remain fresh with `a|b`. | SG-1 | F-R-01 |',
+            '| **SR-R-01** | Remain fresh with `a|b`. | SG-1 | F-X-99 |',
+        )
+        self.assert_check('C6', 'SRS:F-X-99')
+
+    def test_c6_document_findings_are_independently_baselineable(self):
+        """SRS and trace allocation violations have distinct exact keys suppressible one at a time."""
+        self.replace(
+            'docs/safety/SAFETY_REQUIREMENTS.md',
+            '| **SR-R-01** | Remain fresh with `a|b`. | SG-1 | F-R-01 |',
+            '| **SR-R-01** | Remain fresh with `a|b`. | SG-1 | F-X-99 |',
+        )
+        self.replace('docs/safety/TRACEABILITY.md', '| SR-R-01 | F-R-01 |', '| SR-R-01 | F-X-99 |')
+        findings = [finding for finding in self.findings() if finding.check_id == 'C6']
+        self.assertEqual({finding.subject for finding in findings}, {'SRS:F-X-99', 'TRACE:F-X-99'})
+        suppressed_key = next(finding for finding in findings if finding.subject == 'SRS:F-X-99')
+        active, suppressed = apply_baseline(
+            findings,
+            {
+                ('C6', suppressed_key.subject, suppressed_key.message): {
+                    'reason': 'fixture',
+                    'owner': 'test',
+                }
+            },
+        )
+        self.assertEqual([finding.subject for finding in suppressed], ['SRS:F-X-99'])
+        self.assertEqual([finding.subject for finding in active], ['TRACE:F-X-99'])
 
     def test_c7_flags_unknown_upstream_reference(self):
         """C7 warns when a requirement cites an absent hazard, goal, or DU identifier."""
@@ -362,10 +527,136 @@ class ConsistencyTests(FixtureRepo):
         with self.assertRaises(LintError):
             _load_baseline(path)
 
+    def test_baseline_top_level_must_be_object(self):
+        """A baseline with a list at top level fails as malformed input."""
+        self.assert_invalid_baseline([])
+
+    def test_baseline_findings_must_be_list(self):
+        """A baseline findings member must be a list rather than an iterable scalar or object."""
+        self.assert_invalid_baseline({'findings': {}})
+
+    def test_baseline_entry_must_be_object(self):
+        """Every baseline findings entry must be an object."""
+        self.assert_invalid_baseline({'findings': ['bad']})
+
+    def test_baseline_entry_requires_every_field(self):
+        """Every baseline entry requires all five exact-key and justification fields."""
+        self.assert_invalid_baseline({'findings': [{'check_id': 'C4'}]})
+
+    def test_baseline_entry_fields_must_be_strings(self):
+        """Every required baseline field must be a string."""
+        self.assert_invalid_baseline({'findings': [self.baseline_entry(owner=7)]})
+
+    def test_baseline_entry_fields_must_be_nonblank(self):
+        """Whitespace-only required baseline fields are rejected."""
+        self.assert_invalid_baseline({'findings': [self.baseline_entry(reason='  ')]})
+
+    def assert_invalid_baseline(self, document):
+        path = self.root / 'invalid-baseline.json'
+        path.write_text(json.dumps(document), encoding='utf-8')
+        with self.assertRaises(LintError):
+            _load_baseline(path)
+
+    @staticmethod
+    def baseline_entry(**changes):
+        entry = {
+            'check_id': 'C4',
+            'subject': 'SR-R-01',
+            'finding': 'missing fixture',
+            'reason': 'fixture reason',
+            'owner': 'test',
+        }
+        entry.update(changes)
+        return entry
+
     def test_undocumented_srs_status_is_informational(self):
         """A valid status used by requirements but omitted from conventions is informationally visible."""
         findings = self.findings()
         self.assertTrue([f for f in findings if f.check_id == 'C2' and f.severity == 'info'])
+
+
+class NumericCoverageOwnershipTests(unittest.TestCase):
+    def test_reconciled_real_section_has_no_c10_finding(self):
+        """The reconciled real summary keeps all numeric requirements coverage inside generated regions."""
+        text = (REPO / 'docs/safety/TRACEABILITY.md').read_text(encoding='utf-8')
+        self.assertEqual(check_numeric_coverage_claims(text), ())
+
+    def test_marker_bounded_numeric_claims_are_ignored(self):
+        """Generated coverage regions exclusively own every numeric claim they contain."""
+        text = """## 3. Requirements coverage summary
+<!-- BEGIN GENERATED: safety-lint headline -->
+32 / 40 = 80.0 %; 17 Verified; 14 Partially-verified
+<!-- END GENERATED: safety-lint headline -->
+<!-- BEGIN GENERATED: safety-lint areas -->
+22 / 27 = 81.5 %
+<!-- END GENERATED: safety-lint areas -->
+**Reading:** 56.8 % branch coverage
+"""
+        self.assertEqual(check_numeric_coverage_claims(text), ())
+
+    def test_c10_catches_every_legacy_headline_numeric_pattern(self):
+        """C10 catches cited, strict, all-function, and safety-function legacy totals outside markers."""
+        text = """## 3. Requirements coverage summary
+SRs with ≥1 passing verifying test: 32 / 40
+Strict, fully-verified only: 17 / 40
+Safety functions F-xx traced to ≥1 SR: 22 / 27
+Excluding the two declared-non-safety functions: 22 / 25
+**Reading:** details
+"""
+        message = check_numeric_coverage_claims(text)[0].message
+        for claim in ('32 / 40', '17 / 40', '22 / 27', '22 / 25'):
+            with self.subTest(claim=claim):
+                self.assertIn(claim, message)
+
+    def test_new_outside_claim_changes_exact_message(self):
+        """Any added outside-marker ratio or percentage breaks an exact C10 baseline."""
+        base = """## 3. Requirements coverage summary
+Legacy coverage: 2 / 3 = 66.7 %.
+**Reading:** details
+"""
+        changed = base.replace('**Reading:**', 'Another claim: 75 %.\n**Reading:**')
+        before = check_numeric_coverage_claims(base)[0]
+        after = check_numeric_coverage_claims(changed)[0]
+        self.assertEqual(before.subject, after.subject)
+        self.assertNotEqual(before.message, after.message)
+        self.assertIn('75 %', after.message)
+
+    def test_identifiers_date_and_reconciliation_delta_do_not_trigger(self):
+        """Compact IDs, dates, and reconciliation deltas are not coverage values."""
+        text = """## 3. Requirements coverage summary
+Reconciled 2026-08-07: +4 for SR-M-01/03/05 and DU-1/2/3/4.
+**Reading:** details
+"""
+        self.assertEqual(check_numeric_coverage_claims(text), ())
+
+    def test_structural_percentages_after_reading_do_not_trigger(self):
+        """Structural coverage in Reading is outside C10's requirements-summary scope."""
+        text = """## 3. Requirements coverage summary
+Coverage details are generated above.
+**Reading:** MC-DC 100 %, branch 56.8 %, line ~89 %.
+"""
+        self.assertEqual(check_numeric_coverage_claims(text), ())
+
+    def test_later_sections_are_not_scanned_without_reading_paragraph(self):
+        """Coverage-like numbers in section 4 cannot become section-3 ownership findings."""
+        text = """## 3. Requirements coverage summary
+Coverage details are generated above.
+## 4. Test-gap register
+Historical result: 4 / 5 = 80 %.
+"""
+        self.assertEqual(check_numeric_coverage_claims(text), ())
+
+    def test_clean_pointer_and_reconciliation_section_has_no_finding(self):
+        """Pointers and nonnumeric history may remain outside generated coverage regions."""
+        text = """## 3. Requirements coverage summary
+<!-- BEGIN GENERATED: safety-lint headline -->
+32 / 40 = 80.0 %
+<!-- END GENERATED: safety-lint headline -->
+See the generated headline and area table. Reconciled 2026-08-07: +4 for
+SR-M-01/03/05 and DU-1/2/3/4 after evidence review.
+**Reading:** structural coverage is discussed here at 100 %.
+"""
+        self.assertEqual(check_numeric_coverage_claims(text), ())
 
 
 class CoverageRenderCliTests(FixtureRepo):
@@ -393,6 +684,14 @@ class CoverageRenderCliTests(FixtureRepo):
         proc = self.run_cli('--check')
         self.assertEqual(proc.returncode, 1)
 
+    def test_stale_check_names_exact_write_remedy(self):
+        """Stale check output gives the exact command that refreshes generated regions."""
+        proc = self.run_cli('--check')
+        self.assertIn(
+            'docs/safety/TRACEABILITY.md: generated regions are stale; run python3 -m tools.safety_lint --write',
+            proc.stdout,
+        )
+
     def test_render_does_not_touch_prose_outside_markers(self):
         """Rendering preserves hand-authored Reading prose byte-for-byte."""
         path = self.root / 'docs/safety/TRACEABILITY.md'
@@ -402,18 +701,31 @@ class CoverageRenderCliTests(FixtureRepo):
         )[1]
         self.assertEqual(after, before)
 
-    def test_mixed_numeric_prose_is_checked_not_generated(self):
-        """A stale number outside generated markers remains a check failure."""
-        result = analyze(REPO)
+    def test_renderer_uses_unicode_greater_than_or_equal(self):
+        """The generated area heading preserves the document's Unicode comparison symbol."""
+        text = (self.root / 'docs/safety/TRACEABILITY.md').read_text(encoding='utf-8')
+        rendered = render_traceability(text, compute_coverage(analyze(self.root)))
+        self.assertIn('≥1 cited test %', rendered)
+        self.assertNotIn('>=', rendered)
+
+    def test_generated_headline_reports_all_and_safety_function_totals(self):
+        """The generated headline labels both function denominators and the non-safety exclusion."""
+        rendered = render_traceability(
+            (self.root / 'docs/safety/TRACEABILITY.md').read_text(encoding='utf-8'),
+            compute_coverage(analyze(self.root)),
+        )
+        self.assertIn('Functions traced to at least one SR: 1 / 1', rendered)
+        self.assertIn('excluding declared non-safety functions: 1 / 1', rendered)
+
+    def test_new_numeric_prose_outside_markers_is_a_c10_failure(self):
+        """A newly introduced numeric claim outside generated markers remains a check failure."""
         text = (REPO / 'docs/safety/TRACEABILITY.md').read_text(encoding='utf-8')
-        stale = text.replace('22 / 27 = 81.5 %', '21 / 27 = 77.8 %')
-        self.assertTrue(check_summary_prose(stale, compute_coverage(result)))
+        stale = text.replace('**Reading:**', 'Legacy claim: 21 / 27 = 77.8 %.\n\n**Reading:**')
+        self.assertTrue(check_numeric_coverage_claims(stale))
 
     def test_cli_exit_code_zero_on_clean_tree(self):
-        """The real repository passes with its checked-in baseline and current generated regions."""
-        proc = subprocess.run(
-            [sys.executable, '-m', 'tools.safety_lint'], cwd=REPO, capture_output=True, text=True, check=False
-        )
+        """A repository with no active or stale findings returns the clean exit code."""
+        proc = self.run_cli()
         self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
 
     def test_cli_exit_code_one_on_injected_error(self):
@@ -447,12 +759,24 @@ class CoverageRenderCliTests(FixtureRepo):
         (self.root / 'docs/safety/SAFETY_REQUIREMENTS.md').unlink()
         self.assertEqual(self.run_cli().returncode, 2)
 
+    def test_cli_exit_code_two_on_malformed_baseline_without_traceback(self):
+        """Malformed baseline shapes return cannot-run without leaking an AttributeError traceback."""
+        (self.root / 'docs/safety/lint-baseline.json').write_text('{"findings":[7]}\n', encoding='utf-8')
+        proc = self.run_cli()
+        self.assertEqual(proc.returncode, 2)
+        self.assertNotIn('AttributeError', proc.stderr)
+
     def test_workflow_has_no_path_filters(self):
         """CI runs on every pull request and every main push without path filtering."""
         text = (REPO / '.github/workflows/safety-lint.yml').read_text(encoding='utf-8')
         self.assertNotIn('paths:', text)
         self.assertIn('pull_request:', text)
         self.assertIn('branches: [main]', text)
+
+    def test_workflow_declares_contents_read_as_sole_top_level_permission(self):
+        """Safety lint runs with only repository-content read permission at workflow scope."""
+        text = (REPO / '.github/workflows/safety-lint.yml').read_text(encoding='utf-8')
+        self.assertIn('\npermissions:\n  contents: read\n\njobs:', text)
 
     def run_cli(self, *args):
         return subprocess.run(

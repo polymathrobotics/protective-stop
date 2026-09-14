@@ -10,6 +10,20 @@
       "owner": "raj"
     },
     {
+      "check_id": "C4",
+      "subject": "SR-R-01",
+      "finding": "estop_verdict.c: firmware/main/estop_verdict.c: path is not an approved evidence class (test artifact, SR-naming docs report, or scripts/check_*.sh guard)",
+      "reason": "TRACEABILITY.md cites estop_verdict.c as structural-coverage context, but production source is not verification evidence. SR-R-01 retains independently accepted EV test evidence; the hand-authored citation needs human disposition.",
+      "owner": "raj"
+    },
+    {
+      "check_id": "C4",
+      "subject": "SR-R-03",
+      "finding": "firmware-build.yml: .github/workflows/firmware-build.yml: path is not an approved evidence class (test artifact, SR-naming docs report, or scripts/check_*.sh guard)",
+      "reason": "TRACEABILITY.md cites firmware-build.yml as CI wiring context, but a workflow is not verification evidence. SR-R-03 retains accepted scripts/check_estop_diversity.sh evidence; the hand-authored workflow citation needs human disposition.",
+      "owner": "raj"
+    },
+    {
       "check_id": "C8",
       "subject": "F-H-04",
       "finding": "function has no allocated safety requirement",

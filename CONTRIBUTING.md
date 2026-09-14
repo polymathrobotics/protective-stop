@@ -107,6 +107,15 @@ opens and assesses the record, and then starts review.
 - **No changes to `pstop_c/`** (contribute upstream instead).
 - **Clear commits.** Explain the design intent, not just the diff.
   Reference the relevant `docs/` design note where one applies.
+- **Keep safety traceability lint clean.** The linter checks requirement and
+  function mappings, statuses, evidence citations, and ownership of numeric
+  coverage claims. Generated coverage becomes stale whenever document
+  citations or statuses change; refresh it with
+  `python3 -m tools.safety_lint --write`. This command recounts citations and
+  statuses from the documents; it does not execute tests or establish that
+  cited tests pass. Write mode refuses to modify the document while
+  unbaselined errors exist. Automatic pre-commit rewriting is deliberately not
+  configured because coverage drops require human review.
 
 Contributions are licensed according to where they land: software and firmware
 under Apache-2.0, hardware design files under CERN-OHL-P-2.0, and documentation

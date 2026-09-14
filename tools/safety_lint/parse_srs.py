@@ -61,20 +61,23 @@ def normalize_status(cell, vocabulary, path, line):
     raise LintError(f'{path}:{line}: unknown status cell {cell!r}')
 
 
-def expand_allocations(cell):
-    """Expand F-X-01..03 and F-X-01/02 notation into complete IDs."""
+def expand_allocations(cell, path='<allocation>', line=1):
+    """Expand compact ranges and arbitrary slash chains, rejecting truncation."""
     result = []
-    occupied = []
-    pattern = re.compile(r'F-([A-Z])-([0-9]{2})(?:\.\.([0-9]{2})|/([0-9]{2}))?')
+    pattern = re.compile(r'F-([A-Z])-([0-9]{2})(?:\.\.([0-9]{2})|((?:/[0-9]{2})+))?')
     for match in pattern.finditer(cell):
-        area, first, end, alternate = match.groups()
-        occupied.append(match.span())
+        area, first, end, alternates = match.groups()
+        trailing = cell[match.end() :]
+        if trailing.startswith(('/', '.')) and not trailing.startswith('/F-'):
+            literal = re.match(r'[^\s,|)]+', cell[match.start() :]).group()
+            raise LintError(f'{path}:{line}: malformed allocation {literal!r}')
         if end:
+            if int(end) < int(first):
+                raise LintError(f'{path}:{line}: descending allocation range F-{area}-{first}..{end}')
             result.extend(f'F-{area}-{number:02d}' for number in range(int(first), int(end) + 1))
         else:
             result.append(f'F-{area}-{first}')
-            if alternate:
-                result.append(f'F-{area}-{alternate}')
+            result.extend(f'F-{area}-{number}' for number in (alternates or '').lstrip('/').split('/') if number)
     return tuple(dict.fromkeys(result))
 
 
@@ -117,7 +120,7 @@ def parse_srs(path):
                     int(match.group(2)),
                     cells[columns['Requirement (shall)']],
                     derived,
-                    expand_allocations(cells[columns['Allocated to']]),
+                    expand_allocations(cells[columns['Allocated to']], path, line_number),
                     cells[columns['Integrity']],
                     verify,
                     status,

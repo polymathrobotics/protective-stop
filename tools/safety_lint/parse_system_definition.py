@@ -26,6 +26,11 @@ def parse_system_definition(path):
         cells = split_row(line)
         if len(cells) >= 2 and re.fullmatch(r'F-[A-Z]-\d{2}', cells[0].strip('*')):
             function_id = cells[0].strip('*')
+            if function_id in functions:
+                raise LintError(
+                    f'{path}:{index + 1}: duplicate function ID {function_id}; '
+                    f'lines {functions[function_id].source_line} and {index + 1}'
+                )
             functions[function_id] = Function(function_id, cells[1], index + 1)
     if not functions:
         raise LintError(f'{path}: no functions found in section 4')
