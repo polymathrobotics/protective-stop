@@ -1444,6 +1444,9 @@ static esp_err_t handler_ota(httpd_req_t * req)
       ESP_LOGI(
         TAG, "OTA: %3d%%  (%d / %d bytes, %d KB remaining)", pct, total_written, req->content_len, remaining / 1024);
     }
+    /* Block one tick so fast uploads cannot starve the idle watchdog tasks.
+     * taskYIELD() does not schedule lower-priority tasks. */
+    vTaskDelay(1);
   }
 
   free(buf);
