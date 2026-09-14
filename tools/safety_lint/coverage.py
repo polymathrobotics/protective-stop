@@ -14,6 +14,7 @@ class Coverage:
     areas: dict[str, dict[str, int]]
     functions_total: int
     functions_traced: int
+    safety_functions_traced: int
     safety_functions_total: int
 
 
@@ -34,6 +35,11 @@ def compute_coverage(analysis):
     non_safety = sum(
         entry.declared_non_safety for entry in analysis.reverse.values() if entry.function_id in analysis.functions
     )
+    safety_traced = sum(
+        bool(entry.sr_ids)
+        for entry in analysis.reverse.values()
+        if entry.function_id in analysis.functions and not entry.declared_non_safety
+    )
     return Coverage(
         len(analysis.trace),
         sum(bool(row.test_refs) for row in analysis.trace),
@@ -41,5 +47,6 @@ def compute_coverage(analysis):
         areas,
         len(analysis.functions),
         traced,
+        safety_traced,
         len(analysis.functions) - non_safety,
     )

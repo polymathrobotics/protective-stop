@@ -68,7 +68,12 @@ def expand_allocations(cell, path='<allocation>', line=1):
     for match in pattern.finditer(cell):
         area, first, end, alternates = match.groups()
         trailing = cell[match.end() :]
-        if trailing.startswith(('/', '.')) and not trailing.startswith('/F-'):
+        malformed = (
+            (trailing.startswith('/') and not trailing.startswith('/F-'))
+            or trailing.startswith('..')
+            or (trailing and trailing[0].isalnum())
+        )
+        if malformed:
             literal = re.match(r'[^\s,|)]+', cell[match.start() :]).group()
             raise LintError(f'{path}:{line}: malformed allocation {literal!r}')
         if end:

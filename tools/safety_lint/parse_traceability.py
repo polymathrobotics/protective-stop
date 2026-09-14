@@ -65,7 +65,11 @@ def _test_refs(root, sr_id, cell, line, index):
         if reason is None:
             refs.append(path)
             return
-        kind = 'report-does-not-name-sr' if reason == 'evidence report does not name cited SR' else 'rejected-evidence'
+        kind = (
+            'report-does-not-name-sr'
+            if reason.startswith('evidence report does not name cited SR')
+            else 'rejected-evidence'
+        )
         issues.append(ResolutionIssue(kind, sr_id, literal, f'{path}: {reason}', line, 'test'))
 
     for match in re.finditer(r'\bHIL(10|20|30)((?:/(?:10|20|30))*)', evidence_cell):

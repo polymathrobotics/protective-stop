@@ -52,6 +52,7 @@ def _coverage_dict(coverage):
         'functions': {
             'traced': coverage.functions_traced,
             'total': coverage.functions_total,
+            'safety_traced': coverage.safety_functions_traced,
             'safety_total': coverage.safety_functions_total,
         },
     }
@@ -107,7 +108,7 @@ def main(argv=None):
             for finding in suppressed:
                 print(f'{finding.file}:{finding.line}: [{finding.check_id}] {finding.subject} — {finding.message}')
             print(
-                f'Coverage: cited tests {coverage.cited_tests}/{coverage.total}; strict Verified {coverage.verified}/{coverage.total}; functions {coverage.functions_traced}/{coverage.functions_total} ({coverage.functions_traced}/{coverage.safety_functions_total} excluding declared non-safety)'
+                f'Coverage: cited tests {coverage.cited_tests}/{coverage.total}; strict Verified {coverage.verified}/{coverage.total}; functions {coverage.functions_traced}/{coverage.functions_total} ({coverage.safety_functions_traced}/{coverage.safety_functions_total} excluding declared non-safety)'
             )
             print('Citation limitation: resolution does not verify test execution or passing state.')
             for area, data in coverage.areas.items():
