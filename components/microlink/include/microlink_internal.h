@@ -19,6 +19,7 @@
 #pragma once
 
 #include "esp_heap_caps.h"
+#include "ml_relay_refetch.h"
 // clang-format off
 #include "freertos/FreeRTOS.h"  // must precede other freertos/ headers
 #include "freertos/event_groups.h"
@@ -384,9 +385,10 @@ extern "C"
  * the cost is ~40 full control-plane reconnects/h, each a 5-7 s blackout of
  * the coord session plus a full netmap re-ingest (PSTOP06 bench, 2026-09-04:
  * 1822 reconnects in 46 h, 95 % from this path). So the interval doubles per
- * unsuccessful re-fetch up to this cap, and resets the moment any safety
- * peer regains direct. 90,180,360,720,1440,1800,... = still four fast rounds
- * in the first 10 min for the transient case, then ~2/h. */
+ * unsuccessful re-fetch up to this cap, PER PEER (ml_relay_refetch.h), and
+ * resets on that peer's own direct-regain edge; ML_RELAY_REFETCH_MIN_MS also
+ * floors the spacing between re-fetches for ANY peer. Gaps after successive
+ * re-fetches: 180, 360, 720, 1440, 1800, 1800 s. */
 #define ML_RELAY_REFETCH_MAX_MS 1800000
 
 /* Bench regression of the second cut (2026-08-09, all 3 devices on the fix
@@ -677,6 +679,11 @@ extern "C"
     /* Disco-reset v2: per-peer rate limit (was a single global stamp that let
      * two stuck peers starve each other). 0 = never fired. */
     uint64_t disco_reset_next_ms;
+
+    /* Relay-stuck coord re-fetch schedule, PER PEER (ml_relay_refetch.h): a
+     * direct regain on another safety peer must not reset this peer's backoff.
+     * Reset on this peer's own direct-regain edge. */
+    ml_relay_refetch_t relay_refetch;
 
     /* Chip<->chip CMM chain breaker (see ML_DISCO_CMM_MIN_INTERVAL_MS): ms of
      * the last CallMeMaybe SENT to this peer. 0 = never sent. */
@@ -1058,7 +1065,7 @@ extern "C"
   int ml_derp_get_stall_events(ml_derp_stall_event_t * out, int max);
   /* Periodic idempotent coord re-registrations executed. */
   uint32_t ml_coord_get_reregisters(void);
-  void ml_coord_get_disconnect_causes(uint32_t out[6]); /* DIAG, see ml_coord.c */
+  void ml_coord_get_disconnect_causes(uint32_t out[7]); /* DIAG, see ml_coord.c */
   /* Stage-0 gauges: out[0]=worst single DERP-task iteration ms, out[1]=worst
    * gap between consecutive rx-poll passes ms (both since boot). */
   void ml_derp_get_iter_diag(uint32_t out[2]);

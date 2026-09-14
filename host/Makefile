@@ -58,12 +58,22 @@ test_crypto_kat: test_crypto_kat.c $(CRYPTO_SRCS)
 test_demote_veto: test_demote_veto.c $(MICROLINK)/include/ml_demote_verdict.h
 	$(CC) $(CFLAGS) -I$(MICROLINK)/include -o $@ test_demote_veto.c
 
+# Per-peer relay-stuck coord re-fetch schedule (backoff ladder, floor, reset).
+test_relay_refetch: test_relay_refetch.c $(MICROLINK)/include/ml_relay_refetch.h
+	$(CC) $(CFLAGS) -I$(MICROLINK)/include -o $@ test_relay_refetch.c
+
+# Coord stream recv() outcome classification (would-block / EOF / alignment).
+test_recv_outcome: test_recv_outcome.c $(MICROLINK)/include/ml_recv_outcome.h
+	$(CC) $(CFLAGS) -I$(MICROLINK)/include -o $@ test_recv_outcome.c
+
 .PHONY: test clean
-test: test_clock_guard test_crypto_kat test_demote_veto test_aux_channel
+test: test_clock_guard test_crypto_kat test_demote_veto test_relay_refetch test_recv_outcome test_aux_channel
 	./test_clock_guard
 	./test_crypto_kat
 	./test_demote_veto
+	./test_relay_refetch
+	./test_recv_outcome
 	./test_aux_channel
 
 clean:
-	rm -f machine_app_runner test_clock_guard test_crypto_kat test_demote_veto test_aux_channel
+	rm -f machine_app_runner test_clock_guard test_crypto_kat test_demote_veto test_relay_refetch test_recv_outcome test_aux_channel
