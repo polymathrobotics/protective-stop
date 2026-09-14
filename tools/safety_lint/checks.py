@@ -4,6 +4,7 @@
 
 import re
 from collections import Counter, defaultdict
+from pathlib import Path
 
 from .model import Finding
 
@@ -28,6 +29,33 @@ _COMPACT_SAFETY_ID = re.compile(r'\b(?:SR-[A-Z]+-\d+(?:/\d+)*|DU-\d+(?:/\d+)*)\b
 
 def _finding(check, severity, subject, message, file, line=1):
     return Finding(check, severity, subject, message, file, line)
+
+
+def evidence_rejection(root, path, sr_id):
+    """Return why an existing path is not one of the three approved evidence classes."""
+    candidate = Path(path)
+    parts = tuple(part.lower() for part in candidate.parts)
+    stem = candidate.stem.lower()
+
+    if candidate.name.lower() == 'readme.md':
+        return 'README files are not approved evidence reports'
+
+    # 1. Test sources are identified by a test/requirements directory or source naming.
+    if {'test', 'tests', 'requirements'} & set(parts) or stem.startswith('test_') or stem.endswith('_test'):
+        return None
+
+    # 2. A docs Markdown report must not be a README and must name this requirement.
+    if parts and parts[0] == 'docs' and candidate.suffix.lower() == '.md':
+        content = (Path(root) / candidate).read_text(encoding='utf-8', errors='replace')
+        if sr_id not in content:
+            return 'evidence report does not name cited SR'
+        return None
+
+    # 3. Repository guard scripts are scripts/check_*.sh only.
+    if len(parts) == 2 and parts[0] == 'scripts' and candidate.name.startswith('check_') and candidate.suffix == '.sh':
+        return None
+
+    return 'path is not an approved evidence class (test artifact, SR-naming docs report, or scripts/check_*.sh guard)'
 
 
 def run_checks(analysis):
@@ -138,7 +166,7 @@ def run_checks(analysis):
                     _finding(
                         'C6',
                         'error',
-                        function_id,
+                        f'SRS:{function_id}',
                         f'allocated by {row.sr_id} but absent from system definition',
                         'docs/safety/SAFETY_REQUIREMENTS.md',
                         row.source_line,
@@ -151,7 +179,7 @@ def run_checks(analysis):
                     _finding(
                         'C6',
                         'error',
-                        function_id,
+                        f'TRACE:{function_id}',
                         f'allocated by {row.sr_id} but absent from system definition',
                         'docs/safety/TRACEABILITY.md',
                         row.source_line,
@@ -224,45 +252,6 @@ def run_checks(analysis):
                     f'matrix allocation {sorted(row.allocated_to)} != SRS allocation {sorted(srs_by_id[row.sr_id].allocated_to)}',
                     'docs/safety/TRACEABILITY.md',
                     row.source_line,
-                )
-            )
-    return tuple(findings)
-
-
-def check_summary_prose(text, coverage):
-    """Check numeric claims embedded in hand-authored prose without rewriting it."""
-    expected = (
-        (
-            r'SRs with ≥1 passing verifying test:\s*(\d+)\s*/\s*(\d+)',
-            (coverage.cited_tests, coverage.total),
-            'passing-test headline',
-        ),
-        (r'Strict, fully-verified only:\s*(\d+)\s*/\s*(\d+)', (coverage.verified, coverage.total), 'strict headline'),
-        (
-            r'Safety functions F-xx traced to ≥1 SR:\s*(\d+)\s*/\s*(\d+)',
-            (coverage.functions_traced, coverage.functions_total),
-            'function headline',
-        ),
-        (
-            r'Excluding the two declared-non-safety functions:\s*(\d+)\s*/\s*(\d+)',
-            (coverage.functions_traced, coverage.safety_functions_total),
-            'safety-function headline',
-        ),
-    )
-    findings = []
-    for pattern, wanted, subject in expected:
-        match = re.search(pattern, text, re.IGNORECASE)
-        if match is None:
-            continue
-        actual = tuple(map(int, match.groups()))
-        if actual != wanted:
-            findings.append(
-                _finding(
-                    'SUMMARY',
-                    'error',
-                    subject,
-                    f'committed prose value {actual} != citation-derived {wanted}; agreement does not verify execution',
-                    'docs/safety/TRACEABILITY.md',
                 )
             )
     return tuple(findings)

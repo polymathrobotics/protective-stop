@@ -7,7 +7,7 @@ import re
 from collections import defaultdict
 from pathlib import Path
 
-from .checks import TRACE_STATUSES
+from .checks import TRACE_STATUSES, evidence_rejection
 from .model import LintError, ResolutionIssue, ReverseEntry, TraceRow
 from .parse_srs import SR_RE, expand_allocations, normalize_status, split_row
 
@@ -60,13 +60,21 @@ def _test_refs(root, sr_id, cell, line, index):
         )
     )
 
+    def accept(path, literal):
+        reason = evidence_rejection(root, path, sr_id)
+        if reason is None:
+            refs.append(path)
+            return
+        kind = 'report-does-not-name-sr' if reason == 'evidence report does not name cited SR' else 'rejected-evidence'
+        issues.append(ResolutionIssue(kind, sr_id, literal, f'{path}: {reason}', line, 'test'))
+
     for match in re.finditer(r'\bHIL(10|20|30)((?:/(?:10|20|30))*)', evidence_cell):
         numbers = (match.group(1), *match.group(2).lstrip('/').split('/'))
         for number in filter(None, numbers):
             token = f'HIL{number}'
             path = SHORTHAND[token]
             if path in all_paths:
-                refs.append(path)
+                accept(path, token)
             else:
                 issues.append(
                     ResolutionIssue(
@@ -78,7 +86,7 @@ def _test_refs(root, sr_id, cell, line, index):
             continue
         if re.search(rf'\b{token}(?:\[[A-Z/]+\])?\b', evidence_cell):
             if path in all_paths:
-                refs.append(path)
+                accept(path, token)
             else:
                 issues.append(
                     ResolutionIssue(
@@ -89,7 +97,7 @@ def _test_refs(root, sr_id, cell, line, index):
         for number in match.group(1).split('/'):
             path = f'pstop_c/pstop/test/src/pstop/requirements/req_{number}_test.c'
             if path in all_paths:
-                refs.append(path)
+                accept(path, f'REQ {number}')
             else:
                 issues.append(
                     ResolutionIssue(
@@ -102,7 +110,7 @@ def _test_refs(root, sr_id, cell, line, index):
         r'(?<![\w/`])((?:test_[A-Za-z0-9_]+|[A-Za-z0-9_]+_test)(?:\.(?:c|cc|cpp|py))?)(?![\w/`])', evidence_cell
     )
     literals += re.findall(
-        r'(?<![`\w])((?:docs|tools|test|tests|firmware|host|machn|ros2)/[A-Za-z0-9_./-]+\.(?:c|cc|cpp|py|md))(?![\w])',
+        r'(?<![`\w])((?:\.?[A-Za-z0-9_-]+/)+[A-Za-z0-9_./-]+\.(?:c|cc|cpp|py|md|yaml|yml|sh))(?![\w])',
         evidence_cell,
     )
     literals += [token for token in re.findall(r'\btest_[A-Za-z0-9_]+\b', evidence_cell) if token in by_stem]
@@ -119,26 +127,9 @@ def _test_refs(root, sr_id, cell, line, index):
             candidates = by_name.get(Path(literal).name, [])
         else:
             candidates = by_stem.get(literal, [])
-        if not explicit:
-            candidates = [path for path in candidates if _is_test_artifact(path)]
         if len(candidates) == 1:
             path = candidates[0]
-            if path.endswith('.md'):
-                if path.startswith('pstop_c/'):
-                    continue
-                if sr_id not in (root / path).read_text(encoding='utf-8', errors='replace'):
-                    issues.append(
-                        ResolutionIssue(
-                            'report-does-not-name-sr',
-                            sr_id,
-                            literal,
-                            'evidence report does not name cited SR',
-                            line,
-                            'test',
-                        )
-                    )
-                    continue
-            refs.append(path)
+            accept(path, literal)
         elif len(candidates) > 1:
             issues.append(
                 ResolutionIssue(
@@ -152,22 +143,12 @@ def _test_refs(root, sr_id, cell, line, index):
     return tuple(dict.fromkeys(refs)), tuple(issues)
 
 
-def _is_test_artifact(path):
-    """Return whether a bare candidate is independently recognizable as test evidence."""
-    candidate = Path(path)
-    lower_parts = {part.lower() for part in candidate.parts}
-    stem = candidate.stem.lower()
-    if candidate.suffix.lower() == '.md':
-        return True
-    return stem.startswith('test_') or stem.endswith('_test') or bool(lower_parts & {'test', 'tests', 'requirements'})
-
-
 def _looks_like_test_citation(literal):
     without_line = re.sub(r':\d+(?:-\d+)?$', '', literal)
     return (
         ('/' in without_line and not without_line.startswith('/') and '.' in Path(without_line).name)
         or without_line.startswith('test_')
-        or without_line.endswith(('.c', '.cc', '.cpp', '.py', '.md'))
+        or without_line.endswith(('.c', '.cc', '.cpp', '.py', '.md', '.yaml', '.yml', '.sh'))
     )
 
 
@@ -255,7 +236,7 @@ def parse_traceability(root):
                 rows.append(
                     TraceRow(
                         sr_id,
-                        expand_allocations(cells[1]),
+                        expand_allocations(cells[1], path, line_number),
                         code_refs,
                         test_refs,
                         tuple(part.strip() for part in cells[-2].split('+') if part.strip()),
@@ -270,6 +251,11 @@ def parse_traceability(root):
             else:
                 function_id = cells[0].strip('*')
                 sr_cell = cells[2]
+                if function_id in reverse:
+                    raise LintError(
+                        f'{path}:{line_number}: duplicate reverse-map function ID {function_id}; '
+                        f'lines {reverse[function_id].source_line} and {line_number}'
+                    )
                 reverse[function_id] = ReverseEntry(
                     function_id,
                     cells[1],

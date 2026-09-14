@@ -132,6 +132,8 @@ Test-file shorthand:
 <!-- BEGIN GENERATED: safety-lint headline -->
 - **SRs with at least one cited verifying test: 32 / 40 = 80.0 %**‡
 - **Strict, fully-verified only: 17 / 40 = 42.5 %**
+- **Functions traced to at least one SR: 22 / 27 = 81.5 %**
+- **Functions traced excluding declared non-safety functions: 22 / 25 = 88.0 %**
 
 ‡ Citation resolution, not test execution or passing state, is checked by the linter.
 <!-- END GENERATED: safety-lint headline -->
