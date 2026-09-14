@@ -378,23 +378,10 @@ class ConsistencyTests(FixtureRepo):
 
 
 class NumericCoverageOwnershipTests(unittest.TestCase):
-    def test_current_section_emits_one_exact_c10_finding(self):
-        """Today's outside-marker claims aggregate into one exact baseline discriminator."""
+    def test_reconciled_real_section_has_no_c10_finding(self):
+        """The reconciled real summary keeps all numeric requirements coverage inside generated regions."""
         text = (REPO / 'docs/safety/TRACEABILITY.md').read_text(encoding='utf-8')
-        findings = check_numeric_coverage_claims(text)
-        self.assertEqual(len(findings), 1)
-        self.assertEqual(
-            (findings[0].check_id, findings[0].severity, findings[0].subject, findings[0].message),
-            (
-                'C10',
-                'error',
-                'section 3 outside generated regions',
-                'numeric coverage claims outside generated regions: '
-                '[32 / 40 = 80.0 %, 17 Verified, 14 Partially-verified, '
-                '1 Residual-with-test, 7 Unverified-gap SRs, 17 / 40 = 42.5 %, '
-                '14 Partials, 22 / 27 = 81.5 %, 22 / 25 = 88.0 %, 5 / 6 = 83.3 %]',
-            ),
-        )
+        self.assertEqual(check_numeric_coverage_claims(text), ())
 
     def test_marker_bounded_numeric_claims_are_ignored(self):
         """Generated coverage regions exclusively own every numeric claim they contain."""
@@ -509,12 +496,11 @@ class CoverageRenderCliTests(FixtureRepo):
         self.assertIn('≥1 cited test %', rendered)
         self.assertNotIn('>=', rendered)
 
-    def test_mixed_numeric_prose_is_checked_not_generated(self):
-        """A stale number outside generated markers remains a check failure."""
-        result = analyze(REPO)
+    def test_new_numeric_prose_outside_markers_is_a_c10_failure(self):
+        """A newly introduced numeric claim outside generated markers remains a check failure."""
         text = (REPO / 'docs/safety/TRACEABILITY.md').read_text(encoding='utf-8')
-        stale = text.replace('22 / 27 = 81.5 %', '21 / 27 = 77.8 %')
-        self.assertTrue(check_summary_prose(stale, compute_coverage(result)))
+        stale = text.replace('**Reading:**', 'Legacy claim: 21 / 27 = 77.8 %.\n\n**Reading:**')
+        self.assertTrue(check_numeric_coverage_claims(stale))
 
     def test_missing_legacy_summary_claims_do_not_trigger_summary(self):
         """Removing superseded hand-authored headlines does not create SUMMARY errors."""

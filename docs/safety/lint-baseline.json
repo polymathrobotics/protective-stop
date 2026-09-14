@@ -3,13 +3,6 @@
   "note": "Pre-existing findings accepted at linter introduction. Each entry needs an exact finding message, owner, and reason. Removing a fixed entry is required; CI fails on a stale entry.",
   "findings": [
     {
-      "check_id": "C10",
-      "subject": "section 3 outside generated regions",
-      "finding": "numeric coverage claims outside generated regions: [32 / 40 = 80.0 %, 17 Verified, 14 Partially-verified, 1 Residual-with-test, 7 Unverified-gap SRs, 17 / 40 = 42.5 %, 14 Partials, 22 / 27 = 81.5 %, 22 / 25 = 88.0 %, 5 / 6 = 83.3 %]",
-      "reason": "TRACEABILITY.md section 3 retains superseded numeric headline and footnote claims outside generated regions. Owner-approved Class C reconciliation is pending; remove this baseline entry when that edit lands.",
-      "owner": "raj"
-    },
-    {
       "check_id": "C4",
       "subject": "SR-M-01",
       "finding": "test_timing_floors: cited evidence file does not exist",
