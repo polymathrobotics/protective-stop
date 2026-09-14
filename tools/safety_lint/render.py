@@ -32,8 +32,8 @@ def render_traceability(text, coverage):
         f'{_percent(coverage.verified, coverage.total)}**\n'
         f'- **Functions traced to at least one SR: {coverage.functions_traced} / {coverage.functions_total} = '
         f'{_percent(coverage.functions_traced, coverage.functions_total)}**\n'
-        f'- **Functions traced excluding declared non-safety functions: {coverage.functions_traced} / '
-        f'{coverage.safety_functions_total} = {_percent(coverage.functions_traced, coverage.safety_functions_total)}**\n'
+        f'- **Functions traced excluding declared non-safety functions: {coverage.safety_functions_traced} / '
+        f'{coverage.safety_functions_total} = {_percent(coverage.safety_functions_traced, coverage.safety_functions_total)}**\n'
         '\n'
         '‡ Citation resolution, not test execution or passing state, is checked by the linter.'
     )

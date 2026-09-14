@@ -9,14 +9,16 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
+from unittest import mock
 
 REPO = Path(__file__).resolve().parents[2]
 FIXTURE = Path(__file__).with_name('fixtures') / 'repository'
 
 sys.path.insert(0, str(REPO))
 
-from tools.safety_lint.__main__ import _load_baseline  # noqa: E402
+from tools.safety_lint.__main__ import _coverage_dict, _load_baseline, main  # noqa: E402
 from tools.safety_lint.checks import (  # noqa: E402
     SRS_STATUSES,
     TRACE_STATUSES,
@@ -25,7 +27,7 @@ from tools.safety_lint.checks import (  # noqa: E402
     run_checks,
 )
 from tools.safety_lint.coverage import compute_coverage  # noqa: E402
-from tools.safety_lint.model import LintError  # noqa: E402
+from tools.safety_lint.model import Function, LintError, ReverseEntry  # noqa: E402
 from tools.safety_lint.parse_srs import expand_allocations, parse_srs, split_row  # noqa: E402
 from tools.safety_lint.parse_system_definition import parse_system_definition  # noqa: E402
 from tools.safety_lint.parse_traceability import parse_traceability  # noqa: E402
@@ -88,6 +90,10 @@ class ParserTests(FixtureRepo):
         """Compact slash allocations expand to complete function IDs."""
         self.assertEqual(expand_allocations('F-M-03/04'), ('F-M-03', 'F-M-04'))
 
+    def test_allocation_tokens_allow_ordinary_trailing_punctuation(self):
+        """Sentence punctuation after a complete allocation is not a malformed continuation."""
+        self.assertEqual(expand_allocations('F-M-03/04. F-R-01)'), ('F-M-03', 'F-M-04', 'F-R-01'))
+
     def test_allocated_to_arbitrary_slash_chain_expansion(self):
         """Every member of an arbitrary compact slash chain becomes a complete function ID."""
         self.assertEqual(
@@ -105,9 +111,35 @@ class ParserTests(FixtureRepo):
         with self.assertRaisesRegex(LintError, r'doc.md:19:.*F-R-01/02/XX'):
             expand_allocations('F-R-01/02/XX', 'doc.md', 19)
 
+    def test_every_malformed_allocation_continuation_fails_in_helper(self):
+        """Malformed slash, range, and numeric continuations can never leave a partial allocation."""
+        for literal in ('F-R-01/XX', 'F-R-01..', 'F-R-01/2', 'F-R-01/003'):
+            with self.subTest(literal=literal), self.assertRaisesRegex(LintError, 'malformed allocation'):
+                expand_allocations(literal, 'doc.md', 21)
+
+    def test_srs_and_trace_rows_allow_allocation_punctuation(self):
+        """Both authoritative allocation tables accept punctuation after complete function IDs."""
+        self.replace('docs/safety/SAFETY_REQUIREMENTS.md', '| F-R-01 | SIL 3 |', '| F-R-01) | SIL 3 |')
+        self.replace('docs/safety/TRACEABILITY.md', '| SR-R-01 | F-R-01 |', '| SR-R-01 | F-R-01. |')
+        srs = parse_srs(self.root / 'docs/safety/SAFETY_REQUIREMENTS.md')
+        trace, _, _ = parse_traceability(self.root)
+        self.assertEqual((srs[1].allocated_to, trace[1].allocated_to), (('F-R-01',), ('F-R-01',)))
+
+    def test_srs_parser_rejects_partial_range_in_real_row(self):
+        """A malformed continuation in an SRS table row fails instead of retaining its valid prefix."""
+        self.replace('docs/safety/SAFETY_REQUIREMENTS.md', '| F-R-01 | SIL 3 |', '| F-R-01.. | SIL 3 |')
+        with self.assertRaisesRegex(LintError, r'SAFETY_REQUIREMENTS\.md:14: malformed allocation'):
+            parse_srs(self.root / 'docs/safety/SAFETY_REQUIREMENTS.md')
+
     def test_trace_parser_reports_malformed_allocation_row_location(self):
         """A truncated trace allocation fails at the exact matrix row rather than yielding partial data."""
         self.replace('docs/safety/TRACEABILITY.md', '| SR-R-01 | F-R-01 |', '| SR-R-01 | F-R-01/02/XX |')
+        with self.assertRaisesRegex(LintError, r'TRACEABILITY\.md:11: malformed allocation'):
+            parse_traceability(self.root)
+
+    def test_trace_parser_rejects_malformed_numeric_member_in_real_row(self):
+        """A malformed numeric member in a matrix row fails instead of retaining its valid prefix."""
+        self.replace('docs/safety/TRACEABILITY.md', '| SR-R-01 | F-R-01 |', '| SR-R-01 | F-R-01/2 |')
         with self.assertRaisesRegex(LintError, r'TRACEABILITY\.md:11: malformed allocation'):
             parse_traceability(self.root)
 
@@ -239,6 +271,22 @@ class ParserTests(FixtureRepo):
         _, _, issues = parse_traceability(self.root)
         self.assertTrue([i for i in issues if i.kind == 'report-does-not-name-sr'])
 
+    def test_test_named_markdown_without_sr_is_rejected_as_report(self):
+        """A Markdown file in tests must name the cited SR before test-like naming can matter."""
+        (self.root / 'tests/test_report.md').write_text('# Report without requirement\n', encoding='utf-8')
+        self.replace('docs/safety/TRACEABILITY.md', 'test_unique_probe.py', 'tests/test_report.md')
+        rows, _, issues = parse_traceability(self.root)
+        self.assertFalse(rows[1].test_refs)
+        self.assertTrue([i for i in issues if i.literal == 'tests/test_report.md'])
+
+    def test_test_named_markdown_with_sr_outside_docs_is_rejected(self):
+        """A Markdown report naming its SR is still ineligible when it is outside docs."""
+        (self.root / 'tests/test_report.md').write_text('# Evidence for SR-R-01\n', encoding='utf-8')
+        self.replace('docs/safety/TRACEABILITY.md', 'test_unique_probe.py', 'tests/test_report.md')
+        rows, _, issues = parse_traceability(self.root)
+        self.assertFalse(rows[1].test_refs)
+        self.assertTrue([i for i in issues if i.literal == 'tests/test_report.md'])
+
     def test_docs_markdown_report_naming_sr_is_evidence(self):
         """A non-README Markdown report under docs counts when its content names the cited SR."""
         (self.root / 'docs/evidence.md').write_text('# Evidence for SR-R-01\n', encoding='utf-8')
@@ -246,6 +294,50 @@ class ParserTests(FixtureRepo):
         rows, _, issues = parse_traceability(self.root)
         self.assertEqual(rows[1].test_refs, ('docs/evidence.md',))
         self.assertFalse([issue for issue in issues if issue.literal == 'docs/evidence.md'])
+
+    def test_sr_report_match_requires_complete_identifier_token(self):
+        """A report must contain the exact cited SR token, not a prefixed or extended identifier."""
+        path = self.root / 'docs/evidence.md'
+        self.replace('docs/safety/TRACEABILITY.md', 'test_unique_probe.py', 'docs/evidence.md')
+        for content in ('SR-R-010', 'XSR-R-01', 'xSR-R-01', 'SR-R-01bb', 'SR-R-01-extra', 'SR-R-01_extra'):
+            with self.subTest(content=content):
+                path.write_text(f'# Evidence for {content}\n', encoding='utf-8')
+                rows, _, issues = parse_traceability(self.root)
+                self.assertFalse(rows[1].test_refs)
+                self.assertTrue([i for i in issues if i.kind == 'report-does-not-name-sr'])
+        path.write_text('# Evidence for (SR-R-01).\n', encoding='utf-8')
+        rows, _, issues = parse_traceability(self.root)
+        self.assertEqual(rows[1].test_refs, ('docs/evidence.md',))
+        self.assertFalse([i for i in issues if i.literal == 'docs/evidence.md'])
+
+    def test_sr_report_match_allows_one_lowercase_decomposition_suffix(self):
+        """A report naming one lowercase requirement decomposition suffix evidences its canonical parent."""
+        path = self.root / 'docs/evidence.md'
+        path.write_text('# Evidence for SR-R-01b\n', encoding='utf-8')
+        self.replace('docs/safety/TRACEABILITY.md', 'test_unique_probe.py', 'docs/evidence.md')
+        rows, _, issues = parse_traceability(self.root)
+        self.assertEqual(rows[1].test_refs, ('docs/evidence.md',))
+        self.assertFalse([i for i in issues if i.literal == 'docs/evidence.md'])
+
+    def test_explicit_parent_traversal_cannot_resolve_outside_root(self):
+        """An existing file reached through ../ is missing evidence because it is absent from the root index."""
+        outside = self.root.parent / f'{self.root.name}-outside_test.py'
+        outside.write_text('# SR-R-01 outside repository\n', encoding='utf-8')
+        citation = f'../{outside.name}'
+        try:
+            self.replace('docs/safety/TRACEABILITY.md', 'test_unique_probe.py', f'`{citation}`')
+            rows, _, issues = parse_traceability(self.root)
+            self.assertFalse(rows[1].test_refs)
+            self.assertTrue([i for i in issues if i.kind == 'missing' and i.literal == citation])
+        finally:
+            outside.unlink()
+
+    def test_public_analysis_rejects_malformed_sr_before_coverage(self):
+        """The public CLI analysis seam cannot pass a malformed trace SR to coverage computation."""
+        self.replace('docs/safety/TRACEABILITY.md', '| SR-R-01 |', '| SR-R-1 |')
+        with mock.patch('tools.safety_lint.__main__.compute_coverage') as compute:
+            self.assertEqual(main(['--root', str(self.root)]), 2)
+        compute.assert_not_called()
 
     def test_test_artifact_directory_and_source_naming_are_evidence(self):
         """Both test-directory membership and test-source naming independently identify test artifacts."""
@@ -375,6 +467,14 @@ class ParserTests(FixtureRepo):
 
 
 class ConsistencyTests(FixtureRepo):
+    def test_reachable_findings_have_unique_baseline_discriminators(self):
+        """Real and independently injected findings never compete for one exact baseline key."""
+        self.replace('docs/safety/TRACEABILITY.md', 'test_unique_probe.py', 'test_missing_one, test_missing_two')
+        self.replace('docs/safety/TRACEABILITY.md', '| SR-R-01 | F-R-01 |', '| SR-R-01 | F-X-99 |')
+        findings = self.findings()
+        keys = [(finding.check_id, finding.subject, finding.message) for finding in findings]
+        self.assertEqual(len(keys), len(set(keys)))
+
     def test_c1_flags_sr_set_mismatch(self):
         """C1 reports an SRS requirement omitted from the matrix."""
         self.replace(
@@ -665,6 +765,39 @@ class CoverageRenderCliTests(FixtureRepo):
         result = analyze(REPO)
         coverage = compute_coverage(result)
         self.assertEqual((coverage.total, coverage.cited_tests, coverage.verified), (40, 32, 17))
+        self.assertEqual(
+            (
+                coverage.functions_traced,
+                coverage.functions_total,
+                coverage.safety_functions_traced,
+                coverage.safety_functions_total,
+            ),
+            (22, 27, 22, 25),
+        )
+
+    def test_declared_non_safety_sr_does_not_inflate_safety_numerator(self):
+        """An SR on a declared non-safety function affects only the all-function traced numerator."""
+        analysis = analyze(self.root)
+        functions = dict(analysis.functions)
+        reverse = dict(analysis.reverse)
+        functions['F-R-02'] = Function('F-R-02', 'Non-safety probe', 11)
+        reverse['F-R-02'] = ReverseEntry('F-R-02', 'Non-safety probe', ('SR-R-01',), True, 30)
+        coverage = compute_coverage(replace(analysis, functions=functions, reverse=reverse))
+        self.assertEqual(
+            (coverage.functions_traced, coverage.safety_functions_traced, coverage.safety_functions_total),
+            (2, 1, 1),
+        )
+        self.assertLessEqual(coverage.safety_functions_traced, coverage.safety_functions_total)
+        rendered = render_traceability(
+            (self.root / 'docs/safety/TRACEABILITY.md').read_text(encoding='utf-8'),
+            coverage,
+        )
+        self.assertIn('excluding declared non-safety functions: 1 / 1 = 100 %', rendered)
+
+    def test_json_exposes_safety_function_numerator(self):
+        """Machine-readable coverage distinguishes all-function and safety-only traced counts."""
+        functions = _coverage_dict(compute_coverage(analyze(self.root)))['functions']
+        self.assertEqual(functions['safety_traced'], 1)
 
     def test_generated_block_is_idempotent(self):
         """Rendering an already rendered traceability document is byte-idempotent."""

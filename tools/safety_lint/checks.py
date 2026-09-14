@@ -37,21 +37,23 @@ def evidence_rejection(root, path, sr_id):
     parts = tuple(part.lower() for part in candidate.parts)
     stem = candidate.stem.lower()
 
-    if candidate.name.lower() == 'readme.md':
-        return 'README files are not approved evidence reports'
+    # Markdown is always a report first; test-like paths and names cannot bypass report rules.
+    if candidate.suffix.lower() == '.md':
+        if candidate.name.lower() == 'readme.md':
+            return 'README files are not approved evidence reports'
+        if not parts or parts[0] != 'docs':
+            return 'Markdown evidence reports must be under docs/'
+        content = (Path(root) / candidate).read_text(encoding='utf-8', errors='replace')
+        token = re.compile(rf'(?<![A-Za-z0-9_-]){re.escape(sr_id)}(?:[a-z])?(?![A-Za-z0-9_-])')
+        if token.search(content) is None:
+            return 'evidence report does not name cited SR as a complete token'
+        return None
 
     # 1. Test sources are identified by a test/requirements directory or source naming.
     if {'test', 'tests', 'requirements'} & set(parts) or stem.startswith('test_') or stem.endswith('_test'):
         return None
 
-    # 2. A docs Markdown report must not be a README and must name this requirement.
-    if parts and parts[0] == 'docs' and candidate.suffix.lower() == '.md':
-        content = (Path(root) / candidate).read_text(encoding='utf-8', errors='replace')
-        if sr_id not in content:
-            return 'evidence report does not name cited SR'
-        return None
-
-    # 3. Repository guard scripts are scripts/check_*.sh only.
+    # 2. Repository guard scripts are scripts/check_*.sh only.
     if len(parts) == 2 and parts[0] == 'scripts' and candidate.name.startswith('check_') and candidate.suffix == '.sh':
         return None
 
