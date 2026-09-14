@@ -1,0 +1,25 @@
+---
+name: Safety traceability lint
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  safety_lint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Safety linter self-tests
+        run: python3 tools/safety_lint/self_test.py
+
+      - name: Safety traceability check
+        run: python3 -m tools.safety_lint --check

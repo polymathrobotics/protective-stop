@@ -48,6 +48,7 @@ rationale) · **Verification** (Test / Fault-injection / Analysis / Inspection) 
 
 - **Satisfied** — implemented; cited `file:line` (line numbers per the analyzed
   tree, ±a few lines as the tree evolves).
+- **Partially satisfied**
 - **Gap** — no implementation yet.
 - **Residual-accepted** — deliberately not implemented; rationale given.
 
