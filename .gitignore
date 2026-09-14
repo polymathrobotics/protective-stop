@@ -20,6 +20,7 @@ host/test_crypto_kat
 host/test_demote_veto
 host/test_relay_refetch
 host/test_recv_outcome
+host/test_safety_retry
 host/test_aux_channel
 # cppcheck
 *.ctu-info
