@@ -4,6 +4,7 @@
 
 import argparse
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -64,9 +65,13 @@ def run_linter_at_tree(worktree):
     """Run the revision's own unchanged linter and add its parsed citation map."""
     if not (worktree / 'tools/safety_lint/__main__.py').is_file():
         return {'unavailable': 'tools/safety_lint is absent at this revision'}
+    child_environment = os.environ.copy()
+    for name in ('GH_TOKEN', 'GITHUB_TOKEN'):
+        child_environment.pop(name, None)
     result = subprocess.run(
         [sys.executable, '-m', 'tools.safety_lint', '--json'],
         cwd=worktree,
+        env=child_environment,
         check=False,
         capture_output=True,
         text=True,
@@ -82,7 +87,12 @@ def run_linter_at_tree(worktree):
         'print(json.dumps({r.sr_id: sorted(set(r.test_refs)) for r in analyze(".").trace}, sort_keys=True))'
     )
     citations = subprocess.run(
-        [sys.executable, '-c', citation_code], cwd=worktree, check=False, capture_output=True, text=True
+        [sys.executable, '-c', citation_code],
+        cwd=worktree,
+        env=child_environment,
+        check=False,
+        capture_output=True,
+        text=True,
     )
     if citations.returncode:
         raise RuntimeError(citations.stderr.strip() or 'cannot extract linter citations')
@@ -113,7 +123,7 @@ def report_at_revision(root, revision):
 
 def upsert_coverage_comment(api, repository, pr, report):
     """Create or update the single marker-owned deterministic coverage comment."""
-    comments = api('GET', f'repos/{repository}/issues/{pr}/comments')
+    comments = api('GET', f'repos/{repository}/issues/{pr}/comments', paginate=True)
     existing = next((comment for comment in comments if MARKER in comment.get('body', '')), None)
     body = f'{MARKER}\n{report}'
     if existing:

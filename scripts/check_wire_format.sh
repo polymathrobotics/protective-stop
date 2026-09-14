@@ -11,6 +11,10 @@ cd "$ROOT" || exit 2
 
 args=(check --root "$ROOT" --labels "${PSTOP_PR_LABELS:-}")
 if [ -n "${PSTOP_BASE_SHA:-}" ]; then
+    if [[ ! "$PSTOP_BASE_SHA" =~ ^[0-9A-Fa-f]{40}$ ]]; then
+        echo "wire-format: cannot run: PSTOP_BASE_SHA must be exactly 40 ASCII hexadecimal characters" >&2
+        exit 2
+    fi
     if ! git cat-file -e "$PSTOP_BASE_SHA:tools/change_control/wire_format.sha256" 2>/dev/null; then
         args+=(--initial-expectation)
     fi

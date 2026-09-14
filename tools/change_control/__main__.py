@@ -11,7 +11,7 @@ from pathlib import Path
 
 from tools.safety_lint.model import LintError
 
-from .checks import evaluate, load_mode, render_report, upsert_comment
+from .checks import cr_number, evaluate, load_mode, render_report, upsert_comment
 
 
 class GhApi:
@@ -64,18 +64,6 @@ def _require(mapping, path):
     return value
 
 
-def _cr_number(body):
-    import re
-
-    values = set(
-        re.findall(
-            r'(?im)^\s*(?:closes|refs)\s+(?:(?:https://github\.com/[^/]+/[^/]+/issues/)?#?)(\d+)\s*$',
-            body or '',
-        )
-    )
-    return int(next(iter(values))) if len(values) == 1 else None
-
-
 def collect(api, repository, pr_number):
     """Collect the complete GitHub snapshot used by pure policy evaluation."""
     prefix = f'repos/{repository}'
@@ -84,7 +72,7 @@ def collect(api, repository, pr_number):
     head = _require(pr, ('head', 'sha'))
     if 'body' not in pr or 'labels' not in pr:
         raise RuntimeError('partial GitHub response missing PR body or labels')
-    cr = _cr_number(pr['body'])
+    cr = cr_number(pr['body'], repository)
     issue = api('GET', f'{prefix}/issues/{cr}') if cr else {'labels': [], 'body': ''}
     comments = api('GET', f'{prefix}/issues/{cr}/comments', paginate=True) if cr else []
     reviews = api('GET', f'{prefix}/pulls/{pr_number}/reviews', paginate=True)
@@ -101,6 +89,7 @@ def collect(api, repository, pr_number):
         if not isinstance(value, list):
             raise RuntimeError(f'partial GitHub response: {name} is not a list')
     return {
+        'repository': repository,
         'pr': pr,
         'issue': issue,
         'issue_comments': comments,

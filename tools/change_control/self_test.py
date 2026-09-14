@@ -56,6 +56,7 @@ def snapshot(**overrides):
         '|  |  |', '| None | None |'
     )
     data = {
+        'repository': 'polymathrobotics/protective-stop',
         'pr': {
             'user': {'login': 'contributor'},
             'body': 'Closes #17',
@@ -466,6 +467,42 @@ class ApprovalAndLinkTests(unittest.TestCase):
         data['pr']['body'] = 'Closes #17\nRefs #18'
         self.assertEqual(next(item for item in evaluate(ROOT, data) if item.check_id == 'E1').status, 'fail')
 
+    def test_same_repository_issue_url_is_accepted(self):
+        """A full issue URL for the current repository must identify its Change Request."""
+        data = snapshot(repository='polymathrobotics/protective-stop')
+        data['pr']['body'] = 'https://github.com/polymathrobotics/protective-stop/issues/17'
+        self.assertEqual(next(item for item in evaluate(ROOT, data) if item.check_id == 'E1').status, 'pass')
+
+    def test_foreign_repository_same_issue_number_is_rejected(self):
+        """A foreign issue URL must not map an equal issue number into the current repository."""
+        data = snapshot(repository='polymathrobotics/protective-stop')
+        data['pr']['body'] = 'Refs https://github.com/other/protective-stop/issues/17'
+        self.assertEqual(next(item for item in evaluate(ROOT, data) if item.check_id == 'E1').status, 'fail')
+
+    def test_foreign_repository_different_issue_number_is_rejected(self):
+        """A foreign issue URL must never select that number from the current repository."""
+        data = snapshot(repository='polymathrobotics/protective-stop')
+        data['pr']['body'] = 'Closes https://github.com/other/project/issues/91'
+        self.assertEqual(next(item for item in evaluate(ROOT, data) if item.check_id == 'E1').status, 'fail')
+
+    def test_mixed_local_and_foreign_issue_links_are_rejected(self):
+        """A local CR candidate mixed with any foreign candidate must be treated as ambiguous."""
+        data = snapshot(repository='polymathrobotics/protective-stop')
+        data['pr']['body'] = 'Closes #17\nRefs https://github.com/other/project/issues/91'
+        self.assertEqual(next(item for item in evaluate(ROOT, data) if item.check_id == 'E1').status, 'fail')
+
+    def test_duplicate_same_local_issue_link_is_accepted(self):
+        """Repeated equivalent local links must identify one unambiguous Change Request."""
+        data = snapshot(repository='polymathrobotics/protective-stop')
+        data['pr']['body'] = 'Closes #17\nRefs #17'
+        self.assertEqual(next(item for item in evaluate(ROOT, data) if item.check_id == 'E1').status, 'pass')
+
+    def test_repository_identity_comparison_is_case_insensitive(self):
+        """GitHub owner and repository casing must not make a same-repository URL foreign."""
+        data = snapshot(repository='PolyMathRobotics/Protective-Stop')
+        data['pr']['body'] = 'Refs https://github.com/POLYMATHROBOTICS/protective-stop/issues/17'
+        self.assertEqual(next(item for item in evaluate(ROOT, data) if item.check_id == 'E1').status, 'pass')
+
     def test_needs_change_request_label_exempts_e1(self):
         """External PRs awaiting a maintainer CR must produce a pending E1 result."""
         data = snapshot()
@@ -493,6 +530,36 @@ class EvidenceAndCommentTests(unittest.TestCase):
         data['issue_comments'][1]['body'] += '\n# 7. Verification plan for this change\n`host-check`\n'
         data['check_runs'] = [{'name': 'host-check', 'conclusion': 'success', 'head_sha': 'oldsha'}]
         self.assertEqual(next(item for item in evaluate(ROOT, data) if item.check_id == 'E6').status, 'fail')
+
+    def test_e6_ignores_check_evidence_without_head_sha(self):
+        """A successful check without explicit commit identity cannot satisfy the verification plan."""
+        data = snapshot()
+        data['issue_comments'][1]['body'] += '\n# 7. Verification plan for this change\n`host-check`\n'
+        data['check_runs'] = [{'name': 'host-check', 'conclusion': 'success'}]
+        self.assertEqual(next(item for item in evaluate(ROOT, data) if item.check_id == 'E6').status, 'fail')
+
+    def test_e6_ignores_workflow_evidence_with_null_head_sha(self):
+        """A successful workflow with null commit identity cannot satisfy the verification plan."""
+        data = snapshot()
+        data['issue_comments'][1]['body'] += '\n# 7. Verification plan for this change\n`host-check`\n'
+        data['check_runs'] = []
+        data['workflow_runs'] = [{'name': 'host-check', 'conclusion': 'success', 'head_sha': None}]
+        self.assertEqual(next(item for item in evaluate(ROOT, data) if item.check_id == 'E6').status, 'fail')
+
+    def test_e6_ignores_check_evidence_with_empty_head_sha(self):
+        """A successful check with empty commit identity cannot satisfy the verification plan."""
+        data = snapshot()
+        data['issue_comments'][1]['body'] += '\n# 7. Verification plan for this change\n`host-check`\n'
+        data['check_runs'] = [{'name': 'host-check', 'conclusion': 'success', 'head_sha': ''}]
+        self.assertEqual(next(item for item in evaluate(ROOT, data) if item.check_id == 'E6').status, 'fail')
+
+    def test_e6_accepts_workflow_evidence_with_exact_head_sha(self):
+        """A successful exactly named workflow explicitly attached to PR head must satisfy the plan."""
+        data = snapshot()
+        data['issue_comments'][1]['body'] += '\n# 7. Verification plan for this change\n`host-check`\n'
+        data['check_runs'] = []
+        data['workflow_runs'] = [{'name': 'host-check', 'conclusion': 'success', 'head_sha': 'abc123'}]
+        self.assertEqual(next(item for item in evaluate(ROOT, data) if item.check_id == 'E6').status, 'pass')
 
     def test_e6_does_not_accept_a_substring_check_name(self):
         """A short IA test token must not match an unrelated longer check-run name."""
@@ -543,6 +610,71 @@ class WireFormatTests(unittest.TestCase):
         return Path(directory)
 
     _copy_headers = _copy_wire_files
+
+    def _run_wire_script(self, base_sha_marker, fake_git=False):
+        environment = os.environ.copy()
+        if base_sha_marker is None:
+            environment.pop('PSTOP_BASE_SHA', None)
+        else:
+            environment['PSTOP_BASE_SHA'] = base_sha_marker
+        marker = None
+        temporary = None
+        if fake_git:
+            temporary = tempfile.TemporaryDirectory()
+            directory = Path(temporary.name)
+            marker = directory / 'git-called'
+            fake = directory / 'git'
+            fake.write_text(f'#!/usr/bin/env bash\ntouch "{marker}"\nexit 99\n', encoding='utf-8')
+            fake.chmod(0o755)
+            environment['PATH'] = f'{directory}:{environment["PATH"]}'
+        result = subprocess.run(
+            ['scripts/check_wire_format.sh'],
+            cwd=ROOT,
+            env=environment,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        git_called = marker.exists() if marker else False
+        if temporary:
+            temporary.cleanup()
+        return result, git_called
+
+    def test_wire_script_allows_unset_base_sha(self):
+        """A local invocation with PSTOP_BASE_SHA unset must run the current-tree check."""
+        result, _ = self._run_wire_script(None)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_wire_script_allows_empty_base_sha(self):
+        """A local invocation with an empty PSTOP_BASE_SHA must run the current-tree check."""
+        result, _ = self._run_wire_script('')
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_wire_script_accepts_valid_full_base_sha(self):
+        """An exact 40-character hexadecimal base SHA must reach the real git comparison seam."""
+        head = subprocess.run(
+            ['git', 'rev-parse', 'HEAD'], cwd=ROOT, check=True, capture_output=True, text=True
+        ).stdout.strip()
+        result, _ = self._run_wire_script(head)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_wire_script_rejects_short_base_sha_before_git(self):
+        """A shortened base SHA must return cannot-run before invoking git."""
+        result, git_called = self._run_wire_script('a' * 39, fake_git=True)
+        self.assertEqual((result.returncode, git_called), (2, False))
+        self.assertIn('cannot run', result.stderr.lower())
+
+    def test_wire_script_rejects_nonhex_base_sha_before_git(self):
+        """A 40-character nonhex base SHA must return cannot-run before invoking git."""
+        result, git_called = self._run_wire_script('g' * 40, fake_git=True)
+        self.assertEqual((result.returncode, git_called), (2, False))
+        self.assertIn('PSTOP_BASE_SHA', result.stderr)
+
+    def test_wire_script_rejects_option_like_base_sha_before_git(self):
+        """An option-like base value must never be passed to git as a revision argument."""
+        result, git_called = self._run_wire_script('--help', fake_git=True)
+        self.assertEqual((result.returncode, git_called), (2, False))
+        self.assertIn('PSTOP_BASE_SHA', result.stderr)
 
     def test_signature_stable_across_comment_only_change(self):
         """Adding a C comment to a watched header must not alter its signature."""
@@ -806,6 +938,36 @@ class CoverageDeltaTests(unittest.TestCase):
         self.assertIn('SR-R-01', delta)
         self.assertIn('unresolvable', delta.lower())
 
+    def test_revision_linter_subprocesses_cannot_observe_actions_credentials(self):
+        """Code from an untrusted revision must receive no Actions token while producing a normal report."""
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            package = root / 'tools/safety_lint'
+            package.mkdir(parents=True)
+            (root / 'tools/__init__.py').write_text('', encoding='utf-8')
+            (package / '__init__.py').write_text('', encoding='utf-8')
+            guard = (
+                "if os.environ.get('GH_TOKEN') or os.environ.get('GITHUB_TOKEN'): raise RuntimeError('token leaked')"
+            )
+            (package / '__main__.py').write_text(
+                'import json, os\n'
+                f'{guard}\n'
+                "print(json.dumps({'coverage': {'cited_tests': 1, 'total': 1}, 'findings': []}))\n",
+                encoding='utf-8',
+            )
+            (package / 'runner.py').write_text(
+                'import os\nfrom types import SimpleNamespace\n'
+                f'{guard}\n'
+                "def analyze(root): return SimpleNamespace(trace=[SimpleNamespace(sr_id='SR-X-01', test_refs=['probe'])])\n",
+                encoding='utf-8',
+            )
+            with mock.patch.dict(os.environ, {'GH_TOKEN': 'gh-sentinel', 'GITHUB_TOKEN': 'github-sentinel'}):
+                report = run_linter_at_tree(root)
+                self.assertEqual(os.environ['GH_TOKEN'], 'gh-sentinel')
+                self.assertEqual(os.environ['GITHUB_TOKEN'], 'github-sentinel')
+        self.assertEqual(report['coverage'], {'cited_tests': 1, 'total': 1})
+        self.assertEqual(report['citations'], {'SR-X-01': ['probe']})
+
     def test_base_without_linter_exposes_stacked_dependency(self):
         """A base predating change-0001 must be reported as unavailable, never treated as zero coverage."""
         delta = compare_reports(
@@ -826,14 +988,32 @@ class CoverageDeltaTests(unittest.TestCase):
         """Coverage delta must update its marker-owned comment rather than append on every run."""
         writes = []
 
-        def api(method, path, body=None):
+        def api(method, path, body=None, paginate=False):
             if method == 'GET':
+                self.assertTrue(paginate)
                 return [{'id': 12, 'body': '<!-- coverage-delta -->\nold'}]
             writes.append((method, path, body))
             return {}
 
         upsert_coverage_comment(api, 'acme/project', 7, 'new')
         self.assertEqual(writes[0][0:2], ('PATCH', 'repos/acme/project/issues/comments/12'))
+
+    def test_coverage_comment_marker_on_second_page_is_updated(self):
+        """Comment lookup must paginate so a marker beyond page one is updated rather than duplicated."""
+        calls = []
+
+        def api(method, path, body=None, paginate=False):
+            calls.append((method, path, body, paginate))
+            if method == 'GET':
+                self.assertTrue(paginate)
+                return [{'id': 1, 'body': 'first page'}, {'id': 12, 'body': '<!-- coverage-delta -->\nold'}]
+            return {}
+
+        upsert_coverage_comment(api, 'acme/project', 7, 'new')
+        self.assertIn(
+            ('PATCH', 'repos/acme/project/issues/comments/12', {'body': '<!-- coverage-delta -->\nnew'}, False), calls
+        )
+        self.assertFalse(any(call[0] == 'POST' for call in calls))
 
     def test_coverage_cli_no_comment_avoids_write_api(self):
         """Fork-safe coverage reporting must support stdout-only operation when write tokens are unavailable."""
@@ -887,6 +1067,15 @@ class CliTests(unittest.TestCase):
         self.assertIn('CAN_COMMENT', coverage)
         self.assertIn('--no-comment', coverage)
         self.assertIn('CAN_LABEL', wire)
+
+    def test_marker_comment_workflows_cancel_superseded_pr_runs(self):
+        """Each marker-comment writer must cancel stale runs in its own per-PR concurrency group."""
+        change = (ROOT / '.github/workflows/change-control.yml').read_text(encoding='utf-8')
+        coverage = (ROOT / '.github/workflows/coverage-delta.yml').read_text(encoding='utf-8')
+        self.assertIn('group: change-control-${{ github.event.pull_request.number }}', change)
+        self.assertIn('group: coverage-delta-${{ github.event.pull_request.number }}', coverage)
+        self.assertEqual(change.count('cancel-in-progress: true'), 1)
+        self.assertEqual(coverage.count('cancel-in-progress: true'), 1)
 
     def test_warn_mode_exits_zero_with_findings(self):
         """Warn mode must report findings while returning success to the caller."""

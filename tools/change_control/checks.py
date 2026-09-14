@@ -90,12 +90,30 @@ def _labels(entity):
     return {label['name'] if isinstance(label, dict) else label for label in entity.get('labels', [])}
 
 
-def _cr_number(body):
-    matches = re.findall(
-        r'(?im)^\s*(?:closes|refs)\s+(?:(?:https://github\.com/[^/]+/[^/]+/issues/)?#?)(\d+)\s*$',
-        body or '',
-    )
-    return int(matches[0]) if len(set(matches)) == 1 else None
+def cr_number(body, repository):
+    """Return one local CR number, rejecting foreign or ambiguous candidates."""
+    if repository.count('/') != 1:
+        return None
+    current_owner, current_name = repository.casefold().split('/')
+    numbers = set()
+    foreign = False
+    for line in (body or '').splitlines():
+        local = re.fullmatch(r'\s*(?:closes|refs)\s+#(\d+)\s*', line, re.IGNORECASE)
+        if local:
+            numbers.add(int(local.group(1)))
+            continue
+        url = re.fullmatch(
+            r'\s*(?:(?:closes|refs)\s+)?https://github\.com/([^/\s]+)/([^/\s]+)/issues/(\d+)/?\s*',
+            line,
+            re.IGNORECASE,
+        )
+        if url:
+            owner, name, number = url.groups()
+            if (owner.casefold(), name.casefold()) == (current_owner, current_name):
+                numbers.add(int(number))
+            else:
+                foreign = True
+    return next(iter(numbers)) if len(numbers) == 1 and not foreign else None
 
 
 def _issue_fields_complete(root, body):
@@ -193,7 +211,7 @@ def evaluate(root, data):
     root = Path(root)
     pr = data['pr']
     labels = _labels(pr)
-    cr_number = _cr_number(pr.get('body', ''))
+    linked_cr = cr_number(pr.get('body', ''), data['repository'])
     issue = data.get('issue', {})
     issue_labels = _labels(issue)
     comments = data.get('issue_comments', [])
@@ -230,9 +248,9 @@ def evaluate(root, data):
             len(authorization_times) >= required_authorizers and max(ia_times) <= min(authorization_times)
         )
         ordered = before_implementation and after_analysis
-        missing_fields = _issue_fields_complete(root, issue.get('body', '')) if cr_number else ['change-request-link']
+        missing_fields = _issue_fields_complete(root, issue.get('body', '')) if linked_cr else ['change-request-link']
         okay = (
-            cr_number is not None
+            linked_cr is not None
             and 'change-request' in issue_labels
             and 'status:authorized' in issue_labels
             and authorized_comment
@@ -303,7 +321,7 @@ def evaluate(root, data):
     evidence = {
         item.get('name', '')
         for item in data.get('check_runs', [])
-        if item.get('head_sha', head) == head and item.get('conclusion') == 'success'
+        if item.get('head_sha') == head and item.get('conclusion') == 'success'
     }
     evidence.update(
         item.get('name', item.get('path', ''))
