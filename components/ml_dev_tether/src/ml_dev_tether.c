@@ -24,6 +24,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "arch/sys_arch.h"
 #include "esp_event.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
@@ -33,6 +34,8 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "lwip/esp_netif_net_stack.h"
+#include "ml_usb_tx.h"
+#include "ml_usb_tx_limits.h"
 #include "tinyusb.h"
 #include "tinyusb_cdc_acm.h"
 #include "tinyusb_console.h"
@@ -60,8 +63,12 @@ void ml_dev_tether_set_unit_number(uint8_t n)
 
 static esp_err_t netif_transmit(void * h, void * buffer, size_t len)
 {
-  /* Synchronous send so lwIP can free the pbuf immediately. */
-  return tinyusb_net_send_sync(buffer, len, NULL, pdMS_TO_TICKS(100));
+  if (!sys_thread_tcpip(LWIP_CORE_LOCK_QUERY_HOLDER)) {
+    ml_usb_tx_note_ownership_error();
+    return ESP_ERR_INVALID_STATE;
+  }
+  /* The bounded request owns a copy; lwIP may release its pbuf on return. */
+  return ml_usb_tx_send(buffer, len);
 }
 
 static void netif_l2_free(void * h, void * buffer)
@@ -159,7 +166,8 @@ esp_err_t ml_dev_tether_try_start(uint32_t timeout_ms)
 
   /* --- TinyUSB up --- */
   if (!s_tusb_installed) {
-    const tinyusb_config_t tusb_cfg = TINYUSB_DEFAULT_CONFIG();
+    tinyusb_config_t tusb_cfg = TINYUSB_DEFAULT_CONFIG();
+    tusb_cfg.task.priority = ML_USB_TASK_PRIORITY;
     err = tinyusb_driver_install(&tusb_cfg);
     if (err != ESP_OK) {
       ESP_LOGE(TAG, "tinyusb_driver_install: %s", esp_err_to_name(err));
@@ -239,6 +247,8 @@ esp_err_t ml_dev_tether_try_start(uint32_t timeout_ms)
      * The on_recv callback from the first init indirects through the file-static
      * s_netif, which we refresh just below, so RX keeps working after a restart. */
   if (!s_net_inited) {
+    err = ml_usb_tx_init();
+    if (err != ESP_OK) goto fail;
     err = tinyusb_net_init(&net_cfg);
     if (err != ESP_OK) {
       ESP_LOGE(TAG, "tinyusb_net_init: %s", esp_err_to_name(err));
@@ -290,6 +300,7 @@ esp_err_t ml_dev_tether_try_start(uint32_t timeout_ms)
      * the Ethernet-class netif stays in admin-up/link-down state and the
      * DHCP client never sends DISCOVER (it's waiting for a phy link event
      * that's never coming from our USB driver). */
+  ml_usb_tx_set_enabled(true);
   esp_netif_action_start(s_netif, 0, 0, 0);
   esp_netif_action_connected(s_netif, 0, 0, 0);
 
@@ -329,6 +340,7 @@ fail:
 
 void ml_dev_tether_stop(void)
 {
+  ml_usb_tx_set_enabled(false);
   /* NULL s_netif UNDER s_rx_lock, then destroy outside it. The lock makes this
      * mutually exclusive with on_usb_rx(): an RX already running holds the lock,
      * so we block until it finishes before freeing the netif; an RX starting

@@ -1,7 +1,9 @@
 ---
 ## ESP-IDF component manager manifest
-## Pulls espressif/esp_tinyusb (which transitively pulls TinyUSB + NCM).
+## Versions audited by the build-time nonblocking-defer extension.
 dependencies:
   espressif/esp_tinyusb:
-    version: ^2.0.0
+    version: 2.2.1
+  espressif/tinyusb:
+    version: 0.21.0~1
   idf: ^5.5

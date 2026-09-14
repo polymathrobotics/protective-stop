@@ -60,3 +60,4 @@ build/
 install/
 log/
 tools/fleet.env
+host/test_usb_tx

@@ -54,6 +54,7 @@
 #include "freertos/task.h"
 #include "hal/gpio_ll.h" /* gpio_ll_get_io_config — pad-config read-back (SR-R-09) */
 #include "lwip/sockets.h"
+#include "ml_usb_tx_limits.h"
 #include "pstop/protocol_data.h"
 #include "pstop/pstop_msg.h"
 #include "pstop_aux_channel.h"
@@ -1516,6 +1517,7 @@ void app_main(void)
      * then block — so running them above WG costs the radio path nothing.
      * Stays well below the TCPIP thread (prio 18) the sockets depend on. */
 #define SAFETY_TASK_PRIO 8
+  _Static_assert(ML_USB_TASK_PRIORITY < SAFETY_TASK_PRIO, "USB must not outrank the safety lockstep tasks");
 
   /* Bring up the dual-channel E-stop GPIOs before the cores start reading
      * them. Done here (not in dcs_support) because the loops ARE the safety

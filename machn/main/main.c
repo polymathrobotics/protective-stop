@@ -51,6 +51,7 @@
 #include "esp_task_wdt.h" /* TWDT subscribe/feed for the comparator */
 #include "esp_timer.h"
 #include "microlink.h" /* peer-wanted hook: pin operator remotes past the peer cap */
+#include "ml_usb_tx_limits.h"
 #include "sdkconfig.h" /* CONFIG_MACHN_RELAY_FEEDBACK — relay-feedback gate */
 // clang-format off
 #include "freertos/FreeRTOS.h"
@@ -129,6 +130,7 @@ static const char * TAG = "machn";
 #define TICK_MS 100u /* comparator/liveness cadence, matches the remote */
 #define CORE_WINDOW_MS 80u /* per-core processing budget within a tick */
 #define SAFETY_TASK_PRIO 8 /* above WG tasks, below TCPIP — remote rationale */
+_Static_assert(ML_USB_TASK_PRIORITY < SAFETY_TASK_PRIO, "USB must not outrank the safety lockstep tasks");
 
 /* Independent-timebase clock sanity (SR-H-04b machine-side / FMEA DU-2). The
  * machn's entire liveness case (machine_validate_heartbeats) runs on esp_timer
