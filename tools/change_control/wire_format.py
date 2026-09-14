@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2026 Polymath Robotics, Inc.
 # SPDX-License-Identifier: Apache-2.0
-"""Compute and enforce the normalized pstop_c public wire-header signature."""
+"""Compute and enforce the normalized pstop_c wire-behavior signature."""
 
 import argparse
 import hashlib
@@ -20,15 +20,20 @@ HEADER_NAMES = (
     'endian.h',
 )
 HEADER_PREFIX = 'pstop_c/pstop/include/pstop/'
+WIRE_PATHS = tuple(HEADER_PREFIX + name for name in HEADER_NAMES) + (
+    'pstop_c/pstop/src/pstop/pstop_msg.c',
+    'pstop_c/pstop/src/pstop/checksum.c',
+    'pstop_c/pstop/src/pstop/endian.c',
+)
 
 
 @dataclass(frozen=True)
 class WireSignature:
-    """Per-header evidence and the aggregate normalized wire signature."""
+    """Per-file evidence and the aggregate normalized wire signature."""
 
     version: str
     message_size: str
-    headers: dict
+    files: dict
     aggregate: str
 
 
@@ -46,27 +51,26 @@ def _literal(text, name):
 
 
 def compute_signature(root):
-    """Hash comment-free, whitespace-collapsed headers plus explicit protocol literals."""
-    include = Path(root) / HEADER_PREFIX
+    """Hash comment-free, whitespace-collapsed wire files plus explicit protocol literals."""
     normalized = {}
-    for name in HEADER_NAMES:
-        path = include / name
+    for relative in WIRE_PATHS:
+        path = Path(root) / relative
         if not path.is_file():
             raise FileNotFoundError(path)
-        normalized[name] = ' '.join(_strip_comments(path.read_text(encoding='utf-8')).split())
-    config = (include / 'config.h').read_text(encoding='utf-8')
+        normalized[relative] = ' '.join(_strip_comments(path.read_text(encoding='utf-8')).split())
+    config = (Path(root) / HEADER_PREFIX / 'config.h').read_text(encoding='utf-8')
     version = _literal(config, 'PSTOP_VERSION')
     message_size = _literal(config, 'PSTOP_MESSAGE_SIZE')
-    header_hashes = {name: hashlib.sha256(normalized[name].encode()).hexdigest() for name in HEADER_NAMES}
-    payload = ''.join(f'{name}\0{normalized[name]}\0' for name in HEADER_NAMES)
+    file_hashes = {path: hashlib.sha256(normalized[path].encode()).hexdigest() for path in WIRE_PATHS}
+    payload = ''.join(f'{path}\0{normalized[path]}\0' for path in WIRE_PATHS)
     payload += f'PSTOP_VERSION\0{version}\0PSTOP_MESSAGE_SIZE\0{message_size}\0'
-    return WireSignature(version, message_size, header_hashes, hashlib.sha256(payload.encode()).hexdigest())
+    return WireSignature(version, message_size, file_hashes, hashlib.sha256(payload.encode()).hexdigest())
 
 
 def read_expected(path):
     """Read the reviewable line-oriented wire signature record."""
     values = {}
-    headers = {}
+    files = {}
     for raw in Path(path).read_text(encoding='utf-8').splitlines():
         line = raw.strip()
         if not line or line.startswith('#'):
@@ -75,43 +79,44 @@ def read_expected(path):
         if len(parts) != 2:
             raise ValueError(f'invalid expected signature line: {raw}')
         key, value = parts
-        if key in HEADER_NAMES:
-            headers[key] = value
+        if key in WIRE_PATHS:
+            files[key] = value
         else:
             values[key] = value
-    if set(headers) != set(HEADER_NAMES) or not {'PSTOP_VERSION', 'PSTOP_MESSAGE_SIZE', 'aggregate'} <= set(values):
-        raise ValueError('expected signature lacks version, size, aggregate, or per-header hashes')
-    return WireSignature(values['PSTOP_VERSION'], values['PSTOP_MESSAGE_SIZE'], headers, values['aggregate'])
+    if set(files) != set(WIRE_PATHS) or not {'PSTOP_VERSION', 'PSTOP_MESSAGE_SIZE', 'aggregate'} <= set(values):
+        raise ValueError('expected signature lacks version, size, aggregate, or per-file hashes')
+    return WireSignature(values['PSTOP_VERSION'], values['PSTOP_MESSAGE_SIZE'], files, values['aggregate'])
 
 
 def render_signature(signature):
     """Render deterministic expected-signature content suitable for code review."""
     lines = [
-        '# Normalized pstop_c wire headers; comments stripped and whitespace collapsed.',
+        '# Normalized pstop_c wire files; comments stripped and whitespace collapsed.',
         f'# Corresponds to PSTOP_VERSION {signature.version}.',
         f'PSTOP_VERSION {signature.version}',
         f'PSTOP_MESSAGE_SIZE {signature.message_size}',
     ]
-    lines.extend(f'{name} {signature.headers[name]}' for name in HEADER_NAMES)
+    lines.extend(f'{path} {signature.files[path]}' for path in WIRE_PATHS)
     lines.append(f'aggregate {signature.aggregate}')
     return '\n'.join(lines) + '\n'
 
 
 def check_wire_format(root, expected_path, labels, changed_files, expectation_preexisted=True):
-    """Return guard exit code and explanation for current headers, labels, and changed paths."""
+    """Return guard exit code and explanation for current files, labels, and changed paths."""
     try:
         current = compute_signature(root)
         expected = read_expected(expected_path)
     except (OSError, ValueError) as error:
         return 2, f'wire-format: cannot run: {error}'
-    mismatched = [name for name in HEADER_NAMES if current.headers[name] != expected.headers[name]]
+    mismatched = [path for path in WIRE_PATHS if current.files[path] != expected.files[path]]
     if current.version != expected.version or current.message_size != expected.message_size:
-        if 'config.h' not in mismatched:
-            mismatched.append('config.h')
+        config_path = HEADER_PREFIX + 'config.h'
+        if config_path not in mismatched:
+            mismatched.append(config_path)
     expectation_change = expectation_preexisted and 'tools/change_control/wire_format.sha256' in changed_files
-    initial_header_change = not expectation_preexisted and any(path.startswith(HEADER_PREFIX) for path in changed_files)
+    initial_wire_change = not expectation_preexisted and bool(set(changed_files) & set(WIRE_PATHS))
     signature_changed = bool(mismatched or current.aggregate != expected.aggregate)
-    required = {'wire-break', 'class-c'} if expectation_change or initial_header_change or signature_changed else set()
+    required = {'wire-break', 'class-c'} if expectation_change or initial_wire_change or signature_changed else set()
     missing_labels = sorted(required - set(labels))
     rollout = 'Remote and machine must be released and deployed together for a coordinated rollout.'
     if signature_changed:

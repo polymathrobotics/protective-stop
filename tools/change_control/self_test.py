@@ -30,10 +30,23 @@ from tools.change_control.coverage_delta import (  # noqa: E402
     upsert_coverage_comment,
 )
 from tools.change_control.issue_form import parse_issue_form, validate_issue_form  # noqa: E402
-from tools.change_control.wire_format import HEADER_NAMES, check_wire_format, compute_signature  # noqa: E402
+from tools.change_control.wire_format import WIRE_PATHS, check_wire_format, compute_signature  # noqa: E402
 
 FORM = ROOT / '.github/ISSUE_TEMPLATE/change-request.yml'
 WIRE_EXPECTED = ROOT / 'tools/change_control/wire_format.sha256'
+EXPECTED_WIRE_PATHS = (
+    'pstop_c/pstop/include/pstop/config.h',
+    'pstop_c/pstop/include/pstop/constants.h',
+    'pstop_c/pstop/include/pstop/protocol.h',
+    'pstop_c/pstop/include/pstop/protocol_data.h',
+    'pstop_c/pstop/include/pstop/pstop_msg.h',
+    'pstop_c/pstop/include/pstop/checksum.h',
+    'pstop_c/pstop/include/pstop/device_id.h',
+    'pstop_c/pstop/include/pstop/endian.h',
+    'pstop_c/pstop/src/pstop/pstop_msg.c',
+    'pstop_c/pstop/src/pstop/checksum.c',
+    'pstop_c/pstop/src/pstop/endian.c',
+)
 
 
 def snapshot(**overrides):
@@ -67,6 +80,25 @@ def snapshot(**overrides):
 
 
 class IssueFormTests(unittest.TestCase):
+    def _parse_field(self, attributes):
+        form = (
+            'name: Test\n'
+            'description: Test form\n'
+            "title: '[Test] '\n"
+            'labels: [test]\n'
+            'body:\n'
+            '  - type: textarea\n'
+            '    id: field\n'
+            '    attributes:\n'
+            f'{attributes}'
+            '    validations:\n'
+            '      required: true\n'
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'form.yml'
+            path.write_text(form, encoding='utf-8')
+            return parse_issue_form(path)['body'][0]
+
     def test_issue_form_is_valid_yaml_and_parses(self):
         """The checked-in issue form must parse as the deliberately supported YAML subset."""
         parsed = parse_issue_form(FORM)
@@ -114,6 +146,49 @@ class IssueFormTests(unittest.TestCase):
         self.assertIn('Run by', fields['gate-1']['description'])
         self.assertIn('Forward -', fields['gate-1']['description'])
         self.assertIn('Backward -', fields['gate-1']['description'])
+
+    def test_plain_label_continuation_is_folded(self):
+        """A continued attributes label must be joined to its first line with one space."""
+        field = self._parse_field('      label: First label line\n        second label line\n')
+        self.assertEqual(field['label'], 'First label line second label line')
+
+    def test_plain_description_continuation_is_folded(self):
+        """A continued attributes description must be joined to its first line with one space."""
+        field = self._parse_field(
+            '      label: Field\n      description: First description line\n        second description line\n'
+        )
+        self.assertEqual(field['description'], 'First description line second description line')
+
+    def test_plain_placeholder_continuation_is_folded(self):
+        """A continued attributes placeholder must be joined to its first line with one space."""
+        field = self._parse_field(
+            '      label: Field\n      placeholder: First placeholder line\n        second placeholder line\n'
+        )
+        self.assertEqual(field['placeholder'], 'First placeholder line second placeholder line')
+
+    def test_real_gate_one_description_is_complete(self):
+        """The checked-in folded Gate 1 description must retain its final continuation text."""
+        fields = {field['id']: field for field in parse_issue_form(FORM)['body']}
+        self.assertTrue(fields['gate-1']['description'].endswith('requirements covered.'))
+
+    def test_orphan_attribute_continuation_is_rejected(self):
+        """Indented text without an active scalar key must fail rather than disappear."""
+        with self.assertRaises(ValueError):
+            self._parse_field('        orphan continuation\n      label: Field\n')
+
+    def test_option_continuation_is_rejected(self):
+        """Deeper text below an option must never be folded into an attributes scalar."""
+        attributes = '      label: Field\n      options:\n        - First\n          unsupported option continuation\n'
+        with self.assertRaises(ValueError):
+            self._parse_field(attributes)
+
+    def test_validation_continuation_is_rejected(self):
+        """Deeper validation text must never be appended to the preceding attributes scalar."""
+        attributes = (
+            '      label: Field\n    validations:\n      required: true\n        unsupported validation continuation\n'
+        )
+        with self.assertRaises(ValueError):
+            self._parse_field(attributes)
 
     def test_malformed_issue_form_is_rejected(self):
         """Malformed indentation must fail instead of silently degrading to a blank issue."""
@@ -460,13 +535,14 @@ class EvidenceAndCommentTests(unittest.TestCase):
 
 
 class WireFormatTests(unittest.TestCase):
-    def _copy_headers(self, directory):
-        include = Path(directory) / 'pstop_c/pstop/include/pstop'
-        include.mkdir(parents=True)
-        source = ROOT / 'pstop_c/pstop/include/pstop'
-        for name in HEADER_NAMES:
-            shutil.copy2(source / name, include / name)
+    def _copy_wire_files(self, directory):
+        for relative in EXPECTED_WIRE_PATHS:
+            destination = Path(directory) / relative
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(ROOT / relative, destination)
         return Path(directory)
+
+    _copy_headers = _copy_wire_files
 
     def test_signature_stable_across_comment_only_change(self):
         """Adding a C comment to a watched header must not alter its signature."""
@@ -476,6 +552,66 @@ class WireFormatTests(unittest.TestCase):
             path = root / 'pstop_c/pstop/include/pstop/protocol.h'
             path.write_text(path.read_text(encoding='utf-8') + '\n/* comment only */\n', encoding='utf-8')
             self.assertEqual(compute_signature(root).aggregate, before.aggregate)
+
+    def test_source_signatures_stay_stable_across_comment_only_changes(self):
+        """Comments in each watched implementation file must not alter any wire signature."""
+        with tempfile.TemporaryDirectory() as directory:
+            root = self._copy_wire_files(directory)
+            before = compute_signature(root)
+            for relative in EXPECTED_WIRE_PATHS[-3:]:
+                path = root / relative
+                path.write_text(path.read_text(encoding='utf-8') + '\n/* comment only */\n', encoding='utf-8')
+            after = compute_signature(root)
+            self.assertEqual(after, before)
+
+    def test_reordered_field_writes_change_pstop_message_source_and_aggregate_hashes(self):
+        """Reordering adjacent encoded fields must change pstop_msg.c evidence and the aggregate."""
+        relative = 'pstop_c/pstop/src/pstop/pstop_msg.c'
+        with tempfile.TemporaryDirectory() as directory:
+            root = self._copy_wire_files(directory)
+            before = compute_signature(root)
+            path = root / relative
+            original = (
+                '    write_uint32(msg->counter, data, &pos);\n    write_uint32(msg->received_counter, data, &pos);'
+            )
+            replacement = (
+                '    write_uint32(msg->received_counter, data, &pos);\n    write_uint32(msg->counter, data, &pos);'
+            )
+            changed = path.read_text(encoding='utf-8').replace(original, replacement)
+            self.assertNotEqual(changed, path.read_text(encoding='utf-8'))
+            path.write_text(changed, encoding='utf-8')
+            after = compute_signature(root)
+            self.assertNotEqual(after.files[relative], before.files[relative])
+            self.assertNotEqual(after.aggregate, before.aggregate)
+
+    def test_crc_polynomial_change_changes_checksum_source_and_aggregate_hashes(self):
+        """Changing the CRC polynomial must change checksum.c evidence and the aggregate."""
+        relative = 'pstop_c/pstop/src/pstop/checksum.c'
+        with tempfile.TemporaryDirectory() as directory:
+            root = self._copy_wire_files(directory)
+            before = compute_signature(root)
+            path = root / relative
+            path.write_text(path.read_text(encoding='utf-8').replace('0x8D95U', '0x8D96U'), encoding='utf-8')
+            after = compute_signature(root)
+            self.assertNotEqual(after.files[relative], before.files[relative])
+            self.assertNotEqual(after.aggregate, before.aggregate)
+
+    def test_byte_order_change_changes_endian_source_and_aggregate_hashes(self):
+        """Changing one byte-order operation must change endian.c evidence and the aggregate."""
+        relative = 'pstop_c/pstop/src/pstop/endian.c'
+        with tempfile.TemporaryDirectory() as directory:
+            root = self._copy_wire_files(directory)
+            before = compute_signature(root)
+            path = root / relative
+            path.write_text(
+                path.read_text(encoding='utf-8').replace(
+                    'bytes[3] = (uint8_t)(value & 0xFFU);', 'bytes[2] = (uint8_t)(value & 0xFFU);'
+                ),
+                encoding='utf-8',
+            )
+            after = compute_signature(root)
+            self.assertNotEqual(after.files[relative], before.files[relative])
+            self.assertNotEqual(after.aggregate, before.aggregate)
 
     def test_comment_only_change_needs_no_wire_labels(self):
         """A comment-only watched-header edit must pass the declaration check without wire-break labels."""
@@ -541,6 +677,18 @@ class WireFormatTests(unittest.TestCase):
             self.assertEqual(code, 1)
             self.assertIn('protocol.h', message)
 
+    def test_source_mismatch_diagnostic_names_repository_path(self):
+        """A source mismatch diagnostic must identify the changed repository-relative path."""
+        relative = 'pstop_c/pstop/src/pstop/checksum.c'
+        with tempfile.TemporaryDirectory() as directory:
+            root = self._copy_wire_files(directory)
+            shutil.copy2(WIRE_EXPECTED, root / 'wire_format.sha256')
+            path = root / relative
+            path.write_text(path.read_text(encoding='utf-8').replace('0x8D95U', '0x8D96U'), encoding='utf-8')
+            code, message = check_wire_format(root, root / 'wire_format.sha256', {'wire-break', 'class-c'}, [])
+            self.assertEqual(code, 1)
+            self.assertIn(relative, message)
+
     def test_expected_update_requires_both_labels(self):
         """Changing the expected signature cannot pass without wire-break and class-c labels."""
         code, message = check_wire_format(
@@ -571,6 +719,26 @@ class WireFormatTests(unittest.TestCase):
         )
         self.assertEqual(code, 1)
         self.assertIn('class-c', message)
+
+    def test_initial_snapshot_cannot_hide_a_source_change(self):
+        """A watched source edit accompanying the first snapshot must still require both declarations."""
+        relative = 'pstop_c/pstop/src/pstop/endian.c'
+        code, message = check_wire_format(
+            ROOT,
+            WIRE_EXPECTED,
+            {'wire-break'},
+            [relative, 'tools/change_control/wire_format.sha256'],
+            expectation_preexisted=False,
+        )
+        self.assertEqual(code, 1)
+        self.assertIn('class-c', message)
+
+    def test_workflow_initial_bootstrap_matcher_watches_all_wire_files(self):
+        """The reviewable workflow matcher must include every watched header and implementation path."""
+        workflow = (ROOT / '.github/workflows/wire-break.yml').read_text(encoding='utf-8')
+        self.assertEqual(WIRE_PATHS, EXPECTED_WIRE_PATHS)
+        for relative in EXPECTED_WIRE_PATHS:
+            self.assertIn(relative, workflow)
 
     def test_wire_cli_exposes_guard_exit_codes(self):
         """The public wire CLI must return 0 for a match, 1 for policy mismatch, and 2 when it cannot run."""

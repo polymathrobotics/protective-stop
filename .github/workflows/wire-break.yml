@@ -28,10 +28,21 @@ jobs:
           if git cat-file -e "$BASE_SHA:tools/change_control/wire_format.sha256" 2>/dev/null; then
             expectation_preexisted=true
           fi
+          watched_paths='pstop_c/pstop/include/pstop/config.h
+          pstop_c/pstop/include/pstop/constants.h
+          pstop_c/pstop/include/pstop/protocol.h
+          pstop_c/pstop/include/pstop/protocol_data.h
+          pstop_c/pstop/include/pstop/pstop_msg.h
+          pstop_c/pstop/include/pstop/checksum.h
+          pstop_c/pstop/include/pstop/device_id.h
+          pstop_c/pstop/include/pstop/endian.h
+          pstop_c/pstop/src/pstop/pstop_msg.c
+          pstop_c/pstop/src/pstop/checksum.c
+          pstop_c/pstop/src/pstop/endian.c'
           if { [ "$expectation_preexisted" = true ] && \
                git diff --name-only "$BASE_SHA"...HEAD | grep -Eq '^tools/change_control/wire_format\.sha256$'; } || \
              { [ "$expectation_preexisted" = false ] && \
-               git diff --name-only "$BASE_SHA"...HEAD | grep -Eq '^pstop_c/pstop/include/pstop/'; }; then
+               git diff --name-only "$BASE_SHA"...HEAD | grep -Fqx -f <(printf '%s\n' "$watched_paths"); }; then
             signature_changed=true
           elif ! python3 -m tools.change_control.wire_format check --root . >/dev/null; then
             signature_changed=true

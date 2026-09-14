@@ -107,7 +107,7 @@ in this change requires.
 | Checkout action version in use | `actions/checkout@v7` |
 | Authorizers | Ilia Baranov, Raj, David Tarazi — all three are code owners of everything and all three may authorize |
 | Protocol version constant | `pstop_c/pstop/include/pstop/config.h` — `PSTOP_VERSION 0x02U`, `PSTOP_MESSAGE_SIZE 48U` |
-| Wire-format headers | `pstop_c/pstop/include/pstop/` — `config.h`, `constants.h`, `protocol.h`, `protocol_data.h`, `pstop_msg.h`, `checksum.h`, `device_id.h`, `endian.h` |
+| Wire-behavior files | Eight public headers under `pstop_c/pstop/include/pstop/` — `config.h`, `constants.h`, `protocol.h`, `protocol_data.h`, `pstop_msg.h`, `checksum.h`, `device_id.h`, `endian.h` — plus `pstop_c/pstop/src/pstop/pstop_msg.c`, `pstop_c/pstop/src/pstop/checksum.c`, and `pstop_c/pstop/src/pstop/endian.c` |
 | `pstop_c` is vendored in-tree | A directory, NOT an ESP-IDF managed component. It does not appear in `firmware/dependencies.lock`. A "version bump" is a directory update, so the check compares header content, not a lockfile line |
 | Linter entry point (change-0001) | `python3 -m tools.safety_lint --json` |
 | Pre-commit exclusions | `pstop_c/`, `ros2/`, `archive/`, vendored wireguard and x25519, `hardware/` binaries. `tools/`, `docs/` and `.github/` are in scope |
@@ -361,28 +361,31 @@ it fail-safes to STOP — safe, and permanently stopped until both ends are upda
 together. The build stays green throughout. This check makes that impossible to ship
 unannounced.
 
-**5b. The signature.** A SHA-256 over the normalized content of the wire-format headers
+**5b. The signature.** A SHA-256 over the normalized content of the wire-behavior files
 listed in §3, plus the literal values of `PSTOP_VERSION` and `PSTOP_MESSAGE_SIZE`.
 Normalize by stripping comments and collapsing whitespace so a comment edit does not
 trip it. Store the expected value in `wire_format.sha256` with a comment recording the
 `PSTOP_VERSION` it corresponds to.
 
-**5c. Behaviour on mismatch.** Fail the PR with a message naming which headers changed
+**5c. Behaviour on mismatch.** Fail the PR with a message naming which files changed
 and stating that remote and machine must be released and deployed together. Apply the
 `wire-break` label and require the `class-c` label. The fix path is to update
 `wire_format.sha256` in the same PR, which makes the change explicit in the diff and
 reviewable — the point is not to prevent wire changes, it is to prevent *silent* ones.
 
 **5d. This check ignores `docs/process/enforcement-mode` and always enforces.** It has
-no judgement in it and no false positives — the headers either changed or they did not
-— and the failure mode is a field outage rather than a process complaint. Hardcode
+no judgement in it and no false positives — the watched files either changed or they
+did not — and the failure mode is a field outage rather than a process complaint. Hardcode
 this; do not make it configurable.
 
 **Tests:**
-- `test_signature_stable_across_comment_only_change` — add a comment to `protocol.h`
-  in a scratch copy, assert the signature is unchanged.
+- `test_signature_stable_across_comment_only_change` — add comments to watched headers
+  and implementation files in a scratch copy, assert the signature is unchanged.
 - `test_signature_changes_on_field_addition` — add a field to a struct in a scratch
   copy, assert it changes.
+- Mutate each watched implementation file in a scratch copy: reorder adjacent field
+  writes in `pstop_msg.c`, change the CRC polynomial in `checksum.c`, and change a
+  byte-order operation in `endian.c`; each file hash and the aggregate must change.
 - `test_signature_changes_on_message_size_change`
 - `test_check_exits_one_on_mismatch_and_names_the_headers`
 - Drift-verify: corrupt `wire_format.sha256`, confirm CI fails, restore. Paste the run.

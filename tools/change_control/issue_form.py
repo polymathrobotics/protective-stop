@@ -28,6 +28,8 @@ def parse_issue_form(path):
     item = None
     section = None
     options = False
+    active_attribute_key = None
+    active_attribute_indent = None
     in_body = False
     for number, raw in enumerate(lines, 1):
         if not raw.strip() or raw.lstrip().startswith('#') or raw.strip() == '---':
@@ -35,6 +37,8 @@ def parse_issue_form(path):
         indent = len(raw) - len(raw.lstrip(' '))
         text = raw.strip()
         if indent == 0:
+            active_attribute_key = None
+            active_attribute_indent = None
             match = re.fullmatch(r'([a-z_]+):(?:\s*(.*))?', text)
             if not match:
                 raise ValueError(f'{path}:{number}: unsupported top-level YAML')
@@ -55,6 +59,8 @@ def parse_issue_form(path):
             document['body'].append(item)
             section = None
             options = False
+            active_attribute_key = None
+            active_attribute_indent = None
             continue
         if item is None:
             raise ValueError(f'{path}:{number}: body entry must begin with type')
@@ -68,6 +74,8 @@ def parse_issue_form(path):
                     raise ValueError(f'{path}:{number}: {key} must be a mapping')
                 section = key
             options = False
+            active_attribute_key = None
+            active_attribute_indent = None
             continue
         if indent == 6 and section in ('attributes', 'validations'):
             if ':' not in text:
@@ -75,20 +83,32 @@ def parse_issue_form(path):
             key, value = text.split(':', 1)
             if section == 'validations' and key == 'required':
                 item['required'] = _scalar(value)
+                active_attribute_key = None
+                active_attribute_indent = None
             elif section == 'attributes' and key == 'options':
                 if value.strip():
                     raise ValueError(f'{path}:{number}: options must be a sequence')
                 options = True
+                active_attribute_key = None
+                active_attribute_indent = None
             elif section == 'attributes':
                 item[key] = _scalar(value)
                 options = False
+                active_attribute_key = key
+                active_attribute_indent = indent
             else:
                 raise ValueError(f'{path}:{number}: unsupported validation')
             continue
         if indent == 8 and options and text.startswith('- '):
             item['options'].append(_scalar(text[2:]))
             continue
-        if indent >= 8 and section == 'attributes':
+        if (
+            section == 'attributes'
+            and not options
+            and active_attribute_key is not None
+            and indent > active_attribute_indent
+        ):
+            item[active_attribute_key] = f'{item[active_attribute_key]} {_scalar(text)}'.strip()
             continue
         raise ValueError(f'{path}:{number}: unsupported indentation or YAML construct')
     validate_issue_form(document)
