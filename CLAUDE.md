@@ -398,12 +398,13 @@ v2.2.0 (excludes `pstop_c/`, `ros2/`, `archive/`, vendored WireGuard and x25519,
 
 ```
 firmware/machn   cd firmware && idf.py build | idf.py -p /dev/ttyACM0 flash monitor
-diversity gate   scripts/check_estop_diversity.sh build/pstop_remote.elf
+diversity gate   scripts/check_estop_diversity.sh
 host             make -C host  |  make -C host test
 MISRA            ./tools/misra_check.sh          # advisory in CI — read it
 sdkconfig parity ./scripts/check_sdkconfig_parity.sh
 coverage         scripts/coverage.sh             # writes docs/safety/coverage/SUMMARY.md
-safety lint      python3 -m tools.safety_lint --check | --write
+safety lint      python3 -m tools.safety_lint --check
+safety lint regen python3 -m tools.safety_lint --write
 integration      tools/pstop_multi_remote_test.py | tools/pstop_multi_machine_test.py
 HIL              tools/hil/test_10_button.py | test_20_discordance.py | test_30_power_cycle.py
 robustness       test/chaos_ladder.sh | netem_ladder.sh | longsoak.sh | test_suite.sh
