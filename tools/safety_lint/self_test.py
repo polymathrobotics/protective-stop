@@ -113,7 +113,17 @@ class ParserTests(FixtureRepo):
 
     def test_every_malformed_allocation_continuation_fails_in_helper(self):
         """Malformed slash, range, and numeric continuations can never leave a partial allocation."""
-        for literal in ('F-R-01/XX', 'F-R-01..', 'F-R-01/2', 'F-R-01/003'):
+        for literal in (
+            'F-R-01/XX',
+            'F-R-01..',
+            'F-R-01/2',
+            'F-R-01/003',
+            'F-R-01.02',
+            'F-R-01,02',
+            'F-R-01-02',
+            'F-H-01/F-M02',
+            'F-H-01/F-M-1',
+        ):
             with self.subTest(literal=literal), self.assertRaisesRegex(LintError, 'malformed allocation'):
                 expand_allocations(literal, 'doc.md', 21)
 
@@ -910,6 +920,12 @@ class CoverageRenderCliTests(FixtureRepo):
         """Safety lint runs with only repository-content read permission at workflow scope."""
         text = (REPO / '.github/workflows/safety-lint.yml').read_text(encoding='utf-8')
         self.assertIn('\npermissions:\n  contents: read\n\njobs:', text)
+
+    def test_workflow_does_not_persist_credentials_or_fetch_submodules(self):
+        """Safety lint checkout keeps no Git credential and fetches no nonexistent submodules."""
+        text = (REPO / '.github/workflows/safety-lint.yml').read_text(encoding='utf-8')
+        self.assertIn('persist-credentials: false', text)
+        self.assertNotIn('submodules:', text)
 
     def run_cli(self, *args):
         return subprocess.run(

@@ -70,7 +70,9 @@ def expand_allocations(cell, path='<allocation>', line=1):
         trailing = cell[match.end() :]
         malformed = (
             (trailing.startswith('/') and not trailing.startswith('/F-'))
+            or (trailing.startswith('/F-') and re.match(r'^/F-[A-Z]-[0-9]{2}(?=$|[\s,.;)])', trailing) is None)
             or trailing.startswith('..')
+            or re.match(r'^[.,-][0-9]', trailing) is not None
             or (trailing and trailing[0].isalnum())
         )
         if malformed:
