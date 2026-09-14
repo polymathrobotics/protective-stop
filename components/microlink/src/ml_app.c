@@ -692,6 +692,8 @@ static bool fleet_ota_download_and_apply(
       last_pct = pct;
       ESP_LOGI(TAG, "OTA: %3d%%  (%d / %d bytes)", pct, total, content_len);
     }
+    /* Allow idle watchdog tasks to run even when download data is ready. */
+    vTaskDelay(1);
   }
 
   free(buf);
