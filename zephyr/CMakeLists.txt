@@ -39,9 +39,12 @@ if(CONFIG_PSTOP_MACHINE)
   target_compile_options(${ZEPHYR_CURRENT_LIBRARY} PRIVATE -Wno-format)
 endif()
 
-# time_get_now(): Zephyr's kernel clock, or upstream's (Linux-only) original.
-zephyr_library_sources_ifdef(CONFIG_PSTOP_ZEPHYR_TIME pstop_time_zephyr.c)
-zephyr_library_sources_ifndef(CONFIG_PSTOP_ZEPHYR_TIME ${PSTOP_SRC}/time.c)
+# time_get_now(): see the PSTOP_TIME_SOURCE choice. Exactly one of these can
+# be set, and PSTOP_TIME_APPLICATION deliberately compiles neither -- the
+# application supplies the symbol, so compiling either here would collide
+# with it at link time.
+zephyr_library_sources_ifdef(CONFIG_PSTOP_TIME_ZEPHYR pstop_time_zephyr.c)
+zephyr_library_sources_ifdef(CONFIG_PSTOP_TIME_UPSTREAM ${PSTOP_SRC}/time.c)
 
 if(CONFIG_PSTOP_TRANSPORT_UDP)
   zephyr_include_directories(${PSTOP_ROOT}/pstop_c/transport/include)
