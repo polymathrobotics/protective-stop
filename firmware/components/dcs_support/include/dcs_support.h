@@ -354,15 +354,20 @@ extern "C"
   /** @brief Remove an id from the RAM cache AND NVS (no error if absent). */
   esp_err_t dcs_list_del(dcs_list_t which, uint32_t remote_id);
 
-  /** @brief This remote's announced role (a pstop_aux_role_t value: stop_only or
-   * operator). Lock-free — safe to call from the safety cores when encoding the
-   * outbound pstop frame. Loaded from NVS at boot; stop_only until promoted. */
-  uint8_t dcs_role_get(void);
+  /** @brief The role this remote announces to peer @p slot (a pstop_aux_role_t
+   * value: stop_only or operator). Lock-free. An out-of-range slot reads
+   * stop_only. Loaded from the peer table at boot; a slot is stop_only until
+   * promoted, and drops back to stop_only when re-pointed at another machine.
+   *
+   * The safety cores must not call this: they encode from the per-tick value
+   * the comparator latches, so both cores see one role per slot per tick. */
+  uint8_t dcs_role_get_slot(int slot);
 
-  /** @brief Persist this remote's role AND apply it live: the next outbound
-   * pstop frame announces it. No reboot. The machine re-reads the announced
-   * role on every frame, so authority follows the remote at once. */
-  esp_err_t dcs_role_set(uint8_t role);
+  /** @brief Persist the role this remote announces to peer @p slot AND apply it
+   * live: the next outbound frame to that peer announces it. No reboot, and the
+   * other slots are unaffected. That machine re-reads the announced role on
+   * every frame, so authority follows the remote at once. */
+  esp_err_t dcs_pstop_set_peer_role(int slot, uint8_t role);
 
   /**
  * @brief Tell the transport whether the pstop link to the machine is alive.

@@ -195,17 +195,21 @@ curl -X POST "http://$REMOTE/api/pstop_peer?ip=$LAPTOP_TS&port=8890"
 # expect: {"ok":true,...}    ring: white -> blue within a few seconds
 ```
 
-A new remote is **stop-only**: it can stop the machine but never arm it.
-Promote it once (applies live, no reboot):
+A new remote is **stop-only toward every machine**: it can stop them but never
+arm them. Promote it for THIS peer — slot 0 is the target you set in step 7
+(applies live, no reboot):
 
 ```sh
-curl -u "admin:$ADMIN_PW" -X POST "http://$REMOTE/api/role?role=operator"
-# expect: {"ok":true,"role":"operator","message":"applied"}
+curl -u "admin:$ADMIN_PW" -X POST "http://$REMOTE/api/pstop_peers?slot=0&role=operator"
+# expect: {"ok":true,"slot":0,"role":"operator"}
 ```
 
-That is the only gate: the remote decides its own role and the machine honours
-it. `role=stop_only` demotes it again at any time — an armed machine keeps
-running, but refuses the next re-arm until an `operator` remote does STOP → OK.
+That is the only gate: the remote decides its own role per peer and the machine
+honours it. The role is per slot, so a remote bonded to several machines is
+promoted for each one separately, and re-pointing a slot at another machine
+drops it back to stop-only. `role=stop_only` demotes it again at any time — an
+armed machine keeps running, but refuses the next re-arm until an `operator`
+remote does STOP → OK.
 
 ## 8. Test station
 
@@ -231,7 +235,7 @@ ros2 topic echo /pstop_hb                     # expect: stop: true at ~10 Hz
 Remote-side counters, if a step does not match:
 
 ```sh
-curl -s "http://$REMOTE/state.json" | python3 -m json.tool | grep -E 'pstop_(sent|replies)|ml_state|role'
+curl -s "http://$REMOTE/state.json" | python3 -m json.tool | grep -E 'pstop_(sent|replies)|ml_state|roles'
 curl -s "http://$REMOTE/api/health"                 # lifetime counters: presses, uptime, boots
 ```
 
@@ -249,7 +253,7 @@ software remote that runs the same arming sequence against the node; see
 | `esp-pstop0` up, no `pstop-` in `tailscale status` after 2 min | Key wrong or single-use: `curl -u admin:PW http://10.42.0.X/admin/api/status` (find `10.42.0.X` with `ip neigh show dev esp-pstop0`) → `state`. Fix the key via the admin page at `http://10.42.0.X/admin/` without reflashing. Device approval on and key not pre-approved? Approve it in the console. |
 | `ml_state` stuck at 0–3 | Laptop has no internet, or NAT not active: `sudo nmcli con show esp-pstop \| grep ipv4.method` → `shared`. |
 | Ring stays white after `pstop_peer` | POST failed; re-run and read the JSON. |
-| Ring blue, never green | `/api/role` on the remote returns `operator`? Node running? `/machine_bridge/remotes` shows `stop_only: true` while the remote announces stop-only. |
+| Ring blue, never green | Does `state.json`'s `roles[slot]` read `operator` for this machine's slot? Node running? `/machine_bridge/remotes` shows `stop_only: true` while the remote announces stop-only to it. |
 | Remote row shows `REJECTED` | The node's `allowlist`/`denylist` refused the bond. Fix the list, then press **Rebond** on the remote (or `POST /api/pstop_peers?slot=0&rebond=1`). |
 | Ring red pulsing (slow) | Peer configured but unreachable: node down, wrong `$LAPTOP_TS`, or ufw. `tailscale ping $REMOTE` from the laptop. |
 | Ring purple | One switch loop open while the other is closed: wiring fault. See [`hardware/README.md`](../hardware/README.md). |

@@ -20,12 +20,12 @@
  *   POST /api/ts_boot             Flip NVS dcs_app/ts_boot flag (next reboot)
  *   POST /api/pstop_peer?ip&port  Set + persist pstop peer target
  *   POST /api/pstop_num?n=N       Set USB "PSTOPxx" unit number (0 = auto)
- *   POST /api/pstop_peers?slot..  Multi-machine peer table (set/clear slot)
+ *   POST /api/pstop_peers?slot..  Multi-machine peer table (set/clear slot,
+ *                                 set the per-peer role; promotion needs admin)
  *   POST /api/ring_offset?n=N     Set + persist LED-ring rotation (physical LED 1)
  *   POST /api/led_brightness?pct=N  Set + persist master LED brightness (0..100%)
  *   POST /api/ring_led1?on=0|1    Locate mode: only LED 1 white (auto-expires)
  *   POST /api/enter_download      Enter USB download (flashing) mode
- *   GET/POST /api/role            Read or persist role; POST reboots to apply
  *
  * The admin routes (/admin/...) live in microlink (ml_config_httpd.c, ml_app.c).
  * Full reference for both servers: docs/API.md.
@@ -62,6 +62,10 @@
 #include "wireguardif.h"
 
 static const char * TAG = "dcs_admin";
+
+/* Defined with the admission handlers below; api_pstop_peers needs it earlier
+ * to gate promotion to OPERATOR. */
+static bool admin_required(httpd_req_t * req);
 
 /* === GET / =============================================================== */
 static esp_err_t page_index(httpd_req_t * req)
@@ -510,9 +514,17 @@ static esp_err_t page_state(httpd_req_t * req)
       CLAMP_N();
     }
   }
-  /* Remote self-role: the role this device announces to machines (live —
-     * changes apply on the next frame). Inert on machine-role builds. */
-  n += snprintf(buf + n, cap - n, "],\"role\":\"%s\",\"tk0\":", pstop_aux_role_str((pstop_aux_role_t)dcs_role_get()));
+  /* Per-peer roles: what this device announces to each machine slot, indexed
+     * like the peer table (live — changes apply on the next frame to that
+     * peer). Inert on machine-role builds. */
+  n += snprintf(buf + n, cap - n, "],\"roles\":[");
+  CLAMP_N();
+  for (int i = 0; i < DCS_PSTOP_MAX_MACHINES; i++) {
+    n += snprintf(
+      buf + n, cap - n, "%s\"%s\"", (i != 0) ? "," : "", pstop_aux_role_str((pstop_aux_role_t)dcs_role_get_slot(i)));
+    CLAMP_N();
+  }
+  n += snprintf(buf + n, cap - n, "],\"tk0\":");
   CLAMP_N();
   n += emit_bucket(buf + n, cap - n, &snap.b[0]);
   CLAMP_N();
@@ -697,23 +709,27 @@ static esp_err_t api_pstop_peer(httpd_req_t * req)
   return httpd_resp_send(req, resp, n);
 }
 
-/* === POST /api/pstop_peers?slot=N&ip=A.B.C.D&port=P[&id=HEX] ============== *
+/* === POST /api/pstop_peers?slot=N&ip=A.B.C.D&port=P[&id=HEX][&role=R] ===== *
  * Multi-machine peer table. slot = 0..DCS_PSTOP_MAX_MACHINES-1; id is the
  * machine's device id (pstop_msg.receiver_id), default 0x01020304 to match
  * machine_app_runner's default machine_device_id. ?slot=N&clear=1 empties a
  * slot; ?slot=N&rebond=1 restarts that slot's bond (the only way out of the
  * REJECTED state after the machine answered UNBOND). Applies live (comparator
  * picks the change up within one tick) and persists to NVS. Slot 0 mirrors the
- * legacy /api/pstop_peer target. */
+ * legacy /api/pstop_peer target.
+ *
+ * ?role=stop_only|operator sets what this remote announces to THIS peer, alone
+ * or alongside ip/port. A slot is stop-only until promoted, and re-pointing or
+ * clearing it demotes. Promotion requires admin auth; nothing else here does. */
 static esp_err_t api_pstop_peers(httpd_req_t * req)
 {
-  char query[128];
+  char query[160];
   char val[20];
   (void)httpd_resp_set_type(req, "application/json");
   if (httpd_req_get_url_query_str(req, query, sizeof(query)) != ESP_OK) {
     (void)httpd_resp_set_status(req, "400 Bad Request");
     return httpd_resp_sendstr(
-      req, "{\"ok\":false,\"error\":\"missing ?slot=N&ip=A.B.C.D&port=P (or &clear=1 / &rebond=1)\"}");
+      req, "{\"ok\":false,\"error\":\"missing ?slot=N with ip+port, role, clear=1 or rebond=1\"}");
   }
   if (httpd_query_key_value(query, "slot", val, sizeof(val)) != ESP_OK) {
     (void)httpd_resp_set_status(req, "400 Bad Request");
@@ -733,8 +749,33 @@ static esp_err_t api_pstop_peers(httpd_req_t * req)
     return httpd_resp_send(req, resp, n);
   }
 
+  /* ?role=stop_only|operator — set the role this remote announces to this peer,
+   * with or without an ip/port in the same request.
+   *
+   * ADMIN AUTH gates promotion only. Peer configuration on this endpoint has
+   * always been unauthenticated, and demoting, clearing or re-pointing a slot
+   * can only reduce authority, so those stay open. Granting OPERATOR is the one
+   * outcome that hands out re-arm rights, and since the machine keeps no
+   * operator list this announcement is the WHOLE re-arm gate. */
+  bool have_role = false;
+  uint8_t want_role = PSTOP_AUX_ROLE_STOP_ONLY;
+  if (httpd_query_key_value(query, "role", val, sizeof(val)) == ESP_OK) {
+    if (strcmp(val, "operator") == 0) {
+      want_role = PSTOP_AUX_ROLE_OPERATOR;
+    } else if (strcmp(val, "stop_only") == 0) {
+      want_role = PSTOP_AUX_ROLE_STOP_ONLY;
+    } else {
+      (void)httpd_resp_set_status(req, "400 Bad Request");
+      return httpd_resp_sendstr(req, "{\"ok\":false,\"error\":\"role must be stop_only or operator\"}");
+    }
+    if ((want_role == PSTOP_AUX_ROLE_OPERATOR) && !admin_required(req)) {
+      return ESP_OK; /* 401 already sent */
+    }
+    have_role = true;
+  }
+
   if ((httpd_query_key_value(query, "clear", val, sizeof(val)) == ESP_OK) && (val[0] == '1')) {
-    esp_err_t r = dcs_pstop_set_peer_slot(slot, false, 0, 0, 0);
+    esp_err_t r = dcs_pstop_set_peer_slot(slot, false, 0, 0, 0); /* also drops the role */
     char resp[64];
     int n =
       snprintf(resp, sizeof(resp), "{\"ok\":%s,\"slot\":%d,\"cleared\":true}", (r == ESP_OK) ? "true" : "false", slot);
@@ -745,12 +786,31 @@ static esp_err_t api_pstop_peers(httpd_req_t * req)
   }
 
   char ipstr[20], portstr[8];
-  if (
-    (httpd_query_key_value(query, "ip", ipstr, sizeof(ipstr)) != ESP_OK) ||
-    (httpd_query_key_value(query, "port", portstr, sizeof(portstr)) != ESP_OK))
-  {
+  const bool have_target = (httpd_query_key_value(query, "ip", ipstr, sizeof(ipstr)) == ESP_OK) &&
+                           (httpd_query_key_value(query, "port", portstr, sizeof(portstr)) == ESP_OK);
+  if (!have_target) {
+    if (have_role) {
+      /* Role-only change: leave the slot pointed where it is. */
+      esp_err_t rr = dcs_pstop_set_peer_role(slot, want_role);
+      if (rr == ESP_ERR_INVALID_STATE) {
+        (void)httpd_resp_set_status(req, "409 Conflict");
+        return httpd_resp_sendstr(req, "{\"ok\":false,\"error\":\"slot has no machine; set ip and port first\"}");
+      }
+      char resp[80];
+      int rn = snprintf(
+        resp,
+        sizeof(resp),
+        "{\"ok\":%s,\"slot\":%d,\"role\":\"%s\"}",
+        (rr == ESP_OK) ? "true" : "false",
+        slot,
+        pstop_aux_role_str((pstop_aux_role_t)dcs_role_get_slot(slot)));
+      if (rr != ESP_OK) {
+        (void)httpd_resp_set_status(req, "500 Internal Server Error");
+      }
+      return httpd_resp_send(req, resp, rn);
+    }
     (void)httpd_resp_set_status(req, "400 Bad Request");
-    return httpd_resp_sendstr(req, "{\"ok\":false,\"error\":\"need ip and port (or clear=1)\"}");
+    return httpd_resp_sendstr(req, "{\"ok\":false,\"error\":\"need ip and port, role, or clear=1\"}");
   }
   unsigned int a, b, c, d;
   if ((sscanf(ipstr, "%u.%u.%u.%u", &a, &b, &c, &d) != 4) || (a > 255U) || (b > 255U) || (c > 255U) || (d > 255U)) {
@@ -773,11 +833,16 @@ static esp_err_t api_pstop_peers(httpd_req_t * req)
 
   uint32_t ip = ((uint32_t)a << 24) | ((uint32_t)b << 16) | ((uint32_t)c << 8) | (uint32_t)d;
   esp_err_t r = dcs_pstop_set_peer_slot(slot, true, ip, (uint16_t)port, machine_id);
-  char resp[128];
+  /* After the target, never before: pointing a slot at a different machine
+   * demotes it, which would undo a role applied first. */
+  if ((r == ESP_OK) && have_role) {
+    r = dcs_pstop_set_peer_role(slot, want_role);
+  }
+  char resp[160];
   int n = snprintf(
     resp,
     sizeof(resp),
-    "{\"ok\":%s,\"slot\":%d,\"ip\":\"%u.%u.%u.%u\",\"port\":%d,\"id\":%lu}",
+    "{\"ok\":%s,\"slot\":%d,\"ip\":\"%u.%u.%u.%u\",\"port\":%d,\"id\":%lu,\"role\":\"%s\"}",
     (r == ESP_OK) ? "true" : "false",
     slot,
     a,
@@ -785,7 +850,8 @@ static esp_err_t api_pstop_peers(httpd_req_t * req)
     c,
     d,
     port,
-    (unsigned long)machine_id);
+    (unsigned long)machine_id,
+    pstop_aux_role_str((pstop_aux_role_t)dcs_role_get_slot(slot)));
   if (r != ESP_OK) {
     (void)httpd_resp_set_status(req, "500 Internal Server Error");
   }
@@ -1279,73 +1345,6 @@ static esp_err_t api_admission_post(httpd_req_t * req)
   return admission_send(req);
 }
 
-#ifndef DCS_PAGE_MACHINE
-/* Remote self-role config: this remote announces stop-only vs operator in every
- * pstop frame (see common/pstop_aux_channel.h). The REMOTE alone owns its role;
- * the machine honours whatever is announced. Applies live: the next frame
- * carries the new role and the machine re-reads it per frame, so an armed
- * machine keeps running but refuses the next re-arm once every bonded remote
- * announces stop-only.
- *   GET  /api/role                            -> {"ok":true,"role":"stop_only"}
- *   POST /api/role?role=stop_only|operator    persist + apply (no reboot). */
-static esp_err_t role_send(httpd_req_t * req, bool ok)
-{
-  char buf[64];
-  int len = snprintf(
-    buf,
-    sizeof(buf),
-    "{\"ok\":%s,\"role\":\"%s\"}",
-    ok ? "true" : "false",
-    pstop_aux_role_str((pstop_aux_role_t)dcs_role_get()));
-  (void)httpd_resp_set_type(req, "application/json");
-  return httpd_resp_send(req, buf, len);
-}
-
-static esp_err_t api_role_get(httpd_req_t * req)
-{
-  if (!admin_required(req)) {
-    return ESP_OK;
-  }
-  return role_send(req, true);
-}
-
-static esp_err_t api_role_post(httpd_req_t * req)
-{
-  if (!admin_required(req)) {
-    return ESP_OK;
-  }
-  (void)httpd_resp_set_type(req, "application/json");
-  char query[48], val[16];
-  if (
-    (httpd_req_get_url_query_str(req, query, sizeof(query)) != ESP_OK) ||
-    (httpd_query_key_value(query, "role", val, sizeof(val)) != ESP_OK))
-  {
-    (void)httpd_resp_set_status(req, "400 Bad Request");
-    return httpd_resp_sendstr(req, "{\"ok\":false,\"error\":\"need ?role=stop_only|operator\"}");
-  }
-  uint8_t role;
-  if (strcmp(val, "operator") == 0) {
-    role = PSTOP_AUX_ROLE_OPERATOR;
-  } else if (strcmp(val, "stop_only") == 0) {
-    role = PSTOP_AUX_ROLE_STOP_ONLY;
-  } else {
-    (void)httpd_resp_set_status(req, "400 Bad Request");
-    return httpd_resp_sendstr(req, "{\"ok\":false,\"error\":\"role must be stop_only or operator\"}");
-  }
-  if (dcs_role_set(role) != ESP_OK) {
-    (void)httpd_resp_set_status(req, "500 Internal Server Error");
-    return httpd_resp_sendstr(req, "{\"ok\":false,\"error\":\"NVS write failed\"}");
-  }
-  char resp[112];
-  int len = snprintf(
-    resp,
-    sizeof(resp),
-    "{\"ok\":true,\"role\":\"%s\",\"message\":\"applied\"}",
-    pstop_aux_role_str((pstop_aux_role_t)role));
-  return httpd_resp_send(req, resp, len);
-}
-#endif
-
 /* === GET /api/health, POST /api/health/reset ================================
  * Lifetime wear counters + the process-wide warning board (dcs_health.h).
  * GET is unauthenticated like /state.json; reset is admin-gated because it
@@ -1509,7 +1508,5 @@ void dcs_admin_pages_register(ml_app_t * app)
   (void)ml_app_add_page(app, "/api/health", HTTP_GET, api_health_get);
   (void)ml_app_add_page(app, "/api/health/reset", HTTP_POST, api_health_reset);
 #ifndef DCS_PAGE_MACHINE
-  (void)ml_app_add_page(app, "/api/role", HTTP_GET, api_role_get);
-  (void)ml_app_add_page(app, "/api/role", HTTP_POST, api_role_post);
 #endif
 }

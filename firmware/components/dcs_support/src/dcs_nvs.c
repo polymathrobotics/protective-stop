@@ -12,7 +12,8 @@
  *   ps_ip     u32  pstop peer IPv4 in host byte order
  *   ps_port   u16  pstop peer UDP port
  *   ring_off  u8   LED-ring rotation: physical pixel index of LED 1 (default 0)
- *   ps_peers  blob multi-machine peer table: version byte + per-slot records
+ *   ps_peers  blob multi-machine peer table: version byte + per-slot records,
+ *                  each carrying the role this remote announces to that peer
  *                  (absent -> migrate legacy ps_ip/ps_port into slot 0)
  *   adm_allow blob admission allowlist: count byte + u32 ids
  *   adm_deny  blob admission denylist: same layout
@@ -21,7 +22,10 @@
  *   wifi_txp  u8   WiFi max TX power, quarter-dBm (8..84); 0/absent = config default
  *   led_bri   u8   master LED brightness, 0..100%; absent/corrupt = default 50
  *   ctrl_rst  u8   one-shot controlled-reset cause crumb (DCS_CTRL_RST_*)
- *   role      u8   remote self-role (pstop_aux_role_t): absent/corrupt = stop_only
+ *   role      u8   RETIRED global self-role, superseded by the per-peer role in
+ *                  ps_peers. Read once to seed a v1 table on upgrade; never
+ *                  written. Removing it would demote every remote promoted
+ *                  before the split that has not yet re-migrated.
  */
 
 #include <string.h>
@@ -319,7 +323,7 @@ esp_err_t dcs_nvs_write_led_brightness(uint8_t pct)
   return r;
 }
 
-uint8_t dcs_nvs_read_role(void)
+uint8_t dcs_nvs_read_legacy_role(void)
 {
   nvs_handle_t h;
   if (nvs_open(DCS_NVS_NS, NVS_READONLY, &h) != ESP_OK) return PSTOP_AUX_ROLE_STOP_ONLY;
@@ -328,38 +332,10 @@ uint8_t dcs_nvs_read_role(void)
   nvs_close(h);
   /* Fail-safe: only an explicit OPERATOR value grants re-arm capability; any
    * other stored value (unset, corrupt, unknown schema) degrades to stop_only. */
-  return (v == PSTOP_AUX_ROLE_OPERATOR) ? PSTOP_AUX_ROLE_OPERATOR : PSTOP_AUX_ROLE_STOP_ONLY;
+  return dcs_pstop_peers_role_sanitize(v);
 }
 
-esp_err_t dcs_nvs_write_role(uint8_t role)
-{
-  if ((role != PSTOP_AUX_ROLE_STOP_ONLY) && (role != PSTOP_AUX_ROLE_OPERATOR)) {
-    return ESP_ERR_INVALID_ARG;
-  }
-  nvs_handle_t h;
-  esp_err_t r = nvs_open(DCS_NVS_NS, NVS_READWRITE, &h);
-  if (r != ESP_OK) return r;
-  r = nvs_set_u8(h, DCS_NVS_KEY_ROLE, role);
-  if (r == ESP_OK) {
-    r = nvs_commit(h);
-  }
-  nvs_close(h);
-  return r;
-}
-
-/* ps_peers blob layout (byte-serialized, no struct padding on the wire):
- *   [0]            format version (1)
- *   per slot, DCS_PSTOP_MAX_MACHINES records of 11 bytes:
- *   [0]            used (0/1)
- *   [1..4]         ip, big-endian, host-order value
- *   [5..6]         port, big-endian
- *   [7..10]        machine_id, big-endian
- */
-#define PS_PEERS_VER 1u
-#define PS_PEERS_REC_LEN 11
-#define PS_PEERS_BLOB_LEN (1 + (DCS_PSTOP_MAX_MACHINES * PS_PEERS_REC_LEN))
-
-static void ps_peers_put_u32(uint8_t * p, uint32_t v)
+static void blob_put_u32(uint8_t * p, uint32_t v)
 {
   p[0] = (uint8_t)(v >> 24);
   p[1] = (uint8_t)(v >> 16);
@@ -367,16 +343,20 @@ static void ps_peers_put_u32(uint8_t * p, uint32_t v)
   p[3] = (uint8_t)v;
 }
 
-static uint32_t ps_peers_get_u32(const uint8_t * p)
+static uint32_t blob_get_u32(const uint8_t * p)
 {
   return ((uint32_t)p[0] << 24) | ((uint32_t)p[1] << 16) | ((uint32_t)p[2] << 8) | (uint32_t)p[3];
 }
 
+/* The peer-table blob codec and the v1->v2 migration live in
+ * dcs_pstop_peers_logic.c so firmware/test/ can cover them on the host; this
+ * file is the NVS glue. */
+_Static_assert(
+  DCS_PSTOP_PEERS_MAX == DCS_PSTOP_MAX_MACHINES, "peer-table codec slot count must match DCS_PSTOP_MAX_MACHINES");
+
 void dcs_nvs_read_pstop_peers(dcs_pstop_peer_rec_t out[DCS_PSTOP_MAX_MACHINES])
 {
-  (void)memset(out, 0, DCS_PSTOP_MAX_MACHINES * sizeof(out[0]));
-
-  uint8_t blob[PS_PEERS_BLOB_LEN] = {0};
+  uint8_t blob[DCS_PSTOP_PEERS_BLOB_LEN] = {0};
   size_t len = sizeof(blob);
   nvs_handle_t h;
   esp_err_t r = ESP_FAIL;
@@ -385,18 +365,15 @@ void dcs_nvs_read_pstop_peers(dcs_pstop_peer_rec_t out[DCS_PSTOP_MAX_MACHINES])
     nvs_close(h);
   }
 
-  if ((r == ESP_OK) && (len == sizeof(blob)) && (blob[0] == PS_PEERS_VER)) {
-    for (int i = 0; i < DCS_PSTOP_MAX_MACHINES; i++) {
-      const uint8_t * rec = &blob[1 + (i * PS_PEERS_REC_LEN)];
-      out[i].configured = (rec[0] != 0u);
-      out[i].ip = ps_peers_get_u32(&rec[1]);
-      out[i].port = (uint16_t)(((uint16_t)rec[5] << 8) | (uint16_t)rec[6]);
-      out[i].machine_id = ps_peers_get_u32(&rec[7]);
-      if ((out[i].ip == 0u) || (out[i].port == 0u)) {
-        out[i].configured = false; /* corrupt/cleared record degrades to empty */
-      }
-    }
+  /* A v1 table predates the per-peer role; every slot adopts the retired
+   * global key so a remote promoted before the split keeps arming. */
+  if ((r == ESP_OK) && dcs_pstop_peers_decode(blob, len, dcs_nvs_read_legacy_role(), out)) {
     return;
+  }
+
+  (void)memset(out, 0, DCS_PSTOP_MAX_MACHINES * sizeof(out[0]));
+  for (int i = 0; i < DCS_PSTOP_MAX_MACHINES; i++) {
+    out[i].role = PSTOP_AUX_ROLE_STOP_ONLY;
   }
 
   /* Blob absent (first boot on this firmware) or unreadable: migrate a
@@ -422,22 +399,15 @@ void dcs_nvs_read_pstop_peers(dcs_pstop_peer_rec_t out[DCS_PSTOP_MAX_MACHINES])
     out[0].ip = legacy_ip;
     out[0].port = dcs_nvs_read_pstop_peer_port();
     out[0].machine_id = DCS_PSTOP_DEFAULT_MACHINE_ID;
+    out[0].role = dcs_nvs_read_legacy_role();
   }
   /* else: no legacy peer -> whole table stays zeroed (no machine configured). */
 }
 
 esp_err_t dcs_nvs_write_pstop_peers(const dcs_pstop_peer_rec_t recs[DCS_PSTOP_MAX_MACHINES])
 {
-  uint8_t blob[PS_PEERS_BLOB_LEN] = {0};
-  blob[0] = PS_PEERS_VER;
-  for (int i = 0; i < DCS_PSTOP_MAX_MACHINES; i++) {
-    uint8_t * rec = &blob[1 + (i * PS_PEERS_REC_LEN)];
-    rec[0] = recs[i].configured ? 1u : 0u;
-    ps_peers_put_u32(&rec[1], recs[i].ip);
-    rec[5] = (uint8_t)(recs[i].port >> 8);
-    rec[6] = (uint8_t)recs[i].port;
-    ps_peers_put_u32(&rec[7], recs[i].machine_id);
-  }
+  uint8_t blob[DCS_PSTOP_PEERS_BLOB_LEN];
+  dcs_pstop_peers_encode(recs, blob);
 
   nvs_handle_t h;
   esp_err_t r = nvs_open(DCS_NVS_NS, NVS_READWRITE, &h);
@@ -499,7 +469,7 @@ int dcs_nvs_read_list(dcs_list_t which, uint32_t out[DCS_MAX_LIST_IDS])
     if ((off + 4u) > len) {
       break; /* truncated blob: stop at what we have */
     }
-    uint32_t id = ps_peers_get_u32(&blob[off]);
+    uint32_t id = blob_get_u32(&blob[off]);
     if (id != 0u) {
       out[n++] = id; /* skip cleared/zero slots */
     }
@@ -535,7 +505,7 @@ int dcs_nvs_migrate_legacy_operators(void)
   for (int i = 0; i < count; i++) {
     size_t off = (size_t)1 + ((size_t)i * 4u);
     if ((off + 4u) > len) break;
-    uint32_t id = ps_peers_get_u32(&blob[off]);
+    uint32_t id = blob_get_u32(&blob[off]);
     if (id == 0u) continue;
     bool present = false;
     for (int k = 0; k < n; k++) {
@@ -569,7 +539,7 @@ esp_err_t dcs_nvs_write_list(dcs_list_t which, const uint32_t ids[DCS_MAX_LIST_I
   uint8_t blob[LIST_BLOB_LEN] = {0};
   blob[0] = (uint8_t)count;
   for (int i = 0; i < count; i++) {
-    ps_peers_put_u32(&blob[1 + (i * 4)], ids[i]);
+    blob_put_u32(&blob[1 + (i * 4)], ids[i]);
   }
   nvs_handle_t h;
   esp_err_t r = nvs_open(DCS_NVS_NS, NVS_READWRITE, &h);

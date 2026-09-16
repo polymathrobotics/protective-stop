@@ -214,15 +214,18 @@ Expected. The old list granted *re-arm* authority, which is now the remote's own
 announced role. At first boot the machine moves those ids into its **pin list**
 (`GET /api/admission` → `pinlist`; one WARN log line) so they keep their
 WireGuard pinning, and starts with open admission. Promote the remotes that
-should arm (`/api/role`) and, only if you want to restrict bonding, build the
+should arm (`/api/pstop_peers?slot=N&role=operator`) and, only if you want to
+restrict bonding, build the
 admission allowlist (`/api/admission?allow=`).
 
 ### Remote bonds and sends OK but the machine never arms
 
-The remote announces `stop_only`. Check `GET /api/role` on the **remote**
-(`state.json` `role`) and promote it with `POST /api/role?role=operator` (admin
-auth). Applies live — no reboot, no re-bond. The machine has no operator list
-any more; only the remote's announced role grants re-arm.
+The remote announces `stop_only` to that machine. Check `roles[slot]` in the
+**remote's** `state.json` for the slot pointed at it, and promote that slot with
+`POST /api/pstop_peers?slot=N&role=operator` (admin auth). Applies live — no
+reboot, no re-bond. The role is per peer, so promoting one slot does not promote
+the others. The machine has no operator list any more; only the remote's
+announced role grants re-arm.
 
 ### Tailscale reachable from some hosts, not the operator laptop
 

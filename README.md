@@ -122,7 +122,8 @@ The machine starts stopped. To arm it, press and hold the switch for at least
 `min_stop_ms` (500 ms by default), then release it. Whether a remote may re-arm
 is the **remote's own** declared role: a new remote announces `stop_only` (it can
 stop a machine but never arm it) until promoted to `operator` through its
-authenticated `/api/role`. The change applies live — an armed machine keeps
+authenticated `/api/pstop_peers?slot=N&role=operator`, separately for each
+machine it is bonded to. The change applies live — an armed machine keeps
 running when its operator demotes itself, but refuses to re-arm until a remote
 announcing `operator` performs the gesture.
 

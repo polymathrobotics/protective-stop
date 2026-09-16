@@ -325,7 +325,7 @@ ros2 run protective_stop_machine machine_bridge_node \
       # A non-empty allowlist admits ONLY the listed 32-bit pstop ids; the
       # denylist always refuses and wins. A refused BOND is answered UNBOND.
       # Re-arm authority is NOT here: each remote announces its own
-      # stop_only/operator role (remote /api/role) and the node honours it
+      # stop_only/operator role per peer (remote /api/pstop_peers) and it honours
       # live — a demoted operator keeps an armed machine running but cannot
       # re-arm it after the next STOP.
       # allowlist: [30234300]   # read_only

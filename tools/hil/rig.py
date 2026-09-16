@@ -89,15 +89,18 @@ class Chip:
         except (urllib.error.URLError, OSError, TimeoutError) as e:
             raise ChipUnreachable(f'POST {path}: {e}') from e
 
-    def role(self) -> str | None:
-        """The self-role this remote announces ('stop_only' | 'operator')."""
-        return self.state().get('role')
+    def role(self, slot: int = 0) -> str | None:
+        """The role this remote announces to peer `slot`
+        ('stop_only' | 'operator')."""
+        roles = self.state().get('roles') or []
+        return roles[slot] if slot < len(roles) else None
 
-    def set_role(self, role: str, admin_password: str) -> None:
-        """Set the announced role. Applies LIVE (no reboot) on firmware with
-        the live-role change; older builds reboot, so callers should
-        wait_reachable() afterwards."""
-        self._post(f'/api/role?role={role}', admin_password=admin_password)
+    def set_role(self, role: str, admin_password: str, slot: int = 0) -> None:
+        """Set the role announced to peer `slot`. Applies LIVE (no reboot) on
+        firmware with the live-role change; older builds reboot, so callers
+        should wait_reachable() afterwards. The slot must already have a
+        machine configured, or the remote answers 409."""
+        self._post(f'/api/pstop_peers?slot={slot}&role={role}', admin_password=admin_password)
 
     def state(self) -> dict:
         return json.loads(self._get('/state.json'))

@@ -27,13 +27,12 @@ Query parameters are shown where required. Unless noted, POST bodies are empty.
 | POST | `/api/usb_enable` | Flip the USB-NCM NVS flag and reboot |
 | POST | `/api/ts_boot` | Flip the Tailscale-on-boot NVS flag (effective next reboot) |
 | POST | `/api/pstop_peer?ip=A.B.C.D&port=N` | Set + persist the pstop machine target (= peer slot 0, legacy single-machine call) |
-| POST | `/api/pstop_peers?slot=N&ip=A.B.C.D&port=P[&id=HEX]` | Multi-machine peer table: set slot 0..3 (id = the machine's `machine_device_id`, default `0x01020304`). `?slot=N&clear=1` empties a slot. `?slot=N&rebond=1` restarts that slot's bond — the only way out of `REJECTED` (state 3: the machine refused the BOND with `UNBOND`; the remote does not retry by itself). Applies live within one 100 ms tick, persists to NVS |
+| POST | `/api/pstop_peers?slot=N&ip=A.B.C.D&port=P[&id=HEX][&role=R]` | Multi-machine peer table: set slot 0..3 (id = the machine's `machine_device_id`, default `0x01020304`). `?slot=N&clear=1` empties a slot. `?slot=N&rebond=1` restarts that slot's bond — the only way out of `REJECTED` (state 3: the machine refused the BOND with `UNBOND`; the remote does not retry by itself). Applies live within one 100 ms tick, persists to NVS |
+| POST | `/api/pstop_peers?slot=N&role=stop_only\|operator` | Per-peer role: what this remote announces to THIS machine, alone or alongside `ip`/`port`. This alone decides whether the remote may re-arm that machine; the machine has no operator list. **`role=operator` needs admin auth**; everything else on this endpoint is unauthenticated as before. A slot is `stop_only` until promoted, and re-pointing or clearing it demotes. Applied **live** — an armed machine keeps running when its operator demotes itself, but refuses the next re-arm until a remote announcing `operator` performs STOP → OK. Remote only |
 | POST | `/api/pstop_num?n=N` | Set the USB "PSTOPxx" unit number (0 = auto) |
 | POST | `/api/ring_offset?n=N` | Set + persist the LED-ring rotation offset (0..15) — which physical pixel is "LED 1". Applies immediately, survives reboots and firmware updates (NVS `ring_off`) |
 | POST | `/api/ring_led1?on=0\|1` | Locate mode: light ONLY LED 1 solid white (overrides state colours) so the offset can be verified during install; auto-expires after 5 min |
 | POST | `/api/enter_download?confirm=1` | Enter USB download (flashing) mode (**admin auth**) |
-| GET  | `/api/role` | Remote self-role (**admin auth**): `{"ok":true,"role":"stop_only"\|"operator"}`. Announced in every pstop frame; this alone decides whether the remote may re-arm a machine (the machine has no operator list). Default `stop_only`. Remote only |
-| POST | `/api/role?role=stop_only\|operator` | Persist the self-role to NVS and apply it **live** (**admin auth**, no reboot). An armed machine keeps running when its operator demotes itself, but refuses the next re-arm until a remote announcing `operator` performs STOP → OK. Remote only |
 | GET  | `/api/health` | Lifetime wear/health counters (see [Health](#health-lifetime-counters-and-warnings)) |
 | POST | `/api/health/reset?what=button\|all&confirm=1` | Zero the button counters after a switch replacement (`button`, bumps `button_swaps`) or everything (`all`, refurbished unit). **Admin auth** |
 
@@ -171,7 +170,8 @@ All routes require admin Basic-auth (enforced in-handler, same credential as `/a
 Admission decides only whether a remote may **bond**; a refused BOND is answered
 with `UNBOND` and the remote parks itself (`REJECTED`) until manually rebonded.
 Re-arm authority is **not** configured on the machine: each remote announces its
-own `stop_only`/`operator` role (`/api/role`) and the machine honours it live.
+own `stop_only`/`operator` role per peer (`/api/pstop_peers?slot=N&role=`) and
+the machine honours it live.
 The machine's `/state.json` exposes `allowlist`/`denylist` and, per bonded
 remote, its current `stop_only` — `true` = may STOP, cannot re-arm; `false` =
 may also re-arm.

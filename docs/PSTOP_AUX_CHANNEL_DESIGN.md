@@ -44,7 +44,7 @@ authority.
 
 Two independent decisions, deliberately kept apart.
 
-### Authority: the remote alone decides
+### Authority: the remote alone decides, per peer
 
 A remote may re-arm a machine when — and only when — the frame carrying its OK
 announces `OPERATOR`. Machines do not consult any list for this: the machine
@@ -59,8 +59,9 @@ stop_only = announced_role != OPERATOR
 values decode as stop-only, so the failure mode of a provisioning gap is always
 "cannot re-arm", never "unexpected operator".
 
-The role is **live**. `POST /api/role` on the remote applies to its next frame
-(no reboot) and the machine re-reads it per frame, giving these semantics:
+The role is **live** and **per peer**. `POST /api/pstop_peers?slot=N&role=` on
+the remote applies to its next frame to that peer (no reboot) and that machine
+re-reads it per frame, giving these semantics:
 
 | Situation | Machine behaviour |
 |---|---|
@@ -118,15 +119,32 @@ announces `OPERATOR`.
 
 ## Provisioning and lifecycle
 
-The role is stored in remote NVS and defaults to stop-only. `POST /api/role`
-persists a new value and applies it live; the next outbound frame announces it
-and every bonded machine honours it on receipt (see the table above). No
-re-bond is needed. The active role is exposed as `role` in the remote's
-`state.json` and on its web UI.
+The role is **per peer**: each of the remote's machine slots carries its own
+value in the `ps_peers` NVS table, and a frame announces the role of the slot it
+is addressed to. A slot is stop-only until promoted, so a remote bonded to
+several machines is promoted for each one separately.
+
+`POST /api/pstop_peers?slot=N&role=operator` persists a slot's role and applies
+it live; the next outbound frame to that peer announces it and that machine
+honours it on receipt (see the table above). No re-bond is needed, and the other
+slots are unaffected. Promotion requires admin auth. Re-pointing a slot at a
+different machine, or clearing it, drops it to stop-only — operator authority is
+granted against one machine and must not follow the slot to another.
+
+The comparator latches each slot's role into its per-tick input alongside the
+clock, so both lockstep cores encode the same `padding1` even if the role
+changes mid-tick.
+
+The active roles are exposed as the `roles` array in the remote's `state.json`,
+indexed like the peer table, and on its web UI as a per-slot control.
 
 Machine-side, each bonded remote's effective `stop_only` is observable (ROS 2
 `/machine_bridge/remotes`, machn `state.json` `bonded_remotes`, host runner
-`ROLE` log lines) and now tracks the announced role live.
+`ROLE` log lines) and tracks the announced role live.
+
+Upgrading from the single global role: a v1 peer table adopts the retired `role`
+NVS key for every slot, so a remote already promoted keeps arming. Blank NVS
+starts stop-only.
 
 ## Rollout
 

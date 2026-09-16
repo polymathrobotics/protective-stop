@@ -14,7 +14,8 @@ while *every* bonded remote says OK; any remote that sends STOP, goes silent pas
 its heartbeat timeout, unbonds, or sends a bad message → the machine STOPs. A
 remote is either an **operator** (may STOP *and* re-arm) or **stop-only** (may STOP
 and is heartbeat-monitored, but may never re-arm) — the remote declares which it
-is (`/api/role`), live. Machines may optionally restrict *who may bond* with an
+is (`/api/pstop_peers?slot=N&role=`), per machine and live. Machines may
+optionally restrict *who may bond* with an
 admission allow/denylist (`/api/admission`). See
 `docs/FAILOVER_AND_ARMING_DESIGN_2026-07-21.md` and the authorization model in
 `docs/API.md`.
@@ -40,9 +41,11 @@ admission allow/denylist (`/api/admission`). See
    remote's netmap (see §5).
 2. **Decide operator vs stop-only — on the remote.** A new remote announces
    **stop-only** (it can stop but not re-arm). To let it re-arm, promote it:
-   `POST /api/role?role=operator` on the **remote** (admin auth). Applies live, no
-   reboot; `role=stop_only` demotes it again (an armed machine keeps running but
-   refuses the next re-arm). The machine has no say in this.
+   `POST /api/pstop_peers?slot=N&role=operator` on the **remote** (admin auth),
+   for the slot pointed at that machine. Applies live, no reboot;
+   `role=stop_only` demotes it again (an armed machine keeps running but refuses
+   the next re-arm). The role is per peer, so promote each slot separately; the
+   machine has no say in this.
 3. **Optionally restrict admission — on the machine.** Both lists are empty by
    default and every remote may bond. `POST /api/admission?allow=<remote_id>`
    (id is the 32-bit `0x01<mac24>`, e.g. `0x01d7f344`; hex or decimal) switches the

@@ -18,6 +18,7 @@ idf_component_register(
         "src/dcs_admin_pages.c"
         "src/dcs_health.c"
         "src/dcs_health_logic.c"
+        "src/dcs_pstop_peers_logic.c"
         "src/panic_log.c"
     INCLUDE_DIRS
         "include"

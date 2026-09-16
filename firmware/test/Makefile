@@ -22,16 +22,25 @@ SRCS    := ../main/estop_verdict.c test_estop_verdict.c
 HEALTH_INC  := -I../components/dcs_support/include
 HEALTH_SRCS := ../components/dcs_support/src/dcs_health_logic.c test_dcs_health_logic.c
 
+# Multi-machine peer table: blob codec + the one-shot v1->v2 per-peer-role
+# migration, split out of dcs_nvs for the same host-test reason.
+PEERS_INC  := -I../components/dcs_support/include -I../../common -I../../pstop_c/pstop/include
+PEERS_SRCS := ../components/dcs_support/src/dcs_pstop_peers_logic.c test_dcs_pstop_peers_logic.c
+
 test_estop_verdict: $(SRCS)
 	$(CC) $(CFLAGS) $(INC) -o $@ $(SRCS)
 
 test_dcs_health_logic: $(HEALTH_SRCS)
 	$(CC) $(CFLAGS) $(HEALTH_INC) -o $@ $(HEALTH_SRCS)
 
+test_dcs_pstop_peers_logic: $(PEERS_SRCS)
+	$(CC) $(CFLAGS) $(PEERS_INC) -o $@ $(PEERS_SRCS)
+
 .PHONY: run coverage clean
-run: test_estop_verdict test_dcs_health_logic
+run: test_estop_verdict test_dcs_health_logic test_dcs_pstop_peers_logic
 	./test_estop_verdict
 	./test_dcs_health_logic
+	./test_dcs_pstop_peers_logic
 
 coverage: run
 	$(GCOVR) --root .. --gcov-executable $(GCOV) \
@@ -40,4 +49,4 @@ coverage: run
 	  --json-summary-pretty -o coverage-summary.json
 
 clean:
-	rm -f test_estop_verdict test_dcs_health_logic *.gcda *.gcno *.gcov coverage-summary.json
+	rm -f test_estop_verdict test_dcs_health_logic test_dcs_pstop_peers_logic *.gcda *.gcno *.gcov coverage-summary.json

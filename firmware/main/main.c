@@ -168,9 +168,9 @@ typedef struct
   uint32_t received_counter;
   uint64_t received_stamp;
   uint32_t receiver_id; /* this machine's device id */
-  uint8_t role; /* announced role (pstop_aux_role_t), snapshotted per tick so
-                 * both cores encode the same value even if /api/role flips
-                 * between their encodes (role is live, no reboot) */
+  uint8_t role; /* role announced to THIS peer (pstop_aux_role_t), snapshotted
+                 * per tick so both cores encode the same value even if the
+                 * slot's role flips between their encodes (role is live) */
 } tick_input_t;
 
 static tick_input_t g_tick[PSTOP_MAX_MACHINES];
@@ -568,8 +568,8 @@ static void core_task(void * arg)
       msg.counter = in[i].counter;
       msg.received_counter = in[i].received_counter;
       msg.heartbeat_timeout = HEARTBEAT_TIMEOUT_MS;
-      /* Announced role, from the comparator's per-tick snapshot (live-editable
-             * via /api/role; the machine re-reads it on every frame). */
+      /* Role announced to this peer, from the comparator's per-tick snapshot
+             * (live-editable per slot; the machine re-reads it every frame). */
       pstop_aux_encode_role(&msg, (pstop_aux_role_t)in[i].role);
       /* pstop_message_encode computes the CRC over the payload and writes it to
              * the last 2 bytes — both cores produce byte-identical buffers given
@@ -942,9 +942,11 @@ static void sess_bond_step(pstop_sess_t * s, int slot, uint64_t now_ms)
   req.stamp = now_ms;
   req.counter = s->bond_counter;
   req.heartbeat_timeout = HEARTBEAT_TIMEOUT_MS;
-  /* Announce the role on BOND too, so the machine has the claim cached before
-   * its remote_details callback runs when the bond is accepted. */
-  pstop_aux_encode_role(&req, (pstop_aux_role_t)dcs_role_get());
+  /* Announce this peer's role on BOND too, so the machine has the claim cached
+   * before its remote_details callback runs when the bond is accepted. Read
+   * live rather than latched: BOND is built on the comparator task, not the
+   * lockstep cores, so there is no cross-core byte comparison here. */
+  pstop_aux_encode_role(&req, (pstop_aux_role_t)dcs_role_get_slot(slot));
   uint8_t req_bytes[PSTOP_MESSAGE_SIZE];
   pstop_message_encode(&req, req_bytes);
 
@@ -1222,7 +1224,7 @@ static void comparator_task(void * arg)
         g_tick[i].received_counter = s->pd.last_received_counter;
         g_tick[i].received_stamp = s->pd.last_timestamp;
         g_tick[i].receiver_id = s->machine_id;
-        g_tick[i].role = dcs_role_get();
+        g_tick[i].role = dcs_role_get_slot(i);
         s->tx_stamp_history[s->pd.msg_counter & 15] = now_ms;
         any_active = true;
       }

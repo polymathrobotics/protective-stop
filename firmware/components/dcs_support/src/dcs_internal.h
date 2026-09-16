@@ -14,6 +14,7 @@
 #include <stdint.h>
 
 #include "dcs_health.h" /* lifetime health counters + warning board */
+#include "dcs_pstop_peers_logic.h" /* peer record + ps_peers blob codec */
 #include "dcs_support.h" /* DCS_PSTOP_MAX_MACHINES + public telemetry API */
 #include "esp_err.h"
 #include "esp_netif.h"
@@ -347,23 +348,16 @@ extern "C"
   uint8_t dcs_nvs_read_led_brightness(void);
   esp_err_t dcs_nvs_write_led_brightness(uint8_t pct);
 
-  /* Remote self-role (see common/pstop_aux_channel.h). Read fails safe to
-   * stop_only for absent/corrupt/unknown values; write accepts only the
-   * stop_only/operator enum values. */
-  uint8_t dcs_nvs_read_role(void);
-  esp_err_t dcs_nvs_write_role(uint8_t role);
+  /* Retired global self-role, superseded by the per-peer role carried in the
+   * ps_peers table. Read fails safe to stop_only for absent/corrupt/unknown
+   * values. Read-only: its one remaining caller is the v1 peer-table migration,
+   * which seeds every slot from it. */
+  uint8_t dcs_nvs_read_legacy_role(void);
 
-  /* Multi-machine peer table (ps_peers blob). One record per slot. Read
- * falls back to migrating the legacy ps_ip/ps_port pair into slot 0 when
- * the blob is absent (first boot on this firmware). */
-  typedef struct
-  {
-    bool configured;
-    uint32_t ip; /* host byte order */
-    uint16_t port;
-    uint32_t machine_id; /* pstop_msg.receiver_id for this machine */
-  } dcs_pstop_peer_rec_t;
-
+  /* Multi-machine peer table (ps_peers blob); dcs_pstop_peer_rec_t and the
+ * codec live in dcs_pstop_peers_logic.h. Read falls back to migrating the
+ * legacy ps_ip/ps_port pair into slot 0 when the blob is absent (first boot on
+ * this firmware). */
   void dcs_nvs_read_pstop_peers(dcs_pstop_peer_rec_t out[DCS_PSTOP_MAX_MACHINES]);
   esp_err_t dcs_nvs_write_pstop_peers(const dcs_pstop_peer_rec_t recs[DCS_PSTOP_MAX_MACHINES]);
 

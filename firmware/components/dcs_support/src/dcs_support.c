@@ -333,32 +333,43 @@ esp_err_t dcs_list_del(dcs_list_t which, uint32_t remote_id)
   return r;
 }
 
-/* Remote self-role RAM mirror. Loaded at boot; dcs_role_set() updates it live
- * (both safety cores read it per frame), so a role change takes effect on the
- * next pstop frame without a reboot. */
-static atomic_uint_fast32_t g_dcs_role;
+/* Per-peer role RAM mirror, one entry per machine slot. Loaded at boot;
+ * dcs_pstop_set_peer_role() updates it live, so a change takes effect on the
+ * next pstop frame to that peer without a reboot. Lock-free: the comparator
+ * latches one value per slot into each tick (see tick_input_t in main.c) —
+ * letting the cores read it directly would let them encode different padding1
+ * bytes in the same tick and trip the mismatch detector. */
+static atomic_uint_fast32_t g_dcs_pstop_slot_role[DCS_PSTOP_MAX_MACHINES];
 
-static void dcs_role_load_from_nvs(void)
+uint8_t dcs_role_get_slot(int slot)
 {
-  uint8_t role = dcs_nvs_read_role(); /* fail-safe: stop_only unless explicitly operator */
-  atomic_store(&g_dcs_role, role);
-  ESP_LOGI(TAG, "remote role: %s", pstop_aux_role_str((pstop_aux_role_t)role));
+  if ((slot < 0) || (slot >= DCS_PSTOP_MAX_MACHINES)) {
+    return PSTOP_AUX_ROLE_STOP_ONLY;
+  }
+  return (uint8_t)atomic_load(&g_dcs_pstop_slot_role[slot]);
 }
 
-uint8_t dcs_role_get(void)
+esp_err_t dcs_pstop_set_peer_role(int slot, uint8_t role)
 {
-  return (uint8_t)atomic_load(&g_dcs_role);
-}
-
-esp_err_t dcs_role_set(uint8_t role)
-{
+  if ((slot < 0) || (slot >= DCS_PSTOP_MAX_MACHINES)) {
+    return ESP_ERR_INVALID_ARG;
+  }
   if ((role != PSTOP_AUX_ROLE_STOP_ONLY) && (role != PSTOP_AUX_ROLE_OPERATOR)) {
     return ESP_ERR_INVALID_ARG;
   }
-  esp_err_t r = dcs_nvs_write_role(role);
+  /* An empty slot cannot hold a role: pointing it at a machine later demotes it
+   * (see dcs_pstop_set_peer_slot), so accepting one here would silently discard
+   * it. Configure the target first. */
+  if ((atomic_load(&g_dcs_pstop_slot_ep[slot]) & PSTOP_EP_CONFIGURED) == 0ULL) {
+    return ESP_ERR_INVALID_STATE;
+  }
+  dcs_pstop_peer_rec_t peers[DCS_PSTOP_MAX_MACHINES];
+  dcs_nvs_read_pstop_peers(peers);
+  peers[slot].role = role;
+  esp_err_t r = dcs_nvs_write_pstop_peers(peers);
   if (r == ESP_OK) {
-    atomic_store(&g_dcs_role, role);
-    ESP_LOGI(TAG, "remote role -> %s (live)", pstop_aux_role_str((pstop_aux_role_t)role));
+    atomic_store(&g_dcs_pstop_slot_role[slot], role);
+    ESP_LOGI(TAG, "m%d role -> %s (live)", slot, pstop_aux_role_str((pstop_aux_role_t)role));
   }
   return r;
 }
@@ -510,10 +521,11 @@ dcs_boot_state_t dcs_support_init(void)
      * API + fleet-ota + verbose) and dcs_admin_pages registers 18; at 16 the
      * total overflowed 32 and the LAST-registered app routes silently failed
      * to register (observed: /api/pstop_num and /api/enter_download 404'd on
-     * shipped firmware). dcs now registers 29 on the remote (incl.
-     * /api/admission + /api/role GET+POST, /api/health GET + reset POST);
-     * 36 gives 52 total slots with headroom — re-check this
-     * arithmetic whenever a route is added on either side. */
+     * shipped firmware). dcs now registers 27 on the remote (incl.
+     * /api/admission GET+POST, /api/health GET + reset POST; the per-peer role
+     * rides on /api/pstop_peers rather than its own route); 36 gives 52 total
+     * slots with headroom — re-check this arithmetic whenever a route is added
+     * on either side. */
   cfg.max_user_uri_handlers = 36;
   g_dcs.app = ml_app_start(&cfg);
   g_dcs.ml_handle = ml_app_get_microlink(g_dcs.app);
@@ -565,6 +577,10 @@ dcs_boot_state_t dcs_support_init(void)
     for (int i = 0; i < DCS_PSTOP_MAX_MACHINES; i++) {
       atomic_store(&g_dcs_pstop_slot_ep[i], pstop_ep_pack(peers[i].configured, peers[i].ip, peers[i].port));
       atomic_store(&g_dcs_pstop_slot_id[i], peers[i].machine_id);
+      atomic_store(&g_dcs_pstop_slot_role[i], peers[i].role);
+      if (peers[i].configured) {
+        ESP_LOGI(TAG, "m%d role: %s", i, pstop_aux_role_str((pstop_aux_role_t)peers[i].role));
+      }
     }
     atomic_store(&g_dcs_pstop_peer_ip, peers[0].configured ? peers[0].ip : 0u);
     atomic_store(&g_dcs_pstop_peer_port, peers[0].port);
@@ -592,7 +608,8 @@ dcs_boot_state_t dcs_support_init(void)
     ESP_LOGW(TAG, "operator-allowlist mutex alloc failed — add/del will run unserialized");
   }
   dcs_lists_load_from_nvs();
-  dcs_role_load_from_nvs(); /* remote self-role mirror, before the safety cores spawn */
+  /* The per-peer role mirror is seeded with the peer table above, before the
+   * safety cores spawn. */
 
   /* Register the admin pages now that ml_app is up. */
   dcs_admin_pages_register(g_dcs.app);
@@ -794,6 +811,14 @@ esp_err_t dcs_pstop_set_peer_slot(int slot, bool configured, uint32_t ip, uint16
   /* Unpin the OLD target if this slot had one and no other slot shares it. */
   uint64_t old_ep = (uint64_t)atomic_load(&g_dcs_pstop_slot_ep[slot]);
   uint32_t old_ip = (uint32_t)((old_ep >> 16) & 0xFFFFFFFFULL);
+
+  /* Re-pointing or clearing a slot drops it to stop-only: operator authority is
+   * granted against one machine, so carrying it to a different target would
+   * hand re-arm rights to a machine nobody authorized. An idempotent rewrite of
+   * the same target keeps the role. */
+  const bool same_target = configured && (ip == old_ip) && (port == (uint16_t)(old_ep & 0xFFFFULL)) &&
+                           (machine_id == (uint32_t)atomic_load(&g_dcs_pstop_slot_id[slot]));
+  const uint8_t next_role = same_target ? dcs_role_get_slot(slot) : (uint8_t)PSTOP_AUX_ROLE_STOP_ONLY;
   if (((old_ep & PSTOP_EP_CONFIGURED) != 0ULL) && (old_ip != 0u) && (g_dcs.ml_handle != NULL)) {
     bool shared = false;
     for (int i = 0; i < DCS_PSTOP_MAX_MACHINES; i++) {
@@ -837,6 +862,8 @@ esp_err_t dcs_pstop_set_peer_slot(int slot, bool configured, uint32_t ip, uint16
   peers[slot].ip = ip;
   peers[slot].port = port;
   peers[slot].machine_id = machine_id;
+  peers[slot].role = next_role;
+  atomic_store(&g_dcs_pstop_slot_role[slot], next_role);
   return dcs_nvs_write_pstop_peers(peers);
 }
 
