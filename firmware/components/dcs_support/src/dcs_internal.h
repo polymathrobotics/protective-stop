@@ -40,6 +40,7 @@ extern "C"
 #define DCS_NVS_KEY_PSTOP_PEERS "ps_peers" /* multi-machine peer table (blob, see dcs_nvs.c) */
 #define DCS_NVS_KEY_ALLOWLIST "adm_allow" /* admission allowlist (blob: count byte + u32 ids) */
 #define DCS_NVS_KEY_DENYLIST "adm_deny" /* admission denylist (same blob layout) */
+#define DCS_NVS_KEY_PINLIST "adm_pin" /* WG-pin list (same blob layout); seeded from the legacy operators blob */
 #define DCS_NVS_KEY_LEGACY_OPERATORS \
   "operators" /* pre-admission operator allowlist: erased at boot, NOT reused (its
                                                     * meaning was re-arm authority; reading it as an admission
@@ -370,7 +371,10 @@ extern "C"
    * fills out[] and returns the count (0 on blank NVS = empty). Write persists
    * the given ids. See dcs_list_* in dcs_support.h. */
   int dcs_nvs_read_list(dcs_list_t which, uint32_t out[DCS_MAX_LIST_IDS]);
-  void dcs_nvs_erase_legacy_operators(void);
+  /* One-shot upgrade: move the pre-admission "operators" blob (meaning: may
+   * RE-ARM, and incidentally WG-pinned) into the PIN list, then erase it. It is
+   * NOT read as an admission list. Returns the number of ids migrated. */
+  int dcs_nvs_migrate_legacy_operators(void);
   esp_err_t dcs_nvs_write_list(dcs_list_t which, const uint32_t ids[DCS_MAX_LIST_IDS], int count);
 
   /* Lifetime health counters blob (dcs_health.c owns the RAM copy). */

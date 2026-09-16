@@ -323,8 +323,18 @@ extern "C"
   {
     DCS_LIST_ALLOW = 0,
     DCS_LIST_DENY = 1,
-    DCS_LIST_COUNT = 2
+    /* PIN: not admission. Remotes whose WireGuard keys this machine must keep
+     * across netmap trims / peer-cache LRU on a >ML_MAX_PEERS tailnet, so they
+     * can always reach it (the cold-bond ENOTCONN wedge, 2026-08-08). Seeded
+     * once from the pre-admission "operators" list at upgrade; allowlisted ids
+     * are pinned implicitly; denylisted ids never. */
+    DCS_LIST_PIN = 2,
+    DCS_LIST_COUNT = 3
   } dcs_list_t;
+
+  /** @brief True if this machine should keep remote_id's WG peer pinned:
+   * (allowlisted OR pinned) AND NOT denylisted. Lock-free. */
+  bool dcs_peer_pin_wanted(uint32_t remote_id);
 
   /** @brief Admission verdict for remote_id (RAM-only, lock-free — safe from the
    * safety cores). Deny wins; empty allowlist admits everyone. */

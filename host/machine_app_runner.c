@@ -105,6 +105,7 @@ typedef struct
   int n_allowlist;
   uint32_t denylist[MAX_LIST_IDS];
   int n_denylist;
+  int list_defect; /* an allowlist/denylist failed to parse: refuse to start */
   uint64_t default_heartbeat_ms;
   /* Minimum duration (ms) between the STOP that opens an arming cycle and
      * the OK that completes it — the defence against EMC-induced loop blips
@@ -185,26 +186,39 @@ static uint64_t parse_uint(const char * v)
 }
 
 /* "[0x0154BBD8, 30234300]" -> ids; tolerant of spaces and a trailing comma.
- * Returns the count stored (capped at cap; extras warn). */
+ * Returns the count stored, or -1 on ANY defect: an unparsable token (e.g. a
+ * quoted "0x.." — TOML strings are not ids here), a missing '[' / ']', an id
+ * of 0 or > 32 bits, or more ids than cap. A partial list would silently
+ * weaken admission (a denylist that lost an entry admits that remote), so a
+ * defect is a config error and refuses startup via cfg_validate. */
 static int parse_uint_array(const char * v, uint32_t * out, int cap, const char * what)
 {
   int n = 0;
   const char * p = v;
-  while (*p == ' ' || *p == '[') p++;
-  while (*p != 0 && *p != ']') {
+  while (*p == ' ') p++;
+  if (*p != '[') {
+    fprintf(stderr, "  config: %s: expected an array like [0x01D7F344, 30234300]\n", what);
+    return -1;
+  }
+  p++;
+  for (;;) {
     while (*p == ' ' || *p == ',') p++;
-    if (*p == 0 || *p == ']') break;
+    if (*p == ']') break;
+    if (*p == 0) {
+      fprintf(stderr, "  config: %s: missing ']'\n", what);
+      return -1;
+    }
     char * end = NULL;
     uint64_t id = strtoull(p, &end, 0);
-    if (end == p) {
-      fprintf(stderr, "  config: %s: cannot parse '%s'\n", what, p);
-      break;
+    if (end == p || (*end != ' ' && *end != ',' && *end != ']') || id == 0 || id > 0xFFFFFFFFULL) {
+      fprintf(stderr, "  config: %s: bad id at '%s' (unquoted nonzero 32-bit int or 0x-hex)\n", what, p);
+      return -1;
     }
-    if (n < cap) {
-      out[n++] = (uint32_t)id;
-    } else {
+    if (n >= cap) {
       fprintf(stderr, "  config: %s: too many ids (max %d)\n", what, cap);
+      return -1;
     }
+    out[n++] = (uint32_t)id;
     p = end;
   }
   return n;
@@ -282,11 +296,13 @@ static int cfg_load(machine_cfg_t * c, const char * path)
       c->max_remotes = (uint16_t)parse_uint(val);
     else if (!strcmp(key, "verbose"))
       c->verbose = parse_bool(val);
-    else if (!strcmp(key, "allowlist"))
+    else if (!strcmp(key, "allowlist")) {
       c->n_allowlist = parse_uint_array(val, c->allowlist, (int)MAX_LIST_IDS, "allowlist");
-    else if (!strcmp(key, "denylist"))
+      if (c->n_allowlist < 0) c->list_defect = 1;
+    } else if (!strcmp(key, "denylist")) {
       c->n_denylist = parse_uint_array(val, c->denylist, (int)MAX_LIST_IDS, "denylist");
-    else if (!strcmp(key, "default_heartbeat_ms"))
+      if (c->n_denylist < 0) c->list_defect = 1;
+    } else if (!strcmp(key, "default_heartbeat_ms"))
       c->default_heartbeat_ms = parse_uint(val);
     else if (!strcmp(key, "min_stop_ms"))
       c->min_stop_ms = parse_uint(val);
@@ -715,6 +731,12 @@ static udp_transport_data_t udp_transport;
 
 static int cfg_validate(const machine_cfg_t * c, char * reason, size_t rlen)
 {
+  if (c->list_defect) {
+    /* A partially parsed admission list is a fail-OPEN misconfiguration (a
+     * denylist missing an entry admits that remote). Refuse to start. */
+    snprintf(reason, rlen, "allowlist/denylist did not parse (see config: lines above)");
+    return -1;
+  }
   if (c->default_heartbeat_ms < CFG_HB_MIN_MS || c->default_heartbeat_ms > CFG_HB_MAX_MS) {
     snprintf(
       reason,

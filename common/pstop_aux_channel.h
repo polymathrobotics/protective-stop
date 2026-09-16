@@ -21,13 +21,14 @@
 #define PSTOP_AUX_BYTE_MASK 0xFFu
 
 /*
- * Remote role, wire-stable values. A remote announces its own role; the
- * machine ANDs an OPERATOR claim with its existing allowlist (see design doc).
- *
+ * Remote role, wire-stable values. The REMOTE alone declares its role and the
+ * machine honours it on every frame (see pstop_aux_apply_role_pre/post below);
+ * the machine keeps no operator list. Whether a remote may BOND at all is a
+ * separate, optional machine-side admission decision (allow/denylist).
  *   UNSPECIFIED : remote made no role claim (unprovisioned / version mismatch).
  *                 The machine treats this as non-operator (fail-safe).
  *   STOP_ONLY   : remote may only STOP, never re-arm. Monotonic toward safety.
- *   OPERATOR    : remote claims re-arm privilege (subject to machine policy).
+ *   OPERATOR    : remote may re-arm (STOP -> OK gesture).
  */
 typedef enum
 {

@@ -1157,11 +1157,13 @@ static esp_err_t api_ring_led1(httpd_req_t * req)
  * refuses listed ids and wins over the allowlist. A refused BOND is answered
  * with UNBOND. Admin-authenticated (same Basic-auth as /admin).
  *
- *   GET  /api/admission                -> {"ok":true,"allowlist":[..],"denylist":[..]}
+ *   GET  /api/admission                -> {"ok":true,"allowlist":[..],"denylist":[..],"pinlist":[..]}
  *   POST /api/admission?allow=<id>     add to allowlist   (hex 0x.. or dec)
  *   POST /api/admission?unallow=<id>   remove from allowlist
  *   POST /api/admission?deny=<id>      add to denylist
  *   POST /api/admission?undeny=<id>    remove from denylist
+ *   POST /api/admission?pin=<id>       keep this remote's WG peer across netmap trims (no admission effect)
+ *   POST /api/admission?unpin=<id>     remove from the pin list
  *
  * Applies live to the RAM cache AND persists to NVS. pstop_c re-runs admission
  * on EVERY frame, so denying an already-bonded remote evicts it on its next
@@ -1192,8 +1194,8 @@ static int admission_emit_list(char * buf, size_t cap, dcs_list_t which)
 
 static esp_err_t admission_send(httpd_req_t * req)
 {
-  /* {"ok":true,"allowlist":[...],"denylist":[...]} — 2 * 16 * 11 digits + commas */
-  char buf[80 + (2 * DCS_MAX_LIST_IDS * 12)];
+  /* {"ok":true,"allowlist":[...],"denylist":[...],"pinlist":[...]} — 3 * 16 * 11 digits + commas */
+  char buf[100 + (3 * DCS_MAX_LIST_IDS * 12)];
   int len = snprintf(buf, sizeof(buf), "{\"ok\":true,\"allowlist\":[");
   len += admission_emit_list(buf + len, sizeof(buf) - (size_t)len, DCS_LIST_ALLOW);
   if (len < (int)sizeof(buf)) {
@@ -1201,6 +1203,12 @@ static esp_err_t admission_send(httpd_req_t * req)
   }
   if (len < (int)sizeof(buf)) {
     len += admission_emit_list(buf + len, sizeof(buf) - (size_t)len, DCS_LIST_DENY);
+  }
+  if (len < (int)sizeof(buf)) {
+    len += snprintf(buf + len, sizeof(buf) - (size_t)len, "],\"pinlist\":[");
+  }
+  if (len < (int)sizeof(buf)) {
+    len += admission_emit_list(buf + len, sizeof(buf) - (size_t)len, DCS_LIST_PIN);
   }
   if (len < (int)sizeof(buf)) {
     len += snprintf(buf + len, sizeof(buf) - (size_t)len, "]}");
@@ -1226,7 +1234,7 @@ static esp_err_t api_admission_post(httpd_req_t * req)
   (void)httpd_resp_set_type(req, "application/json");
   if (httpd_req_get_url_query_str(req, query, sizeof(query)) != ESP_OK) {
     (void)httpd_resp_set_status(req, "400 Bad Request");
-    return httpd_resp_sendstr(req, "{\"ok\":false,\"error\":\"need ?allow=|unallow=|deny=|undeny=<id>\"}");
+    return httpd_resp_sendstr(req, "{\"ok\":false,\"error\":\"need ?allow=|unallow=|deny=|undeny=|pin=|unpin=<id>\"}");
   }
 
   static const struct
@@ -1239,6 +1247,8 @@ static esp_err_t api_admission_post(httpd_req_t * req)
     {"unallow", DCS_LIST_ALLOW, false},
     {"deny", DCS_LIST_DENY, true},
     {"undeny", DCS_LIST_DENY, false},
+    {"pin", DCS_LIST_PIN, true},
+    {"unpin", DCS_LIST_PIN, false},
   };
 
   int op = -1;
@@ -1250,7 +1260,7 @@ static esp_err_t api_admission_post(httpd_req_t * req)
   }
   if (op < 0) {
     (void)httpd_resp_set_status(req, "400 Bad Request");
-    return httpd_resp_sendstr(req, "{\"ok\":false,\"error\":\"need ?allow=|unallow=|deny=|undeny=<id>\"}");
+    return httpd_resp_sendstr(req, "{\"ok\":false,\"error\":\"need ?allow=|unallow=|deny=|undeny=|pin=|unpin=<id>\"}");
   }
   uint32_t id = (uint32_t)strtoul(val, NULL, 0); /* 0x.. hex or decimal */
   if (id == 0u) {

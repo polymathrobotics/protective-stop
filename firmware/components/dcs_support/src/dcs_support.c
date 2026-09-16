@@ -195,12 +195,14 @@ static void pstop_slot_pins_sync(void);
 
 static const char * list_name(dcs_list_t which)
 {
-  return (which == DCS_LIST_DENY) ? "denylist" : "allowlist";
+  if (which == DCS_LIST_DENY) return "denylist";
+  if (which == DCS_LIST_PIN) return "pinlist";
+  return "allowlist";
 }
 
 static void dcs_lists_load_from_nvs(void)
 {
-  dcs_nvs_erase_legacy_operators();
+  (void)dcs_nvs_migrate_legacy_operators(); /* must precede the PIN list load */
   for (int w = 0; w < DCS_LIST_COUNT; w++) {
     uint32_t ids[DCS_MAX_LIST_IDS];
     int n = dcs_nvs_read_list((dcs_list_t)w, ids);
@@ -251,6 +253,14 @@ bool dcs_admission_allows(uint32_t remote_id)
     return true;
   }
   return dcs_list_contains(DCS_LIST_ALLOW, remote_id);
+}
+
+bool dcs_peer_pin_wanted(uint32_t remote_id)
+{
+  if (dcs_list_contains(DCS_LIST_DENY, remote_id)) {
+    return false; /* never protect a slot for an id admission will refuse */
+  }
+  return dcs_list_contains(DCS_LIST_ALLOW, remote_id) || dcs_list_contains(DCS_LIST_PIN, remote_id);
 }
 
 /* Serialize a write, snapshot the current ids into a compact array, persist to

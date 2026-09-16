@@ -54,6 +54,7 @@ ros2/build-cov/
 ros2/install-cov/
 ros2/log/
 firmware/test/test_estop_verdict
+firmware/test/test_dcs_health_logic
 firmware/test/coverage-summary.json
 
 build/

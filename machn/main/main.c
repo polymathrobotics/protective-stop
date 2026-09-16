@@ -799,10 +799,12 @@ static void relay_gpio_init(void)
  * pins nothing by default, so a freshly-added remote (no recent activity) gets
  * dropped from the netmap and machn never learns its WG key -> the remote's
  * handshakes get no session and it never bonds. Fix: when the peer table is
- * full, keep any incoming peer whose device identity is on the admission
- * ALLOWLIST (bounded, <= DCS_MAX_LIST_IDS) — the explicit "these are mine"
- * list. In open mode (empty allowlist) nothing is pinned and remotes remain
- * best-effort, as before.
+ * full, keep any incoming peer whose device identity this machine wants
+ * pinned (dcs_peer_pin_wanted: on the admission ALLOWLIST or the PIN list,
+ * and not denylisted; each bounded <= DCS_MAX_LIST_IDS). The PIN list is
+ * seeded from the pre-admission operator list at upgrade so previously
+ * pinned remotes stay pinned; in open mode with no pins nothing is pinned
+ * and remotes remain best-effort, as before.
  *
  * Identity scheme: the remote's tailnet hostname is "pstop-01<mac24>" — the 8
  * lowercase hex digits after "pstop-" ARE the 32-bit pstop id (e.g.
@@ -843,7 +845,7 @@ static bool machn_peer_wanted_cb(void * ctx, const char * hostname, uint32_t vpn
     return false;
   }
   const uint32_t id = (uint32_t)strtoul(hex, NULL, 16);
-  return dcs_list_contains(DCS_LIST_ALLOW, id);
+  return dcs_peer_pin_wanted(id);
 }
 
 void app_main(void);
