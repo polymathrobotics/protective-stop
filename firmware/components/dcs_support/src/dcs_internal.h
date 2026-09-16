@@ -38,7 +38,9 @@ extern "C"
 #define DCS_NVS_KEY_PSTOP_NUM "ps_num" /* USB "PSTOPxx" unit number (0=auto) */
 #define DCS_NVS_KEY_RING_OFF "ring_off" /* ring rotation: physical index of LED 1 */
 #define DCS_NVS_KEY_PSTOP_PEERS "ps_peers" /* multi-machine peer table (blob, see dcs_nvs.c) */
-#define DCS_NVS_KEY_OPERATORS "operators" /* operator allowlist (blob: count byte + u32 ids) */
+#define DCS_NVS_KEY_ALLOWLIST \
+  "operators" /* admission allowlist (blob: count byte + u32 ids); key kept from the old operator list */
+#define DCS_NVS_KEY_DENYLIST "denylist" /* admission denylist (same blob layout) */
 #define DCS_NVS_KEY_WIFI_TXP "wifi_txp" /* WiFi max TX power, quarter-dBm (8..84); 0/absent = config default */
 #define DCS_NVS_KEY_LED_BRIGHT "led_bri" /* master LED brightness, 0..100%; absent = default */
 #define DCS_NVS_KEY_ROLE "role" /* remote self-role: pstop_aux_role_t value (1=stop_only default, 2=operator) */
@@ -361,11 +363,11 @@ extern "C"
   void dcs_nvs_read_pstop_peers(dcs_pstop_peer_rec_t out[DCS_PSTOP_MAX_MACHINES]);
   esp_err_t dcs_nvs_write_pstop_peers(const dcs_pstop_peer_rec_t recs[DCS_PSTOP_MAX_MACHINES]);
 
-  /* Operator allowlist (blob: count byte + count*u32 ids, big-endian). Read
-   * fills out[] and returns the count (0 on blank NVS = empty = all stop-only).
-   * Write persists the given ids. See dcs_operator_* in dcs_support.h. */
-  int dcs_nvs_read_operators(uint32_t out[DCS_MAX_OPERATORS]);
-  esp_err_t dcs_nvs_write_operators(const uint32_t ids[DCS_MAX_OPERATORS], int count);
+  /* Admission lists (blob: count byte + count*u32 ids, big-endian). Read
+   * fills out[] and returns the count (0 on blank NVS = empty). Write persists
+   * the given ids. See dcs_list_* in dcs_support.h. */
+  int dcs_nvs_read_list(dcs_list_t which, uint32_t out[DCS_MAX_LIST_IDS]);
+  esp_err_t dcs_nvs_write_list(dcs_list_t which, const uint32_t ids[DCS_MAX_LIST_IDS], int count);
 
   /* Lifetime health counters blob (dcs_health.c owns the RAM copy). */
   bool dcs_nvs_read_health(dcs_health_counters_t * out);

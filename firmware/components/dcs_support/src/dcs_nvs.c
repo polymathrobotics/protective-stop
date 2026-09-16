@@ -14,7 +14,8 @@
  *   ring_off  u8   LED-ring rotation: physical pixel index of LED 1 (default 0)
  *   ps_peers  blob multi-machine peer table: version byte + per-slot records
  *                  (absent -> migrate legacy ps_ip/ps_port into slot 0)
- *   operators blob operator allowlist: count byte + u32 ids
+ *   operators blob admission allowlist: count byte + u32 ids
+ *   denylist  blob admission denylist: same layout
  *   wifi_txp  u8   WiFi max TX power, quarter-dBm (8..84); 0/absent = config default
  *   led_bri   u8   master LED brightness, 0..100%; absent/corrupt = default 50
  *   ctrl_rst  u8   one-shot controlled-reset cause crumb (DCS_CTRL_RST_*)
@@ -458,30 +459,35 @@ esp_err_t dcs_nvs_write_pstop_peers(const dcs_pstop_peer_rec_t recs[DCS_PSTOP_MA
   return r;
 }
 
-/* operators blob layout (byte-serialized):
- *   [0]            count (0..DCS_MAX_OPERATORS)
+/* admission list blob layout (byte-serialized):
+ *   [0]            count (0..DCS_MAX_LIST_IDS)
  *   per id, big-endian u32
- * Absent/corrupt -> empty list (0 operators = every remote stop-only = safe). */
-#define OPERATORS_BLOB_LEN (1 + (DCS_MAX_OPERATORS * 4))
+ * Absent/corrupt -> empty list. */
+#define LIST_BLOB_LEN (1 + (DCS_MAX_LIST_IDS * 4))
 
-int dcs_nvs_read_operators(uint32_t out[DCS_MAX_OPERATORS])
+static const char * list_key(dcs_list_t which)
 {
-  (void)memset(out, 0, DCS_MAX_OPERATORS * sizeof(out[0]));
+  return (which == DCS_LIST_DENY) ? DCS_NVS_KEY_DENYLIST : DCS_NVS_KEY_ALLOWLIST;
+}
 
-  uint8_t blob[OPERATORS_BLOB_LEN] = {0};
+int dcs_nvs_read_list(dcs_list_t which, uint32_t out[DCS_MAX_LIST_IDS])
+{
+  (void)memset(out, 0, DCS_MAX_LIST_IDS * sizeof(out[0]));
+
+  uint8_t blob[LIST_BLOB_LEN] = {0};
   size_t len = sizeof(blob);
   nvs_handle_t h;
   esp_err_t r = ESP_FAIL;
   if (nvs_open(DCS_NVS_NS, NVS_READONLY, &h) == ESP_OK) {
-    r = nvs_get_blob(h, DCS_NVS_KEY_OPERATORS, blob, &len);
+    r = nvs_get_blob(h, list_key(which), blob, &len);
     nvs_close(h);
   }
   if ((r != ESP_OK) || (len < 1u)) {
-    return 0; /* blank NVS: empty allowlist */
+    return 0; /* blank NVS: empty list */
   }
   int count = blob[0];
-  if (count > DCS_MAX_OPERATORS) {
-    count = DCS_MAX_OPERATORS; /* corrupt length degrades safely (never over-reads) */
+  if (count > DCS_MAX_LIST_IDS) {
+    count = DCS_MAX_LIST_IDS; /* corrupt length degrades safely (never over-reads) */
   }
   int n = 0;
   for (int i = 0; i < count; i++) {
@@ -497,12 +503,12 @@ int dcs_nvs_read_operators(uint32_t out[DCS_MAX_OPERATORS])
   return n;
 }
 
-esp_err_t dcs_nvs_write_operators(const uint32_t ids[DCS_MAX_OPERATORS], int count)
+esp_err_t dcs_nvs_write_list(dcs_list_t which, const uint32_t ids[DCS_MAX_LIST_IDS], int count)
 {
-  if ((count < 0) || (count > DCS_MAX_OPERATORS)) {
+  if ((count < 0) || (count > DCS_MAX_LIST_IDS)) {
     return ESP_ERR_INVALID_ARG;
   }
-  uint8_t blob[OPERATORS_BLOB_LEN] = {0};
+  uint8_t blob[LIST_BLOB_LEN] = {0};
   blob[0] = (uint8_t)count;
   for (int i = 0; i < count; i++) {
     ps_peers_put_u32(&blob[1 + (i * 4)], ids[i]);
@@ -510,7 +516,7 @@ esp_err_t dcs_nvs_write_operators(const uint32_t ids[DCS_MAX_OPERATORS], int cou
   nvs_handle_t h;
   esp_err_t r = nvs_open(DCS_NVS_NS, NVS_READWRITE, &h);
   if (r != ESP_OK) return r;
-  r = nvs_set_blob(h, DCS_NVS_KEY_OPERATORS, blob, sizeof(blob));
+  r = nvs_set_blob(h, list_key(which), blob, sizeof(blob));
   if (r == ESP_OK) {
     r = nvs_commit(h);
   }

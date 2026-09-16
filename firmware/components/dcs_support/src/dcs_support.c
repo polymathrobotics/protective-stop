@@ -112,6 +112,27 @@ atomic_uint_fast32_t g_dcs_pstop_peer_port;
 
 atomic_uint_fast64_t g_dcs_pstop_slot_ep[DCS_PSTOP_MAX_MACHINES];
 atomic_uint_fast32_t g_dcs_pstop_slot_id[DCS_PSTOP_MAX_MACHINES];
+/* Per-slot rebond request generation. /api/pstop_peers?slot=N&rebond=1 bumps
+ * it; the comparator restarts that session's bond when it sees a new value.
+ * This is how a REJECTED session (machine answered BOND with UNBOND) is
+ * retried on command — it never retries on its own. */
+static atomic_uint_fast32_t g_dcs_pstop_slot_rebond_gen[DCS_PSTOP_MAX_MACHINES];
+
+void dcs_pstop_request_rebond(int slot)
+{
+  if ((slot >= 0) && (slot < DCS_PSTOP_MAX_MACHINES)) {
+    atomic_fetch_add(&g_dcs_pstop_slot_rebond_gen[slot], 1u);
+  }
+}
+
+uint32_t dcs_pstop_rebond_generation(int slot)
+{
+  if ((slot < 0) || (slot >= DCS_PSTOP_MAX_MACHINES)) {
+    return 0u;
+  }
+  return (uint32_t)atomic_load(&g_dcs_pstop_slot_rebond_gen[slot]);
+}
+
 atomic_uint_fast32_t g_dcs_pstop_m_sent[DCS_PSTOP_MAX_MACHINES];
 atomic_uint_fast32_t g_dcs_pstop_m_replies[DCS_PSTOP_MAX_MACHINES];
 atomic_uint_fast32_t g_dcs_pstop_m_send_fail[DCS_PSTOP_MAX_MACHINES];
@@ -158,46 +179,58 @@ atomic_uint_fast32_t g_dcs_machn_r_rtt_ms[DCS_MACHN_MAX_REMOTES];
 atomic_uint_fast32_t g_dcs_machn_r_ip[DCS_MACHN_MAX_REMOTES];
 atomic_uint_fast32_t g_dcs_machn_r_stop_only[DCS_MACHN_MAX_REMOTES];
 
-/* Operator allowlist RAM cache. Lock-free for readers: the safety cores scan
- * these atomics from their remote_details callback, never touching NVS/flash.
- * Each slot holds 0 (empty) or a real operator id, so a torn read can never
- * FABRICATE a match — it can at worst miss a just-added id (=> stop-only = safe)
- * or briefly still see a just-removed id (a de-auth lag, harmless). Writers
- * (admin API + boot load) serialize on g_dcs_operators_mtx and also persist to
- * NVS. Loaded once at boot in dcs_support_init(); empty on blank NVS. */
-static atomic_uint_fast32_t g_dcs_operators[DCS_MAX_OPERATORS];
-static SemaphoreHandle_t g_dcs_operators_mtx; /* writer serialization only */
+/* Admission lists (allowlist + denylist) RAM caches. Lock-free for readers:
+ * the safety cores scan these atomics from their remote_details callback,
+ * never touching NVS/flash. Each slot holds 0 (empty) or a real remote id, so
+ * a torn read can never FABRICATE a match — it can at worst miss a just-added
+ * id or briefly still see a just-removed one (a lag, harmless: admission only
+ * decides whether a remote may BOND, never whether it may re-arm). Writers
+ * (admin API + boot load) serialize on g_dcs_lists_mtx and persist to NVS.
+ * Loaded once at boot in dcs_support_init(); both empty on blank NVS =>
+ * every remote is admitted. */
+static atomic_uint_fast32_t g_dcs_lists[DCS_LIST_COUNT][DCS_MAX_LIST_IDS];
+static SemaphoreHandle_t g_dcs_lists_mtx; /* writer serialization only */
 
 static void pstop_slot_pins_sync(void);
 
-static void dcs_operators_load_from_nvs(void)
+static const char * list_name(dcs_list_t which)
 {
-  uint32_t ids[DCS_MAX_OPERATORS];
-  int n = dcs_nvs_read_operators(ids);
-  for (int i = 0; i < DCS_MAX_OPERATORS; i++) {
-    atomic_store(&g_dcs_operators[i], (i < n) ? ids[i] : 0u);
-  }
-  ESP_LOGI(TAG, "operator allowlist: %d id(s) loaded (empty => every remote is stop-only)", n);
+  return (which == DCS_LIST_DENY) ? "denylist" : "allowlist";
 }
 
-bool dcs_operator_is_listed(uint32_t remote_id)
+static void dcs_lists_load_from_nvs(void)
 {
-  if (remote_id == 0u) {
+  for (int w = 0; w < DCS_LIST_COUNT; w++) {
+    uint32_t ids[DCS_MAX_LIST_IDS];
+    int n = dcs_nvs_read_list((dcs_list_t)w, ids);
+    for (int i = 0; i < DCS_MAX_LIST_IDS; i++) {
+      atomic_store(&g_dcs_lists[w][i], (i < n) ? ids[i] : 0u);
+    }
+    ESP_LOGI(TAG, "%s: %d id(s) loaded", list_name((dcs_list_t)w), n);
+  }
+}
+
+bool dcs_list_contains(dcs_list_t which, uint32_t remote_id)
+{
+  if ((remote_id == 0u) || ((unsigned)which >= DCS_LIST_COUNT)) {
     return false;
   }
-  for (int i = 0; i < DCS_MAX_OPERATORS; i++) {
-    if ((uint32_t)atomic_load(&g_dcs_operators[i]) == remote_id) {
+  for (int i = 0; i < DCS_MAX_LIST_IDS; i++) {
+    if ((uint32_t)atomic_load(&g_dcs_lists[which][i]) == remote_id) {
       return true;
     }
   }
   return false;
 }
 
-int dcs_operator_get_list(uint32_t out[DCS_MAX_OPERATORS])
+int dcs_list_get(dcs_list_t which, uint32_t out[DCS_MAX_LIST_IDS])
 {
   int n = 0;
-  for (int i = 0; i < DCS_MAX_OPERATORS; i++) {
-    uint32_t id = (uint32_t)atomic_load(&g_dcs_operators[i]);
+  if ((unsigned)which >= DCS_LIST_COUNT) {
+    return 0;
+  }
+  for (int i = 0; i < DCS_MAX_LIST_IDS; i++) {
+    uint32_t id = (uint32_t)atomic_load(&g_dcs_lists[which][i]);
     if (id != 0u) {
       out[n++] = id;
     }
@@ -205,31 +238,45 @@ int dcs_operator_get_list(uint32_t out[DCS_MAX_OPERATORS])
   return n;
 }
 
+bool dcs_admission_allows(uint32_t remote_id)
+{
+  /* Deny wins. An empty allowlist admits everyone (the default, "open");
+   * a populated one admits only listed ids ("paranoid"). */
+  if (dcs_list_contains(DCS_LIST_DENY, remote_id)) {
+    return false;
+  }
+  uint32_t probe[DCS_MAX_LIST_IDS];
+  if (dcs_list_get(DCS_LIST_ALLOW, probe) == 0) {
+    return true;
+  }
+  return dcs_list_contains(DCS_LIST_ALLOW, remote_id);
+}
+
 /* Serialize a write, snapshot the current ids into a compact array, persist to
  * NVS, and only on NVS success republish the compacted set into the RAM cache.
  * Keeping NVS the source of truth means a failed write leaves RAM unchanged. */
-static esp_err_t dcs_operators_commit(const uint32_t * ids, int count)
+static esp_err_t dcs_list_commit(dcs_list_t which, const uint32_t * ids, int count)
 {
-  esp_err_t r = dcs_nvs_write_operators(ids, count);
+  esp_err_t r = dcs_nvs_write_list(which, ids, count);
   if (r != ESP_OK) {
     return r;
   }
-  for (int i = 0; i < DCS_MAX_OPERATORS; i++) {
-    atomic_store(&g_dcs_operators[i], (i < count) ? ids[i] : 0u);
+  for (int i = 0; i < DCS_MAX_LIST_IDS; i++) {
+    atomic_store(&g_dcs_lists[which][i], (i < count) ? ids[i] : 0u);
   }
   return ESP_OK;
 }
 
-esp_err_t dcs_operator_add(uint32_t remote_id)
+esp_err_t dcs_list_add(dcs_list_t which, uint32_t remote_id)
 {
-  if (remote_id == 0u) {
+  if ((remote_id == 0u) || ((unsigned)which >= DCS_LIST_COUNT)) {
     return ESP_ERR_INVALID_ARG;
   }
-  if (g_dcs_operators_mtx != NULL) {
-    (void)xSemaphoreTake(g_dcs_operators_mtx, portMAX_DELAY);
+  if (g_dcs_lists_mtx != NULL) {
+    (void)xSemaphoreTake(g_dcs_lists_mtx, portMAX_DELAY);
   }
-  uint32_t ids[DCS_MAX_OPERATORS];
-  int n = dcs_operator_get_list(ids);
+  uint32_t ids[DCS_MAX_LIST_IDS];
+  int n = dcs_list_get(which, ids);
   esp_err_t r = ESP_OK;
   bool present = false;
   for (int i = 0; i < n; i++) {
@@ -240,39 +287,44 @@ esp_err_t dcs_operator_add(uint32_t remote_id)
   }
   if (present) {
     r = ESP_OK; /* idempotent */
-  } else if (n >= DCS_MAX_OPERATORS) {
+  } else if (n >= DCS_MAX_LIST_IDS) {
     r = ESP_ERR_NO_MEM;
   } else {
     ids[n++] = remote_id;
-    r = dcs_operators_commit(ids, n);
+    r = dcs_list_commit(which, ids, n);
   }
-  if (g_dcs_operators_mtx != NULL) {
-    (void)xSemaphoreGive(g_dcs_operators_mtx);
+  if (g_dcs_lists_mtx != NULL) {
+    (void)xSemaphoreGive(g_dcs_lists_mtx);
   }
   return r;
 }
 
-esp_err_t dcs_operator_del(uint32_t remote_id)
+esp_err_t dcs_list_del(dcs_list_t which, uint32_t remote_id)
 {
-  if (g_dcs_operators_mtx != NULL) {
-    (void)xSemaphoreTake(g_dcs_operators_mtx, portMAX_DELAY);
+  if ((unsigned)which >= DCS_LIST_COUNT) {
+    return ESP_ERR_INVALID_ARG;
   }
-  uint32_t ids[DCS_MAX_OPERATORS];
-  int n = dcs_operator_get_list(ids);
+  if (g_dcs_lists_mtx != NULL) {
+    (void)xSemaphoreTake(g_dcs_lists_mtx, portMAX_DELAY);
+  }
+  uint32_t ids[DCS_MAX_LIST_IDS];
+  int n = dcs_list_get(which, ids);
   int w = 0;
   for (int i = 0; i < n; i++) {
     if (ids[i] != remote_id) {
       ids[w++] = ids[i];
     }
   }
-  esp_err_t r = (w == n) ? ESP_OK /* absent: nothing to persist */ : dcs_operators_commit(ids, w);
-  if (g_dcs_operators_mtx != NULL) {
-    (void)xSemaphoreGive(g_dcs_operators_mtx);
+  esp_err_t r = (w == n) ? ESP_OK /* absent: nothing to persist */ : dcs_list_commit(which, ids, w);
+  if (g_dcs_lists_mtx != NULL) {
+    (void)xSemaphoreGive(g_dcs_lists_mtx);
   }
   return r;
 }
 
-/* Remote self-role RAM mirror, loaded once at boot and immutable until reboot. */
+/* Remote self-role RAM mirror. Loaded at boot; dcs_role_set() updates it live
+ * (both safety cores read it per frame), so a role change takes effect on the
+ * next pstop frame without a reboot. */
 static atomic_uint_fast32_t g_dcs_role;
 
 static void dcs_role_load_from_nvs(void)
@@ -292,7 +344,12 @@ esp_err_t dcs_role_set(uint8_t role)
   if ((role != PSTOP_AUX_ROLE_STOP_ONLY) && (role != PSTOP_AUX_ROLE_OPERATOR)) {
     return ESP_ERR_INVALID_ARG;
   }
-  return dcs_nvs_write_role(role);
+  esp_err_t r = dcs_nvs_write_role(role);
+  if (r == ESP_OK) {
+    atomic_store(&g_dcs_role, role);
+    ESP_LOGI(TAG, "remote role -> %s (live)", pstop_aux_role_str((pstop_aux_role_t)role));
+  }
+  return r;
 }
 
 /* === DERP region auto-negotiation: §4.2 primary-machine feed ===============
@@ -443,7 +500,7 @@ dcs_boot_state_t dcs_support_init(void)
      * total overflowed 32 and the LAST-registered app routes silently failed
      * to register (observed: /api/pstop_num and /api/enter_download 404'd on
      * shipped firmware). dcs now registers 29 on the remote (incl.
-     * /api/operators + /api/role GET+POST, /api/health GET + reset POST);
+     * /api/admission + /api/role GET+POST, /api/health GET + reset POST);
      * 36 gives 52 total slots with headroom — re-check this
      * arithmetic whenever a route is added on either side. */
   cfg.max_user_uri_handlers = 36;
@@ -519,11 +576,11 @@ dcs_boot_state_t dcs_support_init(void)
      * spawns the safety cores (their remote_details callback reads the cache)
      * and before the admin API can mutate it. Empty on blank NVS = every remote
      * stop-only = safe. */
-  g_dcs_operators_mtx = xSemaphoreCreateMutex();
-  if (g_dcs_operators_mtx == NULL) {
+  g_dcs_lists_mtx = xSemaphoreCreateMutex();
+  if (g_dcs_lists_mtx == NULL) {
     ESP_LOGW(TAG, "operator-allowlist mutex alloc failed — add/del will run unserialized");
   }
-  dcs_operators_load_from_nvs();
+  dcs_lists_load_from_nvs();
   dcs_role_load_from_nvs(); /* remote self-role mirror, before the safety cores spawn */
 
   /* Register the admin pages now that ml_app is up. */

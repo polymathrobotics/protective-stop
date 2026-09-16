@@ -66,15 +66,17 @@
  * machine.toml (next to this binary) for the documented defaults.
  * ========================================================================== */
 
-#define MAX_OPERATORS 32U
+#define MAX_REMOTES_CFG 32U
+#define MAX_LIST_IDS 32U
 
+/* [[remote]] — OPTIONAL per-remote tuning. Membership-neutral: it neither
+ * admits nor authorizes anything (see [policy] allowlist/denylist for
+ * admission; authority is the remote's own announced role). */
 typedef struct
 {
   uint32_t device_id; /* remote UUID (pstop_msg.id) this entry matches  */
   uint64_t heartbeat_ms; /* 0 => inherit default_heartbeat_ms              */
-  int stop_only; /* true => may STOP but never transition to OK    */
-  int allowed; /* false => machine rejects this remote's bonds   */
-} op_cfg_t;
+} remote_cfg_t;
 
 typedef struct
 {
@@ -93,10 +95,17 @@ typedef struct
   uint16_t max_remotes;
   /* [logging] */
   int verbose;
-  /* [policy] — operator allowlist defaults for unlisted remotes */
-  int allow_unlisted;
+  /* [policy] — ADMISSION (optional): may a remote BOND at all? Both lists
+     * empty (default) => every remote is admitted. A non-empty allowlist admits
+     * only listed ids ("paranoid" mode); the denylist always refuses listed ids
+     * and wins. A refused BOND is answered with UNBOND. Admission is NOT
+     * re-arm authority — that is the remote's own announced role, re-read on
+     * every frame (see refresh_client_role). */
+  uint32_t allowlist[MAX_LIST_IDS];
+  int n_allowlist;
+  uint32_t denylist[MAX_LIST_IDS];
+  int n_denylist;
   uint64_t default_heartbeat_ms;
-  int default_stop_only;
   /* Minimum duration (ms) between the STOP that opens an arming cycle and
      * the OK that completes it — the defence against EMC-induced loop blips
      * performing the arming gesture accidentally (observed 2026-07-21:
@@ -116,9 +125,9 @@ typedef struct
   char announce_key_file[256]; /* file whose first line is the bearer token  */
   char announce_name[64]; /* display name; empty = gethostname()         */
   int announce_interval_s; /* default 60                                   */
-  /* [[operator]] entries */
-  op_cfg_t operators[MAX_OPERATORS];
-  int n_operators;
+  /* [[remote]] entries */
+  remote_cfg_t remotes[MAX_REMOTES_CFG];
+  int n_remotes;
 } machine_cfg_t;
 
 static machine_cfg_t g_cfg;
@@ -141,18 +150,14 @@ static void cfg_defaults(machine_cfg_t * c)
   c->max_missed_heartbeats = 5U;
   c->max_remotes = 3U;
   c->verbose = 0;
-  c->allow_unlisted = 1;
+  /* Admission defaults to OPEN (both lists empty). */
+  c->n_allowlist = 0;
+  c->n_denylist = 0;
   /* Advertised per-remote heartbeat window; remotes publish at half this
    * (2x margin), so 400 ms => a 5 Hz remote update rate. */
   c->default_heartbeat_ms = 400U;
   c->min_stop_ms = 500U;
-  /* SAFETY default: an unlisted remote is accepted (allow_unlisted) and
-   * heartbeat-monitored but STOP-ONLY — it may command STOP, never re-arm
-   * (STOP->OK). Only a remote named in a [[operator]] entry (stop_only=false)
-   * may re-arm. Empty operator list => every remote is stop-only = maximally
-   * safe. This replaces the previous accept-any-as-full-operator default. */
-  c->default_stop_only = 1;
-  c->n_operators = 0;
+  c->n_remotes = 0;
   c->announce_url[0] = '\0';
   c->announce_key_file[0] = '\0';
   c->announce_name[0] = '\0';
@@ -179,33 +184,58 @@ static uint64_t parse_uint(const char * v)
   return strtoull(v, NULL, 0);
 }
 
-/* Load a TOML-subset: '#'/';' comments, [section], [[operator]] array-tables,
- * and key = value (int / 0xhex / true|false / "string"). Unknown keys warn.
- * Returns 0 on success, -1 if the file can't be opened. */
+/* "[0x0154BBD8, 30234300]" -> ids; tolerant of spaces and a trailing comma.
+ * Returns the count stored (capped at cap; extras warn). */
+static int parse_uint_array(const char * v, uint32_t * out, int cap, const char * what)
+{
+  int n = 0;
+  const char * p = v;
+  while (*p == ' ' || *p == '[') p++;
+  while (*p != 0 && *p != ']') {
+    while (*p == ' ' || *p == ',') p++;
+    if (*p == 0 || *p == ']') break;
+    char * end = NULL;
+    uint64_t id = strtoull(p, &end, 0);
+    if (end == p) {
+      fprintf(stderr, "  config: %s: cannot parse '%s'\n", what, p);
+      break;
+    }
+    if (n < cap) {
+      out[n++] = (uint32_t)id;
+    } else {
+      fprintf(stderr, "  config: %s: too many ids (max %d)\n", what, cap);
+    }
+    p = end;
+  }
+  return n;
+}
+
+/* Load a TOML-subset: '#'/';' comments, [section], [[remote]] array-tables,
+ * key = value (int / 0xhex / true|false / "string") and flat int arrays
+ * ("[a, b]"). Unknown keys warn. Returns 0 on success, -1 if the file can't be
+ * opened. */
 static int cfg_load(machine_cfg_t * c, const char * path)
 {
   FILE * f = fopen(path, "r");
   if (!f) return -1;
 
-  char line[256], section[32] = "";
-  op_cfg_t * op = NULL;
+  char line[512], section[32] = "";
+  remote_cfg_t * op = NULL;
 
   while (fgets(line, sizeof(line), f)) {
     char * s = trim(line);
     if (*s == 0 || *s == '#' || *s == ';') continue;
 
     if (*s == '[') {
-      if (s[1] == '[') { /* [[operator]] */
-        snprintf(section, sizeof(section), "%s", "operator");
+      if (s[1] == '[') { /* [[remote]] */
+        snprintf(section, sizeof(section), "%s", "remote");
         op = NULL;
-        if (c->n_operators < (int)MAX_OPERATORS) {
-          op = &c->operators[c->n_operators++];
+        if (c->n_remotes < (int)MAX_REMOTES_CFG) {
+          op = &c->remotes[c->n_remotes++];
           op->device_id = 0;
           op->heartbeat_ms = 0; /* 0 => default */
-          op->stop_only = 0;
-          op->allowed = 1;
         } else {
-          fprintf(stderr, "  config: too many [[operator]] entries (max %u)\n", MAX_OPERATORS);
+          fprintf(stderr, "  config: too many [[remote]] entries (max %u)\n", MAX_REMOTES_CFG);
         }
       } else { /* [section] */
         char * e = strchr(s, ']');
@@ -227,17 +257,13 @@ static int cfg_load(machine_cfg_t * c, const char * path)
       if (q) *q = 0;
     }
 
-    if (strcmp(section, "operator") == 0 && op) {
+    if (strcmp(section, "remote") == 0 && op) {
       if (!strcmp(key, "device_id"))
         op->device_id = (uint32_t)parse_uint(val);
       else if (!strcmp(key, "heartbeat_ms"))
         op->heartbeat_ms = parse_uint(val);
-      else if (!strcmp(key, "stop_only"))
-        op->stop_only = parse_bool(val);
-      else if (!strcmp(key, "allowed"))
-        op->allowed = parse_bool(val);
       else
-        fprintf(stderr, "  config: unknown operator key '%s'\n", key);
+        fprintf(stderr, "  config: unknown [[remote]] key '%s'\n", key);
       continue;
     }
 
@@ -256,12 +282,12 @@ static int cfg_load(machine_cfg_t * c, const char * path)
       c->max_remotes = (uint16_t)parse_uint(val);
     else if (!strcmp(key, "verbose"))
       c->verbose = parse_bool(val);
-    else if (!strcmp(key, "allow_unlisted"))
-      c->allow_unlisted = parse_bool(val);
+    else if (!strcmp(key, "allowlist"))
+      c->n_allowlist = parse_uint_array(val, c->allowlist, (int)MAX_LIST_IDS, "allowlist");
+    else if (!strcmp(key, "denylist"))
+      c->n_denylist = parse_uint_array(val, c->denylist, (int)MAX_LIST_IDS, "denylist");
     else if (!strcmp(key, "default_heartbeat_ms"))
       c->default_heartbeat_ms = parse_uint(val);
-    else if (!strcmp(key, "default_stop_only"))
-      c->default_stop_only = parse_bool(val);
     else if (!strcmp(key, "min_stop_ms"))
       c->min_stop_ms = parse_uint(val);
     else if (!strcmp(key, "announce_url"))
@@ -295,20 +321,22 @@ static void cfg_dump(const machine_cfg_t * c)
     c->verbose);
   fprintf(
     stderr,
-    "config: policy allow_unlisted=%d default_heartbeat=%llums "
-    "default_stop_only=%d; %d explicit operator(s):\n",
-    c->allow_unlisted,
+    "config: admission allowlist=%d id(s)%s denylist=%d id(s); default_heartbeat=%llums; "
+    "%d [[remote]] tuning entr%s (authority = each remote's announced role)\n",
+    c->n_allowlist,
+    (c->n_allowlist == 0) ? " (open: everyone admitted)" : " (only these may bond)",
+    c->n_denylist,
     (unsigned long long)c->default_heartbeat_ms,
-    c->default_stop_only,
-    c->n_operators);
-  for (int i = 0; i < c->n_operators; i++)
+    c->n_remotes,
+    (c->n_remotes == 1) ? "y" : "ies");
+  for (int i = 0; i < c->n_allowlist; i++) fprintf(stderr, "config:   allow 0x%08X\n", c->allowlist[i]);
+  for (int i = 0; i < c->n_denylist; i++) fprintf(stderr, "config:   deny  0x%08X\n", c->denylist[i]);
+  for (int i = 0; i < c->n_remotes; i++)
     fprintf(
       stderr,
-      "config:   operator 0x%08X heartbeat=%llums stop_only=%d allowed=%d\n",
-      c->operators[i].device_id,
-      (unsigned long long)(c->operators[i].heartbeat_ms ? c->operators[i].heartbeat_ms : c->default_heartbeat_ms),
-      c->operators[i].stop_only,
-      c->operators[i].allowed);
+      "config:   remote 0x%08X heartbeat=%llums\n",
+      c->remotes[i].device_id,
+      (unsigned long long)(c->remotes[i].heartbeat_ms ? c->remotes[i].heartbeat_ms : c->default_heartbeat_ms));
 }
 
 /* ============================================================================
@@ -362,35 +390,41 @@ static void on_sig(int signo)
   s_running = 0;
 }
 
-/* The callback has no context pointer. Expose only the BOND currently being
- * processed; pstop_c latches the effective stop_only policy into the client. */
-static uint32_t s_bond_role_id;
-static pstop_aux_role_t s_bond_role = PSTOP_AUX_ROLE_UNSPECIFIED;
+/* The callback has no context pointer. Expose the announced role of the frame
+ * currently being processed; the callback seeds a NEW client's is_stop_only
+ * from it at BOND. Later frames refresh the bonded client directly (below). */
+static uint32_t s_frame_role_id;
+static pstop_aux_role_t s_frame_role = PSTOP_AUX_ROLE_UNSPECIFIED;
 
-/* Consults the configured allowlist, ANDed with the remote's announced role. A
- * remote listed in [[operator]] uses its entry; an unlisted remote uses [policy]
- * (allow_unlisted + defaults). Operator authority additionally requires the
- * remote to announce the OPERATOR role (aux uplink); otherwise it is stop-only
- * (fail-safe) — strictly more conservative than config alone. */
-static remote_details_t is_operator_allowed(const device_id_t * device_id)
+/* ADMISSION: may this id bond at all? Deny wins; an empty allowlist admits
+ * everyone. Mirrors machn (dcs_admission_allows) and the ROS 2 node. */
+static int admission_allows(uint32_t id)
+{
+  for (int i = 0; i < g_cfg.n_denylist; i++)
+    if (g_cfg.denylist[i] == id) return 0;
+  if (g_cfg.n_allowlist == 0) return 1;
+  for (int i = 0; i < g_cfg.n_allowlist; i++)
+    if (g_cfg.allowlist[i] == id) return 1;
+  return 0;
+}
+
+/* remote_details_cb: admission from [policy] allow/denylist; heartbeat from
+ * the optional [[remote]] tuning entry; AUTHORITY from the remote's own
+ * announced role (unspecified/old firmware => stop-only, fail-safe). */
+static remote_details_t remote_details(const device_id_t * device_id)
 {
   remote_details_t d;
-  d.allowed = g_cfg.allow_unlisted;
-  d.stop_only = g_cfg.default_stop_only;
+  const uint32_t id = (device_id != NULL) ? device_id->data : 0u;
+  d.allowed = (id != 0u) && admission_allows(id);
   d.heartbeat_ms = g_cfg.default_heartbeat_ms;
-  for (int i = 0; i < g_cfg.n_operators; i++) {
-    if (g_cfg.operators[i].device_id == device_id->data) {
-      d.allowed = g_cfg.operators[i].allowed;
-      d.stop_only = g_cfg.operators[i].stop_only;
-      d.heartbeat_ms = g_cfg.operators[i].heartbeat_ms ? g_cfg.operators[i].heartbeat_ms : g_cfg.default_heartbeat_ms;
+  for (int i = 0; i < g_cfg.n_remotes; i++) {
+    if (g_cfg.remotes[i].device_id == id && g_cfg.remotes[i].heartbeat_ms != 0u) {
+      d.heartbeat_ms = g_cfg.remotes[i].heartbeat_ms;
       break;
     }
   }
-  /* AND-rule: operator authority requires an explicit OPERATOR announcement. */
-  pstop_aux_role_t role = (device_id->data == s_bond_role_id) ? s_bond_role : PSTOP_AUX_ROLE_UNSPECIFIED;
-  if (!d.stop_only && !pstop_aux_role_is_operator(role)) {
-    d.stop_only = 1;
-  }
+  pstop_aux_role_t role = (id == s_frame_role_id) ? s_frame_role : PSTOP_AUX_ROLE_UNSPECIFIED;
+  d.stop_only = !pstop_aux_role_is_operator(role);
   return d;
 }
 
@@ -710,13 +744,13 @@ static int cfg_validate(const machine_cfg_t * c, char * reason, size_t rlen)
       CFG_MIN_STOP_FLOOR_MS);
     return -1;
   }
-  for (int i = 0; i < c->n_operators; i++) {
-    const uint64_t hb = c->operators[i].heartbeat_ms; /* 0 => inherit default */
+  for (int i = 0; i < c->n_remotes; i++) {
+    const uint64_t hb = c->remotes[i].heartbeat_ms; /* 0 => inherit default */
     if (hb != 0U && (hb < CFG_HB_MIN_MS || hb > CFG_HB_MAX_MS)) {
       snprintf(
         reason,
         rlen,
-        "operator[%d] heartbeat_ms %llu out of [%u,%u]",
+        "remote[%d] heartbeat_ms %llu out of [%u,%u]",
         i,
         (unsigned long long)hb,
         CFG_HB_MIN_MS,
@@ -794,7 +828,7 @@ int main(int argc, char * argv[])
      * complete by waiting). Supersedes the wrapper-owned veto this runner
      * carried while the library lacked the feature. 0 disables. */
   pstop_app.app_config.delay_between_stop_ms = (uint32_t)g_cfg.min_stop_ms;
-  pstop_app.remote_details_cb = is_operator_allowed;
+  pstop_app.remote_details_cb = remote_details;
   pstop_app.status_cb = robot_status;
   pstop_app.log_message_cb = log_message;
   /* Arm the clock-freeze guard (SR-H-04b / DU-2) BEFORE the library can call
@@ -976,19 +1010,32 @@ int main(int argc, char * argv[])
       int prev_restart = machine.robot_state.restart_state;
       uint32_t prev_sid = machine.robot_state.remote_stop_id;
 
-      s_bond_role_id = 0u;
-      s_bond_role = PSTOP_AUX_ROLE_UNSPECIFIED;
-      if (
-        req_msg.checksum == req_msg.calculated_checksum && req_msg.message == PSTOP_MESSAGE_BOND &&
-        req_msg.receiver_id.data == g_cfg.machine_device_id)
-      {
-        s_bond_role_id = req_msg.id.data;
-        s_bond_role = pstop_aux_decode_role(&req_msg);
+      s_frame_role_id = 0u;
+      s_frame_role = PSTOP_AUX_ROLE_UNSPECIFIED;
+      if (req_msg.checksum == req_msg.calculated_checksum && req_msg.receiver_id.data == g_cfg.machine_device_id) {
+        s_frame_role_id = req_msg.id.data;
+        s_frame_role = pstop_aux_decode_role(&req_msg);
+        /* Live role: refresh the bonded client's is_stop_only from THIS frame
+                 * before the library evaluates it. pstop_c reads is_stop_only only
+                 * when a STOP may open an arming cycle, so a remote that demotes
+                 * itself mid-run keeps the machine running and is refused at the
+                 * next re-arm; promoting back re-enables it. */
+        pstop_remote_data_t * rc = pstop_remote_get(&machine.remotes, &req_msg.id);
+        if (rc != NULL) {
+          int was = rc->is_stop_only;
+          rc->is_stop_only = !pstop_aux_role_is_operator(s_frame_role);
+          if (was != rc->is_stop_only)
+            fprintf(
+              stderr,
+              "ROLE   remote 0x%08X now announces %s\n",
+              req_msg.id.data,
+              rc->is_stop_only ? "STOP-ONLY (cannot re-arm)" : "OPERATOR (may re-arm)");
+        }
       }
       pstop_message_init(&resp_msg);
       pstop_error_t err = machine_process_message(&machine, &req_msg, &resp_msg);
-      s_bond_role_id = 0u;
-      s_bond_role = PSTOP_AUX_ROLE_UNSPECIFIED;
+      s_frame_role_id = 0u;
+      s_frame_role = PSTOP_AUX_ROLE_UNSPECIFIED;
 
       /* --- Min-STOP-duration arming policy (LIBRARY-native, pstop_c #59) --
              * The library refuses an OK arriving sooner than
@@ -1047,6 +1094,23 @@ int main(int argc, char * argv[])
             msg_name(resp_msg.message),
             resp_msg.counter,
             resp_msg.heartbeat_timeout);
+      } else if (err == PSTOP_OPERATOR_NOT_ALLOWED) {
+        /* Admission refused: pstop_c prepared an UNBOND reply but left the
+                 * addressing blank. Fill it and send it so the remote learns it
+                 * was refused (it parks until a manual rebond) instead of
+                 * hearing silence and knocking forever. */
+        resp_msg.id.data = g_cfg.machine_device_id;
+        resp_msg.receiver_id.data = req_msg.id.data;
+        resp_msg.received_counter = req_msg.counter;
+        resp_msg.received_stamp = req_msg.stamp;
+        pstop_message_encode(&resp_msg, respbytes);
+        transport_udp_write(&udp_transport, respbytes, PSTOP_MESSAGE_SIZE, (struct sockaddr_in *)&client);
+        fprintf(
+          stderr,
+          "ADMISSION remote 0x%08X REFUSED (%s) — replied UNBOND\n",
+          req_msg.id.data,
+          (g_cfg.n_denylist > 0 && !admission_allows(req_msg.id.data) && g_cfg.n_allowlist == 0) ? "denylisted"
+                                                                                                 : "not admitted");
       } else {
         /* Rejected by pstop (recoverable: no response sent, and no STOP
                  * unless loss exceeds tolerance). MSG_LOST/OUT_OF_ORDER can come
