@@ -4418,7 +4418,26 @@ void ml_wg_mgr_task(void * arg)
   int cached = ml_peer_nvs_load_all(ml->peers, ML_MAX_PEERS);
   if (cached > 0) {
     ml->peer_count = cached;
-    ESP_LOGI(TAG, "Pre-loaded %d cached peers from NVS", cached);
+    /* Same allowlist gate as add_peer(), applied to TABLE OCCUPANCY. The
+     * install loop below already skipped non-allowed cached peers, but left
+     * them ACTIVE — so on a filtered device the cache (stranger entries from
+     * before the filter was enabled) filled every slot, including all of
+     * them below the runtime max_peers cap that add_peer() searches for a
+     * free one. A newly allowlisted, non-pinned peer then never got a slot
+     * (DUT 2026-09-16: max_peers=32, 125/128 slots held by allowed:false
+     * cache entries; the laptop's re-add hit peer_table_full forever).
+     * Pinned peers are exempt inside ml_config_peer_is_allowed(). */
+    int dropped = 0;
+    for (int i = 0; i < cached; i++) {
+      if (!ml_config_peer_is_allowed(ml->config_httpd, ml->peers[i].vpn_ip)) {
+        ml->peers[i].active = false;
+        dropped++;
+      }
+    }
+    while (ml->peer_count > 0 && !ml->peers[ml->peer_count - 1].active) {
+      ml->peer_count--;
+    }
+    ESP_LOGI(TAG, "Pre-loaded %d cached peers from NVS (%d not allowlisted, slots released)", cached, dropped);
   }
 
   /* Cold-bond far-side recovery (bench 2026-08-08): a rebooted machine whose
