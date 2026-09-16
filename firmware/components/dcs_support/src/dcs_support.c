@@ -200,6 +200,7 @@ static const char * list_name(dcs_list_t which)
 
 static void dcs_lists_load_from_nvs(void)
 {
+  dcs_nvs_erase_legacy_operators();
   for (int w = 0; w < DCS_LIST_COUNT; w++) {
     uint32_t ids[DCS_MAX_LIST_IDS];
     int n = dcs_nvs_read_list((dcs_list_t)w, ids);

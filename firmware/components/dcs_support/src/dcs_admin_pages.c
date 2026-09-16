@@ -1163,8 +1163,10 @@ static esp_err_t api_ring_led1(httpd_req_t * req)
  *   POST /api/admission?deny=<id>      add to denylist
  *   POST /api/admission?undeny=<id>    remove from denylist
  *
- * Applies live to the RAM cache AND persists to NVS. Takes effect on a remote's
- * next BOND (an already-bonded remote is not evicted). */
+ * Applies live to the RAM cache AND persists to NVS. pstop_c re-runs admission
+ * on EVERY frame, so denying an already-bonded remote evicts it on its next
+ * heartbeat (it gets UNBOND and parks as REJECTED); the machine then STOPs via
+ * liveness. Adding to the allowlist admits on the remote's next BOND. */
 static bool admin_required(httpd_req_t * req)
 {
   if (ml_app_check_admin_auth(req)) {

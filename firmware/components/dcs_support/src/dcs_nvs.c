@@ -14,8 +14,9 @@
  *   ring_off  u8   LED-ring rotation: physical pixel index of LED 1 (default 0)
  *   ps_peers  blob multi-machine peer table: version byte + per-slot records
  *                  (absent -> migrate legacy ps_ip/ps_port into slot 0)
- *   operators blob admission allowlist: count byte + u32 ids
- *   denylist  blob admission denylist: same layout
+ *   adm_allow blob admission allowlist: count byte + u32 ids
+ *   adm_deny  blob admission denylist: same layout
+ *   operators blob LEGACY operator list — erased at boot (dcs_nvs_erase_legacy_operators)
  *   wifi_txp  u8   WiFi max TX power, quarter-dBm (8..84); 0/absent = config default
  *   led_bri   u8   master LED brightness, 0..100%; absent/corrupt = default 50
  *   ctrl_rst  u8   one-shot controlled-reset cause crumb (DCS_CTRL_RST_*)
@@ -501,6 +502,25 @@ int dcs_nvs_read_list(dcs_list_t which, uint32_t out[DCS_MAX_LIST_IDS])
     }
   }
   return n;
+}
+
+/* The pre-admission "operators" blob meant "may RE-ARM"; the admission
+ * allowlist means "may BOND". Silently reading one as the other would, after an
+ * OTA onto a machine with a populated operator list, refuse every other remote
+ * that used to bond fine. So the lists start empty (open) and the legacy blob is
+ * removed rather than reinterpreted. Idempotent; ESP_ERR_NVS_NOT_FOUND is normal. */
+void dcs_nvs_erase_legacy_operators(void)
+{
+  nvs_handle_t h;
+  if (nvs_open(DCS_NVS_NS, NVS_READWRITE, &h) != ESP_OK) {
+    return;
+  }
+  esp_err_t r = nvs_erase_key(h, DCS_NVS_KEY_LEGACY_OPERATORS);
+  if (r == ESP_OK) {
+    (void)nvs_commit(h);
+    ESP_LOGW(TAG, "erased legacy 'operators' NVS list (re-arm authority is now the remote's own role)");
+  }
+  nvs_close(h);
 }
 
 esp_err_t dcs_nvs_write_list(dcs_list_t which, const uint32_t ids[DCS_MAX_LIST_IDS], int count)

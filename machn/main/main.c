@@ -374,13 +374,15 @@ static void core_task(void * arg)
              * bonded client's is_stop_only from THIS frame and release any
              * arming-cycle ownership a stop-only remote holds. Both cores
              * decode the same bytes => identical decision. */
-      if (req.checksum == req.calculated_checksum) {
+      const bool addressed_to_us =
+        (req.checksum == req.calculated_checksum) && (req.receiver_id.data == MACHN_MACHINE_ID);
+      if (addressed_to_us) {
         pstop_aux_apply_role_pre(&mc->machine, &req);
       }
       pstop_message_init(&mc->resp);
       mc->err = machine_process_message(&mc->machine, &req, &mc->resp);
       /* A stop-only remote's STOP never opens an arming cycle. */
-      if (req.checksum == req.calculated_checksum) {
+      if (addressed_to_us) {
         pstop_aux_apply_role_post(&mc->machine, &req, mc->err);
       }
       if (mc->err == PSTOP_OK) {
@@ -657,10 +659,12 @@ static void comparator_task(void * arg)
              * core eventually trips the task WDT into a (safe) reset. */
       mismatch++;
     } else if (g_rx_pending != 0) {
-      bool agree =
-        (g_core[0].err == g_core[1].err) &&
-        ((g_core[0].err != PSTOP_OK) || (memcmp(g_core[0].resp_bytes, g_core[1].resp_bytes, PSTOP_MESSAGE_SIZE) == 0));
-      if (agree && ((g_core[0].err == PSTOP_OK) || (g_core[0].err == PSTOP_OPERATOR_NOT_ALLOWED))) {
+      /* Every reply that reaches the wire (OK, and the admission-refusal
+             * UNBOND) must be byte-identical across both cores. */
+      const bool forwarded = (g_core[0].err == PSTOP_OK) || (g_core[0].err == PSTOP_OPERATOR_NOT_ALLOWED);
+      bool agree = (g_core[0].err == g_core[1].err) &&
+                   (!forwarded || (memcmp(g_core[0].resp_bytes, g_core[1].resp_bytes, PSTOP_MESSAGE_SIZE) == 0));
+      if (agree && forwarded) {
         /* OK: the library's reply. OPERATOR_NOT_ALLOWED: the UNBOND both cores
                  * filled identically — tells the refused remote to stop
                  * knocking (it parks until a manual rebond). */

@@ -730,6 +730,9 @@ static void sess_reconfigure(pstop_sess_t * s, bool configured, uint32_t ip, uin
   s->ip = ip;
   s->port = port;
   s->machine_id = machine_id;
+  /* Adopt the slot's current rebond generation: the memset above zeroed our
+   * copy, and a stale mismatch would fire a spurious "manual rebond" tick. */
+  s->rebond_gen = dcs_pstop_rebond_generation((int)(s - g_sess));
   if (configured) {
     sess_start_bonding(s);
   } else {
@@ -1011,17 +1014,23 @@ static uint32_t sess_drain_replies(pstop_sess_t * s, int slot, uint64_t now_ms)
         (unsigned long)sess_send_period_ms(s));
     }
 
-    if ((s->state == SESS_BONDING) && (resp.message == PSTOP_MESSAGE_UNBOND)) {
-      /* Admission refused: the machine's allow/denylist rejected our BOND
-             * and told us so (pstop_c replies UNBOND for a not-allowed id).
-             * Park the session — no automatic retries — and surface it
-             * (state 3 in /state.json + web UI). Exit only via manual rebond,
-             * slot reconfigure or reboot. */
+    if (resp.message == PSTOP_MESSAGE_UNBOND) {
+      /* Admission refused: the machine's allow/denylist rejected us and told
+             * us so (pstop_c replies UNBOND for a not-allowed id). This can
+             * arrive for a BOND, or mid-session when the machine denylists us
+             * live — pstop_c re-runs admission on EVERY frame. Either way,
+             * park the session (no automatic retries), surface it (state 3 in
+             * /state.json + web UI) and do NOT adopt the reply's zeroed
+             * counter/stamp or refresh last_reply_ms: a parked slot must read
+             * as dead, not healthy. Exit only via manual rebond, slot
+             * reconfigure or reboot. This remote never sends UNBOND itself, so
+             * no legitimate UNBOND reply exists to confuse this with. */
+      const bool was_bonded = (s->state == SESS_BONDED);
       s->state = SESS_REJECTED;
       s->last_msg = PSTOP_MESSAGE_UNBOND;
-      s->last_reply_ms = now_ms;
       s->bond_sent_ms = 0;
-      ESP_LOGW(TAG, "m%d BOND REJECTED by machine (UNBOND) — parked until manual rebond", slot);
+      ESP_LOGW(
+        TAG, "m%d %s REJECTED by machine (UNBOND) — parked until manual rebond", slot, was_bonded ? "session" : "BOND");
       got++;
       continue;
     }
