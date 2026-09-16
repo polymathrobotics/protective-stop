@@ -370,20 +370,19 @@ static void core_task(void * arg)
     if (g_rx_pending != 0) {
       pstop_msg_t req;
       pstop_message_decode(&req, g_rx_bytes);
-      /* Live role: refresh the bonded client's is_stop_only from THIS frame's
-             * announced role before the library evaluates it. pstop_c reads
-             * is_stop_only only when a STOP may open an arming cycle, so a
-             * remote that demotes itself mid-run keeps the machine running and
-             * is refused at the next re-arm; promoting back re-enables it.
-             * Both cores decode the same bytes => identical decision. */
+      /* Live role (shared policy, common/pstop_aux_channel.h): refresh the
+             * bonded client's is_stop_only from THIS frame and release any
+             * arming-cycle ownership a stop-only remote holds. Both cores
+             * decode the same bytes => identical decision. */
       if (req.checksum == req.calculated_checksum) {
-        pstop_remote_data_t * c = pstop_remote_get(&mc->machine.remotes, &req.id);
-        if (c != NULL) {
-          c->is_stop_only = !pstop_aux_role_is_operator(pstop_aux_decode_role(&req));
-        }
+        pstop_aux_apply_role_pre(&mc->machine, &req);
       }
       pstop_message_init(&mc->resp);
       mc->err = machine_process_message(&mc->machine, &req, &mc->resp);
+      /* A stop-only remote's STOP never opens an arming cycle. */
+      if (req.checksum == req.calculated_checksum) {
+        pstop_aux_apply_role_post(&mc->machine, &req, mc->err);
+      }
       if (mc->err == PSTOP_OK) {
         pstop_message_encode(&mc->resp, mc->resp_bytes);
       } else if (mc->err == PSTOP_OPERATOR_NOT_ALLOWED) {

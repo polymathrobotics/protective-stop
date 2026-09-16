@@ -216,20 +216,19 @@ void SoftwareMachineBackend::Impl::run()
         {
           frame_role_id = req_msg.id.data;
           frame_role = pstop_aux_decode_role(&req_msg);
-          // Live role: refresh the bonded client's is_stop_only from THIS
-          // frame before the library evaluates it. pstop_c reads is_stop_only
-          // only when a STOP may open an arming cycle, so a remote that
-          // demotes itself mid-run keeps the machine running and is refused at
-          // the next re-arm; promoting back re-enables it.
+          // Live role (shared policy, common/pstop_aux_channel.h): refresh the
+          // bonded client's is_stop_only from THIS frame and release any
+          // arming-cycle ownership a stop-only remote holds.
           if (known) {
-            pstop_remote_data_t * c = pstop_remote_get(&machine.remotes, &req_msg.id);
-            if (c != nullptr) {
-              c->is_stop_only = !pstop_aux_role_is_operator(frame_role);
-            }
+            pstop_aux_apply_role_pre(&machine, &req_msg);
           }
         }
         pstop_message_init(&resp_msg);
         const pstop_error_t err = machine_process_message(&machine, &req_msg, &resp_msg);
+        // A stop-only remote's STOP never opens an arming cycle.
+        if (known && req_msg.checksum == req_msg.calculated_checksum) {
+          pstop_aux_apply_role_post(&machine, &req_msg, err);
+        }
         if (err == PSTOP_OK) {
           pstop_message_encode(&resp_msg, respbytes);
           transport_udp_write(&udp, respbytes, PSTOP_MESSAGE_SIZE,
