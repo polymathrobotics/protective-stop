@@ -14,7 +14,8 @@ min-STOP-duration arming policy and the two-gate re-arm rule without a chip.
 It works against either machine implementation, since both host the same
 `pstop_c`. Use a **dedicated** port, never the one a real remote is bonded to.
 
-Plain-C runner (`host/machine.toml` accepts any OPERATOR-announcing remote):
+Plain-C runner (`host/machine.toml` admits every remote; the script announces
+OPERATOR, which is all that arming needs):
 
 ```sh
 cd host && make
@@ -22,10 +23,10 @@ cd host && make
 python3 ../tools/pstop_test_remote.py --port 8893
 ```
 
-ROS 2 node (the script's id `0x01020381` = `16909185` must be an operator):
+ROS 2 node (defaults admit every remote; only the port needs overriding):
 
 ```sh
-printf '/machine_bridge:\n  ros__parameters:\n    software:\n      port: 8894\n      operators: [16909185]\n' > /tmp/pstop_test.yaml
+printf '/machine_bridge:\n  ros__parameters:\n    software:\n      port: 8894\n' > /tmp/pstop_test.yaml
 ros2 run protective_stop_machine machine_bridge_node --ros-args --params-file /tmp/pstop_test.yaml &
 python3 tools/pstop_test_remote.py --port 8894
 ```
@@ -49,9 +50,12 @@ to `host/machine_app_runner.c`, `ros2/`, `common/pstop_aux_channel.h` or a
 Drives N scripted software remotes (each its own device_id + counter handshake)
 against a dedicated `machine_app_runner` to validate the many-to-one logic
 across the corner-case matrix: independent arming, the any-STOP OR, arming
-ownership, heartbeat loss, unbond, capacity overflow, allowlist deny, stop-only
-operators, malformed/bad-CRC/invalid-type traffic, and network chaos (via §2).
-32 assertions covering the fail-safe invariants (I1–I7).
+ownership, heartbeat loss, unbond, capacity overflow, admission allow/denylist
+(incl. the addressed `UNBOND` reply and deny-wins), remote-announced stop-only
+vs operator authority, the LIVE role flip (a demoted owner keeps the machine
+running but cannot re-arm it after the next STOP), a mixed operator/stop-only
+fleet, malformed/bad-CRC/invalid-type traffic, and network chaos (via §2).
+47 assertions covering the fail-safe invariants (I1–I7).
 
 ```sh
 python3 tools/pstop_multi_remote_test.py     # exit 0 = all invariants held

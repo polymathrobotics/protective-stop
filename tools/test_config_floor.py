@@ -29,7 +29,8 @@ machine_device_id = 0x01020304
 max_missed_heartbeats = {max_missed}
 max_remotes = 4
 [policy]
-allow_unlisted = true
+allowlist = []
+denylist = []
 default_heartbeat_ms = {hb}
 min_stop_ms = {min_stop}
 """
