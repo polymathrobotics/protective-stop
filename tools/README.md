@@ -1,0 +1,117 @@
+<!--
+SPDX-FileCopyrightText: 2026 Polymath Robotics
+SPDX-License-Identifier: Apache-2.0
+-->
+
+# pstop tools
+
+Flashing, fleet, chaos, soak, and HIL tooling for the remote and machine nodes.
+Every Python tool here runs from one environment, described by
+[`pyproject.toml`](pyproject.toml) and pinned by `uv.lock`.
+
+## First-time setup
+
+These tools use [uv](https://docs.astral.sh/uv/), a Python package and
+environment manager.
+It replaces `pip` and `venv`: you never create or activate a virtualenv by hand,
+and everyone gets the identical dependency versions recorded in `uv.lock`.
+
+### 1. Install uv
+
+```sh
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
+The installer puts `uv` in `~/.local/bin`.
+Open a new shell afterwards, or `source ~/.local/bin/env`, then check it:
+
+```sh
+uv --version
+```
+
+macOS users can use `brew install uv` instead; Windows and other install methods
+are in the [uv installation docs](https://docs.astral.sh/uv/getting-started/installation/).
+
+### 2. Create the environment
+
+```sh
+cd tools
+uv sync                 # flashing and fleet tools
+uv sync --extra hil     # ...plus the hardware-in-the-loop suite
+```
+
+This creates `tools/.venv` and installs the locked dependencies into it.
+It takes a few seconds and needs no further configuration.
+You do not need Python installed already — uv fetches an interpreter if the
+system one is older than 3.11.
+
+## Running a tool
+
+Prefix any command with `uv run`.
+There is no virtualenv to activate.
+
+```sh
+cd tools
+uv run python flash_station.py --selftest
+uv run python pstop_test_remote.py --port 8890
+uv run esptool version
+```
+
+`uv run` re-checks the lock before each command, so a dependency added by a
+teammate is installed automatically on your next run.
+
+The shell tools need no prefix.
+They find `esptool` on `PATH` when already inside `uv run`, and otherwise
+re-enter this environment for each call:
+
+```sh
+tools/flash_pstop.sh --remote
+```
+
+## Flashing a unit
+
+`flash_pstop.sh` provisions one device over USB from a staged image directory;
+`flash_station.py` runs the unattended production loop.
+Both need a staged image in `tools/production_image/` (remote) or
+`tools/production_image_machn/` (machine), which carries per-fleet secrets and
+is git-ignored.
+See the header comment in each script for the full argument list.
+
+## HIL suite
+
+The rig tests live in [`hil/`](hil/) and need the `hil` extra.
+Run them through `hil/run.sh`, which strips `PYTHONPATH` — a sourced ROS
+environment otherwise puts broken plugins on it:
+
+```sh
+cd tools/hil
+./run.sh                    # everything, power cycles included
+./run.sh -m 'not power'     # skip the power-cycle tests
+./run.sh test_00_rig.py     # rig self-check after (re)wiring
+```
+
+## The one exception: `soak_per_remote.py` in ROS mode
+
+`soak_per_remote.py` reads remote state from either the chip's HTTP
+`state.json` or a ROS 2 topic.
+The HTTP source is stdlib-only and runs under `uv run` like everything else.
+The ROS source imports `rclpy` and `protective_stop_msg` lazily, and those come
+from a sourced ROS workspace rather than PyPI, so the uv environment cannot
+provide them:
+
+```sh
+source /opt/ros/$ROS_DISTRO/setup.bash
+source <workspace>/install/setup.bash
+python3 tools/soak_per_remote.py ...      # system python, not uv run
+```
+
+## Adding a dependency
+
+```sh
+cd tools
+uv add <package>                    # runtime dependency
+uv add --optional hil <package>     # HIL-only dependency
+```
+
+`uv add` edits `pyproject.toml` and updates `uv.lock`.
+Commit both.

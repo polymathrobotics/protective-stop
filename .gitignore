@@ -61,3 +61,6 @@ build/
 install/
 log/
 tools/fleet.env
+
+# uv-managed environment for tools/
+tools/.venv/

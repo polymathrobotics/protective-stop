@@ -87,11 +87,17 @@ for f in bootloader.bin partition-table.bin ota_data_initial.bin "$APP"; do
   [ -f "$IMG/$f" ] || { echo "ERROR: missing $IMG/$f — stage a $ROLE build into $(basename "$IMG")/ first." >&2; exit 1; }
 done
 
-# --- esptool available? (prefer the modern 'esptool' entrypoint) ----------
-if   command -v esptool     >/dev/null 2>&1; then ESPTOOL=(esptool)
-elif command -v esptool.py  >/dev/null 2>&1; then ESPTOOL=(esptool.py)
-elif python3 -c "import esptool" >/dev/null 2>&1; then ESPTOOL=(python3 -m esptool)
-else echo "ERROR: esptool not found — 'pip install esptool'." >&2; exit 1; fi
+# --- esptool from the tools/ uv environment -------------------------------
+# Already inside `uv run`, esptool is on PATH; otherwise re-enter the project
+# environment for each call.
+if command -v esptool >/dev/null 2>&1; then
+  ESPTOOL=(esptool)
+elif command -v uv >/dev/null 2>&1; then
+  ESPTOOL=(env -u VIRTUAL_ENV uv run --project "$HERE" --quiet esptool)
+else
+  echo "ERROR: esptool not found. Install uv (https://docs.astral.sh/uv/), then 'cd tools && uv sync'." >&2
+  exit 1
+fi
 
 # esptool v5 renamed flags to hyphens and deprecated the underscore forms;
 # v4 (the ESP-IDF one) only knows underscores. Pick the right set so we neither

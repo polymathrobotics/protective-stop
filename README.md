@@ -74,7 +74,7 @@ preferred, with USB-NCM and WiFi available as fallbacks.
 | [`ros2/`](ros2/) | ROS 2 machine node and messages |
 | [`components/`](components/) | Embedded networking, USB tether, and `pstop_c` integration |
 | [`docs/`](docs/) | API, recovery, testing, networking, and safety-case documentation |
-| [`tools/`](tools/) and [`test/`](test/) | Protocol, chaos, soak, flashing, and static-analysis tools |
+| [`tools/`](tools/) and [`test/`](test/) | Protocol, chaos, soak, flashing, and static-analysis tools (see [`tools/README.md`](tools/README.md) for the uv setup) |
 
 Tailscale support uses
 [`microlink`](https://github.com/CamM2325/microlink), an embedded client from

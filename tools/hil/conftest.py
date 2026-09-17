@@ -5,15 +5,11 @@
 from __future__ import annotations
 
 import sys
-
-try:
-    import tomllib
-except ModuleNotFoundError:
-    import tomli as tomllib
 import time
 from pathlib import Path
 
 import pytest
+import tomllib
 
 HIL_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(HIL_DIR.parent))  # tools/ — for usb_relay4

@@ -13,7 +13,7 @@ before opening a pull request.
 | `firmware/`   | ESP-IDF v5.5 project; builds `pstop_remote.bin` for the ESP32-S3 remote.   |
 | `components/` | Shared ESP-IDF components (`microlink`, `ml_dev_tether`, `pstop`).         |
 | `host/`       | Plain-C `machine_app_runner` (robot-side pstop machine; no ESP-IDF).       |
-| `tools/`      | Python test tools and `misra_check.sh` (cppcheck MISRA pre-check).         |
+| `tools/`      | Python test tools and `misra_check.sh` (cppcheck MISRA pre-check). Run them with `uv` — see `tools/README.md`. |
 | `test/`       | Bash test ladders (chaos, netem, soak, recovery).                         |
 | `docs/`       | Design and test documentation.                                            |
 | `hardware/`   | Certified enclosure CAD, schematic, STEP files, BOM, and assembly guide.  |
@@ -65,7 +65,8 @@ make                    # produces ./machine_app_runner
 
 - **Remote protocol / arming policy:** `tools/pstop_test_remote.py` bonds
   over the real wire protocol and runs timed STOP/OK sequences against a
-  runner instance. See `docs/TESTING.md`.
+  runner instance. Run it as `cd tools && uv run python
+  pstop_test_remote.py`; see `docs/TESTING.md` and `tools/README.md`.
 - **Test ladders:** the scripts in `test/` (`chaos_ladder.sh`,
   `netem_ladder.sh`, `longsoak.sh`, `test_suite.sh`, recovery scripts)
   exercise the system under packet loss, latency, and fault injection.

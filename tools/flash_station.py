@@ -108,22 +108,13 @@ def _esptool_works(c):
 
 
 def esptool_cmd():
-    import glob
-
-    cands = [['esptool'], ['esptool.py'], [sys.executable, '-m', 'esptool']]
-    # esptool.py shipped inside an ESP-IDF install — usable even when the IDF
-    # env isn't sourced (this is the common case: operator just runs the tool).
-    for p in sorted(glob.glob(os.path.expanduser('~/.espressif/python_env/*/bin/esptool.py')), reverse=True):
-        cands.append([p])
-    idf = os.environ.get('IDF_PATH')
-    if idf:
-        cands.append([os.path.join(idf, 'components', 'esptool_py', 'esptool', 'esptool.py')])
-    for c in cands:
+    """The esptool from the tools/ uv environment, verified to run."""
+    for c in (['esptool'], [sys.executable, '-m', 'esptool']):
         if _esptool_works(c):
             return c
     sys.exit(
-        f'{C.R}ERROR: no working esptool found. Install it '
-        f'(`pip install esptool`) or run inside the ESP-IDF environment.{C.X}'
+        f'{C.R}ERROR: no working esptool found. Run this tool through the uv '
+        f'environment: `cd tools && uv sync && uv run python flash_station.py`.{C.X}'
     )
 
 

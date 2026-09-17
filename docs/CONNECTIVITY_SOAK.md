@@ -22,7 +22,7 @@ Watch two remotes and one machine for 12 h, capturing the DUT's USB console, and
 declare success after 8 h with no events:
 
 ```bash
-python3 tools/soak_disconnect_monitor.py \
+uv run --project tools python tools/soak_disconnect_monitor.py \
     --remote PSTOP54=http://192.168.107.70 \
     --remote DUT=http://pstop-01d7f344 \
     --machine machn=http://100.84.155.111 \
@@ -123,7 +123,7 @@ streak is reached (any event resets the streak), so it slots straight into CI or
 a scripted gate:
 
 ```bash
-python3 tools/soak_disconnect_monitor.py \
+uv run --project tools python tools/soak_disconnect_monitor.py \
     --remote R1=http://... --machine M=http://... \
     --duration 90000 --clean-target 28800 --out ./accept_run
 echo "exit=$?"   # 0 = 8h clean streak achieved before --duration ran out
@@ -140,7 +140,7 @@ The originating bench harness pressed a HIL relay button to auto-recover a
 device-under-test after a disconnect. That is fixture-specific (relay URLs,
 channel wiring, open=pressed polarity) and is deliberately **not** shipped here.
 Use the generic `--on-disconnect CMD` hook if you need equivalent behaviour on
-your own rig, e.g. `--on-disconnect 'python3 tools/usb_relay4.py pulse 1 2'`.
+your own rig, e.g. `--on-disconnect 'uv run --project tools python tools/usb_relay4.py pulse 1 2'`.
 The multi-hour checkpoint files the bench version wrote are also dropped;
 `status.txt` plus the CSVs cover the same need without hardcoded checkpoint
 offsets.
