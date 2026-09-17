@@ -11,7 +11,9 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "pstop/machine.h"
 #include "pstop/pstop_msg.h"
+#include "pstop/pstop_remote_data.h"
 
 /* padding1: bits 0..7 schema version, bits 8..15 role, bits 16..31 zero. */
 #define PSTOP_AUX_UP_VERSION 0x01u
@@ -19,13 +21,14 @@
 #define PSTOP_AUX_BYTE_MASK 0xFFu
 
 /*
- * Remote role, wire-stable values. A remote announces its own role; the
- * machine ANDs an OPERATOR claim with its existing allowlist (see design doc).
- *
+ * Remote role, wire-stable values. The REMOTE alone declares its role and the
+ * machine honours it on every frame (see pstop_aux_apply_role_pre/post below);
+ * the machine keeps no operator list. Whether a remote may BOND at all is a
+ * separate, optional machine-side admission decision (allow/denylist).
  *   UNSPECIFIED : remote made no role claim (unprovisioned / version mismatch).
  *                 The machine treats this as non-operator (fail-safe).
  *   STOP_ONLY   : remote may only STOP, never re-arm. Monotonic toward safety.
- *   OPERATOR    : remote claims re-arm privilege (subject to machine policy).
+ *   OPERATOR    : remote may re-arm (STOP -> OK gesture).
  */
 typedef enum
 {
@@ -78,6 +81,53 @@ static inline const char * pstop_aux_role_str(pstop_aux_role_t role)
     case PSTOP_AUX_ROLE_UNSPECIFIED:
     default:
       return "unspecified";
+  }
+}
+
+/*
+ * Live role enforcement — shared by every machine wrapper (machn, ROS 2, host)
+ * so the policy is identical everywhere. pstop_c is untouched; these use only
+ * its public structs. Call _pre right before machine_process_message() and
+ * _post right after, for every frame from an already-bonded remote (a NEW
+ * remote's is_stop_only is seeded by remote_details_cb at BOND).
+ *
+ * Why both halves are needed: pstop_c consults is_stop_only only when a STOP
+ * ACQUIRES ownership of the arming cycle (remote_stop_id == 0). Once a remote
+ * owns the cycle (it armed the machine), its later STOP re-opens the cycle
+ * unconditionally and its OK re-arms. And a STOP from a non-owner stop-only
+ * remote while armed leaves restart_state at OK, so its release would re-arm
+ * too. The two hooks close both holes:
+ *   _pre  : a remote announcing stop-only can never OWN the cycle — release
+ *           ownership; a half-open cycle it owned is voided (NEED_STOP).
+ *   _post : an accepted STOP from a stop-only remote never opens an arming
+ *           cycle — force NEED_STOP so its OK cannot complete the gesture.
+ * Net effect: a remote that demotes itself while the machine is armed keeps
+ * it running; the next STOP from it stops the machine and it cannot re-arm
+ * until some remote announcing OPERATOR performs STOP -> OK.
+ */
+static inline void pstop_aux_apply_role_pre(pstop_machine_t * machine, const pstop_msg_t * req)
+{
+  pstop_remote_data_t * c = pstop_remote_get(&machine->remotes, &req->id);
+  if (c == NULL) {
+    return;
+  }
+  c->is_stop_only = !pstop_aux_role_is_operator(pstop_aux_decode_role(req));
+  if (c->is_stop_only && (machine->robot_state.remote_stop_id == c->local_remote_id)) {
+    machine->robot_state.remote_stop_id = 0U;
+    if (machine->robot_state.restart_state == ROBOT_RESTART_STATE_STOP_RECEIVED) {
+      machine->robot_state.restart_state = ROBOT_RESTART_STATE_NEED_STOP;
+    }
+  }
+}
+
+static inline void pstop_aux_apply_role_post(pstop_machine_t * machine, const pstop_msg_t * req, pstop_error_t err)
+{
+  if ((err != PSTOP_OK) || (req->message != PSTOP_MESSAGE_STOP)) {
+    return;
+  }
+  const pstop_remote_data_t * c = pstop_remote_get(&machine->remotes, &req->id);
+  if ((c != NULL) && c->is_stop_only) {
+    machine->robot_state.restart_state = ROBOT_RESTART_STATE_NEED_STOP;
   }
 }
 

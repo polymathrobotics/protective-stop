@@ -104,14 +104,16 @@ def encode(
 
 
 def decode(data):
-    (version, message, stamp, _rs, _snd, _rcv, _hb, counter, received_counter, padding1, padding2) = struct.unpack(
-        '<BBQQIIIIIII', data[:46]
+    (version, message, stamp, _rs, sender_id, receiver_id, _hb, counter, received_counter, padding1, padding2) = (
+        struct.unpack('<BBQQIIIIIII', data[:46])
     )
     (checksum,) = struct.unpack('<H', data[46:48])
     return dict(
         version=version,
         message=message,
         stamp=stamp,
+        sender_id=sender_id,
+        receiver_id=receiver_id,
         counter=counter,
         received_counter=received_counter,
         padding1=padding1,
@@ -184,6 +186,18 @@ class SoftRemote:
                 return True
             time.sleep(0.3)
         return False
+
+    def bond_reply(self, timeout_s=2.0):
+        """Send ONE BOND and return the machine's raw reply dict (or None). Used
+        to assert the refused-admission UNBOND reply, which bond() ignores."""
+        self.sock.settimeout(timeout_s)
+        try:
+            self.sock.send(encode(self.id, MSG_BOND, self._now(), 0, 1, 0, role=self.role))
+            return decode(self.sock.recv(SIZE))
+        except (socket.timeout, OSError):
+            return None
+        finally:
+            self.sock.settimeout(0.4)
 
     def send_noreply(self, message, corrupt=False, bad_type=None, role=None, receiver_id=MACHINE_ID):
         """Fire a packet and do NOT wait for a reply (for flood/garbage tests)."""
@@ -318,9 +332,9 @@ max_lost_messages = 10
 max_missed_heartbeats = 1
 max_remotes = 3
 [policy]
-allow_unlisted = true
+allowlist = []
+denylist = []
 default_heartbeat_ms = 1000
-default_stop_only = false
 min_stop_ms = 500
 """
 
@@ -511,45 +525,97 @@ def group_e_capacity_allow(verbose):
             r_.close()
         fourth.close()
 
-    # E2 not-allowed operator
-    toml = DEFAULT_TOML.replace('allow_unlisted = true', 'allow_unlisted = false')
-    toml += f'\n[[operator]]\ndevice_id = 0x{RID_A:08X}\nallowed = true\n'
+    # E2 admission: allowlist mode. Only listed ids may bond; a refused BOND is
+    # answered with UNBOND (not silence) so the remote can park itself.
+    toml = DEFAULT_TOML.replace('allowlist = []', f'allowlist = [0x{RID_A:08X}]')
     with Machine(toml_text=toml, verbose=verbose) as m:
         allowed = SoftRemote(RID_A, '127.0.0.1', m.port)
         denied = SoftRemote(RID_B, '127.0.0.1', m.port)
-        check(allowed.bond(timeout_s=4), 'E2a listed operator allowed to bond')
-        check(not denied.bond(timeout_s=3), 'E2b unlisted operator rejected (OPERATOR_NOT_ALLOWED)')
+        check(allowed.bond(timeout_s=4), 'E2a allowlisted remote may bond')
+        check(not denied.bond(timeout_s=3), 'E2b unlisted remote refused in allowlist mode')
+        r = denied.bond_reply()
+        check(
+            r is not None and r['message'] == MSG_UNBOND and r['receiver_id'] == RID_B,
+            'E2c refused BOND is answered with an addressed UNBOND (not silence)',
+            NAMES.get(r['message']) if r else 'silence',
+        )
         allowed.close()
         denied.close()
 
-    # E3 stop_only operator: may STOP but never arm.
-    toml = DEFAULT_TOML + (f'\n[[operator]]\ndevice_id = 0x{RID_B:08X}\nstop_only = true\n')
+    # E2d admission: denylist wins over an open allowlist AND over a listing.
+    toml = DEFAULT_TOML.replace('denylist = []', f'denylist = [0x{RID_B:08X}]')
     with Machine(toml_text=toml, verbose=verbose) as m:
+        a = SoftRemote(RID_A, '127.0.0.1', m.port)
+        b = SoftRemote(RID_B, '127.0.0.1', m.port)
+        check(a.bond(timeout_s=4), 'E2d open allowlist still admits an unlisted id')
+        check(not b.bond(timeout_s=3), 'E2e denylisted id refused')
+        a.close()
+        b.close()
+    toml = DEFAULT_TOML.replace('allowlist = []', f'allowlist = [0x{RID_B:08X}]').replace(
+        'denylist = []', f'denylist = [0x{RID_B:08X}]'
+    )
+    with Machine(toml_text=toml, verbose=verbose) as m:
+        b = SoftRemote(RID_B, '127.0.0.1', m.port)
+        check(not b.bond(timeout_s=3), 'E2f id on BOTH lists: deny wins')
+        b.close()
+
+    # E3 authority is the remote's own announced role; the machine has no say.
+    # A stop-only announcer may STOP but never arm; an operator announcer may.
+    with Machine(verbose=verbose) as m:
         a = SoftRemote(RID_A, '127.0.0.1', m.port, 'A')
-        so = SoftRemote(RID_B, '127.0.0.1', m.port, 'stop_only')
+        so = SoftRemote(RID_B, '127.0.0.1', m.port, 'stop_only', role=ROLE_STOP_ONLY)
         assert a.bond() and so.bond(), 'bond failed'
         s = Session([a, so])
-        # stop_only remote tries to arm -> must fail; A holds OK
         s.run(0.8, {so: MSG_STOP, a: MSG_OK})
         r = s.run(1.2, {so: MSG_OK, a: MSG_OK})
-        check(r[a.id] == MSG_STOP, 'E3a stop_only remote cannot arm the robot', f'A={NAMES.get(r[a.id])}')
-        # but it CAN still stop: A arms, then stop_only stops -> STOP
+        check(r[a.id] == MSG_STOP, 'E3a stop-only announcer cannot arm the robot', f'A={NAMES.get(r[a.id])}')
         arm(s, a, [so])
         r = s.run(1.0, {a: MSG_OK, so: MSG_STOP})
-        check(r[a.id] == MSG_STOP, 'E3b stop_only remote can still STOP the robot (I1)', f'A={NAMES.get(r[a.id])}')
+        check(r[a.id] == MSG_STOP, 'E3b stop-only announcer can still STOP the robot (I1)', f'A={NAMES.get(r[a.id])}')
         a.close()
         so.close()
 
-    # E4 remote-announced stop-only must deny authority even when host policy
-    # otherwise grants every unlisted remote operator eligibility.
+    # E4 LIVE role change, no re-bond. The remote that ARMED the machine demotes
+    # itself: the machine keeps running; its next STOP stops the machine and its
+    # release must NOT re-arm; promoting back re-enables the gesture.
     with Machine(verbose=verbose) as m:
-        so = SoftRemote(RID_A, '127.0.0.1', m.port, 'claimed_stop_only', role=ROLE_STOP_ONLY)
-        assert so.bond(), 'stop-only claim bond failed'
-        s = Session([so])
-        s.run(0.8, {so: MSG_STOP})
-        r = s.run(1.2, {so: MSG_OK})
-        check(r[so.id] == MSG_STOP, 'E4 stop-only claim cannot arm despite host default policy', NAMES.get(r[so.id]))
-        so.close()
+        a = SoftRemote(RID_A, '127.0.0.1', m.port, 'A')
+        assert a.bond(), 'bond failed'
+        s = Session([a])
+        arm(s, a, [])
+        r = s.run(0.6, {a: MSG_OK})
+        check(r[a.id] == MSG_OK, 'E4a armed by operator announcer', NAMES.get(r[a.id]))
+        a.role = ROLE_STOP_ONLY  # live demote: frames now announce stop-only
+        r = s.run(1.0, {a: MSG_OK})
+        check(r[a.id] == MSG_OK, 'E4b demoting the owner while armed keeps the machine RUNNING', NAMES.get(r[a.id]))
+        s.run(0.8, {a: MSG_STOP})
+        r = s.run(1.2, {a: MSG_OK})
+        check(r[a.id] == MSG_STOP, 'E4c stop-only owner: STOP stops, release does NOT re-arm', NAMES.get(r[a.id]))
+        s.run(0.8, {a: MSG_STOP})
+        r = s.run(1.2, {a: MSG_OK})
+        check(r[a.id] == MSG_STOP, 'E4d ...and a second gesture still does not re-arm', NAMES.get(r[a.id]))
+        a.role = ROLE_OPERATOR  # live promote
+        arm(s, a, [])
+        r = s.run(0.6, {a: MSG_OK})
+        check(r[a.id] == MSG_OK, 'E4e promoting back live re-enables the arming gesture', NAMES.get(r[a.id]))
+        a.close()
+
+    # E4f mixed fleet: operator A armed; stop-only B presses -> STOP; B's release
+    # must not re-arm; A's gesture does.
+    with Machine(verbose=verbose) as m:
+        a = SoftRemote(RID_A, '127.0.0.1', m.port, 'A')
+        b = SoftRemote(RID_B, '127.0.0.1', m.port, 'B', role=ROLE_STOP_ONLY)
+        assert a.bond() and b.bond(), 'bond failed'
+        s = Session([a, b])
+        arm(s, a, [b])
+        s.run(0.8, {a: MSG_OK, b: MSG_STOP})
+        r = s.run(1.2, {a: MSG_OK, b: MSG_OK})
+        check(r[a.id] == MSG_STOP, 'E4f stop-only B stopped it; B release does not re-arm', NAMES.get(r[a.id]))
+        arm(s, a, [b])
+        r = s.run(0.6, {a: MSG_OK, b: MSG_OK})
+        check(r[a.id] == MSG_OK, 'E4g operator A re-arms after a stop-only STOP', NAMES.get(r[a.id]))
+        a.close()
+        b.close()
 
 
 def group_f_malformed(verbose):

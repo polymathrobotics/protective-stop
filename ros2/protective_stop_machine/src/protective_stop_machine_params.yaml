@@ -29,21 +29,23 @@ protective_stop_machine:
       description: UDP port for the in-process software backend.
       validation:
         bounds<>: [1, 65535]
-    # Operator authorization (SAFETY). A bonded remote is accepted and
-    # heartbeat-monitored but STOP-ONLY by default: it may command STOP but may
-    # NEVER re-arm (STOP -> OK). Only a remote whose 32-bit pstop id is listed in
-    # `operators` gets re-arm authority. An empty list (the default) leaves every
-    # remote stop-only = maximally safe out of the box.
-    default_stop_only:
-      type: bool
-      default_value: true
-      read_only: true
-      description: Policy for UNLISTED remotes. True (the default, and what a deployment should keep) makes them stop-only, so they may STOP but never re-arm.
-    operators:
+    # Admission (OPTIONAL). Decides only whether a remote may BOND at all.
+    # Both lists empty (the default) = every remote is admitted. A non-empty
+    # allowlist admits ONLY the listed 32-bit pstop ids ("paranoid" mode); the
+    # denylist always refuses the listed ids and wins over the allowlist. A
+    # refused BOND is answered with UNBOND. Admission is NOT re-arm authority:
+    # each remote announces its own stop-only/operator role in every frame and
+    # the machine honours it live.
+    allowlist:
       type: int_array
       default_value: []
       read_only: true
-      description: 32-bit pstop ids granted re-arm authority, e.g. [30234300]. Empty (default) means no remote may re-arm.
+      description: If non-empty, only these 32-bit pstop ids may bond (e.g. [30234300]). Empty = everyone.
+    denylist:
+      type: int_array
+      default_value: []
+      read_only: true
+      description: These 32-bit pstop ids may never bond, regardless of the allowlist.
 
   hardware:
     device_url:

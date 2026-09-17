@@ -200,8 +200,20 @@ extern "C"
     int slot, bool * configured, uint32_t * peer_ip, uint16_t * peer_port, uint32_t * machine_id);
 
   /**
+ * @brief Ask the comparator to restart slot N's bond from scratch on its next
+ * tick. The ONLY way a REJECTED session (machine answered BOND with UNBOND)
+ * re-attempts — it never retries by itself. Wired to
+ * POST /api/pstop_peers?slot=N&rebond=1 and the web UI's Rebond button.
+ */
+  void dcs_pstop_request_rebond(int slot);
+  /** @brief Monotonic counter bumped by dcs_pstop_request_rebond(); the
+ * comparator compares it against its per-session copy each tick. */
+  uint32_t dcs_pstop_rebond_generation(int slot);
+
+  /**
  * @brief Publish one machine session's telemetry (comparator, once per tick
- * per configured slot). sess_state: 0=idle, 1=bonding, 2=bonded.
+ * per configured slot). sess_state: 0=idle, 1=bonding, 2=bonded, 3=rejected
+ * (machine refused the BOND with UNBOND; waits for a manual rebond).
  */
   void dcs_publish_pstop_machine(
     int slot,
@@ -290,42 +302,66 @@ extern "C"
   void dcs_publish_machn_arm(uint32_t remote_stop_id, uint32_t restart_state);
 
   /* ============================================================================
- * Operator allowlist (machine-role authorization).
+ * Admission lists (machine-role, OPTIONAL).
  *
- * A bonded remote is ACCEPTED and heartbeat-monitored but STOP-ONLY by default:
- * it may command STOP, never re-arm (STOP->OK). Only a remote whose 32-bit
- * pstop id is on THIS list is a full operator (stop_only=false, may re-arm).
- * The list is EMPTY on blank NVS, so out of the box every remote is stop-only =
- * maximally safe; operator ids are added during configuration. Persisted in the
- * dcs_app NVS namespace and mirrored to a lock-free RAM cache that the safety
- * cores read from their remote_details callback (never touching NVS/flash).
+ * Admission decides only whether a remote may BOND at all — never whether it
+ * may re-arm. Re-arm authority is the REMOTE's own announced role (see
+ * common/pstop_aux_channel.h); the machine does not second-guess it.
+ *
+ * Two independent global lists, both EMPTY on blank NVS ("open": every remote
+ * is admitted):
+ *   allowlist  non-empty => ONLY listed ids may bond ("paranoid" mode)
+ *   denylist   listed ids may never bond, regardless of the allowlist
+ * A rejected BOND is answered with UNBOND so the remote can show it.
+ *
+ * Persisted in the dcs_app NVS namespace and mirrored to lock-free RAM caches
+ * that the safety cores read from their remote_details callback.
  * ========================================================================== */
-#define DCS_MAX_OPERATORS 16
+#define DCS_MAX_LIST_IDS 16
 
-  /** @brief True if remote_id is a listed operator (RAM-only, lock-free — safe
-   * to call from the safety cores' remote_details callback). Empty list => the
-   * fail-safe: every id returns false => every remote is stop-only. */
-  bool dcs_operator_is_listed(uint32_t remote_id);
+  typedef enum
+  {
+    DCS_LIST_ALLOW = 0,
+    DCS_LIST_DENY = 1,
+    /* PIN: not admission. Remotes whose WireGuard keys this machine must keep
+     * across netmap trims / peer-cache LRU on a >ML_MAX_PEERS tailnet, so they
+     * can always reach it (the cold-bond ENOTCONN wedge, 2026-08-08). Seeded
+     * once from the pre-admission "operators" list at upgrade; allowlisted ids
+     * are pinned implicitly; denylisted ids never. */
+    DCS_LIST_PIN = 2,
+    DCS_LIST_COUNT = 3
+  } dcs_list_t;
 
-  /** @brief Copy the current operator ids into out[] (up to DCS_MAX_OPERATORS);
-   * returns the count. Used by the admin API + /state.json. */
-  int dcs_operator_get_list(uint32_t out[DCS_MAX_OPERATORS]);
+  /** @brief True if this machine should keep remote_id's WG peer pinned:
+   * (allowlisted OR pinned) AND NOT denylisted. Lock-free. */
+  bool dcs_peer_pin_wanted(uint32_t remote_id);
 
-  /** @brief Add an operator id (idempotent) to the RAM cache AND NVS. Returns
-   * ESP_ERR_NO_MEM when the list is full, ESP_ERR_INVALID_ARG for id 0. */
-  esp_err_t dcs_operator_add(uint32_t remote_id);
+  /** @brief Admission verdict for remote_id (RAM-only, lock-free — safe from the
+   * safety cores). Deny wins; empty allowlist admits everyone. */
+  bool dcs_admission_allows(uint32_t remote_id);
 
-  /** @brief Remove an operator id from the RAM cache AND NVS (no error if
-   * absent). */
-  esp_err_t dcs_operator_del(uint32_t remote_id);
+  /** @brief True if remote_id is on the given list (lock-free). */
+  bool dcs_list_contains(dcs_list_t which, uint32_t remote_id);
+
+  /** @brief Copy the given list's ids into out[] (up to DCS_MAX_LIST_IDS);
+   * returns the count. Used by the admin API + web UI. */
+  int dcs_list_get(dcs_list_t which, uint32_t out[DCS_MAX_LIST_IDS]);
+
+  /** @brief Add an id (idempotent) to the RAM cache AND NVS. ESP_ERR_NO_MEM when
+   * the list is full, ESP_ERR_INVALID_ARG for id 0 / bad list. */
+  esp_err_t dcs_list_add(dcs_list_t which, uint32_t remote_id);
+
+  /** @brief Remove an id from the RAM cache AND NVS (no error if absent). */
+  esp_err_t dcs_list_del(dcs_list_t which, uint32_t remote_id);
 
   /** @brief This remote's announced role (a pstop_aux_role_t value: stop_only or
    * operator). Lock-free — safe to call from the safety cores when encoding the
    * outbound pstop frame. Loaded from NVS at boot; stop_only until promoted. */
   uint8_t dcs_role_get(void);
 
-  /** @brief Persist this remote's role for the next boot. The active role is
-   * immutable for a boot so every machine observes it through a fresh bond. */
+  /** @brief Persist this remote's role AND apply it live: the next outbound
+   * pstop frame announces it. No reboot. The machine re-reads the announced
+   * role on every frame, so authority follows the remote at once. */
   esp_err_t dcs_role_set(uint8_t role);
 
   /**

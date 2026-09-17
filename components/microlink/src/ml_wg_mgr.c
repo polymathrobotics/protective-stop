@@ -4418,7 +4418,50 @@ void ml_wg_mgr_task(void * arg)
   int cached = ml_peer_nvs_load_all(ml->peers, ML_MAX_PEERS);
   if (cached > 0) {
     ml->peer_count = cached;
-    ESP_LOGI(TAG, "Pre-loaded %d cached peers from NVS", cached);
+    /* The cache is a boot accelerator, not a second admission path: apply
+     * the same two gates add_peer() applies to a netmap-delivered peer, to
+     * TABLE OCCUPANCY. The install loop below already skipped non-allowed
+     * cached peers, but left them ACTIVE — so a device's stale cache could
+     * fill every slot, including all of them below the runtime max_peers
+     * cap that add_peer() searches for a free one, and a newly allowlisted
+     * (or, with the filter off, simply new) non-pinned peer never got a slot.
+     * DUT 2026-09-16: max_peers=32, 125/128 slots held by allowed:false cache
+     * entries; the laptop's re-add hit peer_table_full forever.
+     *   1. allowlist — ml_config_peer_is_allowed() (pinned peers exempt inside)
+     *   2. runtime max_peers cap — same eff_max add_peer() uses; pinned peers
+     *      are exempt here too (add_peer() takes them past the cap via the
+     *      LRU-evict path). Which non-pinned entries survive is cache order,
+     *      not recency: they only bridge the seconds until the netmap
+     *      arrives, and the pins — what the preseed exists for — always do. */
+    int eff_max = ML_MAX_PEERS;
+    uint8_t cfg_mp = ml_config_get_max_peers(ml->config_httpd);
+    if (cfg_mp > 0u && (int)cfg_mp < eff_max) {
+      eff_max = (int)cfg_mp;
+    }
+    int dropped_allow = 0, dropped_cap = 0, kept_unpinned = 0;
+    for (int i = 0; i < cached; i++) {
+      if (!ml_config_peer_is_allowed(ml->config_httpd, ml->peers[i].vpn_ip)) {
+        ml->peers[i].active = false;
+        dropped_allow++;
+      } else if (!is_pinned_peer(ml, ml->peers[i].vpn_ip)) {
+        if (kept_unpinned >= eff_max) {
+          ml->peers[i].active = false;
+          dropped_cap++;
+        } else {
+          kept_unpinned++;
+        }
+      }
+    }
+    while (ml->peer_count > 0 && !ml->peers[ml->peer_count - 1].active) {
+      ml->peer_count--;
+    }
+    ESP_LOGI(
+      TAG,
+      "Pre-loaded %d cached peers from NVS (%d not allowlisted, %d over max_peers=%d: slots released)",
+      cached,
+      dropped_allow,
+      dropped_cap,
+      eff_max);
   }
 
   /* Cold-bond far-side recovery (bench 2026-08-08): a rebooted machine whose

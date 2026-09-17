@@ -42,35 +42,107 @@ authority.
 
 ## Policy
 
-A remote may re-arm only when both conditions hold:
+Two independent decisions, deliberately kept apart.
 
-1. The BOND announces `OPERATOR`.
-2. The machine's existing allowlist grants that remote operator authority.
+### Authority: the remote alone decides
 
-The machine callback therefore applies:
+A remote may re-arm a machine when — and only when — the frame carrying its OK
+announces `OPERATOR`. Machines do not consult any list for this: the machine
+callback seeds `is_stop_only` from the BOND frame's announced role and every
+later frame refreshes it.
 
 ```text
-stop_only = allowlist_stop_only OR announced_role != OPERATOR
+stop_only = announced_role != OPERATOR
 ```
 
-`pstop_c` latches the result into the bonded client. Later heartbeats do not
-change authorization. This keeps policy changes on the existing BOND boundary
-and prevents rejected or replayed heartbeat traffic from mutating role state.
+`UNSPECIFIED` (pre-role firmware, unknown schema version) and unknown role
+values decode as stop-only, so the failure mode of a provisioning gap is always
+"cannot re-arm", never "unexpected operator".
+
+The role is **live**. `POST /api/role` on the remote applies to its next frame
+(no reboot) and the machine re-reads it per frame, giving these semantics:
+
+| Situation | Machine behaviour |
+|---|---|
+| Armed; the remote that armed it demotes itself to `stop_only` | keeps **running**; that remote's arming-cycle ownership is released |
+| ...then that remote presses STOP | machine **stops** and refuses to re-arm on its release (`NEED_STOP`) |
+| ...and presses again | still refused — a stop-only remote never opens an arming cycle |
+| some remote announcing `OPERATOR` performs STOP → OK | arms |
+| the demoted remote promotes itself back | its next STOP → OK arms |
+
+Why the machine needs two hooks around `machine_process_message()`
+(`common/pstop_aux_channel.h`, `pstop_aux_apply_role_pre/post`): `pstop_c`
+consults `is_stop_only` only when a STOP *acquires* ownership of the arming
+cycle (`remote_stop_id == 0`). Once a remote has armed the machine it stays the
+owner and its later STOP re-opens the cycle unconditionally; and from
+`restart_state = OK` a stop-only STOP leaves `restart_state` untouched, so the
+release would re-arm. The pre-hook releases ownership held by a stop-only remote
+(voiding a half-open cycle to `NEED_STOP`); the post-hook forces `NEED_STOP`
+after any accepted STOP from a stop-only remote. `pstop_c` itself is unmodified;
+only public structs are touched, identically in all three machines.
+
+Because the role is self-asserted (CRC only, no authentication), it must never
+*grant* anything the machine would otherwise refuse — which is why admission is
+a separate, machine-owned decision.
+
+### Admission: optional, machine-owned, global
+
+Whether a remote may **bond at all** is decided by two optional lists on the
+machine, both empty by default (**open**: every remote is admitted). This is the
+normal way to run; a fleet that wants a "paranoid" posture populates them.
+
+| List | Effect |
+|---|---|
+| `allowlist` non-empty | **only** listed ids may bond |
+| `denylist` | listed ids may **never** bond; wins over the allowlist |
+
+Admission is evaluated once, at BOND (`remote_details_t.allowed`). A refused
+BOND is answered with the `UNBOND` reply `pstop_c` already prepares
+(`protocol.c`), addressed to the remote, instead of silence. On the remote a
+BOND answered with `UNBOND` parks that session in `REJECTED` (`state: 3` in
+`state.json`, red chip in the web UI, `last_msg = UNBOND`) with **no automatic
+retries** — it waits for `POST /api/pstop_peers?slot=N&rebond=1` (the Rebond
+button), a slot reconfigure, or a reboot. This keeps a banned or misconfigured
+remote from knocking forever while making the refusal visible.
+
+Where the lists live:
+
+| Machine | Configuration |
+|---|---|
+| ESP32 `machn` | NVS via `GET/POST /api/admission` (`?allow=`, `?unallow=`, `?deny=`, `?undeny=`); web UI; `state.json` `allowlist`/`denylist` |
+| ROS 2 node | `software.allowlist`, `software.denylist` (int arrays) |
+| host runner | `[policy] allowlist = [...]`, `denylist = [...]` in `machine.toml` |
+
+Admission never affects authority: an admitted remote still re-arms only if it
+announces `OPERATOR`.
 
 ## Provisioning and lifecycle
 
 The role is stored in remote NVS and defaults to stop-only. `POST /api/role`
-persists a new value and reboots the remote. The reboot interrupts heartbeats,
-so every machine drops the old bond and forces STOP before accepting the new
-BOND. Re-arming still requires a fresh STOP-to-OK gesture.
+persists a new value and applies it live; the next outbound frame announces it
+and every bonded machine honours it on receipt (see the table above). No
+re-bond is needed. The active role is exposed as `role` in the remote's
+`state.json` and on its web UI.
 
-The active role is exposed as `role` in the remote's `state.json`. Machine-side
-authorization remains observable through each bonded remote's effective
-`stop_only` value.
+Machine-side, each bonded remote's effective `stop_only` is observable (ROS 2
+`/machine_bridge/remotes`, machn `state.json` `bonded_remotes`, host runner
+`ROLE` log lines) and now tracks the announced role live.
 
 ## Rollout
 
 The v2 message size is a hard wire cutover from 40 to 48 bytes. Update remotes
 and machine implementations together. Existing remotes without the NVS role key
 start as stop-only and must be explicitly promoted where re-arm authority is
-required.
+required. A machine that previously carried an operator list does **not**
+inherit it as an admission allowlist: the meanings differ ("may re-arm" vs
+"may bond") and reinterpreting it would lock out every other remote after an
+OTA. machn migrates the legacy `operators` ids once into its **pin list** (they
+keep their WireGuard peer pinning, which is what made cross-site remotes bond
+reliably) and comes up in open admission; add ids to the allowlist deliberately
+if a paranoid posture is wanted.
+
+One observed edge worth knowing: if a remote is promoted to `operator` *while
+its button is held*, its continuing STOP frames are now operator STOPs and open
+an arming cycle, so the release arms (min-STOP still counted from the first
+operator STOP). Role is evaluated per frame; promotion is an authenticated
+admin action, so this is by design.

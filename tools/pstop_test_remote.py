@@ -13,10 +13,11 @@ machine_bridge_node alike (same pstop_c, same UDP port):
     ./machine_app_runner test.toml &          # dedicated instance
     python3 pstop_test_remote.py --port 8893  # runs the test script
 
-Arming needs BOTH gates open: this script announces role OPERATOR in its
-aux channel (--role stop_only to test the refusal), and the machine must
-list REMOTE_ID (0x01020381 = 16909185) as an operator — or run with
-default_stop_only = false, as host/machine.toml does for the bench.
+Arming authority is the REMOTE's own announced role: this script announces
+OPERATOR in its aux channel (--role stop_only to test the refusal). The
+machine has no operator list; its optional [policy] allowlist/denylist only
+decides whether REMOTE_ID (0x01020381 = 16909185) may bond at all (both empty
+= everyone, as host/machine.toml ships).
 
 Test script (asserts on the machine's replies; library-native min-delay
 semantics from pstop_c #59 — an OK sooner than delay_between_stop_ms after
