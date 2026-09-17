@@ -45,7 +45,7 @@ cd tools/hil
 
 `run.sh` runs pytest in the `tools/` uv environment and strips
 `PYTHONPATH`, which a sourced ROS setup otherwise fills with broken
-plugins. One-time setup is `cd tools && uv sync --extra hil`; see
+plugins. One-time setup is `cd tools && uv sync`; see
 [`../README.md`](../README.md) for installing uv.
 
 If the loops aren't wired yet, everything that needs them **skips**

@@ -12,15 +12,11 @@ license = "Apache-2.0"
 requires-python = ">=3.11"
 
 # esptool is run as a subprocess, not imported.
+# pyserial is used by usb_relay4; esptool also pulls it in.
 dependencies = [
   "esptool>=4.7",
-]
-
-# Hardware rig suite; pyserial is used by usb_relay4.
-[project.optional-dependencies]
-hil = [
-  "pytest>=8.0",
   "pyserial>=3.5",
+  "pytest>=8.0",
 ]
 
 # Flat scripts, nothing to build.

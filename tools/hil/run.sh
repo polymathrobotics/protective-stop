@@ -4,4 +4,4 @@
 # Run the HIL suite in the tools/ uv environment, isolated from ROS PYTHONPATH
 # plugins.
 cd "$(dirname "$0")"
-PYTHONPATH= exec env -u VIRTUAL_ENV uv run --project .. --extra hil python -m pytest "$@"
+PYTHONPATH= exec env -u VIRTUAL_ENV uv run --project .. python -m pytest "$@"

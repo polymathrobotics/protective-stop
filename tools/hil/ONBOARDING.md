@@ -34,7 +34,7 @@ are load-bearing).
    (any private /24; the chip takes a lease from it).
 5. **Configure**: edit `tools/hil/hil.toml` — set `ncm_iface`, `host_ip`,
    and the relay polarity if the rig was rewired.
-6. **Validate the rig**: `cd tools && uv sync --extra hil`, then
+6. **Validate the rig**: `cd tools && uv sync`, then
    `cd hil && ./run.sh test_00_rig.py` — this proves the wiring
    channel-by-channel. See [`../README.md`](../README.md) to install uv.
 7. **Full suite**: `./run.sh` (power cycles included) or

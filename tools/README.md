@@ -36,11 +36,11 @@ are in the [uv installation docs](https://docs.astral.sh/uv/getting-started/inst
 
 ```sh
 cd tools
-uv sync                 # flashing and fleet tools
-uv sync --extra hil     # ...plus the hardware-in-the-loop suite
+uv sync
 ```
 
-This creates `tools/.venv` and installs the locked dependencies into it.
+This creates `tools/.venv` and installs the locked dependencies into it —
+one environment for every tool here, flashing through HIL.
 It takes a few seconds and needs no further configuration.
 You do not need Python installed already — uv fetches an interpreter if the
 system one is older than 3.11.
@@ -79,7 +79,7 @@ See the header comment in each script for the full argument list.
 
 ## HIL suite
 
-The rig tests live in [`hil/`](hil/) and need the `hil` extra.
+The rig tests live in [`hil/`](hil/).
 Run them through `hil/run.sh`, which strips `PYTHONPATH` — a sourced ROS
 environment otherwise puts broken plugins on it:
 
@@ -109,8 +109,7 @@ python3 tools/soak_per_remote.py ...      # system python, not uv run
 
 ```sh
 cd tools
-uv add <package>                    # runtime dependency
-uv add --optional hil <package>     # HIL-only dependency
+uv add <package>
 ```
 
 `uv add` edits `pyproject.toml` and updates `uv.lock`.
