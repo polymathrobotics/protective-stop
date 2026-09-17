@@ -11,10 +11,10 @@
 // recovered by RTO — the seconds-long stalls seen on the admin UI over USB.
 //
 // This adapter copies each outgoing frame into a fixed slot ring and drains it
-// from an esp_timer task: the head frame is offered with a zero-tick timeout;
-// on NCM-busy it is KEPT and retried 2 ms later, in order, until its 100 ms
-// lifetime expires. Stock esp_tinyusb / TinyUSB APIs only; no patches, no
-// linker wraps.
+// from a small dedicated task: the head frame is offered with a zero-tick
+// timeout; on NCM-busy it is KEPT and retried 2 ms later, in order, until its
+// 100 ms lifetime expires. Stock esp_tinyusb / TinyUSB APIs only; no patches,
+// no linker wraps.
 #pragma once
 
 #include <stddef.h>
@@ -36,7 +36,7 @@ extern "C"
     uint32_t pending; /* frames in the ring right now */
   } ml_usb_tx_diag_t;
 
-  /* Allocate the ring (PSRAM) and start the drain timer. Idempotent. */
+  /* Allocate the ring (PSRAM) and start the drain task. Idempotent. */
   esp_err_t ml_usb_tx_init(void);
 
   /* Enable/disable submission. Disabling also discards everything queued (the

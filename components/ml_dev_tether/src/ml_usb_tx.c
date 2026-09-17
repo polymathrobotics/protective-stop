@@ -4,7 +4,7 @@
 // Bounded, in-order TX FIFO for the USB-NCM tether. See ml_usb_tx.h.
 //
 // Concurrency model: ONE producer (lwIP's tcpip thread via netif_transmit) and
-// ONE consumer (the esp_timer task running usb_drain). head is written only by
+// ONE consumer (the usb_tx drain task). head is written only by
 // the consumer, tail only by the producer; both are atomics, so the ring needs
 // no lock. Each slot's frame is fully written before tail is published
 // (release), and the consumer reads tail with acquire before touching a slot.
@@ -17,13 +17,16 @@
 #include "esp_heap_caps.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include "tinyusb_net.h"
 #include "tusb.h"
 
 #define TX_SLOTS 16u /* power of two: indices wrap safely */
 #define TX_FRAME_MAX 1536u /* Ethernet MTU + link-layer headers */
 #define TX_TTL_US 100000 /* same 100 ms lifetime the old sync send had */
-#define TX_RETRY_US 2000 /* drain cadence while the endpoint is busy */
+#define TX_RETRY_MS 2 /* drain cadence while the endpoint is busy */
+#define TX_TASK_STACK 4096 /* tinyusb_net_send_sync: event group + semaphore + logging */
+#define TX_TASK_PRIO 5 /* below the safety tasks; above idle/lwIP housekeeping */
 
 typedef struct
 {
@@ -35,17 +38,17 @@ typedef struct
 static tx_slot_t s_slots[TX_SLOTS];
 static atomic_uint s_head, s_tail; /* consumer / producer indices, free-running */
 static atomic_bool s_ready, s_enabled;
-static esp_timer_handle_t s_drain_timer;
+static TaskHandle_t s_drain_task;
 static atomic_uint s_sent, s_busy_retries, s_expired, s_full_drops;
 
-/* Consumer: offer the head frame; keep it on NCM-busy; drop it on expiry. */
-static void usb_drain(void * arg)
+/* Consumer: offer the head frame; keep it on NCM-busy; drop it on expiry.
+ * Returns true when the ring still holds a frame the endpoint refused. */
+static bool usb_drain(void)
 {
-  (void)arg;
   for (;;) {
     unsigned head = atomic_load_explicit(&s_head, memory_order_relaxed);
     if (head == atomic_load_explicit(&s_tail, memory_order_acquire)) {
-      return; /* empty */
+      return false; /* empty */
     }
     tx_slot_t * s = &s_slots[head % TX_SLOTS];
     if (!atomic_load(&s_enabled)) {
@@ -61,11 +64,29 @@ static void usb_drain(void * arg)
       esp_err_t r = tinyusb_net_send_sync(s->bytes, s->len, NULL, 0);
       if (r != ESP_OK) {
         atomic_fetch_add(&s_busy_retries, 1u);
-        return; /* head stays; next timer tick retries in order */
+        return true; /* head stays; retried in order after TX_RETRY_MS */
       }
       atomic_fetch_add(&s_sent, 1u);
     }
     atomic_store_explicit(&s_head, head + 1u, memory_order_release);
+  }
+}
+
+/* Dedicated drain task, NOT the shared esp_timer task: tinyusb_net_send_sync()
+ * blocks on an event group from a call chain several frames deep, and the
+ * esp_timer task's 3.5 KB stack is shared with every other timer callback on
+ * the device. Running the drain there crash-looped the Ethernet DUT
+ * (w5500_tsk SPI descriptor corruption, 4 panics -> rollback, 2026-09-17).
+ * Blocks on a task notification when idle; the producer wakes it. */
+static void usb_drain_task(void * arg)
+{
+  (void)arg;
+  for (;;) {
+    if (usb_drain()) {
+      vTaskDelay(pdMS_TO_TICKS(TX_RETRY_MS)); /* endpoint busy: poll it */
+    } else {
+      (void)ulTaskNotifyTake(pdTRUE, portMAX_DELAY); /* empty: sleep until a frame arrives */
+    }
   }
 }
 
@@ -81,23 +102,9 @@ esp_err_t ml_usb_tx_init(void)
   for (unsigned i = 0; i < TX_SLOTS; i++) {
     s_slots[i].bytes = pool + (i * TX_FRAME_MAX);
   }
-  const esp_timer_create_args_t args = {
-    .callback = usb_drain,
-    .dispatch_method = ESP_TIMER_TASK, /* tinyusb_net_send_sync blocks on an event group */
-    .name = "usb_tx",
-    .skip_unhandled_events = true,
-  };
-  esp_err_t r = esp_timer_create(&args, &s_drain_timer);
-  if (r == ESP_OK) {
-    r = esp_timer_start_periodic(s_drain_timer, TX_RETRY_US);
-  }
-  if (r != ESP_OK) {
-    if (s_drain_timer != NULL) {
-      (void)esp_timer_delete(s_drain_timer);
-      s_drain_timer = NULL;
-    }
+  if (xTaskCreate(usb_drain_task, "usb_tx", TX_TASK_STACK, NULL, TX_TASK_PRIO, &s_drain_task) != pdPASS) {
     heap_caps_free(pool);
-    return r;
+    return ESP_ERR_NO_MEM;
   }
   atomic_store(&s_ready, true);
   return ESP_OK;
@@ -128,6 +135,7 @@ esp_err_t ml_usb_tx_send(const void * buffer, size_t len)
   s->len = (uint16_t)len;
   s->queued_us = esp_timer_get_time();
   atomic_store_explicit(&s_tail, tail + 1u, memory_order_release);
+  xTaskNotifyGive(s_drain_task);
   return ESP_OK;
 }
 
