@@ -6,27 +6,28 @@ remains `docs/safety/`.
 **Original PR branch:** `change-0002-modification-procedure-enforcement`, preserved
 as PR #120 recovery and review history.
 **Current replacement branch:** `change-0002-process-foundation`
-**Base:** current `main` at `6ec5c03`
+**Base:** current `main` at `c2dc4cd`
 **Depends on:** change-0001 (safety traceability linter). Piece 6 consumes
 `tools/safety_lint`. Pieces 1–5 and 7 do not.
-**Status:** sequential replacement delivery in progress; this branch delivers only
-the process foundation and repository intake artifacts.
+**Status:** stacked replacement delivery in progress; this branch delivers only the
+process foundation and repository intake artifacts.
 **Safety class:** B — process governance, assurance tooling, and CI guards only;
 no runtime safety-path or wire-format change.
 **Authorization:** one authorizer approved implementation with the exact instruction
 `proceed` on 2026-09-11.
-**Sequential delivery map (not stacked):**
+**Stacked delivery map:**
 
-1. `change-0002-process-foundation` — this PR, process docs and intake.
-2. `change-0002-wire-break` — created from updated `main` only after #1 merges;
-   always-enforcing wire guard.
-3. `change-0002-change-control-warn` — created after #2 merges; warn-mode record
-   checker and mode file.
-4. `change-0002-coverage-delta` — created after #3 merges; deterministic advisory
-   coverage comments.
+1. `change-0002-process-foundation` — process docs and intake; base `main`.
+2. `change-0002-wire-break` — always-enforcing wire guard; base
+   `change-0002-process-foundation`.
+3. `change-0002-change-control-warn` — warn-mode record checker and mode file; base
+   `change-0002-wire-break`.
+4. `change-0002-coverage-delta` — deterministic advisory coverage comments; base
+   `change-0002-change-control-warn`.
 
 Original PR #120 remains preserved as recovery and review history and will close only
-after all replacement PRs exist.
+after all replacement PRs exist. Each stacked PR must be updated and reviewed against
+its final `main` base after its predecessor merges.
 **Security contact authorization:** on 2026-09-11 the authorizer confirmed
 `security@polymathrobotics.com` as the private reporting route, authorizing removal
 of its placeholder warning in `SECURITY.md` and use by the issue chooser.
