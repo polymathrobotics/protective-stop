@@ -19,6 +19,25 @@ dependencies = [
   "pytest>=8.0",
 ]
 
-# Flat scripts, nothing to build.
+# Mostly flat scripts plus the safety_lint package; nothing here is installed.
 [tool.uv]
 package = false
+
+# The one pytest entry point for this directory. Bare `uv run pytest` runs both
+# suites; `hil/run.sh` passes its own path and gets only the rig tests.
+# The flat scripts are not pytest tests — several take a positional int or exit
+# at import — and safety_lint/fixtures/ holds files whose basenames collide with
+# the real tools.
+[tool.pytest.ini_options]
+testpaths = [
+  "hil",
+  "safety_lint/self_test.py",
+]
+norecursedirs = [
+  ".venv",
+  "safety_lint/fixtures",
+]
+markers = [
+  "power: cuts real USB power to the DUT (needs the power relay wired)",
+]
+addopts = "-ra"

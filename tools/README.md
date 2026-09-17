@@ -90,6 +90,34 @@ cd tools/hil
 ./run.sh test_00_rig.py     # rig self-check after (re)wiring
 ```
 
+## Safety traceability linter
+
+`safety_lint/` parses the safety documents, checks the requirement, function,
+and evidence mappings, and owns the generated coverage numbers in
+`docs/safety/TRACEABILITY.md`.
+It is stdlib-only but runs from this environment like everything else here, and
+from the repo root, since it reads paths relative to the root:
+
+```sh
+uv run --project tools python -m tools.safety_lint --check    # CI's gate
+uv run --project tools python -m tools.safety_lint --write    # refresh coverage
+```
+
+## Tests
+
+`pyproject.toml` holds the only pytest configuration, so one command runs both
+suites — the rig tests and the linter's self-test:
+
+```sh
+cd tools
+uv run pytest
+```
+
+The flat scripts are deliberately outside that: several take a positional
+integer or exit at import, so they are not collectible, and `test/` plus the
+`pstop_*_test.py` ladders are bash- and script-driven. See
+[`../docs/TESTING.md`](../docs/TESTING.md) for those.
+
 ## The one exception: `soak_per_remote.py` in ROS mode
 
 `soak_per_remote.py` reads remote state from either the chip's HTTP

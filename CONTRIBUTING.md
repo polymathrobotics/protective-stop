@@ -110,11 +110,12 @@ Note `pstop_c/` is intentionally excluded from the C/C++ hooks.
   function mappings, statuses, evidence citations, and ownership of numeric
   coverage claims. Generated coverage becomes stale whenever document
   citations or statuses change; refresh it with
-  `python3 -m tools.safety_lint --write`. This command recounts citations and
-  statuses from the documents; it does not execute tests or establish that
-  cited tests pass. Write mode refuses to modify the document while
-  unbaselined errors exist. Automatic pre-commit rewriting is deliberately not
-  configured because coverage drops require human review.
+  `uv run --project tools python -m tools.safety_lint --write` from the repo
+  root (see `tools/README.md` for the environment). This command recounts
+  citations and statuses from the documents; it does not execute tests or
+  establish that cited tests pass. Write mode refuses to modify the document
+  while unbaselined errors exist. Automatic pre-commit rewriting is
+  deliberately not configured because coverage drops require human review.
 
 Contributions are licensed according to where they land: software and firmware
 under Apache-2.0, hardware design files under CERN-OHL-P-2.0, and documentation
