@@ -772,6 +772,21 @@ static bool is_safety_peer(microlink_t * ml, uint32_t vpn_ip)
   return (ml->config.priority_peer_ip != 0 && vpn_ip == ml->config.priority_peer_ip) || is_health_tracked(vpn_ip);
 }
 
+/* True when ANY safety link exists: the priority peer or at least one
+ * registered health peer (machn's bonded remotes / a remote's machine slots).
+ * The DERP home-retry ladder keys on this, not on priority_peer_ip alone: a
+ * multi-machine remote and every machn have no priority IP set, so their
+ * DERP failover path was retried at the calm 60 s cadence while a safety
+ * heartbeat depended on it. */
+bool ml_wg_has_safety_peers(const microlink_t * ml)
+{
+  if (ml->config.priority_peer_ip != 0) return true;
+  for (int i = 0; i < ML_EXTRA_PINS; i++) {
+    if (s_health_peers[i].ip != 0) return true;
+  }
+  return false;
+}
+
 /* DERP home region of a peer identified by its 32-byte WG public key.
  * 0 = unknown peer or region not learned. Called from ml_derp_queue_send on the
  * wg_mgr task (the peer-table owner), so this is a same-task read — no lock. */
@@ -894,8 +909,20 @@ void ml_wg_get_rehome_diag(uint32_t out[6])
  * diag pattern above. Read via /admin/api/monitor. */
 static uint32_t s_diag_relay_retries; /* CMM + forced-sweep rounds fired      */
 static uint32_t s_diag_direct_regains; /* has_direct_path false -> true edges */
-static uint64_t s_last_relay_refetch_ms; /* rate-limit coord re-fetch on relay-stuck symmetric-NAT safety peer */
+static uint64_t s_last_relay_refetch_ms; /* fleet-wide floor: last coord re-fetch issued for ANY safety peer */
 static uint32_t s_diag_relay_refetch_reqs; /* coord re-fetch (reconnect) requests issued for endpoint refresh */
+static uint32_t s_diag_relay_refetch_interval_s; /* backoff now gating the most recently re-fetched peer */
+
+uint32_t ml_wg_get_relay_refetch_reqs(void)
+{
+  return s_diag_relay_refetch_reqs;
+}
+
+uint32_t ml_wg_get_relay_refetch_interval_s(void)
+{
+  return s_diag_relay_refetch_interval_s;
+}
+
 static uint32_t s_diag_relay_disco_resets; /* per-peer from-scratch disco resets on a relay-stuck safety peer
                                             * (v2: rate-limited per-peer via p->disco_reset_next_ms) */
 static uint32_t s_diag_ep_learn_evictions; /* learn-from-ping ring-evictions on a full endpoint table —
@@ -2977,6 +3004,8 @@ static void process_disco_pong(
          * so the NEXT outage starts the CMM/sweep cycle from 30 s again. */
         p->relay_retry_next_ms = 0;
         p->relay_retry_count = 0;
+        p->relay_refetch_interval_ms = 0; /* next outage starts the coord re-fetch ladder at 90 s again */
+        p->relay_refetch_next_ms = 0;
         s_diag_direct_regains++;
         if (is_prio) {
           /* SAFETY-peer regains only (priority peer or health-tracked pstop
@@ -4227,15 +4256,32 @@ static void disco_periodic_probes(microlink_t * ml)
          * Control-plane only (WG heartbeat/green untouched); only fires when the
          * path is ALREADY relay (no healthy path to disturb); rate-limited so a
          * persistently-relay peer can't storm reconnects. */
+        /* Per-peer escalating backoff (90 s doubling to ML_RELAY_REFETCH_MAX_MS,
+         * reset on direct regain): a transient NAT outage still gets four fast
+         * rounds in the first ~10 min; a permanently relay-bound peer drops
+         * from ~40 self-inflicted reconnects/h to ~2/h. The fleet-wide 90 s
+         * floor stays so two stuck peers can't interleave into a storm. */
         if (
-          p->relay_retry_count >= 1u && ml->coord_cmd_queue != NULL &&
+          p->relay_retry_count >= 1u && ml->coord_cmd_queue != NULL && now >= p->relay_refetch_next_ms &&
           (s_last_relay_refetch_ms == 0 || now - s_last_relay_refetch_ms >= ML_RELAY_REFETCH_MIN_MS))
         {
-          s_last_relay_refetch_ms = now;
-          s_diag_relay_refetch_reqs++;
           ml_coord_cmd_t rc = ML_CMD_FORCE_RECONNECT;
-          (void)xQueueSend(ml->coord_cmd_queue, &rc, 0);
-          ESP_LOGW(TAG, "relay-stuck safety peer %s: coord re-fetch (reconnect) for endpoint refresh", p->hostname);
+          if (xQueueSend(ml->coord_cmd_queue, &rc, 0) == pdTRUE) {
+            uint32_t iv_ms =
+              (p->relay_refetch_interval_ms != 0u) ? p->relay_refetch_interval_ms : ML_RELAY_REFETCH_MIN_MS;
+            p->relay_refetch_next_ms = now + iv_ms;
+            uint32_t next_ms = iv_ms * 2u;
+            p->relay_refetch_interval_ms = (next_ms > ML_RELAY_REFETCH_MAX_MS) ? ML_RELAY_REFETCH_MAX_MS : next_ms;
+            s_last_relay_refetch_ms = now;
+            s_diag_relay_refetch_reqs++;
+            s_diag_relay_refetch_interval_s = iv_ms / 1000u;
+            ESP_LOGW(
+              TAG,
+              "relay-stuck safety peer %s: coord re-fetch (reconnect) for endpoint refresh; next for this peer in %lu "
+              "s",
+              p->hostname,
+              (unsigned long)(iv_ms / 1000u));
+          }
         }
         /* Escalation: the coord re-fetch above refreshes the PEER's endpoints,
          * but a re-fetch re-ingests an EXISTING peer with disco state PRESERVED
