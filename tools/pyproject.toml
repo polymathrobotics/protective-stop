@@ -23,14 +23,15 @@ dependencies = [
 [tool.uv]
 package = false
 
-# The one pytest entry point for this directory. Bare `uv run pytest` runs both
-# suites; `hil/run.sh` passes its own path and gets only the rig tests.
+# Bare `uv run pytest` collects only the suites that need no hardware, so a
+# checkout with no bench runs clean. The rig suite is opt-in through
+# `hil/run.sh`; its fixtures fail hard when the rig is absent rather than
+# skipping, which is why it must not be in the default collection.
 # The flat scripts are not pytest tests — several take a positional int or exit
 # at import — and safety_lint/fixtures/ holds files whose basenames collide with
 # the real tools.
 [tool.pytest.ini_options]
 testpaths = [
-  "hil",
   "safety_lint/self_test.py",
 ]
 norecursedirs = [

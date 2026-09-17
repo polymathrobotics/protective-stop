@@ -105,12 +105,19 @@ uv run --project tools python -m tools.safety_lint --write    # refresh coverage
 
 ## Tests
 
-`pyproject.toml` holds the only pytest configuration, so one command runs both
-suites — the rig tests and the linter's self-test:
+`pyproject.toml` holds the only pytest configuration. The default run is the
+suites that need no hardware, so it passes on any checkout:
 
 ```sh
 cd tools
-uv run pytest
+uv run pytest          # linter self-test; no bench needed
+```
+
+The rig tests are opt-in, because their fixtures fail rather than skip when no
+relay board is attached:
+
+```sh
+tools/hil/run.sh       # the HIL suite; needs the bench (see hil/README.md)
 ```
 
 The flat scripts are deliberately outside that: several take a positional

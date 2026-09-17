@@ -5,6 +5,9 @@
 # plugins.
 cd "$(dirname "$0")"
 # Default to this directory so the rig suite runs alone; pytest config and
-# markers come from tools/pyproject.toml.
+# markers come from tools/pyproject.toml. --ignore holds that scope even when
+# the caller passes options but no path, where testpaths would otherwise decide
+# what gets collected.
 [ $# -eq 0 ] && set -- .
-PYTHONPATH= exec env -u VIRTUAL_ENV uv run --project .. python -m pytest "$@"
+PYTHONPATH= exec env -u VIRTUAL_ENV uv run --project .. python -m pytest \
+  --ignore="$(cd .. && pwd)/safety_lint" "$@"
