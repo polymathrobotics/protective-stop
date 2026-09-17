@@ -56,6 +56,7 @@
 #include "freertos/task.h"
 #include "microlink.h"
 #include "ml_app.h"
+#include "ml_usb_tx.h"
 #include "panic_log.h"
 #include "pstop_aux_channel.h"
 #include "soc/rtc_cntl_reg.h"
@@ -229,7 +230,7 @@ static esp_err_t page_state(httpd_req_t * req)
    */
   enum
   {
-    JSON_CAP = 4096 /* eth-watchdog fields + bonded-remote stop_only + operator list
+    JSON_CAP = 4352 /* + 5 usb_tx_* counters (<= ~120 B). eth-watchdog fields + bonded-remote stop_only + operator list
                        + instantaneous internal-heap fields (heap_free_int/heap_lfb_int).
                        remote_stop_id + restart_state add <= 47 B worst case against
                        ~940 B live headroom (measured 2026-08-09). derp_region_locked
@@ -246,6 +247,8 @@ static esp_err_t page_state(httpd_req_t * req)
     return httpd_resp_sendstr(req, "{\"ok\":false,\"error\":\"oom\"}");
   }
   const int cap = JSON_CAP;
+  ml_usb_tx_diag_t usb_tx;
+  ml_usb_tx_get_diag(&usb_tx); /* zeros until the tether has ever started */
   int n = snprintf(
     buf,
     cap,
@@ -263,6 +266,8 @@ static esp_err_t page_state(httpd_req_t * req)
     "\"rgb_cycles\":%lu,"
     "\"derp_paused\":%d,\"derp_delay_ms\":%d,\"wg_paused\":%d,"
     "\"usb_enabled\":%d,\"ts_boot_en\":%d,\"derp_only\":%d,"
+    "\"usb_tx_sent\":%lu,\"usb_tx_busy_retries\":%lu,\"usb_tx_expired\":%lu,\"usb_tx_full_drops\":%lu,\"usb_tx_"
+    "pending\":%lu,"
     "\"boot_count\":%u,\"reset_reason\":%u,\"ctrl_reset_cause\":%u,"
     "\"crash_present\":%d,\"crash_pc\":%lu,\"crash_task\":\"%s\",\"crash_sha\":\"%s\","
     "\"xcheck_last_detail\":%u,\"log_lines_s\":%lu,\"log_lines_s_peak\":%lu,\"log_console_skipped\":%lu,"
@@ -329,6 +334,11 @@ static esp_err_t page_state(httpd_req_t * req)
     g_dcs.usb_enabled ? 1 : 0,
     g_dcs.ts_boot_en ? 1 : 0,
     g_dcs.derp_only_mode ? 1 : 0,
+    (unsigned long)usb_tx.sent,
+    (unsigned long)usb_tx.busy_retries,
+    (unsigned long)usb_tx.expired,
+    (unsigned long)usb_tx.full_drops,
+    (unsigned long)usb_tx.pending,
     (unsigned int)g_dcs.boot_count,
     (unsigned int)g_dcs.reset_reason,
     (unsigned int)g_dcs.ctrl_reset_cause,

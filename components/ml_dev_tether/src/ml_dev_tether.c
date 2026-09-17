@@ -33,6 +33,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "lwip/esp_netif_net_stack.h"
+#include "ml_usb_tx.h"
 #include "tinyusb.h"
 #include "tinyusb_cdc_acm.h"
 #include "tinyusb_console.h"
@@ -60,8 +61,11 @@ void ml_dev_tether_set_unit_number(uint8_t n)
 
 static esp_err_t netif_transmit(void * h, void * buffer, size_t len)
 {
-  /* Synchronous send so lwIP can free the pbuf immediately. */
-  return tinyusb_net_send_sync(buffer, len, NULL, pdMS_TO_TICKS(100));
+  /* Copies into the bounded TX ring (ml_usb_tx.c) so lwIP can free the pbuf
+   * immediately, and so an NCM-busy endpoint is RETRIED instead of dropping
+   * the frame — the old direct tinyusb_net_send_sync() failed on the first
+   * busy probe and cost a TCP RTO per burst. */
+  return ml_usb_tx_send(buffer, len);
 }
 
 static void netif_l2_free(void * h, void * buffer)
@@ -279,6 +283,13 @@ esp_err_t ml_dev_tether_try_start(uint32_t timeout_ms)
     ESP_LOGE(TAG, "esp_netif_new failed");
     goto fail;
   }
+  /* TX ring before the netif can transmit; enabled for this session only. */
+  err = ml_usb_tx_init();
+  if (err != ESP_OK) {
+    ESP_LOGE(TAG, "ml_usb_tx_init: %s", esp_err_to_name(err));
+    goto fail;
+  }
+  ml_usb_tx_set_enabled(1);
 
   /* Use the SAME MAC for the lwIP netif as the NCM endpoint. The IDF
      * sta2eth example uses different MACs because it bridges to a separate
@@ -329,6 +340,7 @@ fail:
 
 void ml_dev_tether_stop(void)
 {
+  ml_usb_tx_set_enabled(0); /* queued frames belong to the netif being torn down */
   /* NULL s_netif UNDER s_rx_lock, then destroy outside it. The lock makes this
      * mutually exclusive with on_usb_rx(): an RX already running holds the lock,
      * so we block until it finishes before freeing the netif; an RX starting
