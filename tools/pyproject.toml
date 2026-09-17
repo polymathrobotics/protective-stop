@@ -11,10 +11,10 @@ license = "Apache-2.0"
 # soak_per_remote.py imports tomllib; lowering this floor breaks it.
 requires-python = ">=3.11"
 
-# esptool is run as a subprocess, not imported.
+# esptool is run as a subprocess, not imported; v5 renamed every flag.
 # pyserial is used by usb_relay4; esptool also pulls it in.
 dependencies = [
-  "esptool>=4.7",
+  "esptool>=5.0",
   "pyserial>=3.5",
   "pytest>=8.0",
 ]

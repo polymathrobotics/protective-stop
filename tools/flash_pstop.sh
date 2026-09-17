@@ -88,27 +88,12 @@ for f in bootloader.bin partition-table.bin ota_data_initial.bin "$APP"; do
 done
 
 # --- esptool from the tools/ uv environment -------------------------------
-# Already inside `uv run`, esptool is on PATH; otherwise re-enter the project
-# environment for each call.
-if command -v esptool >/dev/null 2>&1; then
-  ESPTOOL=(esptool)
-elif command -v uv >/dev/null 2>&1; then
+# Always run esptool through uv; the locked version is the only one used.
+if command -v uv >/dev/null 2>&1; then
   ESPTOOL=(env -u VIRTUAL_ENV uv run --project "$HERE" --quiet esptool)
 else
   echo "ERROR: esptool not found. Install uv (https://docs.astral.sh/uv/), then 'cd tools && uv sync'." >&2
   exit 1
-fi
-
-# esptool v5 renamed flags to hyphens and deprecated the underscore forms;
-# v4 (the ESP-IDF one) only knows underscores. Pick the right set so we neither
-# spam deprecation warnings on v5 nor break on v4.
-EVER="$("${ESPTOOL[@]}" version 2>&1 | grep -oiE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -1)"
-if [ "${EVER%%.*}" -ge 5 ] 2>/dev/null; then
-  O_WF=write-flash O_EF=erase-flash O_MODE=--flash-mode O_SIZE=--flash-size
-  O_FREQ=--flash-freq O_BEFORE=default-reset O_AFTER=hard-reset
-else
-  O_WF=write_flash O_EF=erase_flash O_MODE=--flash_mode O_SIZE=--flash_size
-  O_FREQ=--flash_freq O_BEFORE=default_reset O_AFTER=hard_reset
 fi
 
 # --- find a chip in DOWNLOAD mode. Match Espressif VID 303a in any
@@ -182,12 +167,12 @@ echo "=========================================================="
 
 if [ "$ERASE" = "1" ]; then
   echo ">> erasing flash (full chip)..."
-  "${ESPTOOL[@]}" --chip esp32s3 -p "$PORT" -b "$BAUD" "$O_EF"
+  "${ESPTOOL[@]}" --chip esp32s3 -p "$PORT" -b "$BAUD" erase-flash
 fi
 
 "${ESPTOOL[@]}" --chip esp32s3 -p "$PORT" -b "$BAUD" \
-  --before "$O_BEFORE" --after "$O_AFTER" \
-  "$O_WF" "$O_MODE" dio "$O_SIZE" 8MB "$O_FREQ" 80m \
+  --before default-reset --after hard-reset \
+  write-flash --flash-mode dio --flash-size 8MB --flash-freq 80m \
   0x0     "$IMG/bootloader.bin" \
   0x8000  "$IMG/partition-table.bin" \
   0x19000 "$IMG/ota_data_initial.bin" \

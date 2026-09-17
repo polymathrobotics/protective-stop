@@ -370,7 +370,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "esptool", specifier = ">=4.7" },
+    { name = "esptool", specifier = ">=5.0" },
     { name = "pyserial", specifier = ">=3.5" },
     { name = "pytest", specifier = ">=8.0" },
 ]

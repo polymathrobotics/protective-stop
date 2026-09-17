@@ -95,7 +95,7 @@ def line(msg):
     sys.stdout.flush()
 
 
-# --- esptool resolution + v4/v5 flag differences --------------------------
+# --- esptool resolution ---------------------------------------------------
 def _esptool_works(c):
     """True only if `c version` actually RUNS (exit 0 + prints a version).
     `python3 -m esptool` on a system python without esptool exits non-zero —
@@ -108,23 +108,14 @@ def _esptool_works(c):
 
 
 def esptool_cmd():
-    """The esptool from the tools/ uv environment, verified to run."""
-    for c in (['esptool'], [sys.executable, '-m', 'esptool']):
-        if _esptool_works(c):
-            return c
+    """The esptool module of the running interpreter, verified to run."""
+    c = [sys.executable, '-m', 'esptool']
+    if _esptool_works(c):
+        return c
     sys.exit(
         f'{C.R}ERROR: no working esptool found. Run this tool through the uv '
         f'environment: `cd tools && uv sync && uv run python flash_station.py`.{C.X}'
     )
-
-
-def esptool_v5(cmd):
-    try:
-        out = subprocess.run(cmd + ['version'], capture_output=True, text=True, timeout=10)
-        m = re.search(r'(\d+)\.\d+', out.stdout + out.stderr)
-        return bool(m) and int(m.group(1)) >= 5
-    except Exception:
-        return False
 
 
 # --- device detection -----------------------------------------------------
@@ -198,7 +189,7 @@ def wait_for_blank(known):
         time.sleep(0.4)
 
 
-def read_mac(cmd, port, v5=False, tries=READ_MAC_TRIES):
+def read_mac(cmd, port, tries=READ_MAC_TRIES):
     """Return (mac_str, mac24_hex) or (None, None).
 
     Retries: an ESP32-S3 in USB-JTAG download mode very often fails to sync on
@@ -206,7 +197,7 @@ def read_mac(cmd, port, v5=False, tries=READ_MAC_TRIES):
     settled yet). Each attempt also lets esptool retry the sync itself
     (--connect-attempts), and we back off + retry the whole call `tries` times.
     """
-    sub = 'read-mac' if v5 else 'read_mac'
+    sub = 'read-mac'
     last = ''
     for i in range(tries):
         try:
@@ -231,7 +222,7 @@ def read_mac(cmd, port, v5=False, tries=READ_MAC_TRIES):
 
 
 # --- the flash, with a byte-accurate progress bar -------------------------
-def flash(cmd, port, v5, erase, on_progress):
+def flash(cmd, port, erase, on_progress):
     for _, fn in IMAGES:
         if not os.path.isfile(os.path.join(IMG, fn)):
             return False, f'missing {IMG}/{fn} — stage a build first'
@@ -249,19 +240,7 @@ def flash(cmd, port, v5, erase, on_progress):
                 acc += addr - base
         return acc
 
-    o = (
-        ('write-flash', 'erase-flash', '--flash-mode', '--flash-size', '--flash-freq', 'default-reset', 'hard-reset')
-        if v5
-        else (
-            'write_flash',
-            'erase_flash',
-            '--flash_mode',
-            '--flash_size',
-            '--flash_freq',
-            'default_reset',
-            'hard_reset',
-        )
-    )
+    o = ('write-flash', 'erase-flash', '--flash-mode', '--flash-size', '--flash-freq', 'default-reset', 'hard-reset')
     WF, EF, MODE, SIZE, FREQ, BEFORE, AFTER = o
 
     if erase:
@@ -434,10 +413,10 @@ def confirm_hardware(ip):
 
 
 # --- one full unit cycle --------------------------------------------------
-def flash_one(cmd, v5, port, erase, ip_timeout, app_ver='?', keep_peers=False):
+def flash_one(cmd, port, erase, ip_timeout, app_ver='?', keep_peers=False):
     line(f'{C.BOLD}▶ unit on {port}{C.X}  (app {app_ver})')
     bar(0.02, 'read-mac')
-    mac, mac24 = read_mac(cmd, port, v5)
+    mac, mac24 = read_mac(cmd, port)
     if not mac24:
         line(
             f'  {C.R}✗ chip not responding on {port} after {READ_MAC_TRIES} tries '
@@ -459,7 +438,7 @@ def flash_one(cmd, v5, port, erase, ip_timeout, app_ver='?', keep_peers=False):
             lo, hi = 0.0, 0.05
         bar(lo + (hi - lo) * frac, phase)
 
-    ok, err = flash(cmd, port, v5, erase, prog)
+    ok, err = flash(cmd, port, erase, prog)
     if not ok:
         line(f'  {C.R}✗ FLASH FAILED: {err}{C.X}')
         return False, {'port': port, 'node': host, 'stage': 'flash', 'err': err}
@@ -524,9 +503,9 @@ def source_refresh(project, pin_sha, current_sha):
 
 
 # --- selftest (no hardware) ----------------------------------------------
-def selftest(cmd, v5):
+def selftest(cmd):
     print(f'{C.BOLD}flash_station selftest{C.X}')
-    print(f'  esptool: {" ".join(cmd)}  (v5 flags: {v5})')
+    print(f'  esptool: {" ".join(cmd)}')
     miss = [fn for _, fn in IMAGES if not os.path.isfile(os.path.join(IMG, fn))]
     print(f'  image dir {IMG}: ' + (f'{C.G}complete{C.X}' if not miss else f'{C.Y}missing {miss}{C.X}'))
     print(f'  download-mode ports now: {download_ports() or "none"}')
@@ -565,10 +544,9 @@ def main():
     args = ap.parse_args()
 
     cmd = esptool_cmd()
-    v5 = esptool_v5(cmd)
 
     if args.selftest:
-        selftest(cmd, v5)
+        selftest(cmd)
         return
 
     # The stable boot trio always comes from production_image/ (the plugin
@@ -637,7 +615,7 @@ def main():
                     app_sha, app_ver = img['sha256'], img['version']
                     line(f'{C.B}  {_prov.LABEL}: newer build → {app_ver} ({app_sha[:12]}); flashing it.{C.X}')
             line('')
-            ok, info = flash_one(cmd, v5, port, args.erase, args.ip_timeout, app_ver, args.keep_peers)
+            ok, info = flash_one(cmd, port, args.erase, args.ip_timeout, app_ver, args.keep_peers)
             if ok:
                 n_ok += 1
             else:

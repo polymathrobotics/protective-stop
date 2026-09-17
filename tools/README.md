@@ -61,8 +61,8 @@ uv run esptool version
 teammate is installed automatically on your next run.
 
 The shell tools need no prefix.
-They find `esptool` on `PATH` when already inside `uv run`, and otherwise
-re-enter this environment for each call:
+They re-enter this environment through `uv run` for each call, so they always
+get the locked `esptool`:
 
 ```sh
 tools/flash_pstop.sh --remote
