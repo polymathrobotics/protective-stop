@@ -168,6 +168,9 @@ typedef struct
   uint32_t received_counter;
   uint64_t received_stamp;
   uint32_t receiver_id; /* this machine's device id */
+  uint8_t role; /* announced role (pstop_aux_role_t), snapshotted per tick so
+                 * both cores encode the same value even if /api/role flips
+                 * between their encodes (role is live, no reboot) */
 } tick_input_t;
 
 static tick_input_t g_tick[PSTOP_MAX_MACHINES];
@@ -565,8 +568,9 @@ static void core_task(void * arg)
       msg.counter = in[i].counter;
       msg.received_counter = in[i].received_counter;
       msg.heartbeat_timeout = HEARTBEAT_TIMEOUT_MS;
-      /* The role is immutable for this boot; changing it persists and reboots. */
-      pstop_aux_encode_role(&msg, (pstop_aux_role_t)dcs_role_get());
+      /* Announced role, from the comparator's per-tick snapshot (live-editable
+             * via /api/role; the machine re-reads it on every frame). */
+      pstop_aux_encode_role(&msg, (pstop_aux_role_t)in[i].role);
       /* pstop_message_encode computes the CRC over the payload and writes it to
              * the last 2 bytes — both cores produce byte-identical buffers given
              * identical input fields. */
@@ -602,7 +606,10 @@ typedef enum
 {
   SESS_IDLE = 0, /* slot not configured */
   SESS_BONDING = 1, /* configured; (re)bonding — heartbeats not flowing */
-  SESS_BONDED = 2 /* counter handshake done; heartbeats flowing */
+  SESS_BONDED = 2, /* counter handshake done; heartbeats flowing */
+  SESS_REJECTED = 3 /* machine answered BOND with UNBOND (admission refused).
+                     * Parked: no retries until a manual rebond
+                     * (/api/pstop_peers?slot=N&rebond=1), reconfigure or reboot. */
 } sess_state_t;
 
 typedef struct
@@ -625,6 +632,7 @@ typedef struct
   uint32_t bond_counter;
   uint64_t bond_sent_ms; /* 0 = no BOND in flight */
   uint64_t last_reply_ms;
+  uint32_t rebond_gen; /* last-seen dcs_pstop_rebond_generation(slot) */
   uint64_t tx_stamp_history[16];
 
   /* Sustained-ENOTCONN escalation state (cold-bond far-side gap,
@@ -722,6 +730,9 @@ static void sess_reconfigure(pstop_sess_t * s, bool configured, uint32_t ip, uin
   s->ip = ip;
   s->port = port;
   s->machine_id = machine_id;
+  /* Adopt the slot's current rebond generation: the memset above zeroed our
+   * copy, and a stale mismatch would fire a spurious "manual rebond" tick. */
+  s->rebond_gen = dcs_pstop_rebond_generation((int)(s - g_sess));
   if (configured) {
     sess_start_bonding(s);
   } else {
@@ -1003,6 +1014,26 @@ static uint32_t sess_drain_replies(pstop_sess_t * s, int slot, uint64_t now_ms)
         (unsigned long)sess_send_period_ms(s));
     }
 
+    if (resp.message == PSTOP_MESSAGE_UNBOND) {
+      /* Admission refused: the machine's allow/denylist rejected us and told
+             * us so (pstop_c replies UNBOND for a not-allowed id). This can
+             * arrive for a BOND, or mid-session when the machine denylists us
+             * live — pstop_c re-runs admission on EVERY frame. Either way,
+             * park the session (no automatic retries), surface it (state 3 in
+             * /state.json + web UI) and do NOT adopt the reply's zeroed
+             * counter/stamp or refresh last_reply_ms: a parked slot must read
+             * as dead, not healthy. Exit only via manual rebond, slot
+             * reconfigure or reboot. This remote never sends UNBOND itself, so
+             * no legitimate UNBOND reply exists to confuse this with. */
+      const bool was_bonded = (s->state == SESS_BONDED);
+      s->state = SESS_REJECTED;
+      s->last_msg = PSTOP_MESSAGE_UNBOND;
+      s->bond_sent_ms = 0;
+      ESP_LOGW(
+        TAG, "m%d %s REJECTED by machine (UNBOND) — parked until manual rebond", slot, was_bonded ? "session" : "BOND");
+      got++;
+      continue;
+    }
     if (s->state == SESS_BONDING) {
       /* Bond response: adopt the machine's counter/stamp so the first OK
              * heartbeat carries the right context (mirrors the handshake in
@@ -1153,6 +1184,21 @@ static void comparator_task(void * arg)
       if (!s->configured) {
         continue;
       }
+      {
+        /* Manual rebond (/api/pstop_peers?slot=N&rebond=1 / web UI button).
+                 * The only exit from REJECTED; harmless in any other state. */
+        uint32_t gen = dcs_pstop_rebond_generation(i);
+        if (gen != s->rebond_gen) {
+          s->rebond_gen = gen;
+          ESP_LOGI(TAG, "m%d manual rebond requested (was %d)", i, (int)s->state);
+          s->rebonds++;
+          atomic_fetch_add(&g_dcs_pstop_rebonds, 1);
+          sess_start_bonding(s);
+        }
+      }
+      if (s->state == SESS_REJECTED) {
+        continue; /* parked: the machine refused us; nothing to send */
+      }
       if (!sess_ensure_socket(s, i)) {
         continue; /* binding unavailable (VPN down): dark = fail-safe */
       }
@@ -1176,6 +1222,7 @@ static void comparator_task(void * arg)
         g_tick[i].received_counter = s->pd.last_received_counter;
         g_tick[i].received_stamp = s->pd.last_timestamp;
         g_tick[i].receiver_id = s->machine_id;
+        g_tick[i].role = dcs_role_get();
         s->tx_stamp_history[s->pd.msg_counter & 15] = now_ms;
         any_active = true;
       }

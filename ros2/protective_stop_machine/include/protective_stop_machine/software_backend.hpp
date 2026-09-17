@@ -19,32 +19,37 @@ struct SoftwareConfig
   int port{8890};
   uint32_t machine_id{0x01020304};
   MachineTiming timing;
-  bool allow_unlisted{true};
-  // Operator authorization (SAFETY). A bonded remote is ACCEPTED and
-  // heartbeat-monitored but STOP-ONLY by default: it may command STOP, never
-  // re-arm (STOP->OK). Only a remote whose 32-bit pstop id is on `operators`
-  // gains re-arm authority. Empty `operators` (the default) => every remote is
-  // stop-only = maximally safe out of the box. `default_stop_only` is the
-  // policy applied to UNLISTED remotes; it defaults true and a deployment
-  // should keep it true.
-  bool default_stop_only{true};
-  std::vector<uint32_t> operators{};
+  // ADMISSION (optional): may a remote BOND at all? Two independent global
+  // lists, both empty by default ("open": every remote is admitted).
+  //   allowlist  non-empty => ONLY listed ids may bond ("paranoid" mode)
+  //   denylist   listed ids may never bond; wins over the allowlist
+  // A refused BOND is answered with UNBOND so the remote can show it.
+  // Admission is NOT authority: whether a bonded remote may re-arm is the
+  // REMOTE's own announced role (common/pstop_aux_channel.h), re-read on every
+  // frame by the machine thread.
+  std::vector<uint32_t> allowlist{};
+  std::vector<uint32_t> denylist{};
 };
 
-// Single source of truth for the operator-authorization decision: whether a
-// bonded remote is STOP-ONLY (may STOP + is heartbeat-monitored, may NEVER
-// re-arm) rather than a full operator (may also re-arm). A remote is stop-only
-// unless its 32-bit pstop id is on the operator allowlist; an empty allowlist
-// therefore makes every remote stop-only. Header-inline + pstop-free so it is
-// directly unit-testable. Mirrors machn/main.c and host/machine_app_runner.c.
-inline bool software_remote_is_stop_only(const SoftwareConfig & cfg, uint32_t remote_id)
+// Single source of truth for the admission decision. Header-inline +
+// pstop-free so it is directly unit-testable. Mirrors machn/main.c
+// (dcs_admission_allows) and host/machine_app_runner.c.
+inline bool software_remote_admitted(const SoftwareConfig & cfg, uint32_t remote_id)
 {
-  for (uint32_t op : cfg.operators) {
-    if (op == remote_id) {
-      return false;  // listed operator: full re-arm authority
+  for (uint32_t id : cfg.denylist) {
+    if (id == remote_id) {
+      return false;  // deny wins
     }
   }
-  return cfg.default_stop_only;  // unlisted: stop-only by default (safe)
+  if (cfg.allowlist.empty()) {
+    return true;  // open mode
+  }
+  for (uint32_t id : cfg.allowlist) {
+    if (id == remote_id) {
+      return true;
+    }
+  }
+  return false;
 }
 
 // The node itself IS the machine: this backend links pstop_c and runs a machine

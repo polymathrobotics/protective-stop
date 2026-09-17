@@ -14,7 +14,10 @@
  *   ring_off  u8   LED-ring rotation: physical pixel index of LED 1 (default 0)
  *   ps_peers  blob multi-machine peer table: version byte + per-slot records
  *                  (absent -> migrate legacy ps_ip/ps_port into slot 0)
- *   operators blob operator allowlist: count byte + u32 ids
+ *   adm_allow blob admission allowlist: count byte + u32 ids
+ *   adm_deny  blob admission denylist: same layout
+ *   adm_pin   blob WG pin list: same layout (seeded once from the legacy operators blob)
+ *   operators blob LEGACY operator list — migrated into adm_pin then erased at boot
  *   wifi_txp  u8   WiFi max TX power, quarter-dBm (8..84); 0/absent = config default
  *   led_bri   u8   master LED brightness, 0..100%; absent/corrupt = default 50
  *   ctrl_rst  u8   one-shot controlled-reset cause crumb (DCS_CTRL_RST_*)
@@ -458,30 +461,37 @@ esp_err_t dcs_nvs_write_pstop_peers(const dcs_pstop_peer_rec_t recs[DCS_PSTOP_MA
   return r;
 }
 
-/* operators blob layout (byte-serialized):
- *   [0]            count (0..DCS_MAX_OPERATORS)
+/* admission list blob layout (byte-serialized):
+ *   [0]            count (0..DCS_MAX_LIST_IDS)
  *   per id, big-endian u32
- * Absent/corrupt -> empty list (0 operators = every remote stop-only = safe). */
-#define OPERATORS_BLOB_LEN (1 + (DCS_MAX_OPERATORS * 4))
+ * Absent/corrupt -> empty list. */
+#define LIST_BLOB_LEN (1 + (DCS_MAX_LIST_IDS * 4))
 
-int dcs_nvs_read_operators(uint32_t out[DCS_MAX_OPERATORS])
+static const char * list_key(dcs_list_t which)
 {
-  (void)memset(out, 0, DCS_MAX_OPERATORS * sizeof(out[0]));
+  if (which == DCS_LIST_DENY) return DCS_NVS_KEY_DENYLIST;
+  if (which == DCS_LIST_PIN) return DCS_NVS_KEY_PINLIST;
+  return DCS_NVS_KEY_ALLOWLIST;
+}
 
-  uint8_t blob[OPERATORS_BLOB_LEN] = {0};
+int dcs_nvs_read_list(dcs_list_t which, uint32_t out[DCS_MAX_LIST_IDS])
+{
+  (void)memset(out, 0, DCS_MAX_LIST_IDS * sizeof(out[0]));
+
+  uint8_t blob[LIST_BLOB_LEN] = {0};
   size_t len = sizeof(blob);
   nvs_handle_t h;
   esp_err_t r = ESP_FAIL;
   if (nvs_open(DCS_NVS_NS, NVS_READONLY, &h) == ESP_OK) {
-    r = nvs_get_blob(h, DCS_NVS_KEY_OPERATORS, blob, &len);
+    r = nvs_get_blob(h, list_key(which), blob, &len);
     nvs_close(h);
   }
   if ((r != ESP_OK) || (len < 1u)) {
-    return 0; /* blank NVS: empty allowlist */
+    return 0; /* blank NVS: empty list */
   }
   int count = blob[0];
-  if (count > DCS_MAX_OPERATORS) {
-    count = DCS_MAX_OPERATORS; /* corrupt length degrades safely (never over-reads) */
+  if (count > DCS_MAX_LIST_IDS) {
+    count = DCS_MAX_LIST_IDS; /* corrupt length degrades safely (never over-reads) */
   }
   int n = 0;
   for (int i = 0; i < count; i++) {
@@ -497,12 +507,66 @@ int dcs_nvs_read_operators(uint32_t out[DCS_MAX_OPERATORS])
   return n;
 }
 
-esp_err_t dcs_nvs_write_operators(const uint32_t ids[DCS_MAX_OPERATORS], int count)
+/* The pre-admission "operators" blob meant "may RE-ARM" (and those remotes were
+ * WG-pinned as a side effect). The admission allowlist means "may BOND", so the
+ * blob must NOT be read as one: on a machine with a populated operator list that
+ * would refuse every other remote after an OTA. What must survive the upgrade
+ * is the pinning — losing it reopens the cold-bond ENOTCONN wedge on a large
+ * tailnet — so the ids move into the PIN list (no admission effect), and the
+ * legacy key is erased. Idempotent: absent key => nothing to do. */
+int dcs_nvs_migrate_legacy_operators(void)
 {
-  if ((count < 0) || (count > DCS_MAX_OPERATORS)) {
+  uint8_t blob[LIST_BLOB_LEN] = {0};
+  size_t len = sizeof(blob);
+  nvs_handle_t h;
+  if (nvs_open(DCS_NVS_NS, NVS_READWRITE, &h) != ESP_OK) {
+    return 0;
+  }
+  esp_err_t r = nvs_get_blob(h, DCS_NVS_KEY_LEGACY_OPERATORS, blob, &len);
+  if (r != ESP_OK) {
+    nvs_close(h);
+    return 0; /* no legacy list: normal */
+  }
+  int count = (len >= 1u) ? blob[0] : 0;
+  if (count > DCS_MAX_LIST_IDS) count = DCS_MAX_LIST_IDS;
+  uint32_t pins[DCS_MAX_LIST_IDS];
+  int n = dcs_nvs_read_list(DCS_LIST_PIN, pins);
+  int migrated = 0;
+  for (int i = 0; i < count; i++) {
+    size_t off = (size_t)1 + ((size_t)i * 4u);
+    if ((off + 4u) > len) break;
+    uint32_t id = ps_peers_get_u32(&blob[off]);
+    if (id == 0u) continue;
+    bool present = false;
+    for (int k = 0; k < n; k++) {
+      if (pins[k] == id) present = true;
+    }
+    if (!present && (n < DCS_MAX_LIST_IDS)) {
+      pins[n++] = id;
+      migrated++;
+    }
+  }
+  if (migrated > 0) {
+    (void)dcs_nvs_write_list(DCS_LIST_PIN, pins, n);
+  }
+  if (nvs_erase_key(h, DCS_NVS_KEY_LEGACY_OPERATORS) == ESP_OK) {
+    (void)nvs_commit(h);
+  }
+  nvs_close(h);
+  ESP_LOGW(
+    TAG,
+    "legacy 'operators' list: %d id(s) migrated to the WG pin list (admission stays open; re-arm authority is the "
+    "remote's own role)",
+    migrated);
+  return migrated;
+}
+
+esp_err_t dcs_nvs_write_list(dcs_list_t which, const uint32_t ids[DCS_MAX_LIST_IDS], int count)
+{
+  if ((count < 0) || (count > DCS_MAX_LIST_IDS)) {
     return ESP_ERR_INVALID_ARG;
   }
-  uint8_t blob[OPERATORS_BLOB_LEN] = {0};
+  uint8_t blob[LIST_BLOB_LEN] = {0};
   blob[0] = (uint8_t)count;
   for (int i = 0; i < count; i++) {
     ps_peers_put_u32(&blob[1 + (i * 4)], ids[i]);
@@ -510,7 +574,7 @@ esp_err_t dcs_nvs_write_operators(const uint32_t ids[DCS_MAX_OPERATORS], int cou
   nvs_handle_t h;
   esp_err_t r = nvs_open(DCS_NVS_NS, NVS_READWRITE, &h);
   if (r != ESP_OK) return r;
-  r = nvs_set_blob(h, DCS_NVS_KEY_OPERATORS, blob, sizeof(blob));
+  r = nvs_set_blob(h, list_key(which), blob, sizeof(blob));
   if (r == ESP_OK) {
     r = nvs_commit(h);
   }

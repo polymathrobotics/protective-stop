@@ -198,6 +198,32 @@ agreement, so a gap means messages were dropped OR withheld
 (mismatch/boot-priming hold) — not necessarily wire loss. Persistent
 gaps + `max_lost_messages` (10) exceeded → MSG_LOST STOP.
 
+### Remote shows `REJECTED` on a machine slot / `last_msg = UNBOND`
+
+The machine refused this remote's BOND — it is on the machine's **denylist**, or
+the machine runs a non-empty **allowlist** that does not include it
+(`GET /api/admission` on machn; `software.allowlist`/`denylist` on the ROS 2
+node; `[policy]` in `machine.toml`). The remote parks the slot deliberately and
+**does not retry**. Fix the list on the machine, then press **Rebond** on the
+remote's machine-peer row (or `POST /api/pstop_peers?slot=N&rebond=1`). A slot
+reconfigure or reboot also retries.
+
+### After upgrading a machine, its old operator list is gone
+
+Expected. The old list granted *re-arm* authority, which is now the remote's own
+announced role. At first boot the machine moves those ids into its **pin list**
+(`GET /api/admission` → `pinlist`; one WARN log line) so they keep their
+WireGuard pinning, and starts with open admission. Promote the remotes that
+should arm (`/api/role`) and, only if you want to restrict bonding, build the
+admission allowlist (`/api/admission?allow=`).
+
+### Remote bonds and sends OK but the machine never arms
+
+The remote announces `stop_only`. Check `GET /api/role` on the **remote**
+(`state.json` `role`) and promote it with `POST /api/role?role=operator` (admin
+auth). Applies live — no reboot, no re-bond. The machine has no operator list
+any more; only the remote's announced role grants re-arm.
+
 ### Tailscale reachable from some hosts, not the operator laptop
 
 A tailnet subnet router advertising the robot's LAN steals traffic to

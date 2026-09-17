@@ -10,6 +10,7 @@ try:
     import tomllib
 except ModuleNotFoundError:
     import tomli as tomllib
+import time
 from pathlib import Path
 
 import pytest
@@ -82,6 +83,18 @@ def chip(cfg, rig, request) -> Chip:
         ver, sha = fw
         if expect != ver and not sha.startswith(expect):
             pytest.fail(f'DUT runs fw_ver={ver} fw_sha={sha}, expected {expect} — flash/OTA did not take effect')
+
+    # Authority is the remote's own announced role and a fresh remote announces
+    # stop-only: it could STOP the HIL machine but never arm it, and every
+    # press/release test would fail. Promote to OPERATOR for the session.
+    if c.role() != 'operator':
+        c.set_role('operator', cfg['rig'].get('admin_password', 'microlink'))
+        # Live on current firmware; older builds reboot to apply.
+        time.sleep(1.0)
+        if not c.reachable():
+            c.wait_reachable(timeout=30.0)
+        if c.role() != 'operator':
+            pytest.fail('could not promote the DUT to the operator role (admin password?)')
     return c
 
 

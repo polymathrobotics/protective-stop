@@ -47,10 +47,11 @@ struct SoftwareMachineBackend::Impl
   MachineSnapshot snap;  // guarded
   MachineTiming timing;  // guarded (read by the C remote-details callback)
 
-  // The callback has no context argument. These fields expose only the BOND
-  // currently being processed; pstop_c latches stop_only into the client.
-  uint32_t bond_role_id{0};
-  pstop_aux_role_t bond_role{PSTOP_AUX_ROLE_UNSPECIFIED};
+  // The callback has no context argument. These fields expose the announced
+  // role of the frame currently being processed (machine thread only); the
+  // callback seeds a NEW client's is_stop_only from it at BOND.
+  uint32_t frame_role_id{0};
+  pstop_aux_role_t frame_role{PSTOP_AUX_ROLE_UNSPECIFIED};
 
   void run();
   void rebuild_snapshot();  // caller holds no lock; locks internally
@@ -75,26 +76,23 @@ static remote_details_t cb_remote_details(const device_id_t * id)
   remote_detail_init(&d);
   uint64_t hb = 400;
   bool allow = true;
-  // STOP-ONLY unless this remote is a listed operator. Default (empty operator
-  // list) => stop-only, so an unlisted remote may STOP + is heartbeat-monitored
-  // but can NEVER re-arm. Replaces the previous hardcoded is_stop_only=false,
-  // which accepted every remote as a full operator.
   bool stop_only = true;
   if (g_impl) {
+    const uint32_t remote_id = (id != nullptr) ? id->data : 0U;
     {
       std::lock_guard<std::mutex> lk(g_impl->mtx);
       hb = g_impl->timing.heartbeat_ms;
-      allow = g_impl->cfg.allow_unlisted;
-      stop_only = software_remote_is_stop_only(g_impl->cfg, (id != nullptr) ? id->data : 0U);
+      // ADMISSION: optional allow/denylist; both empty => admitted. A refused
+      // id gets an UNBOND reply (pstop_c prepares it; run() sends it).
+      allow = (remote_id != 0U) && software_remote_admitted(g_impl->cfg, remote_id);
     }
-    // AND-rule: operator authority also requires an explicit OPERATOR
-    // announcement in the BOND currently exposed by the machine thread.
-    const uint32_t remote_id = (id != nullptr) ? id->data : 0U;
+    // AUTHORITY: the remote alone declares stop-only vs operator in every
+    // frame. Seeded here at BOND from the staged frame's role; refreshed per
+    // frame in run() so a live role change follows without a re-bond.
+    // Unspecified (old firmware / bad decode) is stop-only = fail-safe.
     const pstop_aux_role_t role =
-      (g_impl->bond_role_id == remote_id) ? g_impl->bond_role : PSTOP_AUX_ROLE_UNSPECIFIED;
-    if (!stop_only && !pstop_aux_role_is_operator(role)) {
-      stop_only = true;
-    }
+      (g_impl->frame_role_id == remote_id) ? g_impl->frame_role : PSTOP_AUX_ROLE_UNSPECIFIED;
+    stop_only = !pstop_aux_role_is_operator(role);
   }
   remote_detail_set(&d, allow, hb, stop_only);
   return d;
@@ -211,23 +209,44 @@ void SoftwareMachineBackend::Impl::run()
       bool known = pstop_remote_get(&machine.remotes, &req_msg.id) != nullptr;
 
       if (known || req_msg.message == PSTOP_MESSAGE_BOND) {
-        bond_role_id = 0U;
-        bond_role = PSTOP_AUX_ROLE_UNSPECIFIED;
+        frame_role_id = 0U;
+        frame_role = PSTOP_AUX_ROLE_UNSPECIFIED;
         if (req_msg.checksum == req_msg.calculated_checksum &&
-          req_msg.message == PSTOP_MESSAGE_BOND &&
           req_msg.receiver_id.data == cfg.machine_id)
         {
-          bond_role_id = req_msg.id.data;
-          bond_role = pstop_aux_decode_role(&req_msg);
+          frame_role_id = req_msg.id.data;
+          frame_role = pstop_aux_decode_role(&req_msg);
+          // Live role (shared policy, common/pstop_aux_channel.h): refresh the
+          // bonded client's is_stop_only from THIS frame and release any
+          // arming-cycle ownership a stop-only remote holds.
+          if (known) {
+            pstop_aux_apply_role_pre(&machine, &req_msg);
+          }
         }
         pstop_message_init(&resp_msg);
-        if (machine_process_message(&machine, &req_msg, &resp_msg) == PSTOP_OK) {
+        const pstop_error_t err = machine_process_message(&machine, &req_msg, &resp_msg);
+        // A stop-only remote's STOP never opens an arming cycle.
+        if (known && req_msg.checksum == req_msg.calculated_checksum) {
+          pstop_aux_apply_role_post(&machine, &req_msg, err);
+        }
+        if (err == PSTOP_OK) {
+          pstop_message_encode(&resp_msg, respbytes);
+          transport_udp_write(&udp, respbytes, PSTOP_MESSAGE_SIZE,
+              reinterpret_cast<struct sockaddr_in *>(&client));
+        } else if (err == PSTOP_OPERATOR_NOT_ALLOWED) {
+          // Admission refused: pstop_c prepared an UNBOND reply but left the
+          // addressing blank. Fill it and send it so the remote learns it was
+          // refused (it parks until a manual rebond) instead of hearing silence.
+          resp_msg.id.data = cfg.machine_id;
+          resp_msg.receiver_id.data = req_msg.id.data;
+          resp_msg.received_counter = req_msg.counter;
+          resp_msg.received_stamp = req_msg.stamp;
           pstop_message_encode(&resp_msg, respbytes);
           transport_udp_write(&udp, respbytes, PSTOP_MESSAGE_SIZE,
               reinterpret_cast<struct sockaddr_in *>(&client));
         }
-        bond_role_id = 0U;
-        bond_role = PSTOP_AUX_ROLE_UNSPECIFIED;
+        frame_role_id = 0U;
+        frame_role = PSTOP_AUX_ROLE_UNSPECIFIED;
       }
     }
     rebuild_snapshot();
