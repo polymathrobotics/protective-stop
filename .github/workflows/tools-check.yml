@@ -1,0 +1,49 @@
+---
+name: Tools environment (uv)
+
+# Resolves the tools/ uv environment and imports every Python tool in it.
+# `--locked` fails when uv.lock no longer matches pyproject.toml, which is the
+# regression this guards: a dependency edit that is never locked leaves a
+# flashing station resolving something nobody tested.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - tools/**
+      - .github/workflows/tools-check.yml
+  pull_request:
+    paths:
+      - tools/**
+      - .github/workflows/tools-check.yml
+
+jobs:
+  tools_env:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: tools
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Sync the environment against the lock
+        run: uv sync --locked
+
+      - name: Import every tool
+        run: uv run python -m compileall -q . hil
+
+      # The flashers shell out to esptool; proves the environment supplies it
+      # and that flash_station.py's resolution finds that one.
+      - name: esptool resolves
+        run: |
+          uv run esptool version
+          uv run python flash_station.py --selftest
+
+      # Collection exercises conftest.py, rig.py and usb_relay4 (pyserial)
+      # without a rig attached.
+      - name: HIL suite collects
+        run: ./hil/run.sh --collect-only -q
