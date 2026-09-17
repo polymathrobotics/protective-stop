@@ -13,7 +13,7 @@ updates:
           - minor
           - patch
 
-  # NOTE: no `pip` ecosystem is enabled. The Python test tools in tools/
-  # use only the standard library, and there is no tracked requirements.txt
-  # (firmware/managed_components/ is gitignored). Add a `pip` block here if
-  # a real dependency file is introduced.
+  # NOTE: no Python ecosystem is enabled yet. tools/ now tracks pyproject.toml
+  # and uv.lock, so `package-ecosystem: uv` on /tools would bump esptool and the
+  # HIL deps; enable it when someone owns the review of those PRs. Most tools
+  # there are still stdlib-only, and firmware/managed_components/ is gitignored.
