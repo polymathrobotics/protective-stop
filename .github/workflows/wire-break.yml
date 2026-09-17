@@ -1,0 +1,60 @@
+---
+name: Wire break
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  wire-break:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Run wire-format self-tests
+        run: python3 tools/change_control/self_test.py
+      - name: Detect watched changes and apply wire-break label
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          CAN_LABEL: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
+        run: |
+          set -eu
+          signature_changed=false
+          expectation_preexisted=false
+          if git cat-file -e "$BASE_SHA:tools/change_control/wire_format.sha256" 2>/dev/null; then
+            expectation_preexisted=true
+          fi
+          watched_paths='pstop_c/pstop/include/pstop/config.h
+          pstop_c/pstop/include/pstop/constants.h
+          pstop_c/pstop/include/pstop/protocol.h
+          pstop_c/pstop/include/pstop/protocol_data.h
+          pstop_c/pstop/include/pstop/pstop_msg.h
+          pstop_c/pstop/include/pstop/checksum.h
+          pstop_c/pstop/include/pstop/device_id.h
+          pstop_c/pstop/include/pstop/endian.h
+          pstop_c/pstop/src/pstop/pstop_msg.c
+          pstop_c/pstop/src/pstop/checksum.c
+          pstop_c/pstop/src/pstop/endian.c'
+          if { [ "$expectation_preexisted" = true ] && \
+               git diff --name-only "$BASE_SHA"...HEAD | grep -Eq '^tools/change_control/wire_format\.sha256$'; } || \
+             { [ "$expectation_preexisted" = false ] && \
+               git diff --name-only "$BASE_SHA"...HEAD | grep -Fqx -f <(printf '%s\n' "$watched_paths"); }; then
+            signature_changed=true
+          elif ! python3 -m tools.change_control.wire_format check --root . >/dev/null; then
+            signature_changed=true
+          fi
+          if [ "$signature_changed" = true ] && [ "$CAN_LABEL" = true ]; then
+            gh api --method POST 'repos/${{ github.repository }}/issues/'"$PR_NUMBER"'/labels' -f 'labels[]=wire-break' >/dev/null
+          fi
+          labels=$(gh api 'repos/${{ github.repository }}/issues/'"$PR_NUMBER" --jq '[.labels[].name] | join(",")')
+          printf 'PSTOP_PR_LABELS=%s\n' "$labels" >> "$GITHUB_ENV"
+      - name: Enforce wire-format declaration
+        env:
+          PSTOP_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: scripts/check_wire_format.sh
