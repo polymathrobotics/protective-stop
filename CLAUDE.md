@@ -19,8 +19,10 @@ published, so it must be honest about claimed vs demonstrated.
 ## 1. Non-negotiables
 
 ### 1.1 Safety invariants (violating one is a defect, not a style choice)
-- Safe state is **STOP = de-energized**. `OK == 0x00`, `STOP == 0x01`. Never invert;
-  never add a state that defaults to running.
+- Safe state is **STOP = de-energized**. Internal machine/application state uses
+  `OK == 0` and `STOP == 1`; these are not wire bytes. Wire codewords are
+  `PSTOP_MESSAGE_OK == 0x55` and `PSTOP_MESSAGE_STOP == 0x92`. Never invert or
+  confuse either mapping; never add a state that defaults to running.
 - Default and power-on state is STOP. OK is exceptional and continuously justified.
 - The **OPEN→STOP edge is never filtered, delayed, debounced, retried, or buffered**.
   It propagates on the tick it is sampled. Only re-arm may be gated.
@@ -38,7 +40,12 @@ published, so it must be honest about claimed vs demonstrated.
 - Timing config is validated against a compiled envelope at startup and on every
   reconfiguration, and out-of-envelope values are **refused, not silently clamped**.
   Host and ROS 2 floors are one envelope expressed twice — keep them in parity.
-- Re-arm is gated on the operator allowlist, which **defaults to empty**.
+- Machine allowlist/denylist policy controls bond admission only: deny wins, and an
+  empty allowlist admits every non-denied remote. Admission never grants re-arm
+  authority.
+- Re-arm authority derives only from the remote's live announced role. A `stop_only`
+  or unspecified role cannot re-arm; an `operator` role may complete only the required
+  deliberate STOP→OK gesture and never bypasses the arming policy.
 - **A diagnostic that detects must act.** Detection without a forced STOP or controlled
   reset is a log line, not a diagnostic.
 - **Never state a quantitative safety claim the FMEDA does not support.** SFF, DC, PFH
