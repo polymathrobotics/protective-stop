@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 # SPDX-FileCopyrightText: 2026 Polymath Robotics, Inc.
 # SPDX-License-Identifier: Apache-2.0
 """Spec-driven tests for the focused warn-mode change-control checker."""
@@ -425,7 +424,9 @@ class ApprovalAndLinkTests(unittest.TestCase):
         """Emergency E7 must require two current approvals and all three short-form IA subjects."""
         data = snapshot()
         data['pr']['labels'].append({'name': 'emergency'})
-        data['issue_comments'][1]['body'] = 'What changed: tooling\nWhat it could affect: process\nTests: change-control'
+        data['issue_comments'][1]['body'] = (
+            'What changed: tooling\nWhat it could affect: process\nTests: change-control'
+        )
         data['reviews'] = [
             {'user': {'login': AUTHORIZERS[0]}, 'state': 'APPROVED', 'commit_id': 'abc123'},
             {'user': {'login': AUTHORIZERS[1]}, 'state': 'APPROVED', 'commit_id': 'abc123'},
@@ -611,9 +612,7 @@ class CliTests(unittest.TestCase):
     def test_gh_api_rejects_non_list_paginated_page(self):
         """A malformed list page must fail closed rather than hide omitted GitHub records."""
         with self.assertRaisesRegex(RuntimeError, 'non-list page'):
-            self._fake_api({'GET items': {'__pages__': [[{'id': 1}], {'id': 2}]}})(
-                'GET', 'items', paginate=True
-            )
+            self._fake_api({'GET items': {'__pages__': [[{'id': 1}], {'id': 2}]}})('GET', 'items', paginate=True)
 
     def test_gh_api_rejects_missing_collection_in_paginated_page(self):
         """A malformed collection page must fail closed rather than produce partial evidence."""
