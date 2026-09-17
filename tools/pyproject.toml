@@ -1,37 +1,28 @@
 # SPDX-FileCopyrightText: 2026 Polymath Robotics
 # SPDX-License-Identifier: Apache-2.0
 #
-# Dependency declaration for the pstop developer and production tooling.
-# Run everything through `uv run` from this directory; see README section
-# "Tooling setup".
+# The single Python environment for everything in tools/. See README.md.
 
 [project]
 name = "pstop-tools"
 version = "0.1.0"
 description = "Flashing, fleet, chaos, and HIL tooling for the pstop remote and machine nodes"
 license = "Apache-2.0"
+# soak_per_remote.py imports tomllib; lowering this floor breaks it.
 requires-python = ">=3.11"
 
-# esptool is invoked as a subprocess, never imported, so the floor is a CLI
-# contract rather than an API one.
-# flash_pstop.sh selects between the v4 underscore flags and the v5 hyphen
-# flags at runtime, so both major versions work; uv.lock pins the exact one a
-# flashing station gets.
+# esptool is run as a subprocess, not imported.
 dependencies = [
   "esptool>=4.7",
 ]
 
-# The HIL suite runs against real hardware on a rig and is not needed to flash
-# a unit.
-# pyserial is pulled in by usb_relay4, which the power-cycle tests drive.
+# Hardware rig suite; pyserial is used by usb_relay4.
 [project.optional-dependencies]
 hil = [
   "pytest>=8.0",
   "pyserial>=3.5",
 ]
 
-# The tools are flat scripts rather than an importable package today, so there
-# is nothing to build and no console entry points yet.
-# uv still manages the environment and the lock.
+# Flat scripts, nothing to build.
 [tool.uv]
 package = false
