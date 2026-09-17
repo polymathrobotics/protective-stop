@@ -22,10 +22,10 @@ jobs:
         uses: astral-sh/setup-uv@v5
 
       # The linter is stdlib-only, but it lives in tools/ and so runs from the
-      # same locked environment as everything else there — that is what holds
-      # the >=3.11 floor the parsers assume, whatever python the runner ships.
+      # same environment as everything else there — that is what holds the
+      # >=3.11 floor the parsers assume, whatever python the runner ships.
       - name: Safety linter self-tests
-        run: uv run --project tools --locked python -m pytest tools/safety_lint/self_test.py
+        run: uv run --project tools python -m pytest tools/safety_lint/self_test.py
 
       - name: Safety traceability check
-        run: uv run --project tools --locked python -m tools.safety_lint --check
+        run: uv run --project tools python -m tools.safety_lint --check
