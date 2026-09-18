@@ -918,6 +918,12 @@ static esp_err_t api_last_log(httpd_req_t * req)
   size_t cap = PANIC_LOG_BUF_SIZE + 1u;
   char * buf = heap_caps_malloc(cap, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
   if (!buf) {
+    /* Fragmented PSRAM: degrade to the old truncated export rather than fail
+     * (same fallback every other PSRAM alloc in this file takes). */
+    cap = 4096u;
+    buf = malloc(cap);
+  }
+  if (!buf) {
     (void)httpd_resp_set_status(req, "500 Internal Server Error");
     return httpd_resp_sendstr(req, "malloc failed");
   }
