@@ -4,10 +4,14 @@
 // Bounded, in-order TX FIFO for the USB-NCM tether. See ml_usb_tx.h.
 //
 // Concurrency model: ONE producer (lwIP's tcpip thread via netif_transmit) and
-// ONE consumer (the usb_tx drain task). head is written only by
-// the consumer, tail only by the producer; both are atomics, so the ring needs
-// no lock. Each slot's frame is fully written before tail is published
-// (release), and the consumer reads tail with acquire before touching a slot.
+// ONE consumer (the usb_tx drain task). head is written ONLY by the consumer,
+// tail ONLY by the producer; both are atomics, so the ring needs no lock. Each
+// slot's frame is fully written before tail is published (release), and the
+// consumer reads tail with acquire before touching a slot.
+// Disable does not touch head or tail from a third context: it bumps a session
+// epoch and wakes the consumer, which discards every frame stamped with an
+// older epoch — so nothing queued for a torn-down netif can be sent after a
+// quick re-enable, and s_head keeps its single writer.
 #include "ml_usb_tx.h"
 
 #include <stdatomic.h>
@@ -38,11 +42,13 @@ typedef struct
   uint8_t * bytes;
   uint16_t len;
   int64_t queued_us;
+  unsigned epoch; /* tether session this frame belongs to */
 } tx_slot_t;
 
 static tx_slot_t s_slots[TX_SLOTS];
 static atomic_uint s_head, s_tail; /* consumer / producer indices, free-running */
-static atomic_bool s_ready, s_enabled, s_producer_busy;
+static atomic_uint s_epoch; /* bumped on every disable; odd = disabled, even = enabled */
+static atomic_bool s_ready, s_init_started, s_producer_busy;
 static TaskHandle_t s_drain_task;
 static atomic_uint s_sent, s_busy_retries, s_expired, s_full_drops;
 
@@ -56,8 +62,9 @@ static bool usb_drain(void)
       return false; /* empty */
     }
     tx_slot_t * s = &s_slots[head % TX_SLOTS];
-    if (!atomic_load(&s_enabled)) {
-      atomic_fetch_add(&s_expired, 1u); /* disabled mid-flight (stale netif): counted, not lost */
+    unsigned epoch = atomic_load_explicit(&s_epoch, memory_order_acquire);
+    if ((epoch & 1u) || s->epoch != epoch) {
+      atomic_fetch_add(&s_expired, 1u); /* disabled, or queued for a previous session: counted, not sent */
     } else if (esp_timer_get_time() - s->queued_us >= TX_TTL_US) {
       atomic_fetch_add(&s_expired, 1u);
     } else if (!tud_mounted()) {
@@ -103,8 +110,16 @@ esp_err_t ml_usb_tx_init(void)
   if (atomic_load(&s_ready)) {
     return ESP_OK;
   }
+  /* Single-flight: two concurrent starts (admin toggle racing the net
+   * supervisor) must not both allocate a pool and spawn a task. The loser
+   * reports busy; its caller's start fails and retries later. */
+  if (atomic_exchange(&s_init_started, true)) {
+    return atomic_load(&s_ready) ? ESP_OK : ESP_ERR_INVALID_STATE;
+  }
+  atomic_store(&s_epoch, 1u); /* starts disabled */
   uint8_t * pool = heap_caps_malloc(TX_SLOTS * TX_FRAME_MAX, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
   if (pool == NULL) {
+    atomic_store(&s_init_started, false);
     return ESP_ERR_NO_MEM;
   }
   for (unsigned i = 0; i < TX_SLOTS; i++) {
@@ -128,6 +143,7 @@ esp_err_t ml_usb_tx_init(void)
       MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) != pdPASS)
   {
     heap_caps_free(pool);
+    atomic_store(&s_init_started, false);
     return ESP_ERR_NO_MEM;
   }
   atomic_store(&s_ready, true);
@@ -136,27 +152,25 @@ esp_err_t ml_usb_tx_init(void)
 
 void ml_usb_tx_set_enabled(int enabled)
 {
-  if (enabled == 0) {
-    /* Disable FIRST so no new frame is accepted, then drop the queue NOW
-     * (not lazily in the drain): a stop -> quick re-enable must never send a
-     * frame that belonged to the torn-down netif. Consumer-side head write
-     * from a third context is safe here because the drain only advances
-     * head past slots it has already handled and re-reads tail per loop. */
-    atomic_store(&s_enabled, false);
-    unsigned tail = atomic_load_explicit(&s_tail, memory_order_acquire);
-    unsigned head = atomic_load_explicit(&s_head, memory_order_relaxed);
-    if (tail != head) {
-      atomic_fetch_add(&s_expired, tail - head);
-      atomic_store_explicit(&s_head, tail, memory_order_release);
-    }
+  /* Epoch parity carries the enabled state: even = enabled, odd = disabled.
+   * Every transition bumps it, so a frame stamped under an earlier session can
+   * never match again. The consumer is the only s_head writer; wake it so the
+   * discard happens now rather than at the next producer wake. */
+  unsigned e = atomic_load(&s_epoch);
+  bool now_enabled = (e & 1u) == 0u;
+  if ((enabled != 0) == now_enabled) {
     return;
   }
-  atomic_store(&s_enabled, true);
+  atomic_fetch_add_explicit(&s_epoch, 1u, memory_order_acq_rel);
+  if (s_drain_task != NULL) {
+    xTaskNotifyGive(s_drain_task);
+  }
 }
 
 esp_err_t ml_usb_tx_send(const void * buffer, size_t len)
 {
-  if (!atomic_load(&s_ready) || !atomic_load(&s_enabled) || !tud_mounted()) {
+  unsigned epoch = atomic_load_explicit(&s_epoch, memory_order_acquire);
+  if (!atomic_load(&s_ready) || (epoch & 1u) || !tud_mounted()) {
     return ESP_ERR_INVALID_STATE;
   }
   if (buffer == NULL || len == 0 || len > TX_FRAME_MAX) {
@@ -179,6 +193,7 @@ esp_err_t ml_usb_tx_send(const void * buffer, size_t len)
     memcpy(s->bytes, buffer, len);
     s->len = (uint16_t)len;
     s->queued_us = esp_timer_get_time();
+    s->epoch = epoch; /* a disable racing this publish flips parity; the consumer then discards it */
     atomic_store_explicit(&s_tail, tail + 1u, memory_order_release);
     xTaskNotifyGive(s_drain_task);
   }

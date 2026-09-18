@@ -39,8 +39,9 @@ extern "C"
   /* Allocate the ring (PSRAM) and start the drain task. Idempotent. */
   esp_err_t ml_usb_tx_init(void);
 
-  /* Enable/disable submission. Disabling also discards everything queued (the
-   * netif is going away; its frames must not reach the next tether session). */
+  /* Enable/disable submission. Disabling starts a new session epoch: every
+   * frame still queued (or published concurrently) is discarded by the drain
+   * task, counted as expired, and can never reach the next tether session. */
   void ml_usb_tx_set_enabled(int enabled);
 
   /* Copy one Ethernet frame into the ring. Returns immediately; the caller may
