@@ -62,11 +62,11 @@ check_timestamp(const pstop_application_t *app, const protocol_data_t *client, c
     uint64_t diff_received_stamp = get_diff(req->stamp, client->last_received_stamp);
 
     uint64_t now = app->env.get_time_cb();
-    if(now < client->last_timestamp) {
-        return PSTOP_MSG_OUT_OF_ORDER;
+    if(now == client->last_timestamp) {
+        return PSTOP_OK;
     }
 
-    uint64_t diff_sent_stamp = now - client->last_timestamp;
+    uint64_t diff_sent_stamp = get_diff(now, client->last_timestamp);
 
     uint64_t diff_remote_vs_local = get_diff(diff_sent_stamp, diff_received_stamp);
 
