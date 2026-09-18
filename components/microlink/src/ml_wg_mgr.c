@@ -4289,6 +4289,10 @@ static void disco_periodic_probes(microlink_t * ml)
               "s",
               p->hostname,
               (unsigned long)(iv_ms / 1000u));
+          } else {
+            /* Queue full = a reconnect is already pending; don't spin the
+             * gate every disco tick. Hold the fleet-wide floor from now. */
+            s_last_relay_refetch_ms = now;
           }
         }
         /* Escalation: the coord re-fetch above refreshes the PEER's endpoints,
