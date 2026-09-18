@@ -15,6 +15,9 @@ on:
       - tools/**
       - .github/workflows/tools-check.yml
 
+permissions:
+  contents: read
+
 jobs:
   tools_env:
     runs-on: ubuntu-latest
