@@ -85,7 +85,7 @@ curl -s http://$CHIP/state.json | jq '.boot_count, .reset_reason, .rst_hist'
   gateway AND pstop have both been silent 180 s on a previously healthy
   uplink — and that reboot does NOT count toward rollback.
 - `boot_count` 1 = one crash boot, normal recovery (this boot runs
-  DERP-only, auto-restores after 120 s healthy).
+  DERP-only, auto-restores after 10 min healthy).
 - `boot_count` 3 = one more crash-class boot triggers rollback. Ship a
   fix soon.
 - Grab `/api/last_log` before the next reboot overwrites context.
