@@ -12,9 +12,9 @@
 //
 // This adapter copies each outgoing frame into a fixed slot ring and drains it
 // from a small dedicated task: the head frame is offered with a zero-tick
-// timeout; on NCM-busy it is KEPT and retried 2 ms later, in order, until its
-// 100 ms lifetime expires. Stock esp_tinyusb / TinyUSB APIs only; no patches,
-// no linker wraps.
+// timeout; on NCM-busy it is KEPT and retried (2 ms, doubling to 32 ms), in
+// order, until its 100 ms lifetime expires. Stock esp_tinyusb / TinyUSB APIs
+// only; no patches, no linker wraps.
 #pragma once
 
 #include <stddef.h>

@@ -25,7 +25,11 @@
 #define TX_SLOTS 16u /* power of two: indices wrap safely */
 #define TX_FRAME_MAX 1536u /* Ethernet MTU + link-layer headers */
 #define TX_TTL_US 100000 /* same 100 ms lifetime the old sync send had */
-#define TX_RETRY_MS 2 /* drain cadence while the endpoint is busy */
+#define TX_RETRY_MS 2 /* first retry delay while the endpoint is busy... */
+#define TX_RETRY_MAX_MS \
+  32 /* ...doubling to this cap: before the host has configured NCM every
+                            * offer is refused, and a flat 2 ms poll deferred ~800 no-op calls
+                            * onto the TinyUSB task per 16 frames (bench, 2026-09-17) */
 #define TX_TASK_STACK 4096 /* tinyusb_net_send_sync: event group + semaphore + logging */
 #define TX_TASK_PRIO 5 /* below the safety tasks; above idle/lwIP housekeeping */
 
@@ -82,10 +86,13 @@ static bool usb_drain(void)
 static void usb_drain_task(void * arg)
 {
   (void)arg;
+  uint32_t retry_ms = TX_RETRY_MS;
   for (;;) {
     if (usb_drain()) {
-      vTaskDelay(pdMS_TO_TICKS(TX_RETRY_MS)); /* endpoint busy: poll it */
+      vTaskDelay(pdMS_TO_TICKS(retry_ms)); /* endpoint busy: poll it, backing off */
+      if (retry_ms < TX_RETRY_MAX_MS) retry_ms *= 2u;
     } else {
+      retry_ms = TX_RETRY_MS; /* drained (or empty): next burst starts fast again */
       (void)ulTaskNotifyTake(pdTRUE, portMAX_DELAY); /* empty: sleep until a frame arrives */
     }
   }
