@@ -19,7 +19,9 @@ partition-table, ota_data) always comes from tools/production_image/.
 
 A live progress bar tracks each phase; every unit ends in a clear PASS/FAIL
 line and the session keeps a running tally. Nothing here rebuilds firmware or
-needs ESP-IDF — just esptool + the image.
+needs ESP-IDF — just the `tools/` uv environment's esptool + the image. The
+esptool ESP-IDF 5.5 ships is v4 (constraint `esptool~=4.12`) and is refused;
+see the run lines below.
 
 Run it from tools/ through uv, which supplies the locked esptool (v5+; the
 v5 command names are the ones passed below):

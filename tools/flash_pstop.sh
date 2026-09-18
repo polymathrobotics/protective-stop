@@ -7,7 +7,9 @@
 #
 # Flashes the pre-built binaries (bootloader, partition table, otadata, app) to
 # an ESP32-S3 over USB. Use this to bring up new units in production from ONE
-# compiled image per role — no ESP-IDF or rebuild needed, just esptool. After
+# compiled image per role — no ESP-IDF or rebuild needed, just the `tools/` uv
+# environment (`cd tools && uv sync`), which supplies the esptool v5 this uses;
+# the v4 esptool ESP-IDF 5.5 ships will not do. After
 # flashing, the chip self-provisions (per-unit ID from its MAC, auto-joins
 # Tailscale, checks in to the OTA backend if one is configured) and takes all
 # future updates over the network.
