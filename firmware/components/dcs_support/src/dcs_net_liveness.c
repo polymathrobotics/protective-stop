@@ -49,13 +49,13 @@
 
 #define NET_LIVENESS_TIMEOUT_MS \
   180000 /* 180 s of silence (once armed) -> abort.
-                                          * Deliberately ABOVE the boot-count clear
-                                          * window (DCS_SAFETY_CLEAR_AFTER_MS=120s):
-                                          * combined with the fact that liveness
-                                          * aborts no longer count toward rollback,
-                                          * a transient upstream outage can neither
-                                          * ladder nor false-fire quickly. A real
-                                          * lwIP wedge stays wedged far longer. */
+                                          * Independent of the boot-count clear
+                                          * window (DCS_SAFETY_CLEAR_AFTER_MS): a
+                                          * liveness abort neither counts toward
+                                          * rollback nor pauses the age-out — it
+                                          * clears the counter on the next boot
+                                          * (dcs_safety_account_boot). A real lwIP
+                                          * wedge stays wedged far longer than this. */
 #define NET_LIVENESS_POLL_MS 5000 /* re-check target + health every 5 s   */
 
 /* 64-bit ms so the silence math stays correct past the ~49.7-day uint32 ms
