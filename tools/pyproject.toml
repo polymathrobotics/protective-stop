@@ -33,6 +33,7 @@ package = false
 [tool.pytest.ini_options]
 testpaths = [
   "safety_lint/self_test.py",
+  "test",
 ]
 norecursedirs = [
   ".venv",

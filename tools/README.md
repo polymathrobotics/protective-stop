@@ -112,7 +112,7 @@ suites that need no hardware, so it passes on any checkout:
 
 ```sh
 cd tools
-uv run pytest          # linter self-test; no bench needed
+uv run pytest          # linter self-test + the flashing tests; no bench needed
 ```
 
 The rig tests are opt-in, because their fixtures fail rather than skip when no
@@ -123,9 +123,24 @@ tools/hil/run.sh       # the HIL suite; needs the bench (see hil/README.md)
 ```
 
 The flat scripts are deliberately outside that: several take a positional
-integer or exit at import, so they are not collectible, and `test/` plus the
-`pstop_*_test.py` ladders are bash- and script-driven. See
+integer or exit at import, so they are not collectible, and the repo-root
+[`../test/`](../test/) ladders plus the `pstop_*_test.py` harnesses are bash-
+and script-driven. See
 [`../docs/TESTING.md`](../docs/TESTING.md) for those.
+
+### Flashing-tool regression tests
+
+`tools/test/` covers `flash_station.py` and `flash_pstop.sh` against
+`test/fake_esptool.py`, a shim that stands in for the real esptool.
+No hardware is needed; it never opens a port.
+
+```sh
+cd tools
+uv run pytest test/
+```
+
+This is part of the default `uv run pytest` collection above, so a plain run
+from `tools/` already includes it.
 
 ## The one exception: `soak_per_remote.py` in ROS mode
 

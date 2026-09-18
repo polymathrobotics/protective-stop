@@ -119,13 +119,14 @@ def _esptool_version(c):
     return int(m.group(1)) if m else None
 
 
-def esptool_cmd():
-    """The esptool module of the running interpreter, verified to run at >= v5.
+def esptool_cmd(candidate=None):
+    """`candidate` (default: the running interpreter's esptool module), verified
+    to run at >= v5. Exits the process when it does not.
 
     A v4 esptool accepts `version` but rejects the hyphenated subcommands used
     here, which surfaces downstream as a chip that never answers.
     """
-    c = [sys.executable, '-m', 'esptool']
+    c = candidate or [sys.executable, '-m', 'esptool']
     major = _esptool_version(c)
     hint = 'Run this tool through the uv environment: `cd tools && uv sync && uv run python flash_station.py`.'
     if major is None:

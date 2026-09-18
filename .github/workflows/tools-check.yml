@@ -42,5 +42,8 @@ jobs:
           uv run esptool version
           uv run python flash_station.py --selftest
 
+      - name: flash_station.py / flash_pstop.sh regression tests
+        run: uv run pytest
+
       - name: HIL suite collects
         run: ./hil/run.sh --collect-only -q
