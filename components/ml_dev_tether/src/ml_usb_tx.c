@@ -17,6 +17,7 @@
 #include "esp_heap_caps.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/idf_additions.h"
 #include "freertos/task.h"
 #include "tinyusb_net.h"
 #include "tusb.h"
@@ -102,7 +103,23 @@ esp_err_t ml_usb_tx_init(void)
   for (unsigned i = 0; i < TX_SLOTS; i++) {
     s_slots[i].bytes = pool + (i * TX_FRAME_MAX);
   }
-  if (xTaskCreate(usb_drain_task, "usb_tx", TX_TASK_STACK, NULL, TX_TASK_PRIO, &s_drain_task) != pdPASS) {
+  /* Stack + TCB in PSRAM, like the ring: the tether is brought up by the net
+   * supervisor on any Ethernet blip and stays resident, so this must add no
+   * internal-DRAM allocation. An internal 4 KB stack here crash-looped the
+   * Ethernet DUT (2026-09-17): it landed next to the W5500 emac and exposed a
+   * latent overrun into emac->rx_buffer (LoadProhibited in the SPI DMA
+   * teardown, w5500_tsk). Same task with a PSRAM stack: 290 s clean. The
+   * task only blocks and polls; it never touches DMA. */
+  if (
+    xTaskCreateWithCaps(
+      usb_drain_task,
+      "usb_tx",
+      TX_TASK_STACK,
+      NULL,
+      TX_TASK_PRIO,
+      &s_drain_task,
+      MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) != pdPASS)
+  {
     heap_caps_free(pool);
     return ESP_ERR_NO_MEM;
   }
