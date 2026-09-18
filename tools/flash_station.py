@@ -21,12 +21,16 @@ A live progress bar tracks each phase; every unit ends in a clear PASS/FAIL
 line and the session keeps a running tally. Nothing here rebuilds firmware or
 needs ESP-IDF — just esptool + the image.
 
-    tools/flash_station.py                 # loop; use the build-source plugin if present
-    tools/flash_station.py --from-image    # flash the locally staged app, no fetch
-    tools/flash_station.py --fw-sha 40f2   # pin a specific build by sha prefix (plugin)
-    tools/flash_station.py --once          # flash a single unit and exit
-    tools/flash_station.py --erase         # full chip-erase before each flash
-    tools/flash_station.py --selftest      # exercise the plumbing, no hardware
+Run it from tools/ through uv, which supplies the locked esptool (v5+; the
+v5 command names are the ones passed below):
+
+    cd tools
+    uv run python flash_station.py              # loop; use the build-source plugin if present
+    uv run python flash_station.py --from-image # flash the locally staged app, no fetch
+    uv run python flash_station.py --fw-sha 40f2 # pin a specific build by sha prefix (plugin)
+    uv run python flash_station.py --once       # flash a single unit and exit
+    uv run python flash_station.py --erase      # full chip-erase before each flash
+    uv run python flash_station.py --selftest   # exercise the plumbing, no hardware
 
 tools/production_image/ carries secrets (Tailscale key, WiFi creds, admin
 password) and is git-ignored — never commit it.
@@ -96,26 +100,40 @@ def line(msg):
 
 
 # --- esptool resolution ---------------------------------------------------
-def _esptool_works(c):
-    """True only if `c version` actually RUNS (exit 0 + prints a version).
+ESPTOOL_MIN_MAJOR = 5  # v5 renamed every subcommand and flag this tool passes
+
+
+def _esptool_version(c):
+    """The major version `c version` reports, or None if it does not run.
     `python3 -m esptool` on a system python without esptool exits non-zero —
     that must be rejected, not silently accepted."""
     try:
         r = subprocess.run(c + ['version'], capture_output=True, text=True, timeout=15)
-        return r.returncode == 0 and bool(re.search(r'v?\d+\.\d+', r.stdout + r.stderr))
     except Exception:
-        return False
+        return None
+    if 0 != r.returncode:
+        return None
+    m = re.search(r'v?(\d+)\.\d+', r.stdout + r.stderr)
+    return int(m.group(1)) if m else None
 
 
 def esptool_cmd():
-    """The esptool module of the running interpreter, verified to run."""
+    """The esptool module of the running interpreter, verified to run at >= v5.
+
+    A v4 esptool accepts `version` but rejects the hyphenated subcommands used
+    here, which surfaces downstream as a chip that never answers.
+    """
     c = [sys.executable, '-m', 'esptool']
-    if _esptool_works(c):
-        return c
-    sys.exit(
-        f'{C.R}ERROR: no working esptool found. Run this tool through the uv '
-        f'environment: `cd tools && uv sync && uv run python flash_station.py`.{C.X}'
-    )
+    major = _esptool_version(c)
+    hint = 'Run this tool through the uv environment: `cd tools && uv sync && uv run python flash_station.py`.'
+    if major is None:
+        sys.exit(f'{C.R}ERROR: no working esptool found. {hint}{C.X}')
+    if major < ESPTOOL_MIN_MAJOR:
+        sys.exit(
+            f'{C.R}ERROR: esptool v{major} found; v{ESPTOOL_MIN_MAJOR}+ required '
+            f'(this tool uses the v5 command names). {hint}{C.X}'
+        )
+    return c
 
 
 # --- device detection -----------------------------------------------------
