@@ -2319,6 +2319,10 @@ static int add_peer(microlink_t * ml, const ml_peer_update_t * update, bool * sk
     p->last_derp_reconnect_ms = 0;
     p->relay_retry_next_ms = 0;
     p->relay_retry_count = 0;
+    /* Coord re-fetch backoff too: an evicted peer parked at the 30 min cap must
+     * not hand that wait to the fresh peer landing in its slot (@claude, #134). */
+    p->relay_refetch_interval_ms = 0;
+    p->relay_refetch_next_ms = 0;
     /* CMM chain-breaker throttle: an evicted slot's stale stamp would eat the
      * fresh peer's first CallMeMaybe for up to ML_DISCO_CMM_MIN_INTERVAL_MS. */
     p->last_cmm_sent_ms = 0;
