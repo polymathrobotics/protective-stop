@@ -12,14 +12,23 @@ permissions:
 jobs:
   safety_lint:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: tools
     steps:
       - name: Checkout
         uses: actions/checkout@v7
         with:
           persist-credentials: false
 
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      # The linter is stdlib-only, but it lives in tools/ and so runs from the
+      # same environment as everything else there — that is what holds the
+      # >=3.11 floor the parsers assume, whatever python the runner ships.
       - name: Safety linter self-tests
-        run: python3 tools/safety_lint/self_test.py
+        run: uv run pytest
 
       - name: Safety traceability check
-        run: python3 -m tools.safety_lint --check
+        run: uv run python -m safety_lint --check

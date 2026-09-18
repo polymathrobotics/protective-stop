@@ -61,3 +61,6 @@ build/
 install/
 log/
 tools/fleet.env
+
+# uv-managed environment (tools/, and any stale one left by an older run.sh)
+.venv/

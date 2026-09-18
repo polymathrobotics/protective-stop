@@ -31,7 +31,9 @@ Config (TOML — repo config convention):
   admin_url = "http://10.0.0.2"            # remote's own HTTP (mismatch polls)
 
 The ROS 2 source needs rclpy + protective_stop_msg on PYTHONPATH (source the
-workspace); the HTTP source has no dependencies beyond stdlib + tomllib.
+workspace) and must run under that workspace's python, not the tools/ uv
+environment; on Humble that python is 3.10 and needs python3-tomli installed.
+The HTTP source is stdlib + tomllib and runs under `uv run`.
 """
 
 import argparse
@@ -41,7 +43,10 @@ import subprocess
 import time
 import urllib.request
 
-import tomllib
+try:
+    import tomllib
+except ModuleNotFoundError:  # ROS 2 Humble's python 3.10
+    import tomli as tomllib
 
 
 def http_json(url, timeout=6):
