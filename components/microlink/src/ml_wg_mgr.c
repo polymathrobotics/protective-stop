@@ -777,7 +777,11 @@ static bool is_safety_peer(microlink_t * ml, uint32_t vpn_ip)
  * The DERP home-retry ladder keys on this, not on priority_peer_ip alone: a
  * multi-machine remote and every machn have no priority IP set, so their
  * DERP failover path was retried at the calm 60 s cadence while a safety
- * heartbeat depended on it. */
+ * heartbeat depended on it.
+ * Called from the DERP task; lock-free like every other reader of
+ * s_health_peers (httpd via ml_wg_is_health_tracked, the aggregate-health
+ * check below). .ip is an aligned 32-bit word, so a read is never torn; a
+ * stale read only picks the other retry cadence for one round. */
 bool ml_wg_has_safety_peers(const microlink_t * ml)
 {
   if (ml->config.priority_peer_ip != 0) return true;
