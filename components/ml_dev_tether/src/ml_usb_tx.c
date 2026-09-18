@@ -42,7 +42,7 @@ typedef struct
 
 static tx_slot_t s_slots[TX_SLOTS];
 static atomic_uint s_head, s_tail; /* consumer / producer indices, free-running */
-static atomic_bool s_ready, s_enabled;
+static atomic_bool s_ready, s_enabled, s_producer_busy;
 static TaskHandle_t s_drain_task;
 static atomic_uint s_sent, s_busy_retries, s_expired, s_full_drops;
 
@@ -136,9 +136,22 @@ esp_err_t ml_usb_tx_init(void)
 
 void ml_usb_tx_set_enabled(int enabled)
 {
-  atomic_store(&s_enabled, enabled != 0);
-  /* On disable the drain discards whatever is queued (see usb_drain): the
-   * frames belong to a netif that is being torn down. */
+  if (enabled == 0) {
+    /* Disable FIRST so no new frame is accepted, then drop the queue NOW
+     * (not lazily in the drain): a stop -> quick re-enable must never send a
+     * frame that belonged to the torn-down netif. Consumer-side head write
+     * from a third context is safe here because the drain only advances
+     * head past slots it has already handled and re-reads tail per loop. */
+    atomic_store(&s_enabled, false);
+    unsigned tail = atomic_load_explicit(&s_tail, memory_order_acquire);
+    unsigned head = atomic_load_explicit(&s_head, memory_order_relaxed);
+    if (tail != head) {
+      atomic_fetch_add(&s_expired, tail - head);
+      atomic_store_explicit(&s_head, tail, memory_order_release);
+    }
+    return;
+  }
+  atomic_store(&s_enabled, true);
 }
 
 esp_err_t ml_usb_tx_send(const void * buffer, size_t len)
@@ -149,18 +162,28 @@ esp_err_t ml_usb_tx_send(const void * buffer, size_t len)
   if (buffer == NULL || len == 0 || len > TX_FRAME_MAX) {
     return ESP_ERR_INVALID_ARG;
   }
+  /* Single producer by construction (lwIP's tcpip thread is the only caller
+   * of netif_transmit). Guard the invariant so a second caller fails loudly
+   * with a drop instead of two writers racing on one slot. */
+  if (atomic_exchange(&s_producer_busy, true)) {
+    atomic_fetch_add(&s_full_drops, 1u);
+    return ESP_ERR_INVALID_STATE;
+  }
+  esp_err_t r = ESP_OK;
   unsigned tail = atomic_load_explicit(&s_tail, memory_order_relaxed);
   if (tail - atomic_load_explicit(&s_head, memory_order_acquire) >= TX_SLOTS) {
     atomic_fetch_add(&s_full_drops, 1u);
-    return ESP_ERR_NO_MEM; /* lwIP sees a link-layer drop; TCP retransmits */
+    r = ESP_ERR_NO_MEM; /* lwIP sees a link-layer drop; TCP retransmits */
+  } else {
+    tx_slot_t * s = &s_slots[tail % TX_SLOTS];
+    memcpy(s->bytes, buffer, len);
+    s->len = (uint16_t)len;
+    s->queued_us = esp_timer_get_time();
+    atomic_store_explicit(&s_tail, tail + 1u, memory_order_release);
+    xTaskNotifyGive(s_drain_task);
   }
-  tx_slot_t * s = &s_slots[tail % TX_SLOTS];
-  memcpy(s->bytes, buffer, len);
-  s->len = (uint16_t)len;
-  s->queued_us = esp_timer_get_time();
-  atomic_store_explicit(&s_tail, tail + 1u, memory_order_release);
-  xTaskNotifyGive(s_drain_task);
-  return ESP_OK;
+  atomic_store(&s_producer_busy, false);
+  return r;
 }
 
 void ml_usb_tx_get_diag(ml_usb_tx_diag_t * out)
