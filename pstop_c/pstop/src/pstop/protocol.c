@@ -62,14 +62,21 @@ check_timestamp(const pstop_application_t *app, const protocol_data_t *client, c
     uint64_t diff_received_stamp = get_diff(req->stamp, client->last_received_stamp);
 
     uint64_t now = app->env.get_time_cb();
-    if(now == client->last_timestamp) {
-        return PSTOP_OK;
-    }
 
     uint64_t diff_sent_stamp = get_diff(now, client->last_timestamp);
 
     uint64_t diff_remote_vs_local = get_diff(diff_sent_stamp, diff_received_stamp);
 
+    if(diff_sent_stamp == 0U) {
+        // the chances of this happening are extremely unlikely.
+        // It would mean that the amount of time to run through processing
+        // a single message takes 0ms.
+
+        // If this does happen then the received timestamps should also be
+        // close to 0ms. Setting diff_sent_stamp = 1 will mean that the
+        // diff_remote_vs_local is the max number of missed hearbeats.
+        diff_sent_stamp = 1U;
+    }
     uint64_t missed = diff_remote_vs_local / diff_sent_stamp;
     if(missed > (uint64_t)(app->app_config.max_missed_heartbeats + 1U)) {
         return PSTOP_MSG_LOST;
