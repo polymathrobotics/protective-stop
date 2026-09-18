@@ -49,6 +49,8 @@ uv run python soak_disconnect_monitor.py \
   into every event record.
 - `--on-disconnect CMD` runs a shell command once per detected event — a generic
   replacement for the old bench-only HIL button reset (see *Left out*, below).
+  It inherits the monitor's working directory, and a non-zero exit is recorded in
+  `events.log` rather than stopping the run.
 
 It never crashes on a network error: any failed poll is swallowed and the loop
 keeps going, so the monitor outlives the disruptions it is watching. `Ctrl-C`
@@ -142,7 +144,9 @@ The originating bench harness pressed a HIL relay button to auto-recover a
 device-under-test after a disconnect. That is fixture-specific (relay URLs,
 channel wiring, open=pressed polarity) and is deliberately **not** shipped here.
 Use the generic `--on-disconnect CMD` hook if you need equivalent behaviour on
-your own rig, e.g. `--on-disconnect 'cd tools && uv run python usb_relay4.py pulse 1 2'`.
+your own rig, e.g. `--on-disconnect 'uv run python usb_relay4.py pulse 1 --seconds 2'`.
+The hook runs through the shell with the monitor's own working directory, which
+is `tools/` if you started it the way the examples above do.
 The multi-hour checkpoint files the bench version wrote are also dropped;
 `status.txt` plus the CSVs cover the same need without hardcoded checkpoint
 offsets.

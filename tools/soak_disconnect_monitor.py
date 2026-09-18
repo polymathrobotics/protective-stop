@@ -328,7 +328,9 @@ def run(args):
                         log_event(f'  --- console tail ({args.serial}) ---\n{serial.tail(50)}\n  --- end console ---')
                     if args.on_disconnect:
                         try:
-                            subprocess.run(args.on_disconnect, shell=True, timeout=30)
+                            hook = subprocess.run(args.on_disconnect, shell=True, timeout=30)
+                            if 0 != hook.returncode:
+                                log_event(f'  on-disconnect hook EXITED {hook.returncode}: {args.on_disconnect}')
                         except Exception as e:  # noqa: BLE001
                             log_event(f'  on-disconnect hook FAILED: {e}')
 
