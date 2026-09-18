@@ -13,7 +13,7 @@ before opening a pull request.
 | `firmware/`   | ESP-IDF v5.5 project; builds `pstop_remote.bin` for the ESP32-S3 remote.   |
 | `components/` | Shared ESP-IDF components (`microlink`, `ml_dev_tether`, `pstop`).         |
 | `host/`       | Plain-C `machine_app_runner` (robot-side pstop machine; no ESP-IDF).       |
-| `tools/`      | Python test tools and `misra_check.sh` (cppcheck MISRA pre-check).         |
+| `tools/`      | Python test tools and `misra_check.sh` (cppcheck MISRA pre-check). Run them with `uv` — see `tools/README.md`. |
 | `test/`       | Bash test ladders (chaos, netem, soak, recovery).                         |
 | `docs/`       | Design and test documentation.                                            |
 | `hardware/`   | Certified enclosure CAD, schematic, STEP files, BOM, and assembly guide.  |
@@ -65,7 +65,8 @@ make                    # produces ./machine_app_runner
 
 - **Remote protocol / arming policy:** `tools/pstop_test_remote.py` bonds
   over the real wire protocol and runs timed STOP/OK sequences against a
-  runner instance. See `docs/TESTING.md`.
+  runner instance. Run it as `cd tools && uv run python
+  pstop_test_remote.py`; see `docs/TESTING.md` and `tools/README.md`.
 - **Test ladders:** the scripts in `test/` (`chaos_ladder.sh`,
   `netem_ladder.sh`, `longsoak.sh`, `test_suite.sh`, recovery scripts)
   exercise the system under packet loss, latency, and fault injection.
@@ -109,11 +110,12 @@ Note `pstop_c/` is intentionally excluded from the C/C++ hooks.
   function mappings, statuses, evidence citations, and ownership of numeric
   coverage claims. Generated coverage becomes stale whenever document
   citations or statuses change; refresh it with
-  `python3 -m tools.safety_lint --write`. This command recounts citations and
-  statuses from the documents; it does not execute tests or establish that
-  cited tests pass. Write mode refuses to modify the document while
-  unbaselined errors exist. Automatic pre-commit rewriting is deliberately not
-  configured because coverage drops require human review.
+  `cd tools && uv run python -m safety_lint --write` (see `tools/README.md`
+  for the environment). This command recounts
+  citations and statuses from the documents; it does not execute tests or
+  establish that cited tests pass. Write mode refuses to modify the document
+  while unbaselined errors exist. Automatic pre-commit rewriting is
+  deliberately not configured because coverage drops require human review.
 
 Contributions are licensed according to where they land: software and firmware
 under Apache-2.0, hardware design files under CERN-OHL-P-2.0, and documentation

@@ -19,14 +19,20 @@ partition-table, ota_data) always comes from tools/production_image/.
 
 A live progress bar tracks each phase; every unit ends in a clear PASS/FAIL
 line and the session keeps a running tally. Nothing here rebuilds firmware or
-needs ESP-IDF — just esptool + the image.
+needs ESP-IDF — just the `tools/` uv environment's esptool + the image. The
+esptool ESP-IDF 5.5 ships is v4 (constraint `esptool~=4.12`) and is refused;
+see the run lines below.
 
-    tools/flash_station.py                 # loop; use the build-source plugin if present
-    tools/flash_station.py --from-image    # flash the locally staged app, no fetch
-    tools/flash_station.py --fw-sha 40f2   # pin a specific build by sha prefix (plugin)
-    tools/flash_station.py --once          # flash a single unit and exit
-    tools/flash_station.py --erase         # full chip-erase before each flash
-    tools/flash_station.py --selftest      # exercise the plumbing, no hardware
+Run it from tools/ through uv, which supplies the locked esptool (v5+; the
+v5 command names are the ones passed below):
+
+    cd tools
+    uv run python flash_station.py              # loop; use the build-source plugin if present
+    uv run python flash_station.py --from-image # flash the locally staged app, no fetch
+    uv run python flash_station.py --fw-sha 40f2 # pin a specific build by sha prefix (plugin)
+    uv run python flash_station.py --once       # flash a single unit and exit
+    uv run python flash_station.py --erase      # full chip-erase before each flash
+    uv run python flash_station.py --selftest   # exercise the plumbing, no hardware
 
 tools/production_image/ carries secrets (Tailscale key, WiFi creds, admin
 password) and is git-ignored — never commit it.
@@ -95,45 +101,42 @@ def line(msg):
     sys.stdout.flush()
 
 
-# --- esptool resolution + v4/v5 flag differences --------------------------
-def _esptool_works(c):
-    """True only if `c version` actually RUNS (exit 0 + prints a version).
+# --- esptool resolution ---------------------------------------------------
+ESPTOOL_MIN_MAJOR = 5  # v5 renamed every subcommand and flag this tool passes
+
+
+def _esptool_version(c):
+    """The major version `c version` reports, or None if it does not run.
     `python3 -m esptool` on a system python without esptool exits non-zero —
     that must be rejected, not silently accepted."""
     try:
         r = subprocess.run(c + ['version'], capture_output=True, text=True, timeout=15)
-        return r.returncode == 0 and bool(re.search(r'v?\d+\.\d+', r.stdout + r.stderr))
     except Exception:
-        return False
+        return None
+    if 0 != r.returncode:
+        return None
+    m = re.search(r'v?(\d+)\.\d+', r.stdout + r.stderr)
+    return int(m.group(1)) if m else None
 
 
-def esptool_cmd():
-    import glob
+def esptool_cmd(candidate=None):
+    """`candidate` (default: the running interpreter's esptool module), verified
+    to run at >= v5. Exits the process when it does not.
 
-    cands = [['esptool'], ['esptool.py'], [sys.executable, '-m', 'esptool']]
-    # esptool.py shipped inside an ESP-IDF install — usable even when the IDF
-    # env isn't sourced (this is the common case: operator just runs the tool).
-    for p in sorted(glob.glob(os.path.expanduser('~/.espressif/python_env/*/bin/esptool.py')), reverse=True):
-        cands.append([p])
-    idf = os.environ.get('IDF_PATH')
-    if idf:
-        cands.append([os.path.join(idf, 'components', 'esptool_py', 'esptool', 'esptool.py')])
-    for c in cands:
-        if _esptool_works(c):
-            return c
-    sys.exit(
-        f'{C.R}ERROR: no working esptool found. Install it '
-        f'(`pip install esptool`) or run inside the ESP-IDF environment.{C.X}'
-    )
-
-
-def esptool_v5(cmd):
-    try:
-        out = subprocess.run(cmd + ['version'], capture_output=True, text=True, timeout=10)
-        m = re.search(r'(\d+)\.\d+', out.stdout + out.stderr)
-        return bool(m) and int(m.group(1)) >= 5
-    except Exception:
-        return False
+    A v4 esptool accepts `version` but rejects the hyphenated subcommands used
+    here, which surfaces downstream as a chip that never answers.
+    """
+    c = candidate or [sys.executable, '-m', 'esptool']
+    major = _esptool_version(c)
+    hint = 'Run this tool through the uv environment: `cd tools && uv sync && uv run python flash_station.py`.'
+    if major is None:
+        sys.exit(f'{C.R}ERROR: no working esptool found. {hint}{C.X}')
+    if major < ESPTOOL_MIN_MAJOR:
+        sys.exit(
+            f'{C.R}ERROR: esptool v{major} found; v{ESPTOOL_MIN_MAJOR}+ required '
+            f'(this tool uses the v5 command names). {hint}{C.X}'
+        )
+    return c
 
 
 # --- device detection -----------------------------------------------------
@@ -207,7 +210,7 @@ def wait_for_blank(known):
         time.sleep(0.4)
 
 
-def read_mac(cmd, port, v5=False, tries=READ_MAC_TRIES):
+def read_mac(cmd, port, tries=READ_MAC_TRIES):
     """Return (mac_str, mac24_hex) or (None, None).
 
     Retries: an ESP32-S3 in USB-JTAG download mode very often fails to sync on
@@ -215,7 +218,7 @@ def read_mac(cmd, port, v5=False, tries=READ_MAC_TRIES):
     settled yet). Each attempt also lets esptool retry the sync itself
     (--connect-attempts), and we back off + retry the whole call `tries` times.
     """
-    sub = 'read-mac' if v5 else 'read_mac'
+    sub = 'read-mac'
     last = ''
     for i in range(tries):
         try:
@@ -240,7 +243,7 @@ def read_mac(cmd, port, v5=False, tries=READ_MAC_TRIES):
 
 
 # --- the flash, with a byte-accurate progress bar -------------------------
-def flash(cmd, port, v5, erase, on_progress):
+def flash(cmd, port, erase, on_progress):
     for _, fn in IMAGES:
         if not os.path.isfile(os.path.join(IMG, fn)):
             return False, f'missing {IMG}/{fn} — stage a build first'
@@ -258,19 +261,7 @@ def flash(cmd, port, v5, erase, on_progress):
                 acc += addr - base
         return acc
 
-    o = (
-        ('write-flash', 'erase-flash', '--flash-mode', '--flash-size', '--flash-freq', 'default-reset', 'hard-reset')
-        if v5
-        else (
-            'write_flash',
-            'erase_flash',
-            '--flash_mode',
-            '--flash_size',
-            '--flash_freq',
-            'default_reset',
-            'hard_reset',
-        )
-    )
+    o = ('write-flash', 'erase-flash', '--flash-mode', '--flash-size', '--flash-freq', 'default-reset', 'hard-reset')
     WF, EF, MODE, SIZE, FREQ, BEFORE, AFTER = o
 
     if erase:
@@ -443,10 +434,10 @@ def confirm_hardware(ip):
 
 
 # --- one full unit cycle --------------------------------------------------
-def flash_one(cmd, v5, port, erase, ip_timeout, app_ver='?', keep_peers=False):
+def flash_one(cmd, port, erase, ip_timeout, app_ver='?', keep_peers=False):
     line(f'{C.BOLD}▶ unit on {port}{C.X}  (app {app_ver})')
     bar(0.02, 'read-mac')
-    mac, mac24 = read_mac(cmd, port, v5)
+    mac, mac24 = read_mac(cmd, port)
     if not mac24:
         line(
             f'  {C.R}✗ chip not responding on {port} after {READ_MAC_TRIES} tries '
@@ -468,7 +459,7 @@ def flash_one(cmd, v5, port, erase, ip_timeout, app_ver='?', keep_peers=False):
             lo, hi = 0.0, 0.05
         bar(lo + (hi - lo) * frac, phase)
 
-    ok, err = flash(cmd, port, v5, erase, prog)
+    ok, err = flash(cmd, port, erase, prog)
     if not ok:
         line(f'  {C.R}✗ FLASH FAILED: {err}{C.X}')
         return False, {'port': port, 'node': host, 'stage': 'flash', 'err': err}
@@ -533,9 +524,9 @@ def source_refresh(project, pin_sha, current_sha):
 
 
 # --- selftest (no hardware) ----------------------------------------------
-def selftest(cmd, v5):
+def selftest(cmd):
     print(f'{C.BOLD}flash_station selftest{C.X}')
-    print(f'  esptool: {" ".join(cmd)}  (v5 flags: {v5})')
+    print(f'  esptool: {" ".join(cmd)}')
     miss = [fn for _, fn in IMAGES if not os.path.isfile(os.path.join(IMG, fn))]
     print(f'  image dir {IMG}: ' + (f'{C.G}complete{C.X}' if not miss else f'{C.Y}missing {miss}{C.X}'))
     print(f'  download-mode ports now: {download_ports() or "none"}')
@@ -574,10 +565,9 @@ def main():
     args = ap.parse_args()
 
     cmd = esptool_cmd()
-    v5 = esptool_v5(cmd)
 
     if args.selftest:
-        selftest(cmd, v5)
+        selftest(cmd)
         return
 
     # The stable boot trio always comes from production_image/ (the plugin
@@ -646,7 +636,7 @@ def main():
                     app_sha, app_ver = img['sha256'], img['version']
                     line(f'{C.B}  {_prov.LABEL}: newer build → {app_ver} ({app_sha[:12]}); flashing it.{C.X}')
             line('')
-            ok, info = flash_one(cmd, v5, port, args.erase, args.ip_timeout, app_ver, args.keep_peers)
+            ok, info = flash_one(cmd, port, args.erase, args.ip_timeout, app_ver, args.keep_peers)
             if ok:
                 n_ok += 1
             else:

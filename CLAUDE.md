@@ -397,8 +397,9 @@ branch.
 ### 8.3 Stack
 ESP-IDF v5.5 · ESP32-S3 · C (firmware, host, `pstop_c`) · C++ (ROS 2) · CMake / Make /
 colcon-ament · cppcheck + MISRA C:2012 · gcc-14 + gcovr (host and firmware core) ·
-Bullseye (`pstop_c`, two-tool split settled 2026-08-02) · Python 3 stdlib only for
-tooling · WireGuard/Tailscale underlay · pre-commit with `polymath_code_standard`
+Bullseye (`pstop_c`, two-tool split settled 2026-08-02) · Python 3 tooling in the
+uv environment `tools/pyproject.toml` locks (`esptool>=5`, `pyserial`), not a
+sourced ESP-IDF · WireGuard/Tailscale underlay · pre-commit with `polymath_code_standard`
 v2.2.0 (excludes `pstop_c/`, `ros2/`, `archive/`, vendored WireGuard and x25519,
 `hardware/` binaries). Adding to this list is a decision, not a convenience.
 

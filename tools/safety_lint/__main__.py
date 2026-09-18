@@ -13,6 +13,10 @@ from .model import LintError
 from .render import render_traceability
 from .runner import analyze
 
+# tools/safety_lint/__main__.py -> the repository root.
+# The linter resolves every document against this, so it runs from any directory.
+REPO_ROOT = Path(__file__).resolve().parents[2]
+
 
 def _load_baseline(path):
     if not path.is_file():
@@ -63,7 +67,7 @@ def main(argv=None):
     parser.add_argument('--check', action='store_true')
     parser.add_argument('--write', action='store_true')
     parser.add_argument('--json', action='store_true')
-    parser.add_argument('--root', default='.', help=argparse.SUPPRESS)
+    parser.add_argument('--root', default=REPO_ROOT, help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
     if args.check and args.write:
         parser.error('--check and --write are mutually exclusive')
@@ -115,7 +119,7 @@ def main(argv=None):
                 print(f'  SR-{area}: {data["count"]} total, {data["cited"]} cited, {data["Verified"]} Verified')
             if args.check and stale:
                 print(
-                    'docs/safety/TRACEABILITY.md: generated regions are stale; run python3 -m tools.safety_lint --write'
+                    'docs/safety/TRACEABILITY.md: generated regions are stale; run: cd tools && uv run python -m safety_lint --write'
                 )
         failed = bool(active_errors) or (args.check and stale)
         return 1 if failed else 0
