@@ -95,12 +95,14 @@ cd tools/hil
 `safety_lint/` parses the safety documents, checks the requirement, function,
 and evidence mappings, and owns the generated coverage numbers in
 `docs/safety/TRACEABILITY.md`.
-It is stdlib-only but runs from this environment like everything else here, and
-from the repo root, since it reads paths relative to the root:
+It is stdlib-only but runs from this environment like everything else here.
+It resolves the safety documents against the repository root it is checked into,
+so the working directory does not matter:
 
 ```sh
-uv run --project tools python -m tools.safety_lint --check    # CI's gate
-uv run --project tools python -m tools.safety_lint --write    # refresh coverage
+cd tools
+uv run python -m safety_lint --check    # CI's gate
+uv run python -m safety_lint --write    # refresh coverage
 ```
 
 ## Tests

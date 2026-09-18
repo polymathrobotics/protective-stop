@@ -12,6 +12,9 @@ permissions:
 jobs:
   safety_lint:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: tools
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -25,7 +28,7 @@ jobs:
       # same environment as everything else there — that is what holds the
       # >=3.11 floor the parsers assume, whatever python the runner ships.
       - name: Safety linter self-tests
-        run: uv run --project tools python -m pytest tools/safety_lint/self_test.py
+        run: uv run pytest
 
       - name: Safety traceability check
-        run: uv run --project tools python -m tools.safety_lint --check
+        run: uv run python -m safety_lint --check
