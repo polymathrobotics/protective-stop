@@ -57,7 +57,7 @@ static bool usb_drain(void)
     }
     tx_slot_t * s = &s_slots[head % TX_SLOTS];
     if (!atomic_load(&s_enabled)) {
-      /* Disabled mid-flight: discard silently (stale netif). */
+      atomic_fetch_add(&s_expired, 1u); /* disabled mid-flight (stale netif): counted, not lost */
     } else if (esp_timer_get_time() - s->queued_us >= TX_TTL_US) {
       atomic_fetch_add(&s_expired, 1u);
     } else if (!tud_mounted()) {
@@ -172,5 +172,10 @@ void ml_usb_tx_get_diag(ml_usb_tx_diag_t * out)
   out->busy_retries = atomic_load(&s_busy_retries);
   out->expired = atomic_load(&s_expired);
   out->full_drops = atomic_load(&s_full_drops);
-  out->pending = atomic_load(&s_tail) - atomic_load(&s_head);
+  /* Two independent atomics: read head FIRST so a producer racing in between
+   * can only make the difference larger by real frames, never wrap negative
+   * (tail read first + a concurrent retire could yield ~4e9). */
+  unsigned head = atomic_load(&s_head);
+  unsigned tail = atomic_load(&s_tail);
+  out->pending = (tail - head <= TX_SLOTS) ? (tail - head) : TX_SLOTS;
 }
