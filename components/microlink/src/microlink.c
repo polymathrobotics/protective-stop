@@ -856,6 +856,10 @@ esp_err_t microlink_get_peer_info(const microlink_t * ml, int index, microlink_p
   info->hs_cand_ip = 0;
   info->hs_cand_port = 0;
   info->wg_up = false;
+  info->wg_active = false;
+  info->wg_send_hs = false;
+  info->wg_hs_pending = false;
+  info->wg_init_age_ms = 0xFFFFFFFFu; /* "never" until a WG peer says otherwise */
   uint64_t now = ml_get_time_ms();
   info->ping_age_ms = (p->last_ping_sent_ms != 0) ? (uint32_t)(now - p->last_ping_sent_ms) : 0xFFFFFFFFu;
   info->backoff_ms = (p->direct_backoff_until > now) ? (uint32_t)(p->direct_backoff_until - now) : 0u;
@@ -867,6 +871,10 @@ esp_err_t microlink_get_peer_info(const microlink_t * ml, int index, microlink_p
     ip_addr_t cur_ip;
     u16_t cur_port;
     info->wg_up = (wireguardif_peer_is_up(netif, (u8_t)p->wg_peer_index, &cur_ip, &cur_port) == ERR_OK);
+    /* Diagnostic snapshot of plain scalars owned by the TCPIP thread, read
+     * without the core lock on purpose: a torn read can only yield a stale
+     * bool or age for one JSON sample, never a fault, and taking the lock from
+     * the HTTP task for telemetry is what stalled the safety loop before. */
     struct wireguard_device * dev = (struct wireguard_device *)netif->state;
     if (dev != NULL && p->wg_peer_index < WIREGUARD_MAX_PEERS) {
       const struct wireguard_peer * wp = &dev->peers[p->wg_peer_index];

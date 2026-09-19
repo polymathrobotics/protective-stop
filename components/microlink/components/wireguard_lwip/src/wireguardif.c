@@ -1044,9 +1044,13 @@ err_t wireguardif_set_hs_candidate(struct netif *netif, u8_t peer_index, const i
 	err_t result = wireguardif_lookup_peer(netif, peer_index, &peer);
 	if (result == ERR_OK) {
 		if (ip && port != 0) {
+			// Written from the disco task, read on the TCPIP thread (peer_output).
+			// Order the writes so a reader that sees a non-zero port also sees the
+			// matching ip/ms; a reader racing the update at worst skips one leg.
+			peer->hs_cand_port = 0;
 			ip_addr_copy(peer->hs_cand_ip, *ip);
-			peer->hs_cand_port = port;
 			peer->hs_cand_ms = wireguard_sys_now();
+			peer->hs_cand_port = port;
 		} else {
 			ip_addr_set_any(false, &peer->hs_cand_ip);
 			peer->hs_cand_port = 0;
