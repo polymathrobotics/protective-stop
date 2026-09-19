@@ -50,7 +50,27 @@ network tether once TinyUSB starts and the serial console goes quiet. Use
 adapter to the UART0 pins. Full first-time walkthrough: `docs/QUICKSTART.md`.
 
 `sdkconfig.credentials` holds secrets (Wi-Fi, Tailscale auth key, admin
-password) and is gitignored — never commit it.
+password) and is gitignored — never commit it. Every value in it is compiled
+into the `.bin` **and** the `.elf` as a plain string, so a build made with a
+credentials file present is private and must never be attached to a GitHub
+release or shared outside the organisation.
+
+### Publishing release binaries
+
+Only builds made **without** a credentials file go on a release. Build them in a
+clean checkout with `idf.py -DPROJECT_VER=<tag>-public build merge-bin` (the
+`-public` suffix keeps `fw_ver` distinguishable from private builds of the same
+commit), then run the guard on every artifact before `gh release upload`:
+
+```sh
+tools/release_guard.sh firmware/build/pstop_remote.bin firmware/build/pstop_remote.elf ...
+```
+
+It refuses (exit 1) any file that carries the private-build brand (every
+image compiled while a credentials file was present is branded
+`ML-BUILD-WITH-CREDENTIALS`, so the verdict does not depend on which
+credentials file the checking machine has), any value of a local credentials
+file, or a secret-shaped string (`tskey-…`, PEM keys, literal auth tokens).
 
 ### Host runner (robot-side machine)
 
