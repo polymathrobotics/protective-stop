@@ -930,6 +930,7 @@ uint32_t ml_wg_get_relay_refetch_interval_s(void)
 static uint32_t s_diag_relay_disco_resets; /* per-peer from-scratch disco resets on a relay-stuck safety peer
                                             * (v2: rate-limited per-peer via p->disco_reset_next_ms) */
 static uint32_t s_diag_hs_cand_pings; /* disco pings fanned out to the WG handshake candidate */
+static uint32_t s_diag_safety_reconnects; /* wireguardif_connect() on a keyless safety peer regaining direct */
 static uint32_t s_diag_ep_learn_evictions; /* learn-from-ping ring-evictions on a full endpoint table —
                                             * nonzero = the B-1 wedge trigger occurred and was absorbed */
 static uint32_t s_diag_peer_table_full; /* over-cap add refusals; the LOG is rate-limited (task #60: the
@@ -1001,6 +1002,11 @@ void ml_wg_get_reingest_diag(uint32_t out[6])
 uint32_t ml_wg_get_hs_cand_pings(void)
 {
   return s_diag_hs_cand_pings;
+}
+
+uint32_t ml_wg_get_safety_reconnects(void)
+{
+  return s_diag_safety_reconnects;
 }
 
 void ml_wg_get_session_diag(microlink_t * ml, uint32_t out[7])
@@ -3159,7 +3165,24 @@ static void process_disco_pong(
                      * Instead, just fire a single handshake init. If the peer
                      * has us configured, it will respond and establish session.
                      * If not, we stop and wait for them to initiate. */
-          if (!p->tried_initial_handshake) {
+          if (is_safety_peer(ml, p->vpn_ip)) {
+            /* Safety peer (the machine) with NO session on a direct endpoint —
+             * first pong after boot, or a regain after the demote's
+             * connect_derp() left the LIVE endpoint (peer->ip) at 0.0.0.0 so
+             * initiations went relay-only (update_endpoint() above only stores
+             * connect_ip). The one-shot below deliberately leaves active=false
+             * and waits for the peer to initiate — right for bulk peers that may
+             * have trimmed us, a deadlock for the machine host, whose
+             * wireguard-go initiates only when it has data and has nothing to
+             * send while we are silent (bench 2026-09-19: stuck indefinitely
+             * with the relay dead; a stale-but-"valid" keypair took the is_up
+             * branch above instead and recovered in seconds — a lottery).
+             * connect() re-points peer->ip and retries the handshake every
+             * REKEY_TIMEOUT; unlimited retries are correct for the machine. */
+            wireguardif_connect(netif, (u8_t)p->wg_peer_index);
+            s_diag_safety_reconnects++;
+            ESP_LOGW(TAG, "WG safety peer %s: direct endpoint, no session — connecting with retries", p->hostname);
+          } else if (!p->tried_initial_handshake) {
             p->tried_initial_handshake = true;
             /* Store endpoint so wireguardif_connect sends to it */
             wireguardif_update_endpoint(netif, (u8_t)p->wg_peer_index, &ep_ip, pkt->src_port);
