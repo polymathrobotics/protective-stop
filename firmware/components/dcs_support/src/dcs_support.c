@@ -96,6 +96,8 @@ atomic_uint_fast32_t g_dcs_pstop_sent;
 atomic_uint_fast32_t g_dcs_pstop_replies;
 atomic_uint_fast32_t g_dcs_pstop_last_msg; /* last PSTOP_MESSAGE_* received from the machine */
 atomic_uint_fast32_t g_dcs_pstop_mismatch;
+atomic_uint_fast32_t g_dcs_pstop_mm[7]; /* mismatch attribution — layout in dcs_internal.h */
+atomic_uint_fast32_t g_dcs_nvs_write[2]; /* last dcs-side NVS write — layout in dcs_internal.h */
 atomic_uint_fast32_t g_dcs_pstop_send_fail;
 atomic_uint_fast32_t g_dcs_pstop_sf_nomem;
 atomic_uint_fast32_t g_dcs_pstop_sf_route;

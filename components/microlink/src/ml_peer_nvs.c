@@ -255,13 +255,15 @@ void ml_peer_nvs_set_protected(uint32_t vpn_ip)
 static uint32_t s_diag_flush_last_ms;
 static uint32_t s_diag_flush_max_ms;
 static uint32_t s_diag_flush_count;
+static uint32_t s_diag_flush_at_ms; /* uptime ms at the START of the last flush (soak item 5: overlap test) */
 static uint64_t s_defer_start_ms; /* nonzero while an ingest-busy deferral runs */
 
-void ml_peer_nvs_get_flush_diag(uint32_t out[3])
+void ml_peer_nvs_get_flush_diag(uint32_t out[4])
 {
   out[0] = s_diag_flush_last_ms;
   out[1] = s_diag_flush_max_ms;
   out[2] = s_diag_flush_count;
+  out[3] = s_diag_flush_at_ms;
 }
 
 esp_err_t ml_peer_nvs_flush_if_due(uint64_t now_ms, bool ingest_busy)
@@ -291,6 +293,7 @@ esp_err_t ml_peer_nvs_flush_if_due(uint64_t now_ms, bool ingest_busy)
   esp_err_t r = flush_table();
   uint32_t dur = (uint32_t)((esp_timer_get_time() - t0) / 1000);
   s_diag_flush_last_ms = dur;
+  s_diag_flush_at_ms = (uint32_t)(t0 / 1000);
   if (dur > s_diag_flush_max_ms) s_diag_flush_max_ms = dur;
   s_diag_flush_count++;
   s_last_flush_ms = now_ms;
