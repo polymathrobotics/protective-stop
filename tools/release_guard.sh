@@ -33,8 +33,10 @@ public_defaults="$(grep -hoE 'default "[^"]+"' "$REPO"/components/microlink/Kcon
 
 # Kconfig writes strings with \" and \\ escaped; the compiler embeds the unescaped bytes.
 kconfig_unescape() { printf '%s' "$1" | sed -E 's/\\(["\\])/\1/g'; }
-# Escape a literal for grep -P.
-re_escape() { printf '%s' "$1" | sed -E 's/[][\\.^$*+?(){}|/-]/\\&/g'; }
+# Whole-C-string view of an artifact: every NUL becomes a newline, so a
+# NUL-terminated string literal is exactly one line. Portable — needs no
+# grep -P / -z (absent from BSD grep).
+cstrings() { tr '\0' '\n' < "$1"; }
 
 # Layer 2 inputs: "KEY<TAB>value" lines from every credentials file in the tree.
 values=""
@@ -67,14 +69,14 @@ for art in "$@"; do
     if [[ ${#v} -ge 6 ]]; then
       grep -qF -- "$v" "$art" && { echo "LEAK  $art: value of $k present"; leak=1; }
     else
-      grep -qaP -- "\x00$(re_escape "$v")\x00" "$art" && { echo "LEAK  $art: value of $k present"; leak=1; }
+      cstrings "$art" | grep -qaxF -- "$v" && { echo "LEAK  $art: value of $k present"; leak=1; }
     fi
   done <<< "$values"
 
   # 3. secret-shaped strings regardless of any credentials file
   grep -qaE -- 'tskey-(auth|client|api)-[A-Za-z0-9]+' "$art" && { echo "LEAK  $art: Tailscale key pattern present"; leak=1; }
   # header followed by a base64 body — the bare header is an mbedTLS parser constant
-  grep -qazP -- '-----BEGIN [A-Z ]*PRIVATE KEY-----\s*[A-Za-z0-9+/=]{40,}' "$art" && { echo "LEAK  $art: PEM private key present"; leak=1; }
+  tr '\n\r\0' '   ' < "$art" | grep -qaE -- '-----BEGIN [A-Z ]*PRIVATE KEY----- *[A-Za-z0-9+/=]{40,}' && { echo "LEAK  $art: PEM private key present"; leak=1; }
   grep -qaE -- '(^|[^A-Za-z])(Bearer|Basic) [A-Za-z0-9+/=_-]{16,}' "$art" && { echo "LEAK  $art: literal HTTP auth token present"; leak=1; }
 
   if [[ $leak -eq 0 ]]; then echo "clean $art"; else overall=1; fi
