@@ -21,9 +21,11 @@
 #include "esp_timer.h"
 #include "esp_wifi.h"
 #include "lwip/sockets.h"
+#include "lwip/sys.h"
 #include "microlink_internal.h"
 #include "nvs.h"
 #include "nvs_flash.h"
+#include "wireguardif.h" /* peer path-recovery diagnostics in microlink_get_peer_info */
 
 static const char * TAG = "microlink";
 
@@ -848,6 +850,33 @@ esp_err_t microlink_get_peer_info(const microlink_t * ml, int index, microlink_p
   info->online = p->active;
   info->direct_path = p->has_direct_path;
   info->derp_region = p->derp_region;
+  info->endpoint_count = p->endpoint_count;
+  info->best_ip = p->best_ip;
+  info->best_port = (uint16_t)p->best_port;
+  info->hs_cand_ip = 0;
+  info->hs_cand_port = 0;
+  info->wg_up = false;
+  uint64_t now = ml_get_time_ms();
+  info->ping_age_ms = (p->last_ping_sent_ms != 0) ? (uint32_t)(now - p->last_ping_sent_ms) : 0xFFFFFFFFu;
+  info->backoff_ms = (p->direct_backoff_until > now) ? (uint32_t)(p->direct_backoff_until - now) : 0u;
+  if (ml->wg_netif != NULL && p->wg_peer_index >= 0) {
+    struct netif * netif = (struct netif *)ml->wg_netif;
+    u16_t cport = 0;
+    (void)wireguardif_get_hs_candidate(netif, (u8_t)p->wg_peer_index, &info->hs_cand_ip, &cport);
+    info->hs_cand_port = cport;
+    ip_addr_t cur_ip;
+    u16_t cur_port;
+    info->wg_up = (wireguardif_peer_is_up(netif, (u8_t)p->wg_peer_index, &cur_ip, &cur_port) == ERR_OK);
+    struct wireguard_device * dev = (struct wireguard_device *)netif->state;
+    if (dev != NULL && p->wg_peer_index < WIREGUARD_MAX_PEERS) {
+      const struct wireguard_peer * wp = &dev->peers[p->wg_peer_index];
+      info->wg_active = wp->active;
+      info->wg_send_hs = wp->send_handshake;
+      info->wg_hs_pending = wp->handshake.valid;
+      uint32_t wg_now = sys_now(); /* wireguardif stamps with lwIP sys_now(), not esp_timer */
+      info->wg_init_age_ms = (wp->last_initiation_tx != 0) ? (wg_now - wp->last_initiation_tx) : 0xFFFFFFFFu;
+    }
+  }
   return ESP_OK;
 }
 

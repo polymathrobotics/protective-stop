@@ -929,6 +929,8 @@ uint32_t ml_wg_get_relay_refetch_interval_s(void)
 
 static uint32_t s_diag_relay_disco_resets; /* per-peer from-scratch disco resets on a relay-stuck safety peer
                                             * (v2: rate-limited per-peer via p->disco_reset_next_ms) */
+static uint32_t s_diag_hs_cand_pings; /* disco pings fanned out to the WG handshake candidate */
+static uint32_t s_diag_safety_reconnects; /* wireguardif_connect() on a keyless safety peer regaining direct */
 static uint32_t s_diag_ep_learn_evictions; /* learn-from-ping ring-evictions on a full endpoint table —
                                             * nonzero = the B-1 wedge trigger occurred and was absorbed */
 static uint32_t s_diag_peer_table_full; /* over-cap add refusals; the LOG is rate-limited (task #60: the
@@ -997,6 +999,16 @@ void ml_wg_get_reingest_diag(uint32_t out[6])
  * the WORST safety-peer keypair/init ages. wg_kp_age_max steadily ~<120000
  * (rekey cadence) = healthy; climbing past 120000 = a rekey is starving; a
  * green drop then follows ~60 s later when REJECT_AFTER_TIME kills the key. */
+uint32_t ml_wg_get_hs_cand_pings(void)
+{
+  return s_diag_hs_cand_pings;
+}
+
+uint32_t ml_wg_get_safety_reconnects(void)
+{
+  return s_diag_safety_reconnects;
+}
+
 void ml_wg_get_session_diag(microlink_t * ml, uint32_t out[7])
 {
   out[0] = s_diag_ep_learn_evictions;
@@ -2746,6 +2758,26 @@ static void disco_send_ping_to_peer(microlink_t * ml, int peer_idx, bool force)
         }
       }
     }
+    /* Handshake-candidate leg (safety peers): the source of the most recent
+     * DIRECT disco packet from this peer, as remembered by wireguardif for the
+     * initiation second leg. Pinging it too keeps the far side's lazy
+     * wireguard-go peer configured (only an inbound disco PING does that — a
+     * bare WG initiation never re-adds a trimmed peer) and yields the pong the
+     * normal direct regain needs, even when the candidate table lacks it. */
+    if (has_udp && ml->wg_netif && p->wg_peer_index >= 0 && is_safety_peer(ml, p->vpn_ip)) {
+      uint32_t cand_ip = 0;
+      u16_t cand_port = 0;
+      if (
+        wireguardif_get_hs_candidate((struct netif *)ml->wg_netif, (u8_t)p->wg_peer_index, &cand_ip, &cand_port) ==
+          ERR_OK &&
+        cand_ip != 0 && !(best_sent && cand_ip == p->best_ip && cand_port == p->best_port) &&
+        !peer_has_endpoint(p, cand_ip, cand_port, false))
+      {
+        (void)disco_udp_sendto(ml, pkt, pkt_len, cand_ip, cand_port);
+        s_diag_hs_cand_pings++;
+        direct_sent = true;
+      }
+    }
     if (!has_udp) {
       ESP_LOGW(TAG, "  no UDP path for %s (sock4=%d)", p->hostname, ml->disco_sock4);
     } else if (!direct_sent && p->endpoint_count > 0) {
@@ -2890,6 +2922,19 @@ static void process_disco_ping(
      * flips has_direct_path). Without this, a chip whose stored candidate
      * list is empty (netmap endpoints missed or wiped) stays DERP-only
      * forever even while the peer pings it directly every few seconds. */
+  /* 4a. Handshake second leg (safety peers): remember this direct ping's
+   * source so wireguardif mirrors our initiations there while the peer is
+   * DERP-only — the machine host pinging us directly proves reachability even
+   * when our own probes/pongs are not getting through (bench 2026-09-19). */
+  if (
+    !pkt->via_derp && pkt->src_ip != 0 && pkt->src_port != 0 && is_safety_peer(ml, p->vpn_ip) && ml->wg_netif &&
+    p->wg_peer_index >= 0)
+  {
+    ip_addr_t cand;
+    IP_SET_TYPE_VAL(cand, IPADDR_TYPE_V4);
+    ip4_addr_set_u32(ip_2_ip4(&cand), htonl(pkt->src_ip));
+    (void)wireguardif_set_hs_candidate((struct netif *)ml->wg_netif, (u8_t)p->wg_peer_index, &cand, pkt->src_port);
+  }
   if (!pkt->via_derp && pkt->src_ip != 0 && pkt->src_port != 0 && !p->has_direct_path) {
     bool known = peer_has_endpoint(p, pkt->src_ip, pkt->src_port, false);
     if (!known) {
@@ -3077,6 +3122,9 @@ static void process_disco_pong(
         IP_SET_TYPE_VAL(ep_ip, IPADDR_TYPE_V4);
         ip4_addr_set_u32(ip_2_ip4(&ep_ip), htonl(pkt->src_ip));
         wireguardif_update_endpoint(netif, (u8_t)p->wg_peer_index, &ep_ip, pkt->src_port);
+        if (is_safety_peer(ml, p->vpn_ip)) { /* handshake second leg candidate, see ping path */
+          (void)wireguardif_set_hs_candidate(netif, (u8_t)p->wg_peer_index, &ep_ip, pkt->src_port);
+        }
 
         /* Only call connect (forces handshake) if:
                  * 1. Peer has an active WG session, AND
@@ -3117,7 +3165,24 @@ static void process_disco_pong(
                      * Instead, just fire a single handshake init. If the peer
                      * has us configured, it will respond and establish session.
                      * If not, we stop and wait for them to initiate. */
-          if (!p->tried_initial_handshake) {
+          if (is_safety_peer(ml, p->vpn_ip)) {
+            /* Safety peer (the machine) with NO session on a direct endpoint —
+             * first pong after boot, or a regain after the demote's
+             * connect_derp() left the LIVE endpoint (peer->ip) at 0.0.0.0 so
+             * initiations went relay-only (update_endpoint() above only stores
+             * connect_ip). The one-shot below deliberately leaves active=false
+             * and waits for the peer to initiate — right for bulk peers that may
+             * have trimmed us, a deadlock for the machine host, whose
+             * wireguard-go initiates only when it has data and has nothing to
+             * send while we are silent (bench 2026-09-19: stuck indefinitely
+             * with the relay dead; a stale-but-"valid" keypair took the is_up
+             * branch above instead and recovered in seconds — a lottery).
+             * connect() re-points peer->ip and retries the handshake every
+             * REKEY_TIMEOUT; unlimited retries are correct for the machine. */
+            wireguardif_connect(netif, (u8_t)p->wg_peer_index);
+            s_diag_safety_reconnects++;
+            ESP_LOGW(TAG, "WG safety peer %s: direct endpoint, no session — connecting with retries", p->hostname);
+          } else if (!p->tried_initial_handshake) {
             p->tried_initial_handshake = true;
             /* Store endpoint so wireguardif_connect sends to it */
             wireguardif_update_endpoint(netif, (u8_t)p->wg_peer_index, &ep_ip, pkt->src_port);

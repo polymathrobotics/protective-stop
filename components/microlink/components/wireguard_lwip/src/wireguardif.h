@@ -128,6 +128,13 @@ err_t wireguardif_update_endpoint(struct netif *netif, u8_t peer_index, const ip
 // Try and connect to the given peer
 err_t wireguardif_connect(struct netif *netif, u8_t peer_index);
 
+// Remember where a DIRECT disco packet from this peer came from. While the
+// peer has no direct WG endpoint (DERP-only), handshake initiations are also
+// sent there; a response from it re-adopts the direct endpoint. Safety peers.
+err_t wireguardif_set_hs_candidate(struct netif *netif, u8_t peer_index, const ip_addr_t *ip, u16_t port);
+// Read it back (host-order IPv4, 0 = none/stale). For the disco fan-out.
+err_t wireguardif_get_hs_candidate(struct netif *netif, u8_t peer_index, uint32_t *ip_host, u16_t *port);
+
 // Stop trying to connect to the given peer
 err_t wireguardif_disconnect(struct netif *netif, u8_t peer_index);
 
@@ -158,6 +165,8 @@ err_t wireguardif_peer_handshake_age(struct netif *netif, u8_t peer_index, u32_t
 // vs no-valid-keys (every such send surfaces as ENOTCONN/errno 128).
 extern volatile uint32_t wireguardif_tx_keypair_expired;
 extern volatile uint32_t wireguardif_tx_no_valid_keys;
+// Handshake initiations mirrored to a direct disco-source candidate while DERP-only.
+extern volatile uint32_t wireguardif_hs_cand_sends;
 
 // Register a DERP relay output callback for peers without direct endpoints
 // This callback is invoked when a WireGuard packet needs to be sent to a peer

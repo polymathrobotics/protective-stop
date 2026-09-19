@@ -84,6 +84,8 @@ volatile uint32_t wireguardif_pbuf_alloc_fails = 0;
 // no_valid_keys   = subsequent sends with no session at all (surface as errno 128).
 volatile uint32_t wireguardif_tx_keypair_expired = 0;
 volatile uint32_t wireguardif_tx_no_valid_keys = 0;
+volatile uint32_t wireguardif_hs_cand_sends = 0;
+#define HS_CAND_FRESH_MS 60000u /* a disco source older than this is stale */
 
 #define WIREGUARDIF_TIMER_MSECS 400
 
@@ -169,6 +171,23 @@ static err_t wireguardif_peer_output(struct netif *netif, struct pbuf *q, struct
 			if (data) {
 				pbuf_copy_partial(q, data, q->tot_len, 0);
 				err_t result = device->derp_output_fn(peer->public_key, data, q->tot_len, device->derp_output_ctx);
+				// Second leg for handshake INITIATIONS only: the same bytes to the
+				// most recent direct disco source of this peer (bench 2026-09-19:
+				// a remote sat DERP-only for 7+ min with no valid keypair, its
+				// initiations relayed only, while the machine host pinged it
+				// directly every few seconds; one host-initiated handshake healed
+				// it). One initiation, two legs -> either response completes it,
+				// and a direct response re-adopts the direct endpoint.
+				if (device->udp_output_fn && !ip_addr_isany(&peer->hs_cand_ip) && peer->hs_cand_port != 0 &&
+				    !wireguard_expired(peer->hs_cand_ms, HS_CAND_FRESH_MS / 1000) &&
+				    wireguard_get_message_type(data, q->tot_len) == MESSAGE_HANDSHAKE_INITIATION) {
+					uint32_t cand_ip = ip4_addr_get_u32(ip_2_ip4(&peer->hs_cand_ip));
+					err_t leg2 = device->udp_output_fn(cand_ip, peer->hs_cand_port, data, q->tot_len, device->udp_output_ctx);
+					wireguardif_hs_cand_sends++;
+					if (result != ERR_OK && leg2 == ERR_OK) {
+						result = ERR_OK;
+					}
+				}
 				mem_free(data);
 				return result;
 			}
@@ -1017,6 +1036,34 @@ static err_t wireguardif_lookup_peer(struct netif *netif, u8_t peer_index, struc
 		result = ERR_ARG;
 	}
 	*out = peer;
+	return result;
+}
+
+err_t wireguardif_set_hs_candidate(struct netif *netif, u8_t peer_index, const ip_addr_t *ip, u16_t port) {
+	struct wireguard_peer *peer;
+	err_t result = wireguardif_lookup_peer(netif, peer_index, &peer);
+	if (result == ERR_OK) {
+		if (ip && port != 0) {
+			ip_addr_copy(peer->hs_cand_ip, *ip);
+			peer->hs_cand_port = port;
+			peer->hs_cand_ms = wireguard_sys_now();
+		} else {
+			ip_addr_set_any(false, &peer->hs_cand_ip);
+			peer->hs_cand_port = 0;
+		}
+	}
+	return result;
+}
+
+err_t wireguardif_get_hs_candidate(struct netif *netif, u8_t peer_index, uint32_t *ip_host, u16_t *port) {
+	struct wireguard_peer *peer;
+	err_t result = wireguardif_lookup_peer(netif, peer_index, &peer);
+	if (result == ERR_OK && ip_host && port) {
+		bool fresh = !ip_addr_isany(&peer->hs_cand_ip) && peer->hs_cand_port != 0 &&
+		             !wireguard_expired(peer->hs_cand_ms, HS_CAND_FRESH_MS / 1000);
+		*ip_host = fresh ? lwip_ntohl(ip4_addr_get_u32(ip_2_ip4(&peer->hs_cand_ip))) : 0;
+		*port = fresh ? peer->hs_cand_port : 0;
+	}
 	return result;
 }
 
