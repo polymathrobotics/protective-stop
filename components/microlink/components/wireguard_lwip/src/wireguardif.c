@@ -1055,6 +1055,18 @@ err_t wireguardif_set_hs_candidate(struct netif *netif, u8_t peer_index, const i
 	return result;
 }
 
+err_t wireguardif_get_hs_candidate(struct netif *netif, u8_t peer_index, uint32_t *ip_host, u16_t *port) {
+	struct wireguard_peer *peer;
+	err_t result = wireguardif_lookup_peer(netif, peer_index, &peer);
+	if (result == ERR_OK && ip_host && port) {
+		bool fresh = !ip_addr_isany(&peer->hs_cand_ip) && peer->hs_cand_port != 0 &&
+		             !wireguard_expired(peer->hs_cand_ms, HS_CAND_FRESH_MS / 1000);
+		*ip_host = fresh ? lwip_ntohl(ip4_addr_get_u32(ip_2_ip4(&peer->hs_cand_ip))) : 0;
+		*port = fresh ? peer->hs_cand_port : 0;
+	}
+	return result;
+}
+
 err_t wireguardif_connect(struct netif *netif, u8_t peer_index) {
 	struct wireguard_peer *peer;
 	err_t result = wireguardif_lookup_peer(netif, peer_index, &peer);
