@@ -106,6 +106,63 @@ static esp_err_t on_usb_rx(void * buffer, uint16_t len, void * ctx)
   return r;
 }
 
+/* === USB bus state -> netif link state ============================ */
+
+/* The tether netif was brought up with a synthetic "link connected" and
+ * nothing ever took it down again: a host that de-enumerated us, suspended
+ * the bus, or simply went away left the netif up with its lease, so the net
+ * supervisor kept ranking a dead tether as the best uplink and never failed
+ * over (bench, 2026-09-18: host port de-authorised, device kept 10.42.0.x,
+ * no WiFi for minutes). Mirror the bus state onto the netif: detached or
+ * suspended -> link down (lease dropped, netif_usable() false, supervisor
+ * fails over); attached or resumed -> link up (DHCP restarts).
+ * Runs on the TinyUSB task; the same lock on_usb_rx() uses keeps it from
+ * racing ml_dev_tether_stop()'s esp_netif_destroy(). */
+static void on_usb_event(tinyusb_event_t * event, void * arg)
+{
+  (void)arg;
+  if (event == NULL) {
+    return;
+  }
+  bool link_up;
+  const char * what;
+  switch (event->id) {
+    case TINYUSB_EVENT_ATTACHED:
+      link_up = true;
+      what = "attached";
+      break;
+    case TINYUSB_EVENT_DETACHED:
+      link_up = false;
+      what = "detached";
+      break;
+#ifdef CONFIG_TINYUSB_SUSPEND_CALLBACK
+    case TINYUSB_EVENT_SUSPENDED:
+      link_up = false;
+      what = "suspended";
+      break;
+#endif
+#ifdef CONFIG_TINYUSB_RESUME_CALLBACK
+    case TINYUSB_EVENT_RESUMED:
+      link_up = true;
+      what = "resumed";
+      break;
+#endif
+    default:
+      return;
+  }
+  if (s_rx_lock) xSemaphoreTake(s_rx_lock, portMAX_DELAY);
+  esp_netif_t * n = s_netif;
+  if (n) {
+    ESP_LOGW(TAG, "USB %s -> tether link %s", what, link_up ? "up" : "down");
+    if (link_up) {
+      esp_netif_action_connected(n, 0, 0, 0);
+    } else {
+      esp_netif_action_disconnected(n, 0, 0, 0);
+    }
+  }
+  if (s_rx_lock) xSemaphoreGive(s_rx_lock);
+}
+
 /* === DHCP lease signal ============================================ */
 
 static void on_got_ip(void * arg, esp_event_base_t base, int32_t id, void * data)
@@ -163,7 +220,7 @@ esp_err_t ml_dev_tether_try_start(uint32_t timeout_ms)
 
   /* --- TinyUSB up --- */
   if (!s_tusb_installed) {
-    const tinyusb_config_t tusb_cfg = TINYUSB_DEFAULT_CONFIG();
+    const tinyusb_config_t tusb_cfg = TINYUSB_CONFIG_EVENT(on_usb_event);
     err = tinyusb_driver_install(&tusb_cfg);
     if (err != ESP_OK) {
       ESP_LOGE(TAG, "tinyusb_driver_install: %s", esp_err_to_name(err));
@@ -291,11 +348,17 @@ esp_err_t ml_dev_tether_try_start(uint32_t timeout_ms)
   }
   ml_usb_tx_set_enabled(1);
 
-  /* Use the SAME MAC for the lwIP netif as the NCM endpoint. The IDF
-     * sta2eth example uses different MACs because it bridges to a separate
-     * DHCP server; in our DHCP-CLIENT topology there's a single logical
-     * endpoint and ARP/DHCP must resolve to the same MAC the host sees. */
-  esp_netif_set_mac(s_netif, net_cfg.mac_addr);
+  /* The MAC handed to tinyusb_net_init() is the one the HOST adopts for its
+     * side of the link (CDC-NCM iMACAddress); the lwIP netif is the other end
+     * and needs its own address, like any two NICs on a cable. Sharing one
+     * address (as before) had the host learn the device's IP at the host's
+     * own MAC — it happened to work on Linux, but is a spec violation and
+     * indistinguishable frames in any capture. Flip one more bit: still
+     * locally administered, still derived from the unit's WiFi MAC. */
+  uint8_t dev_mac[6];
+  memcpy(dev_mac, net_cfg.mac_addr, sizeof(dev_mac));
+  dev_mac[5] ^= 0x02;
+  esp_netif_set_mac(s_netif, dev_mac);
 
   /* Bring up the netif and also signal "link connected" — without this,
      * the Ethernet-class netif stays in admin-up/link-down state and the
