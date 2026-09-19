@@ -11,8 +11,6 @@ Please report suspected vulnerabilities **privately**. Do not open a
 public issue, pull request, or discussion for a security problem.
 
 - Email: **security@polymathrobotics.com**
-  _(placeholder — please confirm the correct security contact before this
-  policy is published)_
 
 Include, where possible:
 
