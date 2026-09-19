@@ -21,6 +21,7 @@
 #include "esp_timer.h"
 #include "esp_wifi.h"
 #include "lwip/sockets.h"
+#include "lwip/sys.h"
 #include "microlink_internal.h"
 #include "nvs.h"
 #include "nvs_flash.h"
@@ -866,6 +867,15 @@ esp_err_t microlink_get_peer_info(const microlink_t * ml, int index, microlink_p
     ip_addr_t cur_ip;
     u16_t cur_port;
     info->wg_up = (wireguardif_peer_is_up(netif, (u8_t)p->wg_peer_index, &cur_ip, &cur_port) == ERR_OK);
+    struct wireguard_device * dev = (struct wireguard_device *)netif->state;
+    if (dev != NULL && p->wg_peer_index < WIREGUARD_MAX_PEERS) {
+      const struct wireguard_peer * wp = &dev->peers[p->wg_peer_index];
+      info->wg_active = wp->active;
+      info->wg_send_hs = wp->send_handshake;
+      info->wg_hs_pending = wp->handshake.valid;
+      uint32_t wg_now = sys_now(); /* wireguardif stamps with lwIP sys_now(), not esp_timer */
+      info->wg_init_age_ms = (wp->last_initiation_tx != 0) ? (wg_now - wp->last_initiation_tx) : 0xFFFFFFFFu;
+    }
   }
   return ESP_OK;
 }

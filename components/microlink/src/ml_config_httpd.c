@@ -722,6 +722,10 @@ static esp_err_t handler_get_peers(httpd_req_t * req)
       /* Path-recovery forensics (bench 2026-09-19): enough to tell, after the
        * fact, why a safety peer was or was not being reached directly. */
       cJSON_AddBoolToObject(peer, "wg_up", info.wg_up);
+      cJSON_AddBoolToObject(peer, "wg_active", info.wg_active);
+      cJSON_AddBoolToObject(peer, "wg_send_hs", info.wg_send_hs);
+      cJSON_AddBoolToObject(peer, "wg_hs_pending", info.wg_hs_pending);
+      cJSON_AddNumberToObject(peer, "wg_init_age_ms", info.wg_init_age_ms);
       cJSON_AddNumberToObject(peer, "eps", info.endpoint_count);
       char ep_str[24];
       microlink_ip_to_str(info.best_ip, ip_str);
