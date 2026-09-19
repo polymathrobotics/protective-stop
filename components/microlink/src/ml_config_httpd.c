@@ -1143,8 +1143,10 @@ static esp_err_t handler_monitor(httpd_req_t * req)
        * table wedge being absorbed instead of going terminal). */
       extern volatile uint32_t wireguardif_tx_keypair_expired;
       extern volatile uint32_t wireguardif_tx_no_valid_keys;
+      extern volatile uint32_t wireguardif_hs_cand_sends;
       cJSON_AddNumberToObject(json, "wg_tx_keypair_expired", wireguardif_tx_keypair_expired);
       cJSON_AddNumberToObject(json, "wg_tx_no_valid_keys", wireguardif_tx_no_valid_keys);
+      cJSON_AddNumberToObject(json, "wg_hs_cand_sends", wireguardif_hs_cand_sends);
       extern uint32_t ml_derp_get_route_fallbacks(void);
       cJSON_AddNumberToObject(json, "derp_route_fallbacks", ml_derp_get_route_fallbacks());
       /* home_pumps: home-conn rx drains performed DURING an aux DERP connect,

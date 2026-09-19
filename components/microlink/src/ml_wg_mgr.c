@@ -2890,6 +2890,19 @@ static void process_disco_ping(
      * flips has_direct_path). Without this, a chip whose stored candidate
      * list is empty (netmap endpoints missed or wiped) stays DERP-only
      * forever even while the peer pings it directly every few seconds. */
+  /* 4a. Handshake second leg (safety peers): remember this direct ping's
+   * source so wireguardif mirrors our initiations there while the peer is
+   * DERP-only — the machine host pinging us directly proves reachability even
+   * when our own probes/pongs are not getting through (bench 2026-09-19). */
+  if (
+    !pkt->via_derp && pkt->src_ip != 0 && pkt->src_port != 0 && is_safety_peer(ml, p->vpn_ip) && ml->wg_netif &&
+    p->wg_peer_index >= 0)
+  {
+    ip_addr_t cand;
+    IP_SET_TYPE_VAL(cand, IPADDR_TYPE_V4);
+    ip4_addr_set_u32(ip_2_ip4(&cand), htonl(pkt->src_ip));
+    (void)wireguardif_set_hs_candidate((struct netif *)ml->wg_netif, (u8_t)p->wg_peer_index, &cand, pkt->src_port);
+  }
   if (!pkt->via_derp && pkt->src_ip != 0 && pkt->src_port != 0 && !p->has_direct_path) {
     bool known = peer_has_endpoint(p, pkt->src_ip, pkt->src_port, false);
     if (!known) {
@@ -3077,6 +3090,9 @@ static void process_disco_pong(
         IP_SET_TYPE_VAL(ep_ip, IPADDR_TYPE_V4);
         ip4_addr_set_u32(ip_2_ip4(&ep_ip), htonl(pkt->src_ip));
         wireguardif_update_endpoint(netif, (u8_t)p->wg_peer_index, &ep_ip, pkt->src_port);
+        if (is_safety_peer(ml, p->vpn_ip)) { /* handshake second leg candidate, see ping path */
+          (void)wireguardif_set_hs_candidate(netif, (u8_t)p->wg_peer_index, &ep_ip, pkt->src_port);
+        }
 
         /* Only call connect (forces handshake) if:
                  * 1. Peer has an active WG session, AND
