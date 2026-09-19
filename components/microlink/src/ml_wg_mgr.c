@@ -3165,7 +3165,7 @@ static void process_disco_pong(
                      * Instead, just fire a single handshake init. If the peer
                      * has us configured, it will respond and establish session.
                      * If not, we stop and wait for them to initiate. */
-          if (is_safety_peer(ml, p->vpn_ip)) {
+          if (is_safety_peer(ml, p->vpn_ip) && (now - p->last_safety_connect_ms >= 5000u)) {
             /* Safety peer (the machine) with NO session on a direct endpoint —
              * first pong after boot, or a regain after the demote's
              * connect_derp() left the LIVE endpoint (peer->ip) at 0.0.0.0 so
@@ -3179,6 +3179,11 @@ static void process_disco_pong(
              * branch above instead and recovered in seconds — a lottery).
              * connect() re-points peer->ip and retries the handshake every
              * REKEY_TIMEOUT; unlimited retries are correct for the machine. */
+            /* Paced to WireGuard's REKEY_TIMEOUT: pongs arrive several times a
+             * second and connect() resets the pending handshake, so without the
+             * pace a slow path could keep answering an already-superseded
+             * initiation (peer review, 2026-09-19). */
+            p->last_safety_connect_ms = now;
             wireguardif_connect(netif, (u8_t)p->wg_peer_index);
             s_diag_safety_reconnects++;
             ESP_LOGW(TAG, "WG safety peer %s: direct endpoint, no session — connecting with retries", p->hostname);
