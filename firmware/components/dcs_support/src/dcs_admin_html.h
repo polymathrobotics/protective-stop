@@ -33,7 +33,7 @@ static const char k_index_html[] =
   "<link rel='icon' href=\"data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'>"
   "<text y='.9em' font-size='90'>" DCS_PAGE_ICON
   "</text></svg>\">"
-  /* Palette + component styles adopted from the pstop-fleet console so the
+  /* Palette + component styles adopted from the management console so the
    * two consoles read as one system. Same CSS custom properties/tokens. */
   "<style>*{box-sizing:border-box}"
   ":root{--bg:#0d1117;--panel:#161b22;--panel2:#1b212a;--line:#30363d;"
