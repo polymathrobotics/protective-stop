@@ -193,6 +193,8 @@ atomic_uint_fast32_t g_dcs_eth_rec_r2;
 atomic_uint_fast32_t g_dcs_eth_rec_r3;
 atomic_uint_fast32_t g_dcs_eth_rec_reason;
 atomic_uint_fast32_t g_dcs_eth_spi_err;
+atomic_uint_fast32_t g_dcs_eth_int_low_ticks;
+atomic_uint_fast32_t g_dcs_eth_int_low_max_ms;
 atomic_uint_fast32_t g_dcs_rgb_cycles;
 atomic_uint_fast32_t g_dcs_pstop_rebonds;
 atomic_uint_fast32_t g_dcs_relay_fault_a;
