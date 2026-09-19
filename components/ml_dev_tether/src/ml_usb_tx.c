@@ -26,9 +26,19 @@
 #include "tinyusb_net.h"
 #include "tusb.h"
 
-#define TX_SLOTS 16u /* power of two: indices wrap safely */
+#define TX_SLOTS \
+  64u /* power of two: indices wrap safely. 16 lost ~1 safety frame/min on a
+       * remote behind a dock hub chain (bench 2026-09-19: 252 ring-full drops
+       * in 4 h): the disco probe engine emits bursts of >16 frames toward the
+       * tailnet peers, and any pstop frame caught in the burst was dropped
+       * while the endpoint drained. 64 x 1536 B = 96 KB of PSRAM. */
 #define TX_FRAME_MAX 1536u /* Ethernet MTU + link-layer headers */
-#define TX_TTL_US 100000 /* same 100 ms lifetime the old sync send had */
+#define TX_TTL_US \
+  400000 /* a frame older than this is expired, not sent. 100 ms (the old sync
+          * send's lifetime) expired frames during ordinary host scheduling
+          * hiccups; 400 ms is one heartbeat period, still well inside the
+          * machine's 1.6 s stop-on-silence budget and the machine rejects
+          * anything that arrives out of order anyway. */
 #define TX_RETRY_MS 2 /* first retry delay while the endpoint is busy... */
 #define TX_RETRY_MAX_MS \
   32 /* ...doubling to this cap: before the host has configured NCM every
