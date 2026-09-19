@@ -150,32 +150,53 @@ static int coord_send(microlink_t * ml, const uint8_t * data, size_t len)
   return 0;
 }
 
+/* Wall-clock budget for finishing ONE partial Noise frame (issue #127). The old
+ * bound was a retry COUNT (300 x 10 ms, "~3 s"), but each retry first blocks
+ * for the socket's SO_RCVTIMEO — 2 s in long-poll (poll_map_update), 60 s while
+ * fetching the MapResponse — so a stalled-but-open peer held the coord task for
+ * 300 x 2 s = 10 min, starving the ML_CTRL_WATCHDOG_MS (120 s) check that only
+ * runs between reads. 10 s = the connect-phase SO_RCVTIMEO (do_tcp_connect),
+ * >= 4 whole long-poll socket timeouts (a lost segment + TCP retransmit backoff
+ * fits; control frames are <= 4 KB), and 1/12 of the watchdog, so a stall can
+ * delay that check by at most this + one SO_RCVTIMEO. Progress does NOT extend
+ * it: a trickling peer is a stall too. */
+#define COORD_PARTIAL_FRAME_DEADLINE_MS 10000
+
 static int coord_recv(microlink_t * ml, uint8_t * buf, size_t len)
 {
   size_t recvd = 0;
-  int retries = 0;
+  int timeouts = 0; /* per-read SO_RCVTIMEO expiries since the frame went partial */
+  int64_t deadline_us = 0; /* armed by the first consumed byte */
   while (recvd < len) {
+    if (recvd > 0 && esp_timer_get_time() >= deadline_us) {
+      /* Overall deadline, not a per-read socket timeout: the frame is abandoned
+       * and the stream misaligned, so fail like a dead connection. errno must
+       * NOT stay EAGAIN — noise_recv/poll_map_update read that as "retry later"
+       * and would resume the misaligned stream. */
+      ESP_LOGE(TAG, "coord_recv deadline expired: %d/%d bytes, %d socket timeouts", (int)recvd, (int)len, timeouts);
+      errno = ETIMEDOUT;
+      return -1;
+    }
     int n = ml_recv(ml->coord_sock, buf + recvd, len - recvd, 0);
     if (n <= 0) {
-      if (errno == EAGAIN || errno == EWOULDBLOCK) {
+      if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
         if (recvd == 0) {
           /* No data consumed yet — timeout is fine, caller can retry */
           return -1;
         }
         /* Partial data consumed — we MUST finish this read or the
-                 * Noise frame stream will be misaligned. Retry with backoff. */
-        if (++retries > 300) { /* ~3 seconds */
-          ESP_LOGE(TAG, "coord_recv partial timeout: %d/%d bytes", (int)recvd, (int)len);
-          return -1;
-        }
+         * Noise frame stream will be misaligned. Retry until the deadline. */
+        timeouts++; /* outside ESP_LOGW: its args are compiled out below LOG_LOCAL_LEVEL */
+        ESP_LOGW(TAG, "coord_recv socket timeout #%d mid-frame: %d/%d bytes", timeouts, (int)recvd, (int)len);
         vTaskDelay(pdMS_TO_TICKS(10));
         continue;
       }
+      if (n == 0) errno = ECONNRESET; /* orderly EOF: recv() need not set errno */
       ESP_LOGE(TAG, "coord_recv failed: %d (errno %d, recvd %d/%d)", n, errno, (int)recvd, (int)len);
       return -1;
     }
+    if (recvd == 0) deadline_us = esp_timer_get_time() + COORD_PARTIAL_FRAME_DEADLINE_MS * 1000LL;
     recvd += n;
-    retries = 0; /* Reset on successful read */
   }
   return 0;
 }
@@ -231,13 +252,18 @@ static int noise_recv(microlink_t * ml, ml_noise_state_t * noise, uint8_t * plai
 
   /* Header already consumed — payload read MUST complete or stream
      * alignment is permanently lost. Retry EAGAIN (coord_recv returns -1
-     * with errno==EAGAIN if recvd==0 on first byte). */
+     * with errno==EAGAIN if recvd==0 on first byte) under the same wall-clock
+     * budget coord_recv applies once payload bytes flow; past it fail as
+     * ETIMEDOUT so the caller reconnects instead of resuming misaligned. */
   int payload_retries = 0;
+  int64_t payload_deadline_us = esp_timer_get_time() + COORD_PARTIAL_FRAME_DEADLINE_MS * 1000LL;
   while (coord_recv(ml, ciphertext, ct_len) < 0) {
-    if ((errno == EAGAIN || errno == EWOULDBLOCK) && ++payload_retries <= 300) {
+    if ((errno == EAGAIN || errno == EWOULDBLOCK) && esp_timer_get_time() < payload_deadline_us) {
+      payload_retries++;
       vTaskDelay(pdMS_TO_TICKS(10));
       continue;
     }
+    if (errno == EAGAIN || errno == EWOULDBLOCK) errno = ETIMEDOUT; /* header consumed: not retryable */
     ESP_LOGE(TAG, "noise_recv payload failed: ct_len=%d retries=%d errno=%d", ct_len, payload_retries, errno);
     free(ciphertext);
     return -1;
