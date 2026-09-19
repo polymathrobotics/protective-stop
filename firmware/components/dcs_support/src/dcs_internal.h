@@ -171,6 +171,15 @@ extern "C"
   extern atomic_uint_fast32_t g_dcs_pstop_replies; /* machine replies received */
   extern atomic_uint_fast32_t g_dcs_pstop_last_msg; /* last message TYPE from the machine (PSTOP_MESSAGE_*) */
   extern atomic_uint_fast32_t g_dcs_pstop_mismatch;
+  /* pstop_mismatch attribution (soak item 5; comparator-written; /state.json pstop_mm_*): [0] timeout-class
+   * count (a core missed CORE_PUBLISH_TIMEOUT), [1] content-class count (both published, frames differed),
+   * [2] last event packed = kind<<28 (1 timeout, 2 content) | late_core_mask<<26 (bit0 core0, bit1 core1) |
+   * slot<<24 | first_differing_byte<<16 (0xFF n/a) | verdict0<<8 | verdict1, [3] late core's actual
+   * notify->publish ms (0 = not by the next tick), [4] last event uptime ms, [5],[6] worst latency ms per core. */
+  extern atomic_uint_fast32_t g_dcs_pstop_mm[7];
+  /* Last dcs-side NVS write (dcs_nvs.c; both cores stall for the flash op): [0] start uptime ms, [1] duration ms.
+   * Peer-cache flushes have their own diag (ml_peer_nvs_get_flush_diag). /state.json nvs_dcs / nvs_pf. */
+  extern atomic_uint_fast32_t g_dcs_nvs_write[2];
   extern atomic_uint_fast32_t g_dcs_pstop_send_fail;
   /* send_fail split by cause (errno at the failing sendto): ENOMEM =
    * TX-queue/pbuf pressure (typically DERP relay backpressure), route =

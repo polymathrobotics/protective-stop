@@ -230,14 +230,16 @@ static esp_err_t page_state(httpd_req_t * req)
    */
   enum
   {
-    JSON_CAP = 4352 /* + 5 usb_tx_* counters (<= ~120 B). eth-watchdog fields + bonded-remote stop_only + operator list
+    JSON_CAP = 4864 /* + 5 usb_tx_* counters (<= ~120 B). eth-watchdog fields + bonded-remote stop_only + operator list
                        + instantaneous internal-heap fields (heap_free_int/heap_lfb_int).
                        remote_stop_id + restart_state add <= 47 B worst case against
                        ~940 B live headroom (measured 2026-08-09). derp_region_locked
                        adds <= 27 B. Region auto-negotiation surfacing (source string
                        + auto_applied + counters + mbb_state + switches_1h) adds
                        <= ~160 B worst case — bumped 3776 -> 4096 to keep comfortable
-                       headroom rather than shave the measured margin. */
+                       headroom rather than shave the measured margin. Lockstep-mismatch
+                       attribution (pstop_mm_timeout/content/last, pstop_core_lat_max_ms,
+                       nvs_pf, nvs_dcs) adds <= ~230 B worst case: 4352 -> 4864. */
   };
 
   char * buf = heap_caps_malloc(JSON_CAP, MALLOC_CAP_SPIRAM);
@@ -249,6 +251,9 @@ static esp_err_t page_state(httpd_req_t * req)
   const int cap = JSON_CAP;
   ml_usb_tx_diag_t usb_tx;
   ml_usb_tx_get_diag(&usb_tx); /* zeros until the tether has ever started */
+  extern void ml_peer_nvs_get_flush_diag(uint32_t out[4]); /* peer-cache flash flush: last/max/count/start ms */
+  uint32_t pf[4] = {0};
+  ml_peer_nvs_get_flush_diag(pf);
   int n = snprintf(
     buf,
     cap,
@@ -279,6 +284,8 @@ static esp_err_t page_state(httpd_req_t * req)
     "\"derp_mbb_state\":%d,\"derp_switches_1h\":%lu,"
     "\"pstop_peer_ip\":%lu,\"pstop_peer_port\":%lu,"
     "\"pstop_sent\":%lu,\"pstop_replies\":%lu,\"pstop_last_msg\":%lu,\"pstop_mismatch\":%lu,"
+    "\"pstop_mm_timeout\":%lu,\"pstop_mm_content\":%lu,\"pstop_mm_last\":[%lu,%lu,%lu],"
+    "\"pstop_core_lat_max_ms\":[%lu,%lu],\"nvs_pf\":[%lu,%lu,%lu],\"nvs_dcs\":[%lu,%lu],"
     "\"pstop_send_fail\":%lu,\"pstop_sf_nomem\":%lu,\"pstop_sf_route\":%lu,"
     "\"pstop_sf_txdrv\":%lu,\"pstop_sf_txdrv_recovered\":%lu,\"pstop_sf_other\":%lu,"
     "\"pstop_sf_enotconn\":%lu,\"pstop_sf_enotconn_kicks\":%lu,\"pstop_sf_errno\":%d,\"pstop_"
@@ -371,6 +378,18 @@ static esp_err_t page_state(httpd_req_t * req)
     (unsigned long)atomic_load(&g_dcs_pstop_replies),
     (unsigned long)atomic_load(&g_dcs_pstop_last_msg),
     (unsigned long)atomic_load(&g_dcs_pstop_mismatch),
+    (unsigned long)atomic_load(&g_dcs_pstop_mm[0]),
+    (unsigned long)atomic_load(&g_dcs_pstop_mm[1]),
+    (unsigned long)atomic_load(&g_dcs_pstop_mm[2]), /* packed detail — layout in dcs_internal.h */
+    (unsigned long)atomic_load(&g_dcs_pstop_mm[3]), /* late core's actual publish latency ms */
+    (unsigned long)atomic_load(&g_dcs_pstop_mm[4]), /* last event uptime ms */
+    (unsigned long)atomic_load(&g_dcs_pstop_mm[5]),
+    (unsigned long)atomic_load(&g_dcs_pstop_mm[6]),
+    (unsigned long)pf[3], /* nvs_pf: start uptime ms, duration ms, max duration ms */
+    (unsigned long)pf[0],
+    (unsigned long)pf[1],
+    (unsigned long)atomic_load(&g_dcs_nvs_write[0]), /* nvs_dcs: start uptime ms, duration ms */
+    (unsigned long)atomic_load(&g_dcs_nvs_write[1]),
     (unsigned long)atomic_load(&g_dcs_pstop_send_fail),
     (unsigned long)atomic_load(&g_dcs_pstop_sf_nomem),
     (unsigned long)atomic_load(&g_dcs_pstop_sf_route),

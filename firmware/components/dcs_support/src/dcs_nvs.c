@@ -29,6 +29,7 @@
 #include "dcs_internal.h"
 #include "esp_err.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "nvs.h"
 #include "pstop_aux_channel.h"
 
@@ -621,12 +622,15 @@ esp_err_t dcs_nvs_write_health(const dcs_health_counters_t * c)
   uint8_t blob[DCS_HEALTH_BLOB_LEN];
   dcs_health_encode(c, blob);
   nvs_handle_t h;
+  const uint32_t t0 = (uint32_t)(esp_timer_get_time() / 1000); /* soak item 5: stamp this flash write */
   esp_err_t r = nvs_open(DCS_NVS_NS, NVS_READWRITE, &h);
   if (r != ESP_OK) return r;
-  r = nvs_set_blob(h, DCS_NVS_KEY_HEALTH, blob, sizeof(blob));
+  r = nvs_set_blob(h, DCS_NVS_KEY_HEALTH, blob, sizeof(blob)); /* flash program/erase happens HERE (commit = no-op) */
   if (r == ESP_OK) {
     r = nvs_commit(h);
   }
   nvs_close(h);
+  atomic_store(&g_dcs_nvs_write[1], (uint32_t)(esp_timer_get_time() / 1000) - t0);
+  atomic_store(&g_dcs_nvs_write[0], t0);
   return r;
 }
