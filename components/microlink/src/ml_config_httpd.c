@@ -1166,6 +1166,8 @@ static esp_err_t handler_monitor(httpd_req_t * req)
       cJSON_AddNumberToObject(json, "wg_hs_cand_sends", wireguardif_hs_cand_sends);
       extern uint32_t ml_wg_get_hs_cand_pings(void);
       cJSON_AddNumberToObject(json, "disco_hs_cand_pings", ml_wg_get_hs_cand_pings());
+      extern uint32_t ml_wg_get_safety_reconnects(void);
+      cJSON_AddNumberToObject(json, "wg_safety_reconnects", ml_wg_get_safety_reconnects());
       extern uint32_t ml_derp_get_route_fallbacks(void);
       cJSON_AddNumberToObject(json, "derp_route_fallbacks", ml_derp_get_route_fallbacks());
       /* home_pumps: home-conn rx drains performed DURING an aux DERP connect,
