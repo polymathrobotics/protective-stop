@@ -81,8 +81,11 @@ static bool usb_drain(void)
        * packet before the (equal-priority, other-core) TinyUSB task can run
        * it, so the frame is silently never sent unless that task happens to
        * win a microsecond race — on the bench that was ~95 % loss, ~100 ms RTT
-       * on the survivors and a busy_retries storm (2026-09-18). On TIMEOUT the
-       * API has already withdrawn the packet, so a retry cannot duplicate. */
+       * on the survivors and a busy_retries storm (2026-09-18). TIMEOUT is
+       * ambiguous: usually the packet was withdrawn unsent, but if the TinyUSB
+       * task finished the xmit just after the wait expired, the retry sends the
+       * frame twice. Accepted: a duplicate is harmless to IP/TCP and to the
+       * pstop counters, a lost frame is not. */
       esp_err_t r = tinyusb_net_send_sync(s->bytes, s->len, NULL, pdMS_TO_TICKS(TX_SYNC_WAIT_MS));
       if (r != ESP_OK) {
         atomic_fetch_add(&s_busy_retries, 1u);
