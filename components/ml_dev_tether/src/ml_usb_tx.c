@@ -36,6 +36,10 @@
                             * onto the TinyUSB task per 16 frames (bench, 2026-09-17) */
 #define TX_TASK_STACK 4096 /* tinyusb_net_send_sync: event group + semaphore + logging */
 #define TX_TASK_PRIO 5 /* below the safety tasks; above idle/lwIP housekeeping */
+#define TX_SYNC_WAIT_MS \
+  20 /* how long one offer may wait for the TinyUSB task to run it. The
+                             * xmit itself is a memcpy into the NTB (microseconds); this only
+                             * bounds a starved TinyUSB task. Must be > 0 — see usb_drain(). */
 
 typedef struct
 {
@@ -70,10 +74,19 @@ static bool usb_drain(void)
     } else if (!tud_mounted()) {
       atomic_fetch_add(&s_expired, 1u); /* host gone: same fate, counted the same */
     } else {
-      /* Zero-tick offer: esp_tinyusb runs can_xmit+xmit on the TinyUSB task
-       * and reports busy as ESP_FAIL (or ESP_ERR_TIMEOUT if the USB event
-       * queue itself was full). Either way OUR copy is intact: retry. */
-      esp_err_t r = tinyusb_net_send_sync(s->bytes, s->len, NULL, 0);
+      /* esp_tinyusb defers can_xmit+xmit onto the TinyUSB task and hands the
+       * result back through an event group; ESP_FAIL means the endpoint was
+       * busy, ESP_ERR_TIMEOUT means the TinyUSB task did not get to it in time.
+       * The wait MUST be non-zero: with a zero wait the call reclaims its own
+       * packet before the (equal-priority, other-core) TinyUSB task can run
+       * it, so the frame is silently never sent unless that task happens to
+       * win a microsecond race — on the bench that was ~95 % loss, ~100 ms RTT
+       * on the survivors and a busy_retries storm (2026-09-18). TIMEOUT is
+       * ambiguous: usually the packet was withdrawn unsent, but if the TinyUSB
+       * task finished the xmit just after the wait expired, the retry sends the
+       * frame twice. Accepted: a duplicate is harmless to IP/TCP and to the
+       * pstop counters, a lost frame is not. */
+      esp_err_t r = tinyusb_net_send_sync(s->bytes, s->len, NULL, pdMS_TO_TICKS(TX_SYNC_WAIT_MS));
       if (r != ESP_OK) {
         atomic_fetch_add(&s_busy_retries, 1u);
         return true; /* head stays; retried in order after TX_RETRY_MS */
