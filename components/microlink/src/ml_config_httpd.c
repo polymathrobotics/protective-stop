@@ -719,6 +719,19 @@ static esp_err_t handler_get_peers(httpd_req_t * req)
       cJSON_AddBoolToObject(peer, "active", info.online);
       cJSON_AddBoolToObject(peer, "pinned", ml_wg_is_pinned_peer(ml, info.vpn_ip));
       cJSON_AddBoolToObject(peer, "health", ml_wg_is_health_tracked(info.vpn_ip));
+      /* Path-recovery forensics (bench 2026-09-19): enough to tell, after the
+       * fact, why a safety peer was or was not being reached directly. */
+      cJSON_AddBoolToObject(peer, "wg_up", info.wg_up);
+      cJSON_AddNumberToObject(peer, "eps", info.endpoint_count);
+      char ep_str[24];
+      microlink_ip_to_str(info.best_ip, ip_str);
+      snprintf(ep_str, sizeof(ep_str), "%s:%u", ip_str, (unsigned)info.best_port);
+      cJSON_AddStringToObject(peer, "best", ep_str);
+      microlink_ip_to_str(info.hs_cand_ip, ip_str);
+      snprintf(ep_str, sizeof(ep_str), "%s:%u", ip_str, (unsigned)info.hs_cand_port);
+      cJSON_AddStringToObject(peer, "hs_cand", ep_str);
+      cJSON_AddNumberToObject(peer, "ping_age_ms", info.ping_age_ms);
+      cJSON_AddNumberToObject(peer, "backoff_ms", info.backoff_ms);
       cJSON_AddItemToArray(arr, peer);
     }
   }
@@ -1147,6 +1160,8 @@ static esp_err_t handler_monitor(httpd_req_t * req)
       cJSON_AddNumberToObject(json, "wg_tx_keypair_expired", wireguardif_tx_keypair_expired);
       cJSON_AddNumberToObject(json, "wg_tx_no_valid_keys", wireguardif_tx_no_valid_keys);
       cJSON_AddNumberToObject(json, "wg_hs_cand_sends", wireguardif_hs_cand_sends);
+      extern uint32_t ml_wg_get_hs_cand_pings(void);
+      cJSON_AddNumberToObject(json, "disco_hs_cand_pings", ml_wg_get_hs_cand_pings());
       extern uint32_t ml_derp_get_route_fallbacks(void);
       cJSON_AddNumberToObject(json, "derp_route_fallbacks", ml_derp_get_route_fallbacks());
       /* home_pumps: home-conn rx drains performed DURING an aux DERP connect,

@@ -132,6 +132,8 @@ err_t wireguardif_connect(struct netif *netif, u8_t peer_index);
 // peer has no direct WG endpoint (DERP-only), handshake initiations are also
 // sent there; a response from it re-adopts the direct endpoint. Safety peers.
 err_t wireguardif_set_hs_candidate(struct netif *netif, u8_t peer_index, const ip_addr_t *ip, u16_t port);
+// Read it back (host-order IPv4, 0 = none/stale). For the disco fan-out.
+err_t wireguardif_get_hs_candidate(struct netif *netif, u8_t peer_index, uint32_t *ip_host, u16_t *port);
 
 // Stop trying to connect to the given peer
 err_t wireguardif_disconnect(struct netif *netif, u8_t peer_index);

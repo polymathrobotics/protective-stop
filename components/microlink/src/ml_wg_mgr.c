@@ -929,6 +929,7 @@ uint32_t ml_wg_get_relay_refetch_interval_s(void)
 
 static uint32_t s_diag_relay_disco_resets; /* per-peer from-scratch disco resets on a relay-stuck safety peer
                                             * (v2: rate-limited per-peer via p->disco_reset_next_ms) */
+static uint32_t s_diag_hs_cand_pings; /* disco pings fanned out to the WG handshake candidate */
 static uint32_t s_diag_ep_learn_evictions; /* learn-from-ping ring-evictions on a full endpoint table —
                                             * nonzero = the B-1 wedge trigger occurred and was absorbed */
 static uint32_t s_diag_peer_table_full; /* over-cap add refusals; the LOG is rate-limited (task #60: the
@@ -997,6 +998,11 @@ void ml_wg_get_reingest_diag(uint32_t out[6])
  * the WORST safety-peer keypair/init ages. wg_kp_age_max steadily ~<120000
  * (rekey cadence) = healthy; climbing past 120000 = a rekey is starving; a
  * green drop then follows ~60 s later when REJECT_AFTER_TIME kills the key. */
+uint32_t ml_wg_get_hs_cand_pings(void)
+{
+  return s_diag_hs_cand_pings;
+}
+
 void ml_wg_get_session_diag(microlink_t * ml, uint32_t out[7])
 {
   out[0] = s_diag_ep_learn_evictions;
@@ -2744,6 +2750,26 @@ static void disco_send_ping_to_peer(microlink_t * ml, int peer_idx, bool force)
           }
           direct_sent = true;
         }
+      }
+    }
+    /* Handshake-candidate leg (safety peers): the source of the most recent
+     * DIRECT disco packet from this peer, as remembered by wireguardif for the
+     * initiation second leg. Pinging it too keeps the far side's lazy
+     * wireguard-go peer configured (only an inbound disco PING does that — a
+     * bare WG initiation never re-adds a trimmed peer) and yields the pong the
+     * normal direct regain needs, even when the candidate table lacks it. */
+    if (has_udp && ml->wg_netif && p->wg_peer_index >= 0 && is_safety_peer(ml, p->vpn_ip)) {
+      uint32_t cand_ip = 0;
+      u16_t cand_port = 0;
+      if (
+        wireguardif_get_hs_candidate((struct netif *)ml->wg_netif, (u8_t)p->wg_peer_index, &cand_ip, &cand_port) ==
+          ERR_OK &&
+        cand_ip != 0 && !(best_sent && cand_ip == p->best_ip && cand_port == p->best_port) &&
+        !peer_has_endpoint(p, cand_ip, cand_port, false))
+      {
+        (void)disco_udp_sendto(ml, pkt, pkt_len, cand_ip, cand_port);
+        s_diag_hs_cand_pings++;
+        direct_sent = true;
       }
     }
     if (!has_udp) {
