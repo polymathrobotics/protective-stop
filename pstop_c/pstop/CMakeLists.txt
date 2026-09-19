@@ -71,6 +71,7 @@ add_executable(pstop_requirements_test
   test/src/pstop/requirements/req_2_01_test.c
   test/src/pstop/requirements/req_2_02_test.c
   test/src/pstop/requirements/req_2_03_test.c
+  test/src/pstop/requirements/req_2_04_test.c
 
   test/src/pstop/requirements/req_2_06_test.c
   test/src/pstop/requirements/req_2_07_test.c
@@ -97,7 +98,6 @@ add_executable(pstop_requirements_test
   test/src/pstop/requirements/req_3_19_test.c
   test/src/pstop/requirements/req_3_20_test.c
   test/src/pstop/requirements/req_3_21_test.c
-
   test/src/pstop/requirements/req_3_22_test.c
   test/src/pstop/requirements/req_3_23_test.c
 

@@ -7,6 +7,17 @@
 #include "pstop/protocol.h"
 
 static
+uint64_t
+get_diff(uint64_t lhs, uint64_t rhs)
+{
+    if(lhs <= rhs) {
+        return rhs - lhs;
+    }
+
+    return lhs - rhs;
+}
+
+static
 int
 is_checksum_valid(const pstop_msg_t *req)
 {
@@ -35,28 +46,40 @@ check_counter(const pstop_application_config_t *app_config, const pstop_remote_d
 
 static
 pstop_error_t
-check_timestamp(const pstop_application_config_t *app_config, const protocol_data_t *client, const pstop_msg_t *req)
+check_timestamp(const pstop_application_t *app, const protocol_data_t *client, const pstop_msg_t *req)
 {
     if(req->stamp <= client->last_received_stamp) {
         return PSTOP_MSG_OUT_OF_ORDER;
     }
 
-    if(req->received_stamp == client->last_timestamp) {
-        return PSTOP_OK;
-    }
-
     // did the other end miss a message?
-    if(req->received_stamp < client->last_timestamp) {
-        uint64_t diff = client->last_timestamp - req->received_stamp;
+    // example of missed messages
+    // last sent stamp = 500, last received stamp = 500
+    // now = 600, current request stamp = 900
+    // diff = 100, remote diff = 400
+    // diff should be close to the same if no messages have been lost
 
-        uint16_t missed = (uint16_t)(diff / client->heartbeat_ms);
+    uint64_t diff_received_stamp = get_diff(req->stamp, client->last_received_stamp);
 
-        if(missed >= (app_config->max_missed_heartbeats + 1U)) {
-            return PSTOP_MSG_LOST;
-        }
+    uint64_t now = app->env.get_time_cb();
+
+    uint64_t diff_sent_stamp = get_diff(now, client->last_timestamp);
+
+    uint64_t diff_remote_vs_local = get_diff(diff_sent_stamp, diff_received_stamp);
+
+    if(diff_sent_stamp == 0U) {
+        // the chances of this happening are extremely unlikely.
+        // It would mean that the amount of time to run through processing
+        // a single message takes 0ms.
+
+        // If this does happen then the received timestamps should also be
+        // close to 0ms. Setting diff_sent_stamp = 1 will mean that the
+        // diff_remote_vs_local is the max number of missed hearbeats.
+        diff_sent_stamp = 1U;
     }
-    else {
-        return PSTOP_MSG_OUT_OF_ORDER;
+    uint64_t missed = diff_remote_vs_local / diff_sent_stamp;
+    if(missed > (uint64_t)(app->app_config.max_missed_heartbeats + 1U)) {
+        return PSTOP_MSG_LOST;
     }
 
     return PSTOP_OK;
@@ -92,7 +115,7 @@ protocol_handle_message(pstop_machine_t *machine, const pstop_msg_t *req, pstop_
             return err;
         }
 
-        err = check_timestamp(&(machine->application->app_config), &(client->remote_data), req);
+        err = check_timestamp(machine->application, &(client->remote_data), req);
         if(err != PSTOP_OK) {
             return err;
         }
