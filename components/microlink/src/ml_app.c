@@ -1100,12 +1100,16 @@ ml_app_t * ml_app_start(const ml_app_config_t * cfg)
 
   ESP_LOGI(TAG, "MicroLink App Framework starting...");
   /* Brand credentials-bearing images so tools/release_guard.sh can refuse them
-   * on any machine, whatever sdkconfig.credentials it does or doesn't have. The
-   * log reference keeps the string out of --gc-sections. */
+   * on any machine, whatever sdkconfig.credentials it does or doesn't have.
+   * The brand lives in a `used` object, not only in a log format string: an
+   * ESP_LOGI is compiled out below LOG_LOCAL_LEVEL and would silently defeat
+   * the guard (review). */
 #ifdef ML_BUILD_WITH_CREDENTIALS
-  ESP_LOGI(TAG, "Build flavour: ML-BUILD-WITH-CREDENTIALS (private, not for release)");
+  static const char s_build_flavour[] __attribute__((used)) = "ML-BUILD-WITH-CREDENTIALS";
+  ESP_LOGW(TAG, "Build flavour: %s (private, not for release)", s_build_flavour);
 #else
-  ESP_LOGI(TAG, "Build flavour: public (no credentials compiled in)");
+  static const char s_build_flavour[] __attribute__((used)) = "ML-BUILD-PUBLIC";
+  ESP_LOGW(TAG, "Build flavour: %s (no credentials compiled in)", s_build_flavour);
 #endif
   ESP_LOGI(
     TAG,
