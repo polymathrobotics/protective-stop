@@ -66,8 +66,11 @@ commit), then run the guard on every artifact before `gh release upload`:
 tools/release_guard.sh firmware/build/pstop_remote.bin firmware/build/pstop_remote.elf ...
 ```
 
-It refuses (exit 1) any file containing a credentials value or a
-secret-shaped string (`tskey-…`, PEM keys, literal auth tokens).
+It refuses (exit 1) any file that carries the private-build brand (every
+image compiled while a credentials file was present is branded
+`ML-BUILD-WITH-CREDENTIALS`, so the verdict does not depend on which
+credentials file the checking machine has), any value of a local credentials
+file, or a secret-shaped string (`tskey-…`, PEM keys, literal auth tokens).
 
 ### Host runner (robot-side machine)
 
