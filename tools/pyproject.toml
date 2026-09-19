@@ -1,0 +1,45 @@
+# SPDX-FileCopyrightText: 2026 Polymath Robotics
+# SPDX-License-Identifier: Apache-2.0
+#
+# The single Python environment for everything in tools/. See README.md.
+
+[project]
+name = "pstop-tools"
+version = "0.1.0"
+description = "Flashing, fleet, chaos, and HIL tooling for the pstop remote and machine nodes"
+license = "Apache-2.0"
+# soak_per_remote.py imports tomllib; lowering this floor breaks it.
+requires-python = ">=3.11"
+
+# esptool is run as a subprocess, not imported; v5 renamed every flag.
+# pyserial is used by usb_relay4; esptool also pulls it in.
+dependencies = [
+  "esptool>=5.0",
+  "pyserial>=3.5",
+  "pytest>=8.0",
+]
+
+# Mostly flat scripts plus the safety_lint package; nothing here is installed.
+[tool.uv]
+package = false
+
+# Bare `uv run pytest` collects only the suites that need no hardware, so a
+# checkout with no bench runs clean. The rig suite is opt-in through
+# `hil/run.sh`; its fixtures fail hard when the rig is absent rather than
+# skipping, which is why it must not be in the default collection.
+# The flat scripts are not pytest tests — several take a positional int or exit
+# at import — and safety_lint/fixtures/ holds files whose basenames collide with
+# the real tools.
+[tool.pytest.ini_options]
+testpaths = [
+  "safety_lint/self_test.py",
+  "test",
+]
+norecursedirs = [
+  ".venv",
+  "safety_lint/fixtures",
+]
+markers = [
+  "power: cuts real USB power to the DUT (needs the power relay wired)",
+]
+addopts = "-ra"

@@ -1332,13 +1332,14 @@ void ml_derp_tx_task(void * arg)
              * settled and a retry succeeds. One attempt per minute. */
       {
         static uint64_t s_last_derp_retry_ms = 0;
-        /* When a priority (safety) peer is configured, DERP is the
-                 * failover path for its heartbeat — a 60 s reconnect wall is
-                 * far too long. Retry fast for the first few attempts (5s,
-                 * 5s, 10s) then fall back to the calm 60 s cadence so a
-                 * genuinely-down DERP server isn't hammered. Non-priority
-                 * builds keep the original 60 s. */
-        bool has_prio = (ml->config.priority_peer_ip != 0);
+        /* When ANY safety peer exists (priority peer, or a registered
+                 * health peer — machn's bonded remotes, a remote's machine
+                 * slots), DERP is the failover path for its heartbeat — a 60 s
+                 * reconnect wall is far too long. Retry fast for the first few
+                 * attempts (5s, 5s, 10s) then fall back to the calm 60 s cadence
+                 * so a genuinely-down DERP server isn't hammered. Devices with
+                 * no safety peer keep the original 60 s. */
+        bool has_prio = ml_wg_has_safety_peers(ml);
         uint64_t retry_gap = 60000;
         if (has_prio) {
           retry_gap = (s_home_retry_burst < 2) ? 5000u : (s_home_retry_burst < 3) ? 10000u : 60000u;

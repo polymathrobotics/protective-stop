@@ -28,7 +28,6 @@
 #include "esp_log.h"
 
 #define PANIC_LOG_MAGIC 0x4A07BCDEu
-#define PANIC_LOG_BUF_SIZE 7168u /* fits comfortably in 8 KiB RTC slow memory */
 
 typedef struct
 {

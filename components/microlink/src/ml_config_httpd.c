@@ -1127,6 +1127,12 @@ static esp_err_t handler_monitor(httpd_req_t * req)
       cJSON_AddNumberToObject(json, "remove_vetoes", rg[3]);
       cJSON_AddNumberToObject(json, "evict_safety_skips", rg[4]);
       cJSON_AddNumberToObject(json, "relay_disco_resets", rg[5]);
+      /* Relay-stuck coord re-fetch: how many reconnects we asked for, and the
+       * backoff (s) now gating the most recently re-fetched peer (90 s doubling
+       * to a 30 min cap; ~equal to ml_reconnects on a permanently relay-bound
+       * unit, which is how #117 was diagnosed). */
+      cJSON_AddNumberToObject(json, "relay_refetch_reqs", ml_wg_get_relay_refetch_reqs());
+      cJSON_AddNumberToObject(json, "relay_refetch_interval_s", ml_wg_get_relay_refetch_interval_s());
 
       /* WG session health (run-20/21 ENOTCONN forensics). The failure
        * signature to watch: wg_kp_age_max climbing past 120000 (rekey
@@ -1444,6 +1450,9 @@ static esp_err_t handler_ota(httpd_req_t * req)
       ESP_LOGI(
         TAG, "OTA: %3d%%  (%d / %d bytes, %d KB remaining)", pct, total_written, req->content_len, remaining / 1024);
     }
+    /* Block one tick so fast uploads cannot starve the idle watchdog tasks.
+     * taskYIELD() does not schedule lower-priority tasks. */
+    vTaskDelay(1);
   }
 
   free(buf);

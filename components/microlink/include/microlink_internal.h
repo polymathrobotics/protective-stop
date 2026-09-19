@@ -378,6 +378,12 @@ extern "C"
  * endpoints (steady-state coord updates are OmitPeers=true and never do), so the
  * relay-retry ping-sweep can then land and re-hole-punch. Control-plane only. */
 #define ML_RELAY_REFETCH_MIN_MS 90000
+/* Cap for the per-peer relay re-fetch backoff (90 s doubling -> 30 min). A
+ * PERMANENTLY relay-bound safety peer (no direct path possible) otherwise
+ * re-registers with the control plane every ~97 s forever: 1822 reconnects in
+ * 46 h on PSTOP06 (#117), each a full netmap re-ingest, one of which
+ * coincided with a heartbeat gap that latched the machine's need_stop. */
+#define ML_RELAY_REFETCH_MAX_MS 1800000
 
 /* Bench regression of the second cut (2026-08-09, all 3 devices on the fix
  * build): direct_regains oscillated in bursts (machn 131+ over 90 min) and
@@ -647,6 +653,10 @@ extern "C"
      * cleared on every genuine direct promotion. */
     uint64_t relay_retry_next_ms;
     uint8_t relay_retry_count;
+    uint32_t relay_refetch_interval_ms; /* current coord re-fetch spacing for THIS peer;
+                                         * 0 = start at ML_RELAY_REFETCH_MIN_MS. Doubles per
+                                         * re-fetch, capped, reset on direct regain */
+    uint64_t relay_refetch_next_ms; /* earliest next coord re-fetch for this peer (0 = now) */
 
     /* Demote-verification veto streak (ml_demote_verdict.h): consecutive
      * maintenance ticks the veto held this peer's direct path. Capped at
@@ -1085,6 +1095,12 @@ extern "C"
   /* True when vpn_ip is the priority peer or an extra pin — consumed by
    * ml_config_peer_is_allowed()'s centralized pin exemption. */
   bool ml_wg_ip_is_pinned(uint32_t vpn_ip);
+  /* Any safety link present (priority peer or a registered health peer). */
+  bool ml_wg_has_safety_peers(const microlink_t * ml);
+  /* Diag: relay-stuck coord re-fetches issued, and the backoff (s) now gating
+   * the most recently re-fetched peer. */
+  uint32_t ml_wg_get_relay_refetch_reqs(void);
+  uint32_t ml_wg_get_relay_refetch_interval_s(void);
   uint32_t ml_derp_get_kicks_spaced(void); /* connect kicks refused by the spacing gate */
   /* Flush-recovery silence-ping diag: out[0]=pings sent, out[1]=last
    * ping→direct-pong resume delta ms, out[2]=worst resume delta ms,

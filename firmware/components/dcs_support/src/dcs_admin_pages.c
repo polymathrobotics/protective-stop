@@ -56,6 +56,7 @@
 #include "freertos/task.h"
 #include "microlink.h"
 #include "ml_app.h"
+#include "ml_usb_tx.h"
 #include "panic_log.h"
 #include "pstop_aux_channel.h"
 #include "soc/rtc_cntl_reg.h"
@@ -229,7 +230,7 @@ static esp_err_t page_state(httpd_req_t * req)
    */
   enum
   {
-    JSON_CAP = 4096 /* eth-watchdog fields + bonded-remote stop_only + operator list
+    JSON_CAP = 4352 /* + 5 usb_tx_* counters (<= ~120 B). eth-watchdog fields + bonded-remote stop_only + operator list
                        + instantaneous internal-heap fields (heap_free_int/heap_lfb_int).
                        remote_stop_id + restart_state add <= 47 B worst case against
                        ~940 B live headroom (measured 2026-08-09). derp_region_locked
@@ -246,6 +247,8 @@ static esp_err_t page_state(httpd_req_t * req)
     return httpd_resp_sendstr(req, "{\"ok\":false,\"error\":\"oom\"}");
   }
   const int cap = JSON_CAP;
+  ml_usb_tx_diag_t usb_tx;
+  ml_usb_tx_get_diag(&usb_tx); /* zeros until the tether has ever started */
   int n = snprintf(
     buf,
     cap,
@@ -260,9 +263,11 @@ static esp_err_t page_state(httpd_req_t * req)
     "\"eth_en\":%d,\"wifi_en\":%d,\"usbncm_en\":%d,"
     "\"wifi_disc\":%d,\"wifi_conn\":%d,\"wifi_idx\":%d,\"wifi_n\":%d,"
     "\"eth_ip\":%lu,\"usb_ip\":%lu,\"wifi_ip\":%lu,\"local_ip\":%lu,"
-    "\"rgb_cycles\":%lu,\"uptime_ms\":%llu,"
+    "\"rgb_cycles\":%lu,"
     "\"derp_paused\":%d,\"derp_delay_ms\":%d,\"wg_paused\":%d,"
     "\"usb_enabled\":%d,\"ts_boot_en\":%d,\"derp_only\":%d,"
+    "\"usb_tx_sent\":%lu,\"usb_tx_busy_retries\":%lu,\"usb_tx_expired\":%lu,\"usb_tx_full_drops\":%lu,\"usb_tx_"
+    "pending\":%lu,"
     "\"boot_count\":%u,\"reset_reason\":%u,\"ctrl_reset_cause\":%u,"
     "\"crash_present\":%d,\"crash_pc\":%lu,\"crash_task\":\"%s\",\"crash_sha\":\"%s\","
     "\"xcheck_last_detail\":%u,\"log_lines_s\":%lu,\"log_lines_s_peak\":%lu,\"log_console_skipped\":%lu,"
@@ -323,13 +328,17 @@ static esp_err_t page_state(httpd_req_t * req)
     (unsigned long)netif_ip_by_key("WIFI_STA_DEF"),
     (unsigned long)local_ip,
     (unsigned long)atomic_load(&g_dcs_rgb_cycles),
-    (unsigned long long)esp_timer_get_time() / 1000ULL,
     microlink_is_derp_paused() ? 1 : 0,
     microlink_get_derp_loop_delay_ms(),
     atomic_load(&g_dcs_wg_paused),
     g_dcs.usb_enabled ? 1 : 0,
     g_dcs.ts_boot_en ? 1 : 0,
     g_dcs.derp_only_mode ? 1 : 0,
+    (unsigned long)usb_tx.sent,
+    (unsigned long)usb_tx.busy_retries,
+    (unsigned long)usb_tx.expired,
+    (unsigned long)usb_tx.full_drops,
+    (unsigned long)usb_tx.pending,
     (unsigned int)g_dcs.boot_count,
     (unsigned int)g_dcs.reset_reason,
     (unsigned int)g_dcs.ctrl_reset_cause,
@@ -524,7 +533,14 @@ static esp_err_t page_state(httpd_req_t * req)
   CLAMP_N();
   n += emit_bucket(buf + n, cap - n, &snap.b[2]);
   CLAMP_N();
-  n += snprintf(buf + n, cap - n, ",\"oths\":%lu}", (unsigned long)snap.b[2].other_pct);
+  /* Sample uptime after reply timestamps so concurrent RX cannot put them
+   * in the future. Older reply samples only overestimate their age. */
+  n += snprintf(
+    buf + n,
+    cap - n,
+    ",\"oths\":%lu,\"uptime_ms\":%llu}",
+    (unsigned long)snap.b[2].other_pct,
+    (unsigned long long)esp_timer_get_time() / 1000ULL);
   CLAMP_N();
 #undef CLAMP_N
 
@@ -906,8 +922,17 @@ static esp_err_t api_last_log(httpd_req_t * req)
   if (!panic_log_has_snapshot()) {
     return httpd_resp_sendstr(req, "");
   }
-  size_t cap = 4096;
-  char * buf = malloc(cap);
+  /* Copy the FULL retained ring. A 4096-byte prefix discarded the newest
+   * ~3 KiB, including the panic banner/backtrace we need after a reset.
+   * HTTP-only scratch belongs in PSRAM, like the boot snapshot itself. */
+  size_t cap = PANIC_LOG_BUF_SIZE + 1u;
+  char * buf = heap_caps_malloc(cap, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+  if (!buf) {
+    /* Fragmented PSRAM: degrade to the old truncated export rather than fail
+     * (same fallback every other PSRAM alloc in this file takes). */
+    cap = 4096u;
+    buf = malloc(cap);
+  }
   if (!buf) {
     (void)httpd_resp_set_status(req, "500 Internal Server Error");
     return httpd_resp_sendstr(req, "malloc failed");

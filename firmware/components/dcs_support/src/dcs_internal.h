@@ -71,7 +71,13 @@ extern "C"
 #define DCS_PSTOP_PEER_DEFAULT_PORT 8890
 
 #define DCS_SAFETY_MAX_RAPID_BOOTS 3
-#define DCS_SAFETY_CLEAR_AFTER_MS 120000
+/* Healthy uptime after which the crash counter is cleared. Must exceed the
+ * slowest crash the ladder is meant to catch: a build that panicked ~150 s
+ * after boot (2026-09-17, W5500 RX path) looped indefinitely under the old
+ * 120 s window because every crash counted as boot #1. Network + Tailscale
+ * bring-up alone takes ~60 s and the coord re-register cycle is 300 s, so
+ * 10 min is the first point at which "up" says anything about "healthy". */
+#define DCS_SAFETY_CLEAR_AFTER_MS 600000
 
 /* Network-interface route priorities. Higher wins the default route.
  * Ethernet must beat USB-NCM (bumped to 110 in ml_dev_tether) and WiFi STA

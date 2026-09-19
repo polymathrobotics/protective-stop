@@ -60,7 +60,7 @@ curl -s http://$CHIP/state.json | python3 -m json.tool
 | 11 | BROWNOUT | Supply dipped | power supply / cable (not counted toward rollback) |
 
 `reset_reason` is sticky from the last boot. Reason 4 with
-`boot_count = 0` means the 120 s age-out already cleared the counter —
+`boot_count = 0` means the 10 min age-out already cleared the counter —
 the chip is currently healthy.
 
 ## Getting the crash log
@@ -90,7 +90,7 @@ xtensa-esp32s3-elf-addr2line -e firmware/build/pstop_remote.elf 0x4037.... 0x403
   `"rollback_occurred": true` with the partition it rolled back from.
   ~17 s from bad OTA push to back on the good image, no user action.
 - **Crash counter:** `boot_count` in `/state.json`; counter clears after
-  120 s healthy uptime. `boot_count > 3` invokes rollback (with a
+  10 min healthy uptime. `boot_count > 3` invokes rollback (with a
   never-brick guard if the other slot is also invalid).
 - **Degradation ladder:** `boot_count==1` → `derp_only=1` for that boot
   (relay-level latency, auto-restarts back to full speed after the
@@ -137,7 +137,7 @@ disco heartbeat and the ≤10 s direct→DERP failover.
 ### Tunnel latency ~100–200 ms instead of ~5–25 ms
 
 The chip is riding a DERP relay instead of the direct UDP path:
-1. `derp_only=1` in `/state.json` → post-crash ladder; wait ~2 min for
+1. `derp_only=1` in `/state.json` → post-crash ladder; wait ~10 min for
    the auto-restart, or restart manually.
 2. Direct path never formed → NAT/firewall/different LAN between chip
    and peer. DERP works, just slower; the pstop link stays up either way.

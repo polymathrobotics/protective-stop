@@ -97,6 +97,20 @@ void dcs_safety_account_boot(void)
       "SAFETY: last reboot was a net_liveness wedge-recovery "
       "(reset_reason=%u) — NOT counted toward rollback",
       g_dcs.reset_reason);
+    /* ...and it must not merely PAUSE the ladder either. The clear window is
+     * now 10 min while a wedge-abort fires after 180 s, so a flaky upstream
+     * could reboot us every few minutes and restart bc_clear's countdown
+     * forever, pinning a stale boot_count that a later genuine crash would
+     * then ladder on. A wedge-abort says nothing about this image; treat the
+     * uptime before it as healthy and age the counter out now. This is what
+     * decouples the two timeouts (dcs_net_liveness.c no longer has to sit
+     * above the clear window). */
+    if (g_dcs.boot_count != 0u) {
+      if (dcs_nvs_write_boot_count(0) != ESP_OK) {
+        ESP_LOGW(TAG, "SAFETY: boot_count clear failed");
+      }
+      g_dcs.boot_count = 0;
+    }
   }
   if (crash_reset) {
     g_dcs.boot_count++;

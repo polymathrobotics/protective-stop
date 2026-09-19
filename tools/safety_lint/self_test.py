@@ -831,7 +831,7 @@ class CoverageRenderCliTests(FixtureRepo):
         """Stale check output gives the exact command that refreshes generated regions."""
         proc = self.run_cli('--check')
         self.assertIn(
-            'docs/safety/TRACEABILITY.md: generated regions are stale; run python3 -m tools.safety_lint --write',
+            'docs/safety/TRACEABILITY.md: generated regions are stale; run: cd tools && uv run python -m safety_lint --write',
             proc.stdout,
         )
 
