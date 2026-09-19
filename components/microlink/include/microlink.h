@@ -72,6 +72,10 @@ extern "C"
     uint32_t ping_age_ms; /* since our last disco ping to it (0xFFFFFFFF = never) */
     uint32_t backoff_ms; /* remaining direct-upgrade flap backoff */
     bool wg_up; /* WireGuard session currently has a usable keypair */
+    bool wg_active; /* wireguardif: actively (re)initiating handshakes */
+    bool wg_send_hs; /* wireguardif: handshake requested by the data path */
+    bool wg_hs_pending; /* wireguardif: an initiation is outstanding */
+    uint32_t wg_init_age_ms; /* since our last handshake initiation TX (0xFFFFFFFF = never) */
   } microlink_peer_info_t;
 
   /* Connection state */
