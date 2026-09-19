@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Polymath Robotics, Inc.
 // SPDX-License-Identifier: Apache-2.0
 //
-// FleetCheckin — optional periodic DEVICE CHECK-IN to pstop-fleet so a software
+// FleetCheckin — optional periodic DEVICE CHECK-IN to the management backend so a software
 // machine registers there EXACTLY like an ESP32 machine does: a
 // `device_type:"machine"` device with full metadata, not just the lighter
 // [announce] overview ping. It mirrors the ESP32's fleet_ota_checkin()
@@ -43,7 +43,7 @@ namespace protective_stop_machine
 {
 
 // Deployment values for the fleet check-in. Prefer the environment for the base
-// URL + key file (PSTOP_FLEET_CHECKIN_URL / PSTOP_FLEET_API_KEY_FILE) so the
+// URL + key file (PSTOP_CHECKIN_URL / PSTOP_CHECKIN_API_KEY_FILE) so the
 // proprietary fleet URL/key stay out of committed config. Disabled when the base
 // URL is empty. `base_url` is a BASE (e.g. http://fleet.example:8000); the client
 // appends `/api/v1/checkin` itself, exactly as the ESP32 hardcodes that path.

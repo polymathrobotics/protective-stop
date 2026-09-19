@@ -6,7 +6,7 @@
 // disabled-when-empty guard on the real FleetCheckin (which never posts when the
 // base URL is empty). Locks in that the body matches the ESP32
 // fleet_ota_checkin() schema (device_type="machine" + the required metadata) so
-// pstop-fleet registers a software machine identically to a chip.
+// the management backend registers a software machine identically to a chip.
 #include <gtest/gtest.h>
 
 #include <string>

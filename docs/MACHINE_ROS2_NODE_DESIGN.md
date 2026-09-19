@@ -348,7 +348,7 @@ ros2 run protective_stop_machine machine_bridge_node \
     # Optional fleet console check-in (software backend only, both default
     # DISABLED on an empty url). Prefer the ENVIRONMENT for the secrets:
     # PSTOP_ANNOUNCE_URL / PSTOP_ANNOUNCE_KEY_FILE and
-    # PSTOP_FLEET_CHECKIN_URL / PSTOP_FLEET_API_KEY_FILE override these.
+    # PSTOP_CHECKIN_URL / PSTOP_CHECKIN_API_KEY_FILE override these.
     announce:                   # lightweight overview check-in
       url: ''                   # read_only; empty = disabled
       key_file: ''              # read_only; chmod-600 bearer token
