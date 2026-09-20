@@ -614,6 +614,7 @@ extern "C"
 
     /* DISCO state (rate limiting) */
     uint64_t last_ping_sent_ms; /* Last DISCO ping we sent */
+    uint64_t last_safety_connect_ms; /* last keyless-regain wireguardif_connect() (paced to REKEY_TIMEOUT) */
     uint64_t last_pong_recv_ms; /* Last DISCO pong we received (any path) */
     uint64_t last_direct_pong_recv_ms; /* Last pong received DIRECT — the
                                         * pong-dead demote trigger keys on

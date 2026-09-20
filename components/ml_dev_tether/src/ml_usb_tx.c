@@ -26,9 +26,19 @@
 #include "tinyusb_net.h"
 #include "tusb.h"
 
-#define TX_SLOTS 16u /* power of two: indices wrap safely */
+#define TX_SLOTS \
+  64u /* power of two: indices wrap safely. 16 lost ~1 safety frame/min on a
+       * remote behind a dock hub chain (bench 2026-09-19: 252 ring-full drops
+       * in 4 h): the disco probe engine emits bursts of >16 frames toward the
+       * tailnet peers, and any pstop frame caught in the burst was dropped
+       * while the endpoint drained. 64 x 1536 B = 96 KB of PSRAM. */
 #define TX_FRAME_MAX 1536u /* Ethernet MTU + link-layer headers */
-#define TX_TTL_US 100000 /* same 100 ms lifetime the old sync send had */
+#define TX_TTL_US \
+  400000 /* a frame older than this is expired, not sent. 100 ms (the old sync
+          * send's lifetime) expired frames during ordinary host scheduling
+          * hiccups; 400 ms is one heartbeat period, still well inside the
+          * machine's 1.6 s stop-on-silence budget and the machine rejects
+          * anything that arrives out of order anyway. */
 #define TX_RETRY_MS 2 /* first retry delay while the endpoint is busy... */
 #define TX_RETRY_MAX_MS \
   32 /* ...doubling to this cap: before the host has configured NCM every
@@ -36,6 +46,10 @@
                             * onto the TinyUSB task per 16 frames (bench, 2026-09-17) */
 #define TX_TASK_STACK 4096 /* tinyusb_net_send_sync: event group + semaphore + logging */
 #define TX_TASK_PRIO 5 /* below the safety tasks; above idle/lwIP housekeeping */
+#define TX_SYNC_WAIT_MS \
+  20 /* how long one offer may wait for the TinyUSB task to run it. The
+                             * xmit itself is a memcpy into the NTB (microseconds); this only
+                             * bounds a starved TinyUSB task. Must be > 0 — see usb_drain(). */
 
 typedef struct
 {
@@ -70,10 +84,19 @@ static bool usb_drain(void)
     } else if (!tud_mounted()) {
       atomic_fetch_add(&s_expired, 1u); /* host gone: same fate, counted the same */
     } else {
-      /* Zero-tick offer: esp_tinyusb runs can_xmit+xmit on the TinyUSB task
-       * and reports busy as ESP_FAIL (or ESP_ERR_TIMEOUT if the USB event
-       * queue itself was full). Either way OUR copy is intact: retry. */
-      esp_err_t r = tinyusb_net_send_sync(s->bytes, s->len, NULL, 0);
+      /* esp_tinyusb defers can_xmit+xmit onto the TinyUSB task and hands the
+       * result back through an event group; ESP_FAIL means the endpoint was
+       * busy, ESP_ERR_TIMEOUT means the TinyUSB task did not get to it in time.
+       * The wait MUST be non-zero: with a zero wait the call reclaims its own
+       * packet before the (equal-priority, other-core) TinyUSB task can run
+       * it, so the frame is silently never sent unless that task happens to
+       * win a microsecond race — on the bench that was ~95 % loss, ~100 ms RTT
+       * on the survivors and a busy_retries storm (2026-09-18). TIMEOUT is
+       * ambiguous: usually the packet was withdrawn unsent, but if the TinyUSB
+       * task finished the xmit just after the wait expired, the retry sends the
+       * frame twice. Accepted: a duplicate is harmless to IP/TCP and to the
+       * pstop counters, a lost frame is not. */
+      esp_err_t r = tinyusb_net_send_sync(s->bytes, s->len, NULL, pdMS_TO_TICKS(TX_SYNC_WAIT_MS));
       if (r != ESP_OK) {
         atomic_fetch_add(&s_busy_retries, 1u);
         return true; /* head stays; retried in order after TX_RETRY_MS */

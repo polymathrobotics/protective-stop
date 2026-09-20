@@ -139,6 +139,14 @@ struct wireguard_peer {
 	// This is the latest received IP/port
 	ip_addr_t ip;
 	u16_t port;
+	// Handshake second leg (safety peers while DERP-only): the source of the
+	// most recent DIRECT disco packet from this peer. Our initiations are
+	// mirrored there, so a peer that is provably reachable direct can complete
+	// the handshake even when the relay leg is slow or dead and the peer itself
+	// has nothing to send (an idle wireguard-go never initiates). ip any = none.
+	ip_addr_t hs_cand_ip;
+	u16_t hs_cand_port;
+	uint32_t hs_cand_ms;
 	// keep-alive interval in seconds, 0 is disable
 	uint16_t keepalive_interval;
 

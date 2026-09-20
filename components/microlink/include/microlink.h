@@ -62,6 +62,20 @@ extern "C"
     bool online;
     bool direct_path; /* true if communicating via direct UDP */
     uint16_t derp_region; /* learned DERP home region (0 = unknown) — diagnostic */
+    /* Path-recovery diagnostics (bench 2026-09-19): why a peer is or is not
+     * being reached directly. All 0 when unknown. */
+    int endpoint_count; /* disco candidate endpoints held for this peer */
+    uint32_t best_ip; /* chosen direct endpoint (host order), 0 = none */
+    uint16_t best_port;
+    uint32_t hs_cand_ip; /* WG handshake second-leg candidate (host order), 0 = none/stale */
+    uint16_t hs_cand_port;
+    uint32_t ping_age_ms; /* since our last disco ping to it (0xFFFFFFFF = never) */
+    uint32_t backoff_ms; /* remaining direct-upgrade flap backoff */
+    bool wg_up; /* WireGuard session currently has a usable keypair */
+    bool wg_active; /* wireguardif: actively (re)initiating handshakes */
+    bool wg_send_hs; /* wireguardif: handshake requested by the data path */
+    bool wg_hs_pending; /* wireguardif: an initiation is outstanding */
+    uint32_t wg_init_age_ms; /* since our last handshake initiation TX (0xFFFFFFFF = never) */
   } microlink_peer_info_t;
 
   /* Connection state */
