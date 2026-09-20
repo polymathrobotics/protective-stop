@@ -34,6 +34,7 @@
 #include "microlink_internal.h"
 #include "ml_config_httpd.h"
 #include "ml_demote_verdict.h"
+#include "ml_wg_regain_policy.h"
 #include "nacl_box.h"
 #include "wireguard.h"
 #include "wireguardif.h"
@@ -3165,29 +3166,26 @@ static void process_disco_pong(
                      * Instead, just fire a single handshake init. If the peer
                      * has us configured, it will respond and establish session.
                      * If not, we stop and wait for them to initiate. */
-          if (is_safety_peer(ml, p->vpn_ip) && (now - p->last_safety_connect_ms >= 5000u)) {
-            /* Safety peer (the machine) with NO session on a direct endpoint —
-             * first pong after boot, or a regain after the demote's
-             * connect_derp() left the LIVE endpoint (peer->ip) at 0.0.0.0 so
-             * initiations went relay-only (update_endpoint() above only stores
-             * connect_ip). The one-shot below deliberately leaves active=false
-             * and waits for the peer to initiate — right for bulk peers that may
-             * have trimmed us, a deadlock for the machine host, whose
-             * wireguard-go initiates only when it has data and has nothing to
-             * send while we are silent (bench 2026-09-19: stuck indefinitely
-             * with the relay dead; a stale-but-"valid" keypair took the is_up
-             * branch above instead and recovered in seconds — a lottery).
-             * connect() re-points peer->ip and retries the handshake every
-             * REKEY_TIMEOUT; unlimited retries are correct for the machine. */
-            /* Paced to WireGuard's REKEY_TIMEOUT: pongs arrive several times a
-             * second and connect() resets the pending handshake, so without the
-             * pace a slow path could keep answering an already-superseded
-             * initiation (peer review, 2026-09-19). */
+          /* Decision table in ml_wg_regain_policy.h (host-tested). Safety peer
+           * (the machine) with NO session on a direct endpoint — first pong after
+           * boot, or a regain after the demote's connect_derp() left the LIVE
+           * endpoint (peer->ip) at 0.0.0.0 so initiations went relay-only
+           * (update_endpoint() above only stores connect_ip): connect() re-points
+           * peer->ip and retries every REKEY_TIMEOUT (bench 2026-09-19: the
+           * one-shot deadlocked with the relay dead — the host's wireguard-go
+           * initiates only when it has data). Paced to REKEY_TIMEOUT because pongs
+           * arrive several times a second and connect() resets the pending
+           * handshake; inside the window NOTHING runs — in particular not the
+           * bulk-peer one-shot, which clears active and would cancel the retries. */
+          ml_wg_regain_action_t regain = ml_wg_regain_action(
+            is_safety_peer(ml, p->vpn_ip), p->tried_initial_handshake, now, p->last_safety_connect_ms);
+          if (regain == ML_WG_REGAIN_CONNECT_RETRYING) {
             p->last_safety_connect_ms = now;
+            p->tried_initial_handshake = true; /* the one-shot path is for bulk peers only */
             wireguardif_connect(netif, (u8_t)p->wg_peer_index);
             s_diag_safety_reconnects++;
             ESP_LOGW(TAG, "WG safety peer %s: direct endpoint, no session — connecting with retries", p->hostname);
-          } else if (!p->tried_initial_handshake) {
+          } else if (regain == ML_WG_REGAIN_ONE_SHOT_INIT) {
             p->tried_initial_handshake = true;
             /* Store endpoint so wireguardif_connect sends to it */
             wireguardif_update_endpoint(netif, (u8_t)p->wg_peer_index, &ep_ip, pkt->src_port);

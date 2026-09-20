@@ -1039,15 +1039,18 @@ static err_t wireguardif_lookup_peer(struct netif *netif, u8_t peer_index, struc
 	return result;
 }
 
+// hs_cand_{ip,port,ms} are a multi-word record written from the disco task and
+// read on the TCPIP thread (peer_output, which runs under the core lock). Plain
+// stores carry no cross-core ordering guarantee, so the record is updated and
+// read under LOCK_TCPIP_CORE — the same idiom as netif_set_link_up/down here.
+// Callers already on the TCPIP thread hold the lock; the guard is a no-op then.
 err_t wireguardif_set_hs_candidate(struct netif *netif, u8_t peer_index, const ip_addr_t *ip, u16_t port) {
 	struct wireguard_peer *peer;
 	err_t result = wireguardif_lookup_peer(netif, peer_index, &peer);
 	if (result == ERR_OK) {
+		bool nl = wireguardif_core_lock_needed();
+		if (nl) LOCK_TCPIP_CORE();
 		if (ip && port != 0) {
-			// Written from the disco task, read on the TCPIP thread (peer_output).
-			// Order the writes so a reader that sees a non-zero port also sees the
-			// matching ip/ms; a reader racing the update at worst skips one leg.
-			peer->hs_cand_port = 0;
 			ip_addr_copy(peer->hs_cand_ip, *ip);
 			peer->hs_cand_ms = wireguard_sys_now();
 			peer->hs_cand_port = port;
@@ -1055,6 +1058,7 @@ err_t wireguardif_set_hs_candidate(struct netif *netif, u8_t peer_index, const i
 			ip_addr_set_any(false, &peer->hs_cand_ip);
 			peer->hs_cand_port = 0;
 		}
+		if (nl) UNLOCK_TCPIP_CORE();
 	}
 	return result;
 }
@@ -1063,10 +1067,13 @@ err_t wireguardif_get_hs_candidate(struct netif *netif, u8_t peer_index, uint32_
 	struct wireguard_peer *peer;
 	err_t result = wireguardif_lookup_peer(netif, peer_index, &peer);
 	if (result == ERR_OK && ip_host && port) {
+		bool nl = wireguardif_core_lock_needed();
+		if (nl) LOCK_TCPIP_CORE();
 		bool fresh = !ip_addr_isany(&peer->hs_cand_ip) && peer->hs_cand_port != 0 &&
 		             !wireguard_expired(peer->hs_cand_ms, HS_CAND_FRESH_MS / 1000);
 		*ip_host = fresh ? lwip_ntohl(ip4_addr_get_u32(ip_2_ip4(&peer->hs_cand_ip))) : 0;
 		*port = fresh ? peer->hs_cand_port : 0;
+		if (nl) UNLOCK_TCPIP_CORE();
 	}
 	return result;
 }
