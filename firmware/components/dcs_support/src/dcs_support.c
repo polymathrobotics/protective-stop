@@ -114,6 +114,7 @@ void dcs_pstop_mm_snapshot(uint32_t out[7])
     for (int i = 0; i < 7; i++) {
       out[i] = (uint32_t)atomic_load(&g_dcs_pstop_mm[i]);
     }
+    atomic_thread_fence(memory_order_acquire); /* payload loads stay above the seq re-read */
     if ((uint32_t)atomic_load(&g_dcs_pstop_mm_seq) == s1) return;
   }
   /* 8 collisions in a row (writer runs once per 100 ms tick — effectively

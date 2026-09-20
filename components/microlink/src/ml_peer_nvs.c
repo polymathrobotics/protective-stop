@@ -277,6 +277,10 @@ void ml_peer_nvs_get_flush_diag(uint32_t out[4])
     out[1] = s_diag_flush_max_ms;
     out[2] = s_diag_flush_count;
     out[3] = s_diag_flush_at_ms;
+    /* Textbook seqlock reader: the acquire fence keeps the payload loads above
+     * the re-read of the sequence (an acquire LOAD alone only pins what follows
+     * it); the writer's seq_cst fetch_adds order its stores on the other side. */
+    atomic_thread_fence(memory_order_acquire);
     if ((uint32_t)atomic_load(&s_diag_flush_seq) == s1) return;
   }
   /* 8 collisions (flushes are >= 5 s apart, so effectively never): best-effort copy so out[] is always written */
