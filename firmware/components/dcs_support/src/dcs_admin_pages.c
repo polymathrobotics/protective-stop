@@ -62,6 +62,8 @@
 #include "soc/rtc_cntl_reg.h"
 #include "wireguardif.h"
 
+#include "wireguard-platform.h" /* wireguard_tai64n_epoch() */
+
 static const char * TAG = "dcs_admin";
 
 /* === GET / =============================================================== */
@@ -280,7 +282,7 @@ static esp_err_t page_state(httpd_req_t * req)
     "\"crash_present\":%d,\"crash_pc\":%lu,\"crash_task\":\"%s\",\"crash_sha\":\"%s\","
     "\"xcheck_last_detail\":%u,\"log_lines_s\":%lu,\"log_lines_s_peak\":%lu,\"log_console_skipped\":%lu,"
     "\"health\":%d,\"fw_ver\":\"%s\",\"fw_sha\":\"%s\","
-    "\"ml_state\":%d,\"ml_reconnects\":%lu,\"vpn_ip\":%lu,\"public_ip\":%lu,\"derp_region\":%d,"
+    "\"ml_state\":%d,\"ml_reconnects\":%lu,\"wg_epoch\":%lu,\"vpn_ip\":%lu,\"public_ip\":%lu,\"derp_region\":%d,"
     "\"derp_region_locked\":%d,"
     "\"derp_region_source\":\"%s\",\"derp_region_auto_applied\":%d,"
     "\"derp_auto_applies\":%lu,\"derp_auto_apply_s\":%lu,"
@@ -366,6 +368,7 @@ static esp_err_t page_state(httpd_req_t * req)
     fw_sha,
     ml_state,
     (unsigned long)ml_reconnects,
+    (unsigned long)wireguard_tai64n_epoch(), /* 0 = handshake epoch not persisted this boot (#157 degraded) */
     (unsigned long)vpn_ip,
     (unsigned long)public_ip,
     derp_region,

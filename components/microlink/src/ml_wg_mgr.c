@@ -458,6 +458,7 @@ static esp_err_t wg_init_interface(microlink_t * ml)
   }
 
   /* Initialize WireGuard netif */
+  (void)wireguard_tai64n_epoch_init(); /* #157: monotonic handshake timestamps across reboots (logs on failure) */
   netif->state = &wg_init;
   err_t err = wireguardif_init(netif);
   if (err != ERR_OK) {

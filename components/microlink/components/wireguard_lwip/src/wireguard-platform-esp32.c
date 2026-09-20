@@ -6,7 +6,10 @@
 #include "wireguard-platform.h"
 #include "esp_random.h"
 #include "esp_timer.h"
+#include "nvs.h"
 #include "lwip/sys.h"
+#include <stdbool.h>
+#include <stdio.h>
 #include <string.h>
 
 /* ============================================================================
@@ -18,11 +21,48 @@ uint32_t wireguard_sys_now() {
     return sys_now();
 }
 
+// Handshake timestamps must increase across REBOOTS, not just within one: the
+// peer keeps the greatest TAI64N it accepted from our static key and silently
+// drops any initiation that is not newer (wireguard-go compares the 12 bytes
+// as opaque big-endian values; it never checks them against wall time). With
+// uptime alone, a rebooted device could not re-initiate until the host forgot
+// the peer (#157: two 9-min tether outages). No RTC/SNTP here, so a per-boot
+// epoch from NVS, incremented once per boot, provides the monotonic high bits:
+// seconds = TAI(0) + (epoch << 32) + uptime_s.
+static uint64_t s_boot_epoch_s; // (epoch << 32); 0 = not initialised (uptime-only, pre-#157 behaviour)
+
+// Call once at startup, before the WireGuard interface comes up: one NVS
+// read-increment-commit, kept off the handshake path. Returns false (and logs)
+// if the epoch could not be persisted: handshakes then fall back to uptime-only
+// timestamps rather than taking the tunnel down.
+bool wireguard_tai64n_epoch_init(void) {
+    nvs_handle_t h;
+    uint32_t epoch = 0;
+    esp_err_t err = nvs_open("ml_wg", NVS_READWRITE, &h);
+    if (err == ESP_OK) {
+        (void)nvs_get_u32(h, "epoch", &epoch); // absent on first boot: stays 0
+        epoch++;
+        err = nvs_set_u32(h, "epoch", epoch);
+        if (err == ESP_OK) err = nvs_commit(h);
+        nvs_close(h);
+    }
+    if (err != ESP_OK) {
+        printf("[WG] ERROR: handshake epoch not persisted (%d) - post-reboot initiations may be rejected as replays\n", (int)err);
+        return false;
+    }
+    s_boot_epoch_s = (uint64_t)epoch << 32;
+    return true;
+}
+
+// 0 = epoch not persisted this boot (degraded: device-initiated handshakes may be rejected as replays)
+uint32_t wireguard_tai64n_epoch(void) {
+    return (uint32_t)(s_boot_epoch_s >> 32);
+}
+
 void wireguard_tai64n_now(uint8_t *output) {
     // TAI64N format: 8 bytes seconds + 4 bytes nanoseconds
-    // For simplicity, use Unix epoch time
     uint64_t now_us = esp_timer_get_time();
-    uint64_t seconds = now_us / 1000000ULL;
+    uint64_t seconds = now_us / 1000000ULL + s_boot_epoch_s;
     uint32_t nanoseconds = (now_us % 1000000ULL) * 1000;
 
     // Log raw uptime before TAI offset (only every ~5s to avoid spam)

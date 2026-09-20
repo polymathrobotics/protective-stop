@@ -15,6 +15,8 @@ idf_component_register(
     REQUIRES
         lwip
         esp_timer
+    PRIV_REQUIRES
+        nvs_flash
 )
 
 target_compile_definitions(${COMPONENT_LIB} PRIVATE
