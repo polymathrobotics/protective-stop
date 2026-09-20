@@ -39,6 +39,7 @@
 #include "tinyusb_console.h"
 #include "tinyusb_default_config.h"
 #include "tinyusb_net.h"
+#include "tusb.h" /* tud_mounted()/tud_suspended(): seed the netif link state from the bus */
 
 static const char * TAG = "ml_dev_tether";
 
@@ -360,12 +361,27 @@ esp_err_t ml_dev_tether_try_start(uint32_t timeout_ms)
   dev_mac[5] ^= 0x02;
   esp_netif_set_mac(s_netif, dev_mac);
 
-  /* Bring up the netif and also signal "link connected" — without this,
-     * the Ethernet-class netif stays in admin-up/link-down state and the
-     * DHCP client never sends DISCOVER (it's waiting for a phy link event
-     * that's never coming from our USB driver). */
+  /* Bring up the netif and seed its link state from the BUS, not from an
+   * assumption: without a "connected" the Ethernet-class netif stays in
+   * admin-up/link-down and the DHCP client never sends DISCOVER (it waits for
+   * a phy link event that never comes from our USB driver); but a bus event
+   * that fired before s_netif existed was dropped by on_usb_event(), so if the
+   * host is not enumerated right now the link starts DOWN and the next
+   * mounted/resumed event brings it up. Under s_rx_lock so an event landing
+   * during this window is ordered with the seed. */
   esp_netif_action_start(s_netif, 0, 0, 0);
-  esp_netif_action_connected(s_netif, 0, 0, 0);
+  if (s_rx_lock) xSemaphoreTake(s_rx_lock, portMAX_DELAY);
+  {
+    bool bus_up = tud_mounted() && !tud_suspended();
+    ESP_LOGI(
+      TAG, "USB netif start: bus %s -> link %s", bus_up ? "configured" : "not configured", bus_up ? "up" : "down");
+    if (bus_up) {
+      esp_netif_action_connected(s_netif, 0, 0, 0);
+    } else {
+      esp_netif_action_disconnected(s_netif, 0, 0, 0);
+    }
+  }
+  if (s_rx_lock) xSemaphoreGive(s_rx_lock);
 
   /* --- Wait for DHCP lease --- */
   ESP_LOGI(TAG, "Waiting up to %lu ms for DHCP from host...", (unsigned long)timeout_ms);

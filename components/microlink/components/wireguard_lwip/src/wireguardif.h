@@ -167,6 +167,7 @@ extern volatile uint32_t wireguardif_tx_keypair_expired;
 extern volatile uint32_t wireguardif_tx_no_valid_keys;
 // Handshake initiations mirrored to a direct disco-source candidate while DERP-only.
 extern volatile uint32_t wireguardif_hs_cand_sends;
+#define HS_CAND_FRESH_MS 60000u /* a handshake second-leg candidate (direct disco source) older than this is stale */
 
 // Register a DERP relay output callback for peers without direct endpoints
 // This callback is invoked when a WireGuard packet needs to be sent to a peer

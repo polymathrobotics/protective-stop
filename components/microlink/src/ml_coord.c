@@ -153,16 +153,18 @@ static int coord_send(microlink_t * ml, const uint8_t * data, size_t len)
 
 /* Wall-clock budget for finishing ONE partial Noise frame (issue #127): policy
  * and rationale in ml_coord_frame_budget.h (host-tested). Once a frame is
- * partial, each wait is bounded by the REMAINING budget via select(), not by
- * the socket's SO_RCVTIMEO (2 s long-poll / 60 s MapResponse), so a stall holds
- * the coord task — and delays the ML_CTRL_WATCHDOG_MS check that runs between
- * reads — for at most the budget. */
+ * partial, each wait is bounded by the nearer of the 10 s no-progress window
+ * (restarted by every byte) and a hard cap scaled by the frame size, via
+ * select() — not by the socket's SO_RCVTIMEO (2 s long-poll / 60 s
+ * MapResponse). A stalled peer holds the coord task — and delays the
+ * ML_CTRL_WATCHDOG_MS check that runs between reads — for at most 10 s; a slow
+ * but live MapResponse frame keeps going as long as bytes arrive. */
 static int coord_recv_ex(microlink_t * ml, uint8_t * buf, size_t len, bool mid_frame)
 {
   size_t recvd = 0;
   int timeouts = 0; /* bounded waits that expired since the frame went partial */
   ml_coord_frame_budget_t budget;
-  ml_coord_frame_budget_reset(&budget);
+  ml_coord_frame_budget_init(&budget, len);
   if (mid_frame) {
     /* The caller already consumed part of this frame (e.g. the 3-byte Noise
      * header): the stream is partial from the first byte we wait for. */
@@ -175,7 +177,13 @@ static int coord_recv_ex(microlink_t * ml, uint8_t * buf, size_t len, bool mid_f
        * and the stream misaligned, so fail like a dead connection. errno must
        * NOT stay EAGAIN — noise_recv/poll_map_update read that as "retry later"
        * and would resume the misaligned stream. */
-      ESP_LOGE(TAG, "coord_recv deadline expired: %d/%d bytes, %d socket timeouts", (int)recvd, (int)len, timeouts);
+      ESP_LOGE(
+        TAG,
+        "coord_recv deadline expired: %d/%d bytes, %d bounded waits (cap %lu ms)",
+        (int)recvd,
+        (int)len,
+        timeouts,
+        (unsigned long)ml_coord_frame_budget_total_ms(len));
       errno = ETIMEDOUT;
       return -1;
     }
@@ -214,7 +222,8 @@ static int coord_recv_ex(microlink_t * ml, uint8_t * buf, size_t len, bool mid_f
       ESP_LOGE(TAG, "coord_recv failed: %d (errno %d, recvd %d/%d)", n, errno, (int)recvd, (int)len);
       return -1;
     }
-    ml_coord_frame_budget_on_bytes(&budget, esp_timer_get_time()); /* arms on the first byte only */
+    ml_coord_frame_budget_on_bytes(
+      &budget, esp_timer_get_time()); /* arms on the first byte, restarts the no-progress window on every byte */
     recvd += n;
   }
   return 0;
