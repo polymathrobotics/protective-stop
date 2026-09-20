@@ -36,14 +36,21 @@ static uint64_t s_boot_epoch_s; // (epoch << 32); 0 = not initialised (uptime-on
 // if the epoch could not be persisted: handshakes then fall back to uptime-only
 // timestamps rather than taking the tunnel down.
 bool wireguard_tai64n_epoch_init(void) {
+    static bool done; // once per boot even if the WG interface init is retried
+    if (done) return s_boot_epoch_s != 0;
+    done = true;
     nvs_handle_t h;
     uint32_t epoch = 0;
     esp_err_t err = nvs_open("ml_wg", NVS_READWRITE, &h);
     if (err == ESP_OK) {
-        (void)nvs_get_u32(h, "epoch", &epoch); // absent on first boot: stays 0
-        epoch++;
-        err = nvs_set_u32(h, "epoch", epoch);
-        if (err == ESP_OK) err = nvs_commit(h);
+        err = nvs_get_u32(h, "epoch", &epoch);
+        if (err == ESP_ERR_NVS_NOT_FOUND) err = ESP_OK; // first boot: start at 1
+        // any other read error must NOT restart the counter at 1 (that would roll the epoch back)
+        if (err == ESP_OK) {
+            epoch++;
+            err = nvs_set_u32(h, "epoch", epoch);
+            if (err == ESP_OK) err = nvs_commit(h);
+        }
         nvs_close(h);
     }
     if (err != ESP_OK) {
