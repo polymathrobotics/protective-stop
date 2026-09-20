@@ -121,15 +121,38 @@ int main(void)
   CHECK(ml_coord_frame_budget_wait_us(&b, S(3014)) == S(1), "wait bounded by the no-progress window");
   CHECK(ml_coord_frame_budget_expired(&b, S(3015)), "10 s after the last byte: abandoned");
 
-  /* Mid-frame entry (Noise payload after its consumed header): armed at once. */
-  ml_coord_frame_budget_init(&b, 40000);
-  ml_coord_frame_budget_on_bytes(&b, S(700));
-  CHECK(ml_coord_frame_budget_wait_us(&b, S(700)) == S(10), "armed at entry; first wait is the no-progress window");
+  /* ONE budget across header + payload (noise_recv): init for the 3-byte
+   * header, arm on its first byte, then re-size for the whole frame once the
+   * header says how long the payload is — the cap is measured from the header's
+   * first byte, not from the re-size, and the no-progress window carries over. */
+  ml_coord_frame_budget_init(&b, 3);
+  ml_coord_frame_budget_on_bytes(&b, S(700)); /* header byte 1 */
+  CHECK(ml_coord_frame_budget_wait_us(&b, S(700)) == S(10), "header alone: 10 s floor");
+  ml_coord_frame_budget_set_frame_len(&b, 3 + 65535); /* header parsed: 64 KB payload follows */
+  CHECK(ml_coord_frame_budget_wait_us(&b, S(700)) == S(10), "first payload wait is still the no-progress window");
+  CHECK(ml_coord_frame_budget_total_ms(3 + 65535) == 64001u, "cap re-sized for the whole frame (~64 s)");
+  CHECK(b.hard_deadline_us == S(700) + 64001000LL, "cap runs from the header's first byte, not from the re-size");
+  now = S(700);
+  while (now < S(700) + S(60)) { /* live payload: a chunk every 5 s keeps the no-progress window open */
+    now += S(5);
+    ml_coord_frame_budget_on_bytes(&b, now);
+  }
+  CHECK(!ml_coord_frame_budget_expired(&b, S(700) + S(60)), "alive at t+60 s under the shared cap");
+  ml_coord_frame_budget_on_bytes(&b, S(700) + 63999000LL); /* a byte just before the cap ... */
+  CHECK(
+    ml_coord_frame_budget_expired(&b, S(700) + 64002000LL),
+    "... does not extend it: hard cap ends the frame at t+64 s");
+  ml_coord_frame_budget_set_frame_len(&b, 10); /* a smaller re-size never shrinks the cap */
+  CHECK(b.hard_deadline_us == S(700) + 64001000LL, "set_frame_len never shrinks the cap");
+  ml_coord_frame_budget_init(&b, 3);
+  ml_coord_frame_budget_set_frame_len(&b, 65538); /* re-size before arming: applies when armed */
+  ml_coord_frame_budget_on_bytes(&b, S(800));
+  CHECK(b.hard_deadline_us == S(800) + 64001000LL, "re-size before arming takes effect at arming");
 
   /* init forgets everything. */
   ml_coord_frame_budget_init(&b, 1);
   CHECK(!ml_coord_frame_budget_armed(&b) && ml_coord_frame_budget_wait_us(&b, S(999)) == 0, "init clears");
 
-  if (fails == 0) printf("test_coord_frame_budget: OK (27 checks)\n");
+  if (fails == 0) printf("test_coord_frame_budget: OK (34 checks)\n");
   return fails ? 1 : 0;
 }

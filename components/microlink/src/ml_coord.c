@@ -159,20 +159,14 @@ static int coord_send(microlink_t * ml, const uint8_t * data, size_t len)
  * MapResponse). A stalled peer holds the coord task — and delays the
  * ML_CTRL_WATCHDOG_MS check that runs between reads — for at most 10 s; a slow
  * but live MapResponse frame keeps going as long as bytes arrive. */
-static int coord_recv_ex(microlink_t * ml, uint8_t * buf, size_t len, bool mid_frame)
+static int coord_recv_budget(microlink_t * ml, uint8_t * buf, size_t len, ml_coord_frame_budget_t * b)
 {
   size_t recvd = 0;
   int timeouts = 0; /* bounded waits that expired since the frame went partial */
-  ml_coord_frame_budget_t budget;
-  ml_coord_frame_budget_init(&budget, len);
-  if (mid_frame) {
-    /* The caller already consumed part of this frame (e.g. the 3-byte Noise
-     * header): the stream is partial from the first byte we wait for. */
-    ml_coord_frame_budget_on_bytes(&budget, esp_timer_get_time());
-  }
+  ml_coord_frame_budget_t * budget = b; /* caller-owned: one budget can span several reads of ONE frame */
   while (recvd < len) {
     int64_t now_us = esp_timer_get_time();
-    if (ml_coord_frame_budget_expired(&budget, now_us)) {
+    if (ml_coord_frame_budget_expired(budget, now_us)) {
       /* Overall deadline, not a per-read socket timeout: the frame is abandoned
        * and the stream misaligned, so fail like a dead connection. errno must
        * NOT stay EAGAIN — noise_recv/poll_map_update read that as "retry later"
@@ -187,11 +181,11 @@ static int coord_recv_ex(microlink_t * ml, uint8_t * buf, size_t len, bool mid_f
       errno = ETIMEDOUT;
       return -1;
     }
-    if (ml_coord_frame_budget_armed(&budget)) {
+    if (ml_coord_frame_budget_armed(budget)) {
       /* Mid-frame: wait for readability at most the remaining budget. A 0 result
        * loops back to the expiry check above; data/EOF/error fall through to
        * recv(), which reports them. */
-      int64_t wait_us = ml_coord_frame_budget_wait_us(&budget, now_us);
+      int64_t wait_us = ml_coord_frame_budget_wait_us(budget, now_us);
       fd_set rfds;
       FD_ZERO(&rfds);
       FD_SET(ml->coord_sock, &rfds);
@@ -206,7 +200,7 @@ static int coord_recv_ex(microlink_t * ml, uint8_t * buf, size_t len, bool mid_f
     int n = ml_recv(ml->coord_sock, buf + recvd, len - recvd, 0);
     if (n <= 0) {
       if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
-        if (recvd == 0 && !ml_coord_frame_budget_armed(&budget)) {
+        if (recvd == 0 && !ml_coord_frame_budget_armed(budget)) {
           /* Idle stream, nothing of this frame consumed — caller can retry */
           return -1;
         }
@@ -223,7 +217,7 @@ static int coord_recv_ex(microlink_t * ml, uint8_t * buf, size_t len, bool mid_f
       return -1;
     }
     ml_coord_frame_budget_on_bytes(
-      &budget, esp_timer_get_time()); /* arms on the first byte, restarts the no-progress window on every byte */
+      budget, esp_timer_get_time()); /* arms on the first byte, restarts the no-progress window on every byte */
     recvd += n;
   }
   return 0;
@@ -231,7 +225,9 @@ static int coord_recv_ex(microlink_t * ml, uint8_t * buf, size_t len, bool mid_f
 
 static int coord_recv(microlink_t * ml, uint8_t * buf, size_t len)
 {
-  return coord_recv_ex(ml, buf, len, false);
+  ml_coord_frame_budget_t budget; /* this read is the whole frame */
+  ml_coord_frame_budget_init(&budget, len);
+  return coord_recv_budget(ml, buf, len, &budget);
 }
 
 /* ============================================================================
@@ -263,9 +259,14 @@ static int noise_send(microlink_t * ml, ml_noise_state_t * noise, const uint8_t 
 /* Receive and decrypt a Noise transport frame, returns plaintext length */
 static int noise_recv(microlink_t * ml, ml_noise_state_t * noise, uint8_t * plaintext, size_t max_len)
 {
-  /* Read 3-byte frame header */
+  /* ONE budget for the whole frame: it arms on the header's first byte and,
+   * once the header says how long the payload is, its hard cap is re-sized for
+   * header + payload from that same first byte. Header and payload therefore
+   * share a single no-progress window and a single size-scaled cap. */
+  ml_coord_frame_budget_t budget;
+  ml_coord_frame_budget_init(&budget, 3);
   uint8_t hdr[3];
-  if (coord_recv(ml, hdr, 3) < 0) return -1;
+  if (coord_recv_budget(ml, hdr, 3, &budget) < 0) return -1;
 
   if (hdr[0] != 0x04) {
     ESP_LOGE(TAG, "Unexpected Noise frame type: 0x%02x", hdr[0]);
@@ -284,10 +285,11 @@ static int noise_recv(microlink_t * ml, ml_noise_state_t * noise, uint8_t * plai
   if (!ciphertext) return -1;
 
   /* Header already consumed — the payload read MUST complete or stream
-   * alignment is permanently lost, so it runs mid_frame: the wall-clock budget
-   * is armed before the first payload byte and bounds every wait. Past it,
+   * alignment is permanently lost. The budget is already armed (header bytes),
+   * so every payload wait is bounded from the first byte; past the budget,
    * ETIMEDOUT makes the caller reconnect instead of resuming misaligned. */
-  if (coord_recv_ex(ml, ciphertext, ct_len, true) < 0) {
+  ml_coord_frame_budget_set_frame_len(&budget, 3u + (size_t)ct_len);
+  if (coord_recv_budget(ml, ciphertext, ct_len, &budget) < 0) {
     if (errno == EAGAIN || errno == EWOULDBLOCK) errno = ETIMEDOUT; /* header consumed: not retryable */
     ESP_LOGE(TAG, "noise_recv payload failed: ct_len=%d errno=%d", ct_len, errno);
     free(ciphertext);

@@ -43,6 +43,7 @@ typedef struct
 {
   bool armed;
   int64_t total_us; /* hard cap length for this frame (from frame_len) */
+  int64_t first_byte_us; /* when the frame started (arming instant) */
   int64_t hard_deadline_us; /* first byte + total_us */
   int64_t progress_deadline_us; /* last byte + NO_PROGRESS */
 } ml_coord_frame_budget_t;
@@ -59,8 +60,20 @@ static inline void ml_coord_frame_budget_init(ml_coord_frame_budget_t * b, size_
 {
   b->armed = false;
   b->total_us = (int64_t)ml_coord_frame_budget_total_ms(frame_len) * 1000LL;
+  b->first_byte_us = 0;
   b->hard_deadline_us = 0;
   b->progress_deadline_us = 0;
+}
+
+/* A frame's length is often known only after its header: re-size the hard cap
+ * for the WHOLE frame (header + payload) while keeping the first-byte instant,
+ * so header and payload run under ONE budget, not two. Never shrinks below the
+ * length the budget was initialised with. */
+static inline void ml_coord_frame_budget_set_frame_len(ml_coord_frame_budget_t * b, size_t frame_len)
+{
+  int64_t total = (int64_t)ml_coord_frame_budget_total_ms(frame_len) * 1000LL;
+  if (total > b->total_us) b->total_us = total;
+  if (b->armed) b->hard_deadline_us = b->first_byte_us + b->total_us;
 }
 
 /* Call after every read that consumed n > 0 bytes: arms on the first byte,
@@ -69,6 +82,7 @@ static inline void ml_coord_frame_budget_on_bytes(ml_coord_frame_budget_t * b, i
 {
   if (!b->armed) {
     b->armed = true;
+    b->first_byte_us = now_us;
     b->hard_deadline_us = now_us + b->total_us;
   }
   b->progress_deadline_us = now_us + (int64_t)ML_COORD_FRAME_NO_PROGRESS_MS * 1000LL;
