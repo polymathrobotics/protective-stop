@@ -379,14 +379,16 @@ static bool eth_run_recovery(void)
  * every period and reads Sn_IR, so RX latency is bounded by the period with
  * no dependence on the INT edge. The gauge stays on in both modes so the
  * before/after comparison is the same measurement. */
+static uint32_t s_int_low_run_ticks; /* current continuous-low run; reset while the driver is down */
+
 static void eth_int_gauge_tick(void)
 {
-  static uint32_t low_run_ticks;
+  uint32_t low_run_ticks = s_int_low_run_ticks;
   if (gpio_get_level(DCS_ETH_PIN_INT) != 0) {
-    low_run_ticks = 0u; /* INT idle (high) */
+    s_int_low_run_ticks = 0u; /* INT idle (high) */
     return;
   }
-  low_run_ticks++;
+  s_int_low_run_ticks = ++low_run_ticks;
   (void)atomic_fetch_add(&g_dcs_eth_int_low_ticks, 1u);
   uint32_t low_ms = low_run_ticks * DCS_ETHWD_TICK_MS;
   if (low_ms > atomic_load(&g_dcs_eth_int_low_max_ms)) {
@@ -413,6 +415,7 @@ static void eth_watchdog_task(void * arg)
 
     if ((s_eth_handle == NULL) || !atomic_load(&s_enabled)) {
       suspect_ticks = 0u; /* driver down (boot / admin-disabled) — nothing to guard */
+      s_int_low_run_ticks = 0u; /* a low run must not span a stop/restart of the driver */
       continue;
     }
     eth_int_gauge_tick();
