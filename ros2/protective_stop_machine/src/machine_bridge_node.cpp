@@ -88,19 +88,19 @@ bool MachineBridgeNode::build_backend(std::string & error)
 
     // Resolve the optional fleet DEVICE check-in (software machine only — the
     // ESP32 machn checks itself in). This registers the software machine with
-    // pstop-fleet as a device_type="machine" device, mirroring the chip's
+    // the management backend as a device_type="machine" device, mirroring the chip's
     // fleet_ota_checkin(); it is additive to the lighter announce above. The
     // [60, 300] cadence is enforced declaratively by the params bounds<>. Env
     // overrides the params so the proprietary URL/key stay out of committed config.
     fleet_cfg_.base_url = params_.fleet.checkin_url;
     fleet_cfg_.key_file = params_.fleet.api_key_file;
     fleet_cfg_.interval_s = static_cast<int>(params_.fleet.check_interval_s);
-    if (const char * env_url = std::getenv("PSTOP_FLEET_CHECKIN_URL");
+    if (const char * env_url = std::getenv("PSTOP_CHECKIN_URL");
       env_url && env_url[0] != '\0')
     {
       fleet_cfg_.base_url = env_url;
     }
-    if (const char * env_key = std::getenv("PSTOP_FLEET_API_KEY_FILE");
+    if (const char * env_key = std::getenv("PSTOP_CHECKIN_API_KEY_FILE");
       env_key && env_key[0] != '\0')
     {
       fleet_cfg_.key_file = env_key;

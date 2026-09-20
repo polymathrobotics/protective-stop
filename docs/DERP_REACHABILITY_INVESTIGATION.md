@@ -72,7 +72,7 @@ does endpoint *learning* but not the full validation/fallback state machine —
 
 Ranked cheap→involved:
 1. **Fleet-configured peer (cheapest, test FIRST).** It may be enough to have
-   **pstop-fleet configure the DUT with a peer** (the management host / a
+   **the management backend configure the DUT with a peer** (the management host / a
    machine) so the DUT initiates + maintains the link *outbound*, which is the
    direction that already works. The OTA-push channel already proves the DUT
    pulls config outbound. **If this alone restores reachability, document it
