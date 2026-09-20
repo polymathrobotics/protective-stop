@@ -154,6 +154,7 @@ extern atomic_uint_fast32_t g_dcs_pstop_last_msg;
 extern atomic_uint_fast32_t g_dcs_pstop_replies;
 extern atomic_uint_fast32_t g_dcs_pstop_rebonds;
 extern atomic_uint_fast32_t g_dcs_pstop_mm[7]; /* lockstep-mismatch attribution (soak item 5; dcs_internal.h) */
+extern atomic_uint_fast32_t g_dcs_pstop_mm_seq; /* seqlock for g_dcs_pstop_mm (odd while being written) */
 
 /* ============================================================================
  * Lockstep state — one tick's worth of inputs for every active session,
@@ -1098,7 +1099,9 @@ static void comparator_task(void * arg)
   /* Mismatch attribution (soak item 5) -> /state.json pstop_mm_*; layout documented at g_dcs_pstop_mm in
    * dcs_internal.h: [0] timeout count [1] content count [2] last packed [3] late ms [4] at ms [5..6] lat max. */
   uint32_t mm[7] = {0};
-  uint32_t mm_late = 0; /* late-core mask of the last timeout, pending attribution at the next tick */
+  uint32_t mm_late =
+    0; /* late-core mask of the last timeout: bit c stays set until core c has published for that tick */
+  uint64_t mm_late_notify_us = 0; /* notify time of the tick that timed out (attribution reference) */
   uint64_t notify_us = 0;
   uint64_t last_unhealthy_kick_ms = 0;
   bool xc_announced = false;
@@ -1236,10 +1239,21 @@ static void comparator_task(void * arg)
       }
     }
 
-    if (mm_late != 0u) { /* previous tick timed out: when did the late core finally publish? */
-      uint64_t done = (uint64_t)atomic_load(&g_core_done_us[(mm_late & 1u) ? 0 : 1]);
-      mm[3] = (done > notify_us) ? (uint32_t)((done - notify_us) / 1000u) : 0u;
-      mm_late = 0;
+    if (mm_late != 0u) {
+      /* A previous tick timed out: attribute each late core once it has actually
+       * published for THAT tick (done > that tick's notify). A core that has not
+       * landed yet is not "0 ms late" — its bit stays pending (and this tick's own
+       * take below counts it again). mm[3] = the slowest late core's real
+       * notify->publish ms for the last event; both-late events record the max. */
+      for (int c = 0; c < 2; c++) {
+        if ((mm_late & (1u << c)) == 0u) continue;
+        uint64_t done = (uint64_t)atomic_load(&g_core_done_us[c]);
+        if (done > mm_late_notify_us) {
+          uint32_t lat = (uint32_t)((done - mm_late_notify_us) / 1000u);
+          if (lat > mm[3]) mm[3] = lat;
+          mm_late &= ~(1u << c);
+        }
+      }
     }
     /* 3. Drain any stale completion signal before notifying. If a core
          *    published just *after* CORE_PUBLISH_TIMEOUT on a previous tick,
@@ -1257,8 +1271,16 @@ static void comparator_task(void * arg)
     xTaskNotifyGive(g_core_h[0]);
     xTaskNotifyGive(g_core_h[1]);
 
-    const bool in0 = (xSemaphoreTake(g_done[0], CORE_PUBLISH_TIMEOUT) == pdTRUE); /* sequential -> late core known */
-    const bool in1 = (xSemaphoreTake(g_done[1], CORE_PUBLISH_TIMEOUT) == pdTRUE);
+    /* Sequential takes so the late core is known, but ONE absolute deadline for
+     * both: core 1 gets the remainder of CORE_PUBLISH_TIMEOUT, not a fresh budget
+     * after core 0's timeout (which gave it 160 ms and reported a both-late event
+     * as "core 0 late"). Worst-case tick stall is CORE_PUBLISH_TIMEOUT. */
+    const TickType_t take_t0 = xTaskGetTickCount();
+    const bool in0 = (xSemaphoreTake(g_done[0], CORE_PUBLISH_TIMEOUT) == pdTRUE);
+    const TickType_t take_used = xTaskGetTickCount() - take_t0;
+    const bool in1 =
+      (xSemaphoreTake(g_done[1], (take_used < CORE_PUBLISH_TIMEOUT) ? (CORE_PUBLISH_TIMEOUT - take_used) : 0) ==
+       pdTRUE);
     bool both_in = in0 && in1;
 
     /* 5. Lockstep check across ALL active slots. Any disagreement taints
@@ -1289,7 +1311,9 @@ static void comparator_task(void * arg)
     if (!both_in) {
       mismatch++;
       mm[0]++;
-      mm_late = 0u;
+      mm_late = 0u; /* a new event supersedes a still-pending attribution */
+      mm_late_notify_us = notify_us;
+      mm[3] = 0u; /* filled in by the next ticks as the late core(s) land */
       if (!in0) {
         mm_late |= 1u;
       }
@@ -1539,9 +1563,13 @@ static void comparator_task(void * arg)
     atomic_store(&g_dcs_pstop_last_msg, agg_msg);
     atomic_store(&g_dcs_pstop_replies, agg_replies);
     dcs_publish_comparator(agg_sent, mismatch, agg_fail, agg_last_reply, agg_rtt);
+    /* 7-word record published under a seqlock (odd = in flux) so a /state.json
+     * reader (dcs_pstop_mm_snapshot) never mixes two events; single writer. */
+    (void)atomic_fetch_add(&g_dcs_pstop_mm_seq, 1u);
     for (int i = 0; i < 7; i++) {
       atomic_store(&g_dcs_pstop_mm[i], mm[i]);
     }
+    (void)atomic_fetch_add(&g_dcs_pstop_mm_seq, 1u);
 
     /* Aggregate PRIORITY-peer health (kept alongside the per-slot
          * notifications above, which cover each machine target individually):

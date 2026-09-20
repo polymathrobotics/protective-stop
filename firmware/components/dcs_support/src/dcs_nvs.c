@@ -630,7 +630,9 @@ esp_err_t dcs_nvs_write_health(const dcs_health_counters_t * c)
     r = nvs_commit(h);
   }
   nvs_close(h);
-  atomic_store(&g_dcs_nvs_write[1], (uint32_t)(esp_timer_get_time() / 1000) - t0);
-  atomic_store(&g_dcs_nvs_write[0], t0);
+  /* start and duration in ONE atomic word: a reader never pairs this write's
+   * duration with the previous write's start (or vice versa). */
+  const uint32_t dur = (uint32_t)(esp_timer_get_time() / 1000) - t0;
+  atomic_store(&g_dcs_nvs_write, ((uint64_t)t0 << 32) | (uint64_t)dur);
   return r;
 }

@@ -253,7 +253,10 @@ static esp_err_t page_state(httpd_req_t * req)
   ml_usb_tx_get_diag(&usb_tx); /* zeros until the tether has ever started */
   extern void ml_peer_nvs_get_flush_diag(uint32_t out[4]); /* peer-cache flash flush: last/max/count/start ms */
   uint32_t pf[4] = {0};
-  ml_peer_nvs_get_flush_diag(pf);
+  ml_peer_nvs_get_flush_diag(pf); /* seqlock-consistent copy (ml_peer_nvs.c) */
+  uint32_t mm[7] = {0};
+  dcs_pstop_mm_snapshot(mm); /* seqlock-consistent copy of the comparator's record */
+  const uint64_t nvs_w = (uint64_t)atomic_load(&g_dcs_nvs_write);
   int n = snprintf(
     buf,
     cap,
@@ -378,18 +381,18 @@ static esp_err_t page_state(httpd_req_t * req)
     (unsigned long)atomic_load(&g_dcs_pstop_replies),
     (unsigned long)atomic_load(&g_dcs_pstop_last_msg),
     (unsigned long)atomic_load(&g_dcs_pstop_mismatch),
-    (unsigned long)atomic_load(&g_dcs_pstop_mm[0]),
-    (unsigned long)atomic_load(&g_dcs_pstop_mm[1]),
-    (unsigned long)atomic_load(&g_dcs_pstop_mm[2]), /* packed detail — layout in dcs_internal.h */
-    (unsigned long)atomic_load(&g_dcs_pstop_mm[3]), /* late core's actual publish latency ms */
-    (unsigned long)atomic_load(&g_dcs_pstop_mm[4]), /* last event uptime ms */
-    (unsigned long)atomic_load(&g_dcs_pstop_mm[5]),
-    (unsigned long)atomic_load(&g_dcs_pstop_mm[6]),
+    (unsigned long)mm[0],
+    (unsigned long)mm[1],
+    (unsigned long)mm[2], /* packed detail — layout in dcs_internal.h */
+    (unsigned long)mm[3], /* late core's actual publish latency ms */
+    (unsigned long)mm[4], /* last event uptime ms */
+    (unsigned long)mm[5],
+    (unsigned long)mm[6],
     (unsigned long)pf[3], /* nvs_pf: start uptime ms, duration ms, max duration ms */
     (unsigned long)pf[0],
     (unsigned long)pf[1],
-    (unsigned long)atomic_load(&g_dcs_nvs_write[0]), /* nvs_dcs: start uptime ms, duration ms */
-    (unsigned long)atomic_load(&g_dcs_nvs_write[1]),
+    (unsigned long)(uint32_t)(nvs_w >> 32), /* nvs_dcs: start uptime ms, duration ms (one 64-bit word) */
+    (unsigned long)(uint32_t)(nvs_w & 0xFFFFFFFFu),
     (unsigned long)atomic_load(&g_dcs_pstop_send_fail),
     (unsigned long)atomic_load(&g_dcs_pstop_sf_nomem),
     (unsigned long)atomic_load(&g_dcs_pstop_sf_route),

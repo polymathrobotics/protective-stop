@@ -97,7 +97,27 @@ atomic_uint_fast32_t g_dcs_pstop_replies;
 atomic_uint_fast32_t g_dcs_pstop_last_msg; /* last PSTOP_MESSAGE_* received from the machine */
 atomic_uint_fast32_t g_dcs_pstop_mismatch;
 atomic_uint_fast32_t g_dcs_pstop_mm[7]; /* mismatch attribution — layout in dcs_internal.h */
-atomic_uint_fast32_t g_dcs_nvs_write[2]; /* last dcs-side NVS write — layout in dcs_internal.h */
+atomic_uint_fast32_t g_dcs_pstop_mm_seq; /* seqlock for g_dcs_pstop_mm — see dcs_internal.h */
+atomic_uint_fast64_t g_dcs_nvs_write; /* last dcs-side NVS write, start<<32 | duration — dcs_internal.h */
+
+void dcs_pstop_mm_snapshot(uint32_t out[7])
+{
+  /* Seqlock read: retry while the comparator is mid-write (odd) or wrote in
+   * between. The writer runs once per 100 ms tick and the 7 stores take ~1 us,
+   * so a retry is rare; after 8 tries return the last read (diagnostics only). */
+  for (int attempt = 0; attempt < 8; attempt++) {
+    uint32_t s1 = (uint32_t)atomic_load(&g_dcs_pstop_mm_seq);
+    if ((s1 & 1u) != 0u) {
+      taskYIELD();
+      continue;
+    }
+    for (int i = 0; i < 7; i++) {
+      out[i] = (uint32_t)atomic_load(&g_dcs_pstop_mm[i]);
+    }
+    if ((uint32_t)atomic_load(&g_dcs_pstop_mm_seq) == s1) return;
+  }
+}
+
 atomic_uint_fast32_t g_dcs_pstop_send_fail;
 atomic_uint_fast32_t g_dcs_pstop_sf_nomem;
 atomic_uint_fast32_t g_dcs_pstop_sf_route;
