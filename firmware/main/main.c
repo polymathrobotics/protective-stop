@@ -1250,7 +1250,9 @@ static void comparator_task(void * arg)
         uint64_t done = (uint64_t)atomic_load(&g_core_done_us[c]);
         if (done > mm_late_notify_us) {
           uint32_t lat = (uint32_t)((done - mm_late_notify_us) / 1000u);
-          if (lat > mm[3]) mm[3] = lat;
+          if (lat > mm[5 + c]) mm[5 + c] = lat; /* the worst-case gauge must include exactly these slow publishes */
+          if (((mm[2] >> 28) == 1u) && (lat > mm[3]))
+            mm[3] = lat; /* only while the record still describes that timeout */
           mm_late &= ~(1u << c);
         }
       }
@@ -1320,6 +1322,14 @@ static void comparator_task(void * arg)
       if (!in1) {
         mm_late |= 2u;
       }
+      for (int c = 0; c < 2; c++) { /* the core that DID publish in time: fold its latency into the gauge now */
+        if ((mm_late & (1u << c)) != 0u) continue;
+        uint64_t done = (uint64_t)atomic_load(&g_core_done_us[c]);
+        uint32_t lat = (done > notify_us) ? (uint32_t)((done - notify_us) / 1000u) : 0u;
+        if (lat > mm[5 + c]) mm[5 + c] = lat;
+      }
+      /* verdict bytes: the late core has not published for THIS tick, so its byte is
+       * from its previous publish — the late mask in the same word says which. */
       mm[2] = ((uint32_t)1u << 28) | (mm_late << 26) | ((uint32_t)0xFFu << 16) | ((uint32_t)g_verdict[0] << 8);
       mm[2] |= g_verdict[1];
       mm[4] = (uint32_t)now_ms;
@@ -1327,6 +1337,8 @@ static void comparator_task(void * arg)
     } else if (!lockstep_ok) {
       mismatch++;
       mm[1]++;
+      mm[3] =
+        0u; /* late-core latency is a timeout-class field: n/a for a content event (a still-pending attribution goes to mm[5+c] only) */
       mm[2] = ((uint32_t)2u << 28) | ((uint32_t)mm_slot << 24) | ((uint32_t)mm_off << 16);
       mm[2] |= ((uint32_t)g_verdict[0] << 8) | g_verdict[1];
       mm[4] = (uint32_t)now_ms;

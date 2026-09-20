@@ -279,7 +279,11 @@ void ml_peer_nvs_get_flush_diag(uint32_t out[4])
     out[3] = s_diag_flush_at_ms;
     if ((uint32_t)atomic_load(&s_diag_flush_seq) == s1) return;
   }
-  /* 8 collisions (flushes are >= 5 s apart, so effectively never): last read stands — diagnostics only */
+  /* 8 collisions (flushes are >= 5 s apart, so effectively never): best-effort copy so out[] is always written */
+  out[0] = s_diag_flush_last_ms;
+  out[1] = s_diag_flush_max_ms;
+  out[2] = s_diag_flush_count;
+  out[3] = s_diag_flush_at_ms;
 }
 
 esp_err_t ml_peer_nvs_flush_if_due(uint64_t now_ms, bool ingest_busy)

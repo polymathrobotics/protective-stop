@@ -174,8 +174,10 @@ extern "C"
   /* pstop_mismatch attribution (soak item 5; comparator-written; /state.json pstop_mm_*): [0] timeout-class
    * count (a core missed CORE_PUBLISH_TIMEOUT), [1] content-class count (both published, frames differed),
    * [2] last event packed = kind<<28 (1 timeout, 2 content) | late_core_mask<<26 (bit0 core0, bit1 core1) |
-   * slot<<24 | first_differing_byte<<16 (0xFF n/a) | verdict0<<8 | verdict1, [3] late core's actual
-   * notify->publish ms (0 = not by the next tick), [4] last event uptime ms, [5],[6] worst latency ms per core. */
+   * slot<<24 | first_differing_byte<<16 (0xFF n/a) | verdict0<<8 | verdict1 (on a timeout record the LATE core's
+   * verdict byte is from its previous publish — the late mask says which), [3] slowest late core's actual
+   * notify->publish ms for a timeout record (0 = not landed yet / n/a for a content record), [4] last event
+   * uptime ms, [5],[6] worst notify->publish ms per core this boot, including late publishes. */
   extern atomic_uint_fast32_t g_dcs_pstop_mm[7];
   /* Seqlock for g_dcs_pstop_mm: the comparator (single writer) bumps it before and after the 7 stores, so it is
    * odd while the record is in flux. Readers use dcs_pstop_mm_snapshot() and never see two events mixed. */
