@@ -53,6 +53,7 @@
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "hal/gpio_ll.h" /* gpio_ll_get_io_config — pad-config read-back (SR-R-09) */
+#include "lockstep_window.h"
 #include "lwip/sockets.h"
 #include "pstop/protocol_data.h"
 #include "pstop/pstop_msg.h"
@@ -1281,8 +1282,9 @@ static void comparator_task(void * arg)
     const bool in0 = (xSemaphoreTake(g_done[0], CORE_PUBLISH_TIMEOUT) == pdTRUE);
     const TickType_t take_used = xTaskGetTickCount() - take_t0;
     const bool in1 =
-      (xSemaphoreTake(g_done[1], (take_used < CORE_PUBLISH_TIMEOUT) ? (CORE_PUBLISH_TIMEOUT - take_used) : 0) ==
-       pdTRUE);
+      (xSemaphoreTake(
+         g_done[1], (TickType_t)lockstep_second_wait_ticks((uint32_t)CORE_PUBLISH_TIMEOUT, (uint32_t)take_used)) ==
+       pdTRUE); /* lockstep_window.h, host-tested */
     bool both_in = in0 && in1;
 
     /* 5. Lockstep check across ALL active slots. Any disagreement taints

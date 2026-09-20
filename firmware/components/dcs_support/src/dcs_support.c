@@ -99,6 +99,7 @@ atomic_uint_fast32_t g_dcs_pstop_mismatch;
 atomic_uint_fast32_t g_dcs_pstop_mm[7]; /* mismatch attribution — layout in dcs_internal.h */
 atomic_uint_fast32_t g_dcs_pstop_mm_seq; /* seqlock for g_dcs_pstop_mm — see dcs_internal.h */
 atomic_uint_fast64_t g_dcs_nvs_write; /* last dcs-side NVS write, start<<32 | duration — dcs_internal.h */
+atomic_uint_fast32_t g_dcs_nvs_write_max; /* longest dcs-side NVS write this boot, ms */
 
 void dcs_pstop_mm_snapshot(uint32_t out[7])
 {

@@ -183,10 +183,12 @@ extern "C"
    * odd while the record is in flux. Readers use dcs_pstop_mm_snapshot() and never see two events mixed. */
   extern atomic_uint_fast32_t g_dcs_pstop_mm_seq;
   void dcs_pstop_mm_snapshot(uint32_t out[7]);
-  /* Last dcs-side NVS write (dcs_nvs.c; both cores stall for the flash op), ONE 64-bit word so start and
-   * duration are always from the same write: start uptime ms << 32 | duration ms. Peer-cache flushes have
-   * their own diag (ml_peer_nvs_get_flush_diag). /state.json nvs_dcs / nvs_pf. */
+  /* Last dcs-side NVS write (dcs_nvs.c times EVERY read-write handle open->close; both cores stall for the
+   * flash op), ONE 64-bit word so start and duration are always from the same write: start uptime ms << 32 |
+   * duration ms; plus the max duration this boot. Peer-cache flushes have their own diag
+   * (ml_peer_nvs_get_flush_diag). /state.json nvs_dcs = [start, duration, max] / nvs_pf. */
   extern atomic_uint_fast64_t g_dcs_nvs_write;
+  extern atomic_uint_fast32_t g_dcs_nvs_write_max;
   extern atomic_uint_fast32_t g_dcs_pstop_send_fail;
   /* send_fail split by cause (errno at the failing sendto): ENOMEM =
    * TX-queue/pbuf pressure (typically DERP relay backpressure), route =

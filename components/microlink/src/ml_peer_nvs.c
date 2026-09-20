@@ -255,14 +255,17 @@ void ml_peer_nvs_set_protected(uint32_t vpn_ip)
 /* Flush timing diag (§7 R6): the flash commit suspends flash-resident
  * execution on BOTH cores — these gauges make that cost measurable and the
  * fix falsifiable (flush_count flat in steady state = §7a working). */
-/* Flush diag record, published under a seqlock (s_diag_flush_seq odd while the
- * writer is mid-update) so ml_peer_nvs_get_flush_diag() never returns e.g. a
- * new count with the previous flush's duration. Single writer (ml_wg_mgr). */
+/* Flush diag record. Every word is atomic (no data race, each load returns a
+ * value some store wrote), and the record as a whole is published under a
+ * seqlock (s_diag_flush_seq odd while the writer is mid-update) so
+ * ml_peer_nvs_get_flush_diag() never pairs e.g. a new count with the previous
+ * flush's duration. Single writer (ml_wg_mgr). */
 static atomic_uint_fast32_t s_diag_flush_seq;
-static uint32_t s_diag_flush_last_ms;
-static uint32_t s_diag_flush_max_ms;
-static uint32_t s_diag_flush_count;
-static uint32_t s_diag_flush_at_ms; /* uptime ms at the START of the last flush (soak item 5: overlap test) */
+static atomic_uint_fast32_t s_diag_flush_last_ms;
+static atomic_uint_fast32_t s_diag_flush_max_ms;
+static atomic_uint_fast32_t s_diag_flush_count;
+static atomic_uint_fast32_t
+  s_diag_flush_at_ms; /* uptime ms at the START of the last flush (soak item 5: overlap test) */
 static uint64_t s_defer_start_ms; /* nonzero while an ingest-busy deferral runs */
 
 void ml_peer_nvs_get_flush_diag(uint32_t out[4])
@@ -273,10 +276,10 @@ void ml_peer_nvs_get_flush_diag(uint32_t out[4])
       taskYIELD();
       continue;
     }
-    out[0] = s_diag_flush_last_ms;
-    out[1] = s_diag_flush_max_ms;
-    out[2] = s_diag_flush_count;
-    out[3] = s_diag_flush_at_ms;
+    out[0] = (uint32_t)atomic_load(&s_diag_flush_last_ms);
+    out[1] = (uint32_t)atomic_load(&s_diag_flush_max_ms);
+    out[2] = (uint32_t)atomic_load(&s_diag_flush_count);
+    out[3] = (uint32_t)atomic_load(&s_diag_flush_at_ms);
     /* Textbook seqlock reader: the acquire fence keeps the payload loads above
      * the re-read of the sequence (an acquire LOAD alone only pins what follows
      * it); the writer's seq_cst fetch_adds order its stores on the other side. */
@@ -284,10 +287,10 @@ void ml_peer_nvs_get_flush_diag(uint32_t out[4])
     if ((uint32_t)atomic_load(&s_diag_flush_seq) == s1) return;
   }
   /* 8 collisions (flushes are >= 5 s apart, so effectively never): best-effort copy so out[] is always written */
-  out[0] = s_diag_flush_last_ms;
-  out[1] = s_diag_flush_max_ms;
-  out[2] = s_diag_flush_count;
-  out[3] = s_diag_flush_at_ms;
+  out[0] = (uint32_t)atomic_load(&s_diag_flush_last_ms);
+  out[1] = (uint32_t)atomic_load(&s_diag_flush_max_ms);
+  out[2] = (uint32_t)atomic_load(&s_diag_flush_count);
+  out[3] = (uint32_t)atomic_load(&s_diag_flush_at_ms);
 }
 
 esp_err_t ml_peer_nvs_flush_if_due(uint64_t now_ms, bool ingest_busy)
@@ -317,10 +320,10 @@ esp_err_t ml_peer_nvs_flush_if_due(uint64_t now_ms, bool ingest_busy)
   esp_err_t r = flush_table();
   uint32_t dur = (uint32_t)((esp_timer_get_time() - t0) / 1000);
   (void)atomic_fetch_add(&s_diag_flush_seq, 1u); /* odd: record in flux */
-  s_diag_flush_last_ms = dur;
-  s_diag_flush_at_ms = (uint32_t)(t0 / 1000);
-  if (dur > s_diag_flush_max_ms) s_diag_flush_max_ms = dur;
-  s_diag_flush_count++;
+  atomic_store(&s_diag_flush_last_ms, dur);
+  atomic_store(&s_diag_flush_at_ms, (uint32_t)(t0 / 1000));
+  if (dur > (uint32_t)atomic_load(&s_diag_flush_max_ms)) atomic_store(&s_diag_flush_max_ms, dur);
+  (void)atomic_fetch_add(&s_diag_flush_count, 1u);
   (void)atomic_fetch_add(&s_diag_flush_seq, 1u); /* even: consistent */
   s_last_flush_ms = now_ms;
   if (r == ESP_OK) {

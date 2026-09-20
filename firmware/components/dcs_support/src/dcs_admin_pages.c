@@ -288,7 +288,7 @@ static esp_err_t page_state(httpd_req_t * req)
     "\"pstop_peer_ip\":%lu,\"pstop_peer_port\":%lu,"
     "\"pstop_sent\":%lu,\"pstop_replies\":%lu,\"pstop_last_msg\":%lu,\"pstop_mismatch\":%lu,"
     "\"pstop_mm_timeout\":%lu,\"pstop_mm_content\":%lu,\"pstop_mm_last\":[%lu,%lu,%lu],"
-    "\"pstop_core_lat_max_ms\":[%lu,%lu],\"nvs_pf\":[%lu,%lu,%lu],\"nvs_dcs\":[%lu,%lu],"
+    "\"pstop_core_lat_max_ms\":[%lu,%lu],\"nvs_pf\":[%lu,%lu,%lu],\"nvs_dcs\":[%lu,%lu,%lu],"
     "\"pstop_send_fail\":%lu,\"pstop_sf_nomem\":%lu,\"pstop_sf_route\":%lu,"
     "\"pstop_sf_txdrv\":%lu,\"pstop_sf_txdrv_recovered\":%lu,\"pstop_sf_other\":%lu,"
     "\"pstop_sf_enotconn\":%lu,\"pstop_sf_enotconn_kicks\":%lu,\"pstop_sf_errno\":%d,\"pstop_"
@@ -391,8 +391,9 @@ static esp_err_t page_state(httpd_req_t * req)
     (unsigned long)pf[3], /* nvs_pf: start uptime ms, duration ms, max duration ms */
     (unsigned long)pf[0],
     (unsigned long)pf[1],
-    (unsigned long)(uint32_t)(nvs_w >> 32), /* nvs_dcs: start uptime ms, duration ms (one 64-bit word) */
+    (unsigned long)(uint32_t)(nvs_w >> 32), /* nvs_dcs: start uptime ms, duration ms (one 64-bit word), max ms */
     (unsigned long)(uint32_t)(nvs_w & 0xFFFFFFFFu),
+    (unsigned long)atomic_load(&g_dcs_nvs_write_max),
     (unsigned long)atomic_load(&g_dcs_pstop_send_fail),
     (unsigned long)atomic_load(&g_dcs_pstop_sf_nomem),
     (unsigned long)atomic_load(&g_dcs_pstop_sf_route),
