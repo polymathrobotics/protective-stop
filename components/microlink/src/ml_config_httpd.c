@@ -1201,7 +1201,7 @@ static esp_err_t handler_monitor(httpd_req_t * req)
              * 2=vpn_ip 3=disco_key 4=hostname 5=region 6=endpoints */
             for (int i = 0; i < 7; i++) cJSON_AddItemToArray(sfa, cJSON_CreateNumber(sf[i]));
           }
-          uint32_t fl[3] = {0};
+          uint32_t fl[4] = {0};
           ml_peer_nvs_get_flush_diag(fl);
           cJSON_AddNumberToObject(json, "nvs_flush_last_ms", fl[0]);
           cJSON_AddNumberToObject(json, "nvs_flush_max_ms", fl[1]);
