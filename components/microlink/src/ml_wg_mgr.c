@@ -452,13 +452,16 @@ static esp_err_t wg_init_interface(microlink_t * ml)
      * + udp_new. These run at boot — low risk in practice (TCPIP thread
      * isn't processing real traffic yet) but unsafe without the lock per
      * upstream PR#14 audit. */
+  /* #157: monotonic handshake timestamps across reboots — one NVS commit, done
+   * BEFORE taking the TCPIP core lock so the flash write stalls no lwIP caller. */
+  (void)wireguard_tai64n_epoch_init();
+
   bool init_need_lock = ml_lwip_core_lock_needed();
   if (init_need_lock) {
     LOCK_TCPIP_CORE();
   }
 
   /* Initialize WireGuard netif */
-  (void)wireguard_tai64n_epoch_init(); /* #157: monotonic handshake timestamps across reboots (logs on failure) */
   netif->state = &wg_init;
   err_t err = wireguardif_init(netif);
   if (err != ERR_OK) {

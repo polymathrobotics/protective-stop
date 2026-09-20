@@ -69,15 +69,16 @@ uint32_t wireguard_tai64n_epoch(void) {
 void wireguard_tai64n_now(uint8_t *output) {
     // TAI64N format: 8 bytes seconds + 4 bytes nanoseconds
     uint64_t now_us = esp_timer_get_time();
-    uint64_t seconds = now_us / 1000000ULL + s_boot_epoch_s;
+    uint64_t uptime_s = now_us / 1000000ULL;
+    uint64_t seconds = uptime_s + s_boot_epoch_s;
     uint32_t nanoseconds = (now_us % 1000000ULL) * 1000;
 
-    // Log raw uptime before TAI offset (only every ~5s to avoid spam)
+    // Log uptime and the boot epoch separately (only every ~5s to avoid spam)
     static uint64_t last_log_s = 0;
-    if (seconds - last_log_s >= 5) {
+    if (uptime_s - last_log_s >= 5) {
         extern volatile int wg_verbose_logging;
-        if (wg_verbose_logging) printf("[TAI64N] uptime=%llu s, nano=%lu\n", (unsigned long long)seconds, (unsigned long)nanoseconds);
-        last_log_s = seconds;
+        if (wg_verbose_logging) printf("[TAI64N] uptime=%llu s, epoch=%lu, nano=%lu\n", (unsigned long long)uptime_s, (unsigned long)(s_boot_epoch_s >> 32), (unsigned long)nanoseconds);
+        last_log_s = uptime_s;
     }
 
     // TAI64 starts at 1970-01-01 00:00:10 TAI (Unix epoch + 10 seconds)
