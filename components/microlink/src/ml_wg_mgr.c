@@ -2343,6 +2343,11 @@ static int add_peer(microlink_t * ml, const ml_peer_update_t * update, bool * sk
     /* CMM chain-breaker throttle: an evicted slot's stale stamp would eat the
      * fresh peer's first CallMeMaybe for up to ML_DISCO_CMM_MIN_INTERVAL_MS. */
     p->last_cmm_sent_ms = 0;
+    /* WG re-establishment state (ml_wg_regain_policy.h): a predecessor's connect
+     * stamp would pace the fresh safety peer's first connect() by up to 5 s, and
+     * its one-shot flag would deny a fresh bulk peer its single initiation. */
+    p->last_safety_connect_ms = 0;
+    p->tried_initial_handshake = false;
   }
 
   char ip_str[16];

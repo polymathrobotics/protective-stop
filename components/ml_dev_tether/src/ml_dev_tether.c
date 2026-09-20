@@ -336,11 +336,6 @@ esp_err_t ml_dev_tether_try_start(uint32_t timeout_ms)
     .driver = &driver_cfg,
     .stack = &lwip_cfg,
   };
-  s_netif = esp_netif_new(&cfg);
-  if (!s_netif) {
-    ESP_LOGE(TAG, "esp_netif_new failed");
-    goto fail;
-  }
   /* TX ring before the netif can transmit; enabled for this session only. */
   err = ml_usb_tx_init();
   if (err != ESP_OK) {
@@ -359,26 +354,38 @@ esp_err_t ml_dev_tether_try_start(uint32_t timeout_ms)
   uint8_t dev_mac[6];
   memcpy(dev_mac, net_cfg.mac_addr, sizeof(dev_mac));
   dev_mac[5] ^= 0x02;
-  esp_netif_set_mac(s_netif, dev_mac);
 
-  /* Bring up the netif and seed its link state from the BUS, not from an
-   * assumption: without a "connected" the Ethernet-class netif stays in
-   * admin-up/link-down and the DHCP client never sends DISCOVER (it waits for
-   * a phy link event that never comes from our USB driver); but a bus event
-   * that fired before s_netif existed was dropped by on_usb_event(), so if the
-   * host is not enumerated right now the link starts DOWN and the next
-   * mounted/resumed event brings it up. Under s_rx_lock so an event landing
-   * during this window is ordered with the seed. */
-  esp_netif_action_start(s_netif, 0, 0, 0);
+  /* Create, start and PUBLISH the netif under s_rx_lock, then seed its link
+   * state from the BUS rather than from an assumption:
+   *  - on_usb_event()/on_usb_rx() only ever see s_netif once it is started, so
+   *    a bus event can neither hit an un-started netif nor be applied to one
+   *    that stop() is tearing down (the lock orders both);
+   *  - without a "connected" the Ethernet-class netif stays admin-up/link-down
+   *    and the DHCP client never sends DISCOVER (it waits for a phy link event
+   *    that never comes from our USB driver); but a mount/suspend event that
+   *    fired before the netif existed was necessarily dropped, so if the host
+   *    is not enumerated right now the link starts DOWN and the next
+   *    mounted/resumed event brings it up.
+   * The TCPIP thread never takes s_rx_lock, so holding it across the
+   * esp_netif IPC calls cannot deadlock; it only defers USB RX by a few ms. */
   if (s_rx_lock) xSemaphoreTake(s_rx_lock, portMAX_DELAY);
+  esp_netif_t * n = esp_netif_new(&cfg);
+  if (!n) {
+    if (s_rx_lock) xSemaphoreGive(s_rx_lock);
+    ESP_LOGE(TAG, "esp_netif_new failed");
+    goto fail;
+  }
+  esp_netif_set_mac(n, dev_mac);
+  esp_netif_action_start(n, 0, 0, 0);
+  s_netif = n;
   {
     bool bus_up = tud_mounted() && !tud_suspended();
     ESP_LOGI(
       TAG, "USB netif start: bus %s -> link %s", bus_up ? "configured" : "not configured", bus_up ? "up" : "down");
     if (bus_up) {
-      esp_netif_action_connected(s_netif, 0, 0, 0);
+      esp_netif_action_connected(n, 0, 0, 0);
     } else {
-      esp_netif_action_disconnected(s_netif, 0, 0, 0);
+      esp_netif_action_disconnected(n, 0, 0, 0);
     }
   }
   if (s_rx_lock) xSemaphoreGive(s_rx_lock);

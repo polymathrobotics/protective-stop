@@ -286,6 +286,9 @@ static void supervisor_task(void * arg)
 
 void dcs_net_supervisor_start(void)
 {
+  if (s_sup_task != NULL) {
+    return; /* single instance: the WiFi-toggle worker's request/semaphore pair assumes one caller */
+  }
   atomic_store(&g_dcs_active_iface, (int)DCS_IFACE_NONE);
   /* PSRAM stack: route supervisor is non-safety and does no flash/NVS itself —
      * the WiFi failover toggle, which does, runs on an internal-stack worker
