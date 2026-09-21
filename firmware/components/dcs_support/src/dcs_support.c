@@ -96,6 +96,35 @@ atomic_uint_fast32_t g_dcs_pstop_sent;
 atomic_uint_fast32_t g_dcs_pstop_replies;
 atomic_uint_fast32_t g_dcs_pstop_last_msg; /* last PSTOP_MESSAGE_* received from the machine */
 atomic_uint_fast32_t g_dcs_pstop_mismatch;
+atomic_uint_fast32_t g_dcs_pstop_mm[7]; /* mismatch attribution — layout in dcs_internal.h */
+atomic_uint_fast32_t g_dcs_pstop_mm_seq; /* seqlock for g_dcs_pstop_mm — see dcs_internal.h */
+atomic_uint_fast64_t g_dcs_nvs_write; /* last dcs-side NVS write, start<<32 | duration — dcs_internal.h */
+atomic_uint_fast32_t g_dcs_nvs_write_max; /* longest dcs-side NVS write this boot, ms */
+
+void dcs_pstop_mm_snapshot(uint32_t out[7])
+{
+  /* Seqlock read: retry while the comparator is mid-write (odd) or wrote in
+   * between. The writer runs once per 100 ms tick and the 7 stores take ~1 us,
+   * so a retry is rare; after 8 tries return the last read (diagnostics only). */
+  for (int attempt = 0; attempt < 8; attempt++) {
+    uint32_t s1 = (uint32_t)atomic_load(&g_dcs_pstop_mm_seq);
+    if ((s1 & 1u) != 0u) {
+      taskYIELD();
+      continue;
+    }
+    for (int i = 0; i < 7; i++) {
+      out[i] = (uint32_t)atomic_load(&g_dcs_pstop_mm[i]);
+    }
+    atomic_thread_fence(memory_order_acquire); /* payload loads stay above the seq re-read */
+    if ((uint32_t)atomic_load(&g_dcs_pstop_mm_seq) == s1) return;
+  }
+  /* 8 collisions in a row (writer runs once per 100 ms tick — effectively
+   * never): deliver a best-effort copy rather than leave `out` untouched. */
+  for (int i = 0; i < 7; i++) {
+    out[i] = (uint32_t)atomic_load(&g_dcs_pstop_mm[i]);
+  }
+}
+
 atomic_uint_fast32_t g_dcs_pstop_send_fail;
 atomic_uint_fast32_t g_dcs_pstop_sf_nomem;
 atomic_uint_fast32_t g_dcs_pstop_sf_route;
@@ -164,6 +193,8 @@ atomic_uint_fast32_t g_dcs_eth_rec_r2;
 atomic_uint_fast32_t g_dcs_eth_rec_r3;
 atomic_uint_fast32_t g_dcs_eth_rec_reason;
 atomic_uint_fast32_t g_dcs_eth_spi_err;
+atomic_uint_fast32_t g_dcs_eth_int_low_ticks;
+atomic_uint_fast32_t g_dcs_eth_int_low_max_ms;
 atomic_uint_fast32_t g_dcs_rgb_cycles;
 atomic_uint_fast32_t g_dcs_pstop_rebonds;
 atomic_uint_fast32_t g_dcs_relay_fault_a;

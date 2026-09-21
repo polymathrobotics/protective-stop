@@ -65,7 +65,7 @@ private:
   uint32_t machine_id_{0};
 
   // Fleet DEVICE check-in (optional, opt-in, software backend only). Registers
-  // the software machine with pstop-fleet like an ESP32 machn; resolved at
+  // the software machine with the management backend like an ESP32 machn; resolved at
   // configure time, the thread runs only while ACTIVE. Additive to the announcer.
   FleetCheckinConfig fleet_cfg_;
 

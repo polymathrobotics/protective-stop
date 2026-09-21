@@ -62,6 +62,8 @@
 #include "soc/rtc_cntl_reg.h"
 #include "wireguardif.h"
 
+#include "wireguard-platform.h" /* wireguard_tai64n_epoch() */
+
 static const char * TAG = "dcs_admin";
 
 /* === GET / =============================================================== */
@@ -230,14 +232,16 @@ static esp_err_t page_state(httpd_req_t * req)
    */
   enum
   {
-    JSON_CAP = 4352 /* + 5 usb_tx_* counters (<= ~120 B). eth-watchdog fields + bonded-remote stop_only + operator list
+    JSON_CAP = 4864 /* + 5 usb_tx_* counters (<= ~120 B). eth-watchdog fields + bonded-remote stop_only + operator list
                        + instantaneous internal-heap fields (heap_free_int/heap_lfb_int).
                        remote_stop_id + restart_state add <= 47 B worst case against
                        ~940 B live headroom (measured 2026-08-09). derp_region_locked
                        adds <= 27 B. Region auto-negotiation surfacing (source string
                        + auto_applied + counters + mbb_state + switches_1h) adds
                        <= ~160 B worst case — bumped 3776 -> 4096 to keep comfortable
-                       headroom rather than shave the measured margin. */
+                       headroom rather than shave the measured margin. Lockstep-mismatch
+                       attribution (pstop_mm_timeout/content/last, pstop_core_lat_max_ms,
+                       nvs_pf, nvs_dcs) adds <= ~230 B worst case: 4352 -> 4864. */
   };
 
   char * buf = heap_caps_malloc(JSON_CAP, MALLOC_CAP_SPIRAM);
@@ -249,6 +253,12 @@ static esp_err_t page_state(httpd_req_t * req)
   const int cap = JSON_CAP;
   ml_usb_tx_diag_t usb_tx;
   ml_usb_tx_get_diag(&usb_tx); /* zeros until the tether has ever started */
+  extern void ml_peer_nvs_get_flush_diag(uint32_t out[4]); /* peer-cache flash flush: last/max/count/start ms */
+  uint32_t pf[4] = {0};
+  ml_peer_nvs_get_flush_diag(pf); /* seqlock-consistent copy (ml_peer_nvs.c) */
+  uint32_t mm[7] = {0};
+  dcs_pstop_mm_snapshot(mm); /* seqlock-consistent copy of the comparator's record */
+  const uint64_t nvs_w = (uint64_t)atomic_load(&g_dcs_nvs_write);
   int n = snprintf(
     buf,
     cap,
@@ -259,7 +269,7 @@ static esp_err_t page_state(httpd_req_t * req)
     "\"e_hi0\":%lu,\"e_lo0\":%lu,\"e_hi1\":%lu,\"e_lo1\":%lu,"
     "\"active_iface\":%d,\"net_sup_kicks\":%lu,\"eth_link\":%d,"
     "\"eth_recoveries\":%lu,\"eth_rec_r1\":%lu,\"eth_rec_r2\":%lu,\"eth_rec_r3\":%lu,"
-    "\"eth_rec_reason\":%lu,\"eth_spi_err\":%lu,"
+    "\"eth_rec_reason\":%lu,\"eth_spi_err\":%lu,\"eth_int_low_ticks\":%lu,\"eth_int_low_max_ms\":%lu,"
     "\"eth_en\":%d,\"wifi_en\":%d,\"usbncm_en\":%d,"
     "\"wifi_disc\":%d,\"wifi_conn\":%d,\"wifi_idx\":%d,\"wifi_n\":%d,"
     "\"eth_ip\":%lu,\"usb_ip\":%lu,\"wifi_ip\":%lu,\"local_ip\":%lu,"
@@ -267,18 +277,20 @@ static esp_err_t page_state(httpd_req_t * req)
     "\"derp_paused\":%d,\"derp_delay_ms\":%d,\"wg_paused\":%d,"
     "\"usb_enabled\":%d,\"ts_boot_en\":%d,\"derp_only\":%d,"
     "\"usb_tx_sent\":%lu,\"usb_tx_busy_retries\":%lu,\"usb_tx_expired\":%lu,\"usb_tx_full_drops\":%lu,\"usb_tx_"
-    "pending\":%lu,"
+    "pending\":%lu,\"usb_tx_timeout_uncertain\":%lu,"
     "\"boot_count\":%u,\"reset_reason\":%u,\"ctrl_reset_cause\":%u,"
     "\"crash_present\":%d,\"crash_pc\":%lu,\"crash_task\":\"%s\",\"crash_sha\":\"%s\","
     "\"xcheck_last_detail\":%u,\"log_lines_s\":%lu,\"log_lines_s_peak\":%lu,\"log_console_skipped\":%lu,"
     "\"health\":%d,\"fw_ver\":\"%s\",\"fw_sha\":\"%s\","
-    "\"ml_state\":%d,\"ml_reconnects\":%lu,\"vpn_ip\":%lu,\"public_ip\":%lu,\"derp_region\":%d,"
+    "\"ml_state\":%d,\"ml_reconnects\":%lu,\"wg_epoch\":%lu,\"vpn_ip\":%lu,\"public_ip\":%lu,\"derp_region\":%d,"
     "\"derp_region_locked\":%d,"
     "\"derp_region_source\":\"%s\",\"derp_region_auto_applied\":%d,"
     "\"derp_auto_applies\":%lu,\"derp_auto_apply_s\":%lu,"
     "\"derp_mbb_state\":%d,\"derp_switches_1h\":%lu,"
     "\"pstop_peer_ip\":%lu,\"pstop_peer_port\":%lu,"
     "\"pstop_sent\":%lu,\"pstop_replies\":%lu,\"pstop_last_msg\":%lu,\"pstop_mismatch\":%lu,"
+    "\"pstop_mm_timeout\":%lu,\"pstop_mm_content\":%lu,\"pstop_mm_last\":[%lu,%lu,%lu],"
+    "\"pstop_core_lat_max_ms\":[%lu,%lu],\"nvs_pf\":[%lu,%lu,%lu],\"nvs_dcs\":[%lu,%lu,%lu],"
     "\"pstop_send_fail\":%lu,\"pstop_sf_nomem\":%lu,\"pstop_sf_route\":%lu,"
     "\"pstop_sf_txdrv\":%lu,\"pstop_sf_txdrv_recovered\":%lu,\"pstop_sf_other\":%lu,"
     "\"pstop_sf_enotconn\":%lu,\"pstop_sf_enotconn_kicks\":%lu,\"pstop_sf_errno\":%d,\"pstop_"
@@ -316,6 +328,8 @@ static esp_err_t page_state(httpd_req_t * req)
     (unsigned long)atomic_load(&g_dcs_eth_rec_r3),
     (unsigned long)atomic_load(&g_dcs_eth_rec_reason),
     (unsigned long)atomic_load(&g_dcs_eth_spi_err),
+    (unsigned long)atomic_load(&g_dcs_eth_int_low_ticks),
+    (unsigned long)atomic_load(&g_dcs_eth_int_low_max_ms),
     dcs_eth_is_enabled() ? 1 : 0,
     dcs_wifi_is_enabled() ? 1 : 0,
     dcs_usb_is_enabled() ? 1 : 0,
@@ -339,6 +353,7 @@ static esp_err_t page_state(httpd_req_t * req)
     (unsigned long)usb_tx.expired,
     (unsigned long)usb_tx.full_drops,
     (unsigned long)usb_tx.pending,
+    (unsigned long)usb_tx.timeout_uncertain,
     (unsigned int)g_dcs.boot_count,
     (unsigned int)g_dcs.reset_reason,
     (unsigned int)g_dcs.ctrl_reset_cause,
@@ -355,6 +370,7 @@ static esp_err_t page_state(httpd_req_t * req)
     fw_sha,
     ml_state,
     (unsigned long)ml_reconnects,
+    (unsigned long)wireguard_tai64n_epoch(), /* 0 = handshake epoch not persisted this boot (#157 degraded) */
     (unsigned long)vpn_ip,
     (unsigned long)public_ip,
     derp_region,
@@ -371,6 +387,19 @@ static esp_err_t page_state(httpd_req_t * req)
     (unsigned long)atomic_load(&g_dcs_pstop_replies),
     (unsigned long)atomic_load(&g_dcs_pstop_last_msg),
     (unsigned long)atomic_load(&g_dcs_pstop_mismatch),
+    (unsigned long)mm[0],
+    (unsigned long)mm[1],
+    (unsigned long)mm[2], /* packed detail — layout in dcs_internal.h */
+    (unsigned long)mm[3], /* late core's actual publish latency ms */
+    (unsigned long)mm[4], /* last event uptime ms */
+    (unsigned long)mm[5],
+    (unsigned long)mm[6],
+    (unsigned long)pf[3], /* nvs_pf: start uptime ms, duration ms, max duration ms */
+    (unsigned long)pf[0],
+    (unsigned long)pf[1],
+    (unsigned long)(uint32_t)(nvs_w >> 32), /* nvs_dcs: start uptime ms, duration ms (one 64-bit word), max ms */
+    (unsigned long)(uint32_t)(nvs_w & 0xFFFFFFFFu),
+    (unsigned long)atomic_load(&g_dcs_nvs_write_max),
     (unsigned long)atomic_load(&g_dcs_pstop_send_fail),
     (unsigned long)atomic_load(&g_dcs_pstop_sf_nomem),
     (unsigned long)atomic_load(&g_dcs_pstop_sf_route),

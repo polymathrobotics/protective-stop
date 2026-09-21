@@ -196,6 +196,10 @@ CONFIG_TINYUSB_CDC_COUNT=1
 CONFIG_ESP_CONSOLE_SECONDARY_USB_SERIAL_JTAG=n
 CONFIG_TINYUSB_CDC_RX_BUFSIZE=512
 CONFIG_TINYUSB_CDC_TX_BUFSIZE=512
+# Bus suspend/resume events: the tether mirrors them onto its netif link
+# state so the net supervisor fails over when the host goes away.
+CONFIG_TINYUSB_SUSPEND_CALLBACK=y
+CONFIG_TINYUSB_RESUME_CALLBACK=y
 # USB descriptors
 CONFIG_TINYUSB_DESC_MANUFACTURER_STRING="Polymath"
 CONFIG_TINYUSB_DESC_PRODUCT_STRING="MicroLink dual_core_safety"

@@ -614,6 +614,7 @@ extern "C"
 
     /* DISCO state (rate limiting) */
     uint64_t last_ping_sent_ms; /* Last DISCO ping we sent */
+    uint64_t last_safety_connect_ms; /* last keyless-regain wireguardif_connect() (paced to REKEY_TIMEOUT) */
     uint64_t last_pong_recv_ms; /* Last DISCO pong we received (any path) */
     uint64_t last_direct_pong_recv_ms; /* Last pong received DIRECT — the
                                         * pong-dead demote trigger keys on
@@ -1258,8 +1259,8 @@ extern "C"
   /* Deferred flash flush of the peer cache (writes are debounced: saves only
  * update the PSRAM working copy; call this ~once per wg_mgr pass). */
   esp_err_t ml_peer_nvs_flush_if_due(uint64_t now_ms, bool ingest_busy);
-  /* Flush timing diag: out[0]=last ms, out[1]=max ms, out[2]=count. */
-  void ml_peer_nvs_get_flush_diag(uint32_t out[3]);
+  /* Flush timing diag: out[0]=last ms, out[1]=max ms, out[2]=count, out[3]=start uptime ms of the last flush. */
+  void ml_peer_nvs_get_flush_diag(uint32_t out[4]);
   /* Mark a peer (by VPN IP, host order) as never-LRU-evicted from the cache.
  * Bounded set (priority peer, fleet server, app-pinned operator remotes):
  * these keys feed the boot-time WG preseed that answers cold inbound

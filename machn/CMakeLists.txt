@@ -20,6 +20,14 @@ if(EXISTS "${CMAKE_CURRENT_LIST_DIR}/sdkconfig.credentials")
 endif()
 
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
+
+# A build made WITH a credentials file is private: brand the image (see
+# ml_app.c) so tools/release_guard.sh refuses it even on a machine that has a
+# different credentials file, or none.
+if(EXISTS "${CMAKE_CURRENT_LIST_DIR}/sdkconfig.credentials")
+    idf_build_set_property(COMPILE_DEFINITIONS "-DML_BUILD_WITH_CREDENTIALS=1" APPEND)
+endif()
+
 project(machn_machine)
 
 # Identity prefix: machn-01<mac24> instead of pstop-01<mac24>.

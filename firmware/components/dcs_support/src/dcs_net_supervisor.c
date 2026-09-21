@@ -35,6 +35,7 @@
 #include "esp_timer.h"
 #include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "ml_app.h"
 
@@ -45,6 +46,53 @@ static const char * TAG = "dcs_netsup";
  * poll period. Only DOWN transitions kick — UP/promote stays on the periodic
  * loop for natural anti-flap debounce (asymmetric by design). */
 static TaskHandle_t s_sup_task = NULL;
+
+/* dcs_wifi_set_enabled() reaches flash: the wifi_list NVS blob, and
+ * esp_wifi_init/start's PHY-calibration NVS access. Flash access asserts when
+ * the caller's stack is in PSRAM (cache_utils.c:127,
+ * esp_task_stack_is_sane_cache_disabled) — and the supervisor's is. So the
+ * toggle runs on a short-lived INTERNAL-stack worker and the supervisor only
+ * waits on a dedicated semaphore (its task notification is the link-down
+ * wake-up and must not be consumed here). Bench 2026-09-19 (cad4): tether
+ * link-down -> "bringing up WiFi" -> assert abort in net_sup, boot loop. */
+typedef struct
+{
+  bool on;
+  esp_err_t result;
+} wifi_toggle_req_t;
+
+static SemaphoreHandle_t s_wifi_toggle_done = NULL;
+static wifi_toggle_req_t s_wifi_toggle_req; /* one caller (this task), one toggle at a time */
+
+static void wifi_toggle_task(void * arg)
+{
+  wifi_toggle_req_t * req = (wifi_toggle_req_t *)arg;
+  req->result = dcs_wifi_set_enabled(req->on);
+  (void)xSemaphoreGive(s_wifi_toggle_done);
+  vTaskDelete(NULL);
+}
+
+static esp_err_t wifi_set_enabled_on_internal_stack(bool on)
+{
+  if (s_wifi_toggle_done == NULL) {
+    s_wifi_toggle_done = xSemaphoreCreateBinary();
+    if (s_wifi_toggle_done == NULL) {
+      return ESP_ERR_NO_MEM;
+    }
+  }
+  s_wifi_toggle_req.on = on;
+  s_wifi_toggle_req.result = ESP_FAIL;
+  /* Internal stack by construction (plain xTaskCreate): 4 KB, transient. */
+  if (
+    xTaskCreatePinnedToCore(wifi_toggle_task, "wifi_tog", 4096, &s_wifi_toggle_req, 4, NULL, tskNO_AFFINITY) != pdPASS)
+  {
+    ESP_LOGW(TAG, "WiFi toggle worker: no internal RAM for its stack — retry next tick");
+    return ESP_ERR_NO_MEM;
+  }
+  (void)xSemaphoreTake(s_wifi_toggle_done, portMAX_DELAY); /* worker always gives before exiting */
+  return s_wifi_toggle_req.result;
+}
+
 static atomic_uint s_link_down_kicks = 0;
 
 #define SUPERVISOR_PERIOD_MS 1000
@@ -209,12 +257,12 @@ static void supervisor_task(void * arg)
       if (dcs_boot_alt_network_won()) {
         if ((!high_ok) && (high_bad_s >= WIFI_FAILOVER_AFTER_S) && (!dcs_wifi_is_enabled())) {
           ESP_LOGW(TAG, "no Eth/USB for %us — bringing up WiFi", (unsigned)high_bad_s);
-          if (dcs_wifi_set_enabled(true) == ESP_OK) {
+          if (wifi_set_enabled_on_internal_stack(true) == ESP_OK) {
             wifi_auto = true;
           }
         } else if (high_ok && (high_ok_s >= FAILOVER_DROP_HOLD_S) && wifi_auto && dcs_wifi_is_enabled()) {
           ESP_LOGW(TAG, "Eth/USB stable %us — dropping WiFi", (unsigned)high_ok_s);
-          if (dcs_wifi_set_enabled(false) == ESP_OK) {
+          if (wifi_set_enabled_on_internal_stack(false) == ESP_OK) {
             wifi_auto = false;
           }
         } else {
@@ -238,11 +286,13 @@ static void supervisor_task(void * arg)
 
 void dcs_net_supervisor_start(void)
 {
+  if (s_sup_task != NULL) {
+    return; /* single instance: the WiFi-toggle worker's request/semaphore pair assumes one caller */
+  }
   atomic_store(&g_dcs_active_iface, (int)DCS_IFACE_NONE);
-  /* 4608 B: the task now calls dcs_wifi_set_enabled() (esp_wifi_init/deinit,
-     * esp_netif create/destroy) on auto-failover, which needs more stack than
-     * the bare route-arbitration loop. */
-  /* PSRAM stack: route supervisor is non-safety, does no flash/NVS. */
+  /* PSRAM stack: route supervisor is non-safety and does no flash/NVS itself —
+     * the WiFi failover toggle, which does, runs on an internal-stack worker
+     * (wifi_set_enabled_on_internal_stack). */
   s_sup_task = dcs_task_spawn_psram(supervisor_task, "net_sup", 4608, NULL, 4, tskNO_AFFINITY);
 
   /* Event-driven demote: wake the supervisor the instant a link drops so it

@@ -34,6 +34,7 @@ extern "C"
     uint32_t expired; /* frames dropped after the 100 ms lifetime */
     uint32_t full_drops; /* frames dropped at submit: ring full */
     uint32_t pending; /* frames in the ring right now */
+    uint32_t timeout_uncertain; /* offers that timed out in the TinyUSB hand-off: sent or withdrawn, not retried */
   } ml_usb_tx_diag_t;
 
   /* Allocate the ring (PSRAM) and start the drain task. Idempotent. */

@@ -28,10 +28,15 @@ test_estop_verdict: $(SRCS)
 test_dcs_health_logic: $(HEALTH_SRCS)
 	$(CC) $(CFLAGS) $(HEALTH_INC) -o $@ $(HEALTH_SRCS)
 
+# Comparator shared publish window (lockstep_window.h): pure header-only logic.
+test_lockstep_window: test_lockstep_window.c ../main/lockstep_window.h
+	$(CC) $(CFLAGS) -I../main -o $@ test_lockstep_window.c
+
 .PHONY: run coverage clean
-run: test_estop_verdict test_dcs_health_logic
+run: test_estop_verdict test_dcs_health_logic test_lockstep_window
 	./test_estop_verdict
 	./test_dcs_health_logic
+	./test_lockstep_window
 
 coverage: run
 	$(GCOVR) --root .. --gcov-executable $(GCOV) \
@@ -40,4 +45,4 @@ coverage: run
 	  --json-summary-pretty -o coverage-summary.json
 
 clean:
-	rm -f test_estop_verdict test_dcs_health_logic *.gcda *.gcno *.gcov coverage-summary.json
+	rm -f test_estop_verdict test_dcs_health_logic test_lockstep_window *.gcda *.gcno *.gcov coverage-summary.json

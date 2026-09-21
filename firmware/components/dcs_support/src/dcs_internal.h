@@ -171,6 +171,24 @@ extern "C"
   extern atomic_uint_fast32_t g_dcs_pstop_replies; /* machine replies received */
   extern atomic_uint_fast32_t g_dcs_pstop_last_msg; /* last message TYPE from the machine (PSTOP_MESSAGE_*) */
   extern atomic_uint_fast32_t g_dcs_pstop_mismatch;
+  /* pstop_mismatch attribution (soak item 5; comparator-written; /state.json pstop_mm_*): [0] timeout-class
+   * count (a core missed CORE_PUBLISH_TIMEOUT), [1] content-class count (both published, frames differed),
+   * [2] last event packed = kind<<28 (1 timeout, 2 content) | late_core_mask<<26 (bit0 core0, bit1 core1) |
+   * slot<<24 | first_differing_byte<<16 (0xFF n/a) | verdict0<<8 | verdict1 (on a timeout record the LATE core's
+   * verdict byte is from its previous publish — the late mask says which), [3] slowest late core's actual
+   * notify->publish ms for a timeout record (0 = not landed yet / n/a for a content record), [4] last event
+   * uptime ms, [5],[6] worst notify->publish ms per core this boot, including late publishes. */
+  extern atomic_uint_fast32_t g_dcs_pstop_mm[7];
+  /* Seqlock for g_dcs_pstop_mm: the comparator (single writer) bumps it before and after the 7 stores, so it is
+   * odd while the record is in flux. Readers use dcs_pstop_mm_snapshot() and never see two events mixed. */
+  extern atomic_uint_fast32_t g_dcs_pstop_mm_seq;
+  void dcs_pstop_mm_snapshot(uint32_t out[7]);
+  /* Last dcs-side NVS write (dcs_nvs.c times EVERY read-write handle open->close; both cores stall for the
+   * flash op), ONE 64-bit word so start and duration are always from the same write: start uptime ms << 32 |
+   * duration ms; plus the max duration this boot. Peer-cache flushes have their own diag
+   * (ml_peer_nvs_get_flush_diag). /state.json nvs_dcs = [start, duration, max] / nvs_pf. */
+  extern atomic_uint_fast64_t g_dcs_nvs_write;
+  extern atomic_uint_fast32_t g_dcs_nvs_write_max;
   extern atomic_uint_fast32_t g_dcs_pstop_send_fail;
   /* send_fail split by cause (errno at the failing sendto): ENOMEM =
    * TX-queue/pbuf pressure (typically DERP relay backpressure), route =
@@ -283,6 +301,8 @@ extern "C"
   extern atomic_uint_fast32_t g_dcs_eth_rec_r3;
   extern atomic_uint_fast32_t g_dcs_eth_rec_reason;
   extern atomic_uint_fast32_t g_dcs_eth_spi_err;
+  extern atomic_uint_fast32_t g_dcs_eth_int_low_ticks; /* W5500 INT-line gauge: 20 ms samples that found INT asserted */
+  extern atomic_uint_fast32_t g_dcs_eth_int_low_max_ms; /* longest SAMPLED continuous INT-low span, ms (stall gauge) */
 
   /* RGB status-LED loop counter — incremented once per blink cycle by dcs_rgb,
  * read by /state.json so the task's liveness is observable (a frozen counter

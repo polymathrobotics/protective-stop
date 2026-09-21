@@ -98,7 +98,7 @@ path there:
      unit into download mode over HTTP and flashes over USB. Needs the
      (git-ignored) `production_image/` secrets baked locally on the runner.
    Fleet-server URL and API key are PROPRIETARY: provide them to the runner
-   as environment/secret (`PSTOP_FLEET_URL`, key file) — they must never
+   as environment/secret (`PSTOP_CHECKIN_URL`, `PSTOP_CHECKIN_API_KEY_FILE`) — they must never
    appear in committed files (same rule as `sdkconfig.credentials`).
 3. **Flash verification — DONE (firmware >= 4c90711)**: `state.json`
    reports `fw_ver` (git short hash) and `fw_sha` (truncated ELF SHA-256).

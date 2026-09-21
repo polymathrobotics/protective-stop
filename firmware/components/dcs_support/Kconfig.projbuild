@@ -62,3 +62,21 @@ menu "Protective Stop: lifetime health"
             pull loses at most this much uptime.
 
 endmenu
+
+menu "Protective Stop: Ethernet (W5500)"
+
+    config DCS_ETH_W5500_POLL_MS
+        int "W5500 RX polling period in ms (0 = interrupt-driven)"
+        default 10
+        range 0 100
+        help
+            0 keeps the ESP-IDF default: RX is driven by the W5500 INT falling
+            edge, and a frame that lands while the driver task is still busy
+            can wait for the driver's 1000 ms re-check (esp-idf #6233) — up to
+            1 s of a 1.6 s stop-on-silence budget. A non-zero value selects the
+            SDK polling mode: the driver task is woken every period by its own
+            timer and reads the socket interrupt register, so RX latency is
+            bounded by the period regardless of the INT line. One ~40 us SPI
+            register read per period when idle.
+
+endmenu
