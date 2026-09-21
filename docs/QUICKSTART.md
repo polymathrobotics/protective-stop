@@ -96,13 +96,17 @@ python3 -m esptool --chip esp32s3 -p /dev/ttyACM0 -b 460800 write_flash 0x0 psto
 ```
 
 If `esptool` cannot connect, hold **BOOT**, tap **RESET**, release BOOT, retry.
-A board that is already running this firmware has no serial port; put it in
-download mode the same way (or `POST /api/enter_download?confirm=1`, see
-step 9). Settings stored on the remote survive a reflash.
 
-The full-flash image contains everything (bootloader, partition table, app).
-It is built from the release tag **without any credentials**: no Tailscale key,
-no WiFi, admin password `microlink`. You add the key next.
+The full-flash image contains everything (bootloader, partition table, app)
+and writes the whole flash from address 0 — including the settings area, which
+it leaves **blank**. It is a **factory image**: flashing it onto a unit that
+was already provisioned erases its Tailscale identity and key, machine peer,
+role and health counters (the unit comes back as a new machine on the tailnet).
+To *update* a running unit instead, send the app image over the network
+(`…-public.bin`, step 9, "Update a running unit") — that keeps every setting.
+
+The image is built from the release tag **without any credentials**: no
+Tailscale key, no WiFi, admin password `microlink`. You add the key next.
 
 ## 5. First boot: give the remote its Tailscale key
 
@@ -149,8 +153,8 @@ remote's 32-bit device ID in hex; the ROS node wants it in decimal, hence
 `REMOTE_ID`. Now go back to the Tailscale admin console and **disable key
 expiry** on the new machine (step 1).
 
-The key is stored in the remote's flash: it survives reflashes and OTA
-updates (Appendix C). The admin page is reachable only from the USB tether,
+The key is stored in the remote's settings area: it survives OTA updates and
+app-image flashes, not the full-flash image (Appendix D). The admin page is reachable only from the USB tether,
 a wired LAN, or your tailnet; to use a password other than `microlink`, build
 the image yourself (Appendix A).
 
@@ -265,9 +269,9 @@ the one-time uv setup.
 | Remote row shows `REJECTED` | The node's `allowlist`/`denylist` refused the bond. Fix the list, then press **Rebond** on the remote (or `POST /api/pstop_peers?slot=0&rebond=1`). |
 | Ring red pulsing (slow) | Peer configured but unreachable: node down, wrong `$LAPTOP_TS`, or ufw. `tailscale ping $REMOTE` from the laptop. |
 | Ring purple | One switch loop open while the other is closed: wiring fault. See [`hardware/README.md`](../hardware/README.md). |
-| Need to reflash a running unit | It has no serial port. Hold BOOT, tap RESET, then flash; or `curl -u admin:microlink -X POST "http://$REMOTE/api/enter_download?confirm=1"`. Settings in flash (key, peer, role) survive a reflash. |
-| Update a running unit without a cable | `curl -u admin:microlink --data-binary @pstop_remote-<version>-public.bin -X POST "http://$REMOTE/admin/api/ota"` (the app image, not the full-flash one). |
-| Start over | `python3 -m esptool --chip esp32s3 -p /dev/ttyACM0 erase_flash` wipes everything including the Tailscale identity and health counters; the remote comes back as a new machine on the tailnet. |
+| Update a running unit | `curl -u admin:microlink --data-binary @pstop_remote-<version>-public.bin -X POST "http://$REMOTE/admin/api/ota"` — the **app** image, over the network; the unit reboots into it and keeps all settings. |
+| Reflash a running unit by cable | It has no serial port while running: hold BOOT, tap RESET (or `curl -u admin:microlink -X POST "http://$REMOTE/api/enter_download?confirm=1"`), then flash. The full-flash image resets it to factory (step 4); to keep settings, use the OTA row above instead. |
+| Start over | Flash the full-flash image, or `python3 -m esptool --chip esp32s3 -p /dev/ttyACM0 erase_flash`; either wipes the Tailscale identity, key, peer, role and health counters, and the remote comes back as a new machine on the tailnet. |
 
 More: [`TROUBLESHOOTING.md`](TROUBLESHOOTING.md), [`API.md`](API.md).
 
@@ -341,16 +345,19 @@ The remote tries uplinks in order: Ethernet (6 s DHCP wait), USB tether, WiFi.
   bonded machine rides through.
 - **WiFi**: enter the network under **Settings** on the admin page (or set
   `CONFIG_ML_WIFI_SSID` / `CONFIG_ML_WIFI_PASSWORD` when building yourself).
-  With no working uplink for 60 s the remote opens its own access point
-  `microlink-XXYYZZ` (password `microlink`) with the admin page at
-  `http://192.168.4.1/admin`, where WiFi and the auth key can be set without a
-  cable.
+  A remote that **boots** with neither Ethernet nor USB and cannot join WiFi
+  within 60 s opens its own access point `microlink-XXYYZZ` (password
+  `microlink`) with the admin page at `http://192.168.4.1/admin`, where WiFi
+  and the auth key can be set without a cable. This is a boot-time fallback
+  only: a unit that loses its wired/USB link while running falls back to the
+  configured WiFi but does not open the access point — power-cycle it to get
+  there.
 - Two remotes on one laptop by USB: only the first gets `esp-pstop0`; see
   [`USB_NCM_SETUP.md`](USB_NCM_SETUP.md).
 
 ## Appendix D: what persists where
 
-| Data | Lives in | Survives reflash / OTA | Survives `erase_flash` |
+| Data | Lives in | Survives OTA / app-image flash | Survives full-flash image / `erase_flash` |
 |---|---|---|---|
 | Tailscale auth key, WiFi | NVS if set via `/admin/` (or the firmware image when built with credentials) | yes (NVS wins over image) | no |
 | Admin password | firmware image only (`microlink` in release builds) | yes | yes (it is in the image) |
@@ -358,6 +365,10 @@ The remote tries uplinks in order: Ethernet (6 s DHCP wait), USB tether, WiFi.
 | Machine peer, self-role | NVS | yes | no |
 | Lifetime health counters (`/api/health`) | NVS | yes | no |
 | Admission lists (`allowlist`/`denylist`) | laptop: `pstop_machine.yaml` / `machine.toml` | n/a (not on the remote) | n/a |
+
+The full-flash image writes the settings area blank (the release notes call it
+the factory image); `erase_flash` wipes everything. OTA and app-image flashes
+never touch the settings area.
 
 Changing the key baked into a new image does not replace a key that was ever
 saved through the admin page; NVS takes priority at boot.
