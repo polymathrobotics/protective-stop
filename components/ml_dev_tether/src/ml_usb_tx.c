@@ -47,9 +47,13 @@
 #define TX_TASK_STACK 4096 /* tinyusb_net_send_sync: event group + semaphore + logging */
 #define TX_TASK_PRIO 5 /* below the safety tasks; above idle/lwIP housekeeping */
 #define TX_SYNC_WAIT_MS \
-  20 /* how long one offer may wait for the TinyUSB task to run it. The
-                             * xmit itself is a memcpy into the NTB (microseconds); this only
-                             * bounds a starved TinyUSB task. Must be > 0 — see usb_drain(). */
+  200 /* how long one offer may wait for the TinyUSB task to run it. The
+                              * xmit itself is a memcpy into the NTB (microseconds); this only
+                              * bounds a starved TinyUSB task. Must be > 0 — see usb_drain().
+                              * 20 ms timed out ~10x/min on the bench (equal-priority passes of
+                              * 70+ ms starve the TinyUSB task) and every timeout is a frame of
+                              * unknown fate plus a stale deferred callback that can double the
+                              * NEXT frame; 200 ms (half the 400 ms TTL) makes timeouts rare. */
 
 typedef struct
 {
@@ -64,7 +68,7 @@ static atomic_uint s_head, s_tail; /* consumer / producer indices, free-running 
 static atomic_uint s_epoch; /* bumped on every disable; odd = disabled, even = enabled */
 static atomic_bool s_ready, s_init_started, s_producer_busy;
 static TaskHandle_t s_drain_task;
-static atomic_uint s_sent, s_busy_retries, s_expired, s_full_drops;
+static atomic_uint s_sent, s_busy_retries, s_expired, s_full_drops, s_timeout_uncertain;
 
 /* Consumer: offer the head frame; keep it on NCM-busy; drop it on expiry.
  * Returns true when the ring still holds a frame the endpoint refused. */
@@ -93,15 +97,38 @@ static bool usb_drain(void)
        * win a microsecond race — on the bench that was ~95 % loss, ~100 ms RTT
        * on the survivors and a busy_retries storm (2026-09-18). TIMEOUT is
        * ambiguous: usually the packet was withdrawn unsent, but if the TinyUSB
-       * task finished the xmit just after the wait expired, the retry sends the
-       * frame twice. Accepted: a duplicate is harmless to IP/TCP and to the
-       * pstop counters, a lost frame is not. */
-      esp_err_t r = tinyusb_net_send_sync(s->bytes, s->len, NULL, pdMS_TO_TICKS(TX_SYNC_WAIT_MS));
-      if (r != ESP_OK) {
+       * task finished the xmit just after the wait expired, a retry sends the
+       * frame TWICE — and a duplicated WireGuard handshake response makes the
+       * host derive a second session and discard the one we use (two 9-min
+       * tether outages, 2026-09-19/20, #157). So only ESP_FAIL (the TinyUSB
+       * task ran and the endpoint refused the frame: definitely unsent) is
+       * retried; a TIMEOUT frame is given up — possibly lost, never doubled. */
+      /* The wait never extends a frame past its TTL: cap it to the lifetime left. */
+      int64_t left_ms = (TX_TTL_US - (esp_timer_get_time() - s->queued_us)) / 1000;
+      uint32_t wait_ms =
+        (left_ms < (int64_t)TX_SYNC_WAIT_MS) ? (left_ms > 0 ? (uint32_t)left_ms : 1u) : TX_SYNC_WAIT_MS;
+      esp_err_t r = tinyusb_net_send_sync(s->bytes, s->len, NULL, pdMS_TO_TICKS(wait_ms));
+      if (r == ESP_FAIL) {
         atomic_fetch_add(&s_busy_retries, 1u);
         return true; /* head stays; retried in order after TX_RETRY_MS */
       }
-      atomic_fetch_add(&s_sent, 1u);
+      if (r == ESP_OK) {
+        atomic_fetch_add(&s_sent, 1u);
+      } else {
+        atomic_fetch_add(&s_timeout_uncertain, 1u); /* TIMEOUT: sent or withdrawn, unknown — given up, not retried */
+        /* The timed-out offer's deferred callback may still sit in the TinyUSB
+         * event queue. It reads a SHARED packet pointer, so publishing the next
+         * frame before it has run can transmit that frame twice (#161) — a
+         * doubled handshake response is the #157 outage. Deferred callbacks and
+         * USB events share one FIFO: once that queue is observed empty, every
+         * earlier callback has executed (harmlessly: the vendor pointer is NULL
+         * and its semaphore is held until the next offer). Wait for that,
+         * bounded — past the bound the TinyUSB task is starved and the ring's
+         * frames are expiring anyway. */
+        for (int waited_ms = 0; tud_task_event_ready() && waited_ms < (int)TX_SYNC_WAIT_MS; waited_ms++) {
+          vTaskDelay(pdMS_TO_TICKS(1));
+        }
+      }
     }
     atomic_store_explicit(&s_head, head + 1u, memory_order_release);
   }
@@ -232,6 +259,7 @@ void ml_usb_tx_get_diag(ml_usb_tx_diag_t * out)
   out->sent = atomic_load(&s_sent);
   out->busy_retries = atomic_load(&s_busy_retries);
   out->expired = atomic_load(&s_expired);
+  out->timeout_uncertain = atomic_load(&s_timeout_uncertain);
   out->full_drops = atomic_load(&s_full_drops);
   /* Two independent atomics: read head FIRST so a producer racing in between
    * can only make the difference larger by real frames, never wrap negative

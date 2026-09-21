@@ -62,6 +62,8 @@
 #include "soc/rtc_cntl_reg.h"
 #include "wireguardif.h"
 
+#include "wireguard-platform.h" /* wireguard_tai64n_epoch() */
+
 static const char * TAG = "dcs_admin";
 
 /* === GET / =============================================================== */
@@ -275,12 +277,12 @@ static esp_err_t page_state(httpd_req_t * req)
     "\"derp_paused\":%d,\"derp_delay_ms\":%d,\"wg_paused\":%d,"
     "\"usb_enabled\":%d,\"ts_boot_en\":%d,\"derp_only\":%d,"
     "\"usb_tx_sent\":%lu,\"usb_tx_busy_retries\":%lu,\"usb_tx_expired\":%lu,\"usb_tx_full_drops\":%lu,\"usb_tx_"
-    "pending\":%lu,"
+    "pending\":%lu,\"usb_tx_timeout_uncertain\":%lu,"
     "\"boot_count\":%u,\"reset_reason\":%u,\"ctrl_reset_cause\":%u,"
     "\"crash_present\":%d,\"crash_pc\":%lu,\"crash_task\":\"%s\",\"crash_sha\":\"%s\","
     "\"xcheck_last_detail\":%u,\"log_lines_s\":%lu,\"log_lines_s_peak\":%lu,\"log_console_skipped\":%lu,"
     "\"health\":%d,\"fw_ver\":\"%s\",\"fw_sha\":\"%s\","
-    "\"ml_state\":%d,\"ml_reconnects\":%lu,\"vpn_ip\":%lu,\"public_ip\":%lu,\"derp_region\":%d,"
+    "\"ml_state\":%d,\"ml_reconnects\":%lu,\"wg_epoch\":%lu,\"vpn_ip\":%lu,\"public_ip\":%lu,\"derp_region\":%d,"
     "\"derp_region_locked\":%d,"
     "\"derp_region_source\":\"%s\",\"derp_region_auto_applied\":%d,"
     "\"derp_auto_applies\":%lu,\"derp_auto_apply_s\":%lu,"
@@ -351,6 +353,7 @@ static esp_err_t page_state(httpd_req_t * req)
     (unsigned long)usb_tx.expired,
     (unsigned long)usb_tx.full_drops,
     (unsigned long)usb_tx.pending,
+    (unsigned long)usb_tx.timeout_uncertain,
     (unsigned int)g_dcs.boot_count,
     (unsigned int)g_dcs.reset_reason,
     (unsigned int)g_dcs.ctrl_reset_cause,
@@ -367,6 +370,7 @@ static esp_err_t page_state(httpd_req_t * req)
     fw_sha,
     ml_state,
     (unsigned long)ml_reconnects,
+    (unsigned long)wireguard_tai64n_epoch(), /* 0 = handshake epoch not persisted this boot (#157 degraded) */
     (unsigned long)vpn_ip,
     (unsigned long)public_ip,
     derp_region,

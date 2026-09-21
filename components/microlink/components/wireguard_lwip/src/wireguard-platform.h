@@ -69,6 +69,9 @@ void wireguard_random_bytes(void *bytes, size_t size);
 // The Wireguard implementation doesn't strictly need this to be a time, but instead an increasing value
 // The remote end of the Wireguard tunnel will use this value in handshake replay detection
 void wireguard_tai64n_now(uint8_t *output);
+// Persist a per-boot epoch so TAI64N stays monotonic across reboots (#157); call once before the WG netif is up.
+bool wireguard_tai64n_epoch_init(void);
+uint32_t wireguard_tai64n_epoch(void); // 0 = not initialised yet, UINT32_MAX = failed (degraded), else the epoch
 
 // Is the system under load - i.e. should we generate cookie reply message in response to initiation messages
 bool wireguard_is_under_load();
