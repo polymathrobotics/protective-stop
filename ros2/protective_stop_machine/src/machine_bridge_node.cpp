@@ -58,13 +58,13 @@ bool MachineBridgeNode::build_backend(std::string & error)
     sc.port = static_cast<int>(params_.software.port);
     sc.machine_id = static_cast<uint32_t>(params_.machine_id);
     sc.timing = timing_;
-    // Operator authorization (SAFETY): unlisted remotes stay STOP-ONLY, only a
-    // listed 32-bit pstop id may re-arm. Empty list (default) => all stop-only.
-    sc.default_stop_only = params_.software.default_stop_only;
-    sc.operators.clear();
-    sc.operators.reserve(params_.software.operators.size());
-    for (int64_t operator_id : params_.software.operators) {
-      sc.operators.push_back(static_cast<uint32_t>(operator_id));
+    // Admission (optional): who may BOND. Both lists empty (default) => every
+    // remote is admitted. Re-arm authority is each remote's own announced role.
+    for (int64_t id : params_.software.allowlist) {
+      sc.allowlist.push_back(static_cast<uint32_t>(id));
+    }
+    for (int64_t id : params_.software.denylist) {
+      sc.denylist.push_back(static_cast<uint32_t>(id));
     }
     backend_ = std::make_unique<SoftwareMachineBackend>(sc);
 
@@ -88,19 +88,19 @@ bool MachineBridgeNode::build_backend(std::string & error)
 
     // Resolve the optional fleet DEVICE check-in (software machine only — the
     // ESP32 machn checks itself in). This registers the software machine with
-    // pstop-fleet as a device_type="machine" device, mirroring the chip's
+    // the management backend as a device_type="machine" device, mirroring the chip's
     // fleet_ota_checkin(); it is additive to the lighter announce above. The
     // [60, 300] cadence is enforced declaratively by the params bounds<>. Env
     // overrides the params so the proprietary URL/key stay out of committed config.
     fleet_cfg_.base_url = params_.fleet.checkin_url;
     fleet_cfg_.key_file = params_.fleet.api_key_file;
     fleet_cfg_.interval_s = static_cast<int>(params_.fleet.check_interval_s);
-    if (const char * env_url = std::getenv("PSTOP_FLEET_CHECKIN_URL");
+    if (const char * env_url = std::getenv("PSTOP_CHECKIN_URL");
       env_url && env_url[0] != '\0')
     {
       fleet_cfg_.base_url = env_url;
     }
-    if (const char * env_key = std::getenv("PSTOP_FLEET_API_KEY_FILE");
+    if (const char * env_key = std::getenv("PSTOP_CHECKIN_API_KEY_FILE");
       env_key && env_key[0] != '\0')
     {
       fleet_cfg_.key_file = env_key;

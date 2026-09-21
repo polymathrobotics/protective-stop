@@ -74,7 +74,7 @@ preferred, with USB-NCM and WiFi available as fallbacks.
 | [`ros2/`](ros2/) | ROS 2 machine node and messages |
 | [`components/`](components/) | Embedded networking, USB tether, and `pstop_c` integration |
 | [`docs/`](docs/) | API, recovery, testing, networking, and safety-case documentation |
-| [`tools/`](tools/) and [`test/`](test/) | Protocol, chaos, soak, flashing, and static-analysis tools |
+| [`tools/`](tools/) and [`test/`](test/) | Protocol, chaos, soak, flashing, and static-analysis tools (see [`tools/README.md`](tools/README.md) for the uv setup) |
 
 Tailscale support uses
 [`microlink`](https://github.com/CamM2325/microlink), an embedded client from
@@ -119,12 +119,19 @@ of about 2 seconds. Integrators should choose values within the validated limits
 so the timeout fits their process safety time and network conditions.
 
 The machine starts stopped. To arm it, press and hold the switch for at least
-`min_stop_ms` (500 ms by default), then release it. Machine policy determines
-which remotes may re-arm: the hardware and ROS 2 machine implementations default
-to stop-only, while the included host configuration is permissive for bench use.
+`min_stop_ms` (500 ms by default), then release it. Whether a remote may re-arm
+is the **remote's own** declared role: a new remote announces `stop_only` (it can
+stop a machine but never arm it) until promoted to `operator` through its
+authenticated `/api/role`. The change applies live — an armed machine keeps
+running when its operator demotes itself, but refuses to re-arm until a remote
+announcing `operator` performs the gesture.
+
+Machines optionally restrict **who may bond at all** with a global allowlist
+and/or denylist (empty by default = everyone). A refused remote is told so
+(`UNBOND`) and stops retrying until an operator asks it to rebond.
 
 One remote can maintain independent sessions with up to four machines. Each
-machine controls its own heartbeat window, timeout, and authorization policy.
+machine controls its own heartbeat window, timeout and admission policy.
 
 ## Testing
 

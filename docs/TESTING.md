@@ -1,9 +1,14 @@
 # Testing
 
 How to exercise the pstop link, the machine's arming policy, and the
-remote's robustness. All tools are stdlib-Python or bash + `curl`/`jq`;
-nothing needs the chip's IDE. Bench IPs are environment-specific — every
-script takes them as environment variables or flags.
+remote's robustness. Nothing here needs the chip's IDE. Bench IPs are
+environment-specific — every script takes them as environment variables or
+flags.
+
+Most tools here are stdlib-only and run under any Python 3.11+. The
+`tools/` uv environment covers all of them plus the ones with dependencies
+(`usb_relay4.py`, the HIL suite), so the commands below use `uv run`; see
+[`../tools/README.md`](../tools/README.md) for the one-time setup.
 
 ## 1. Machine arming-policy suite — `tools/pstop_test_remote.py`
 
@@ -14,20 +19,21 @@ min-STOP-duration arming policy and the two-gate re-arm rule without a chip.
 It works against either machine implementation, since both host the same
 `pstop_c`. Use a **dedicated** port, never the one a real remote is bonded to.
 
-Plain-C runner (`host/machine.toml` accepts any OPERATOR-announcing remote):
+Plain-C runner (`host/machine.toml` admits every remote; the script announces
+OPERATOR, which is all that arming needs):
 
 ```sh
 cd host && make
 ./machine_app_runner machine.toml 8893 &
-python3 ../tools/pstop_test_remote.py --port 8893
+cd ../tools && uv run python pstop_test_remote.py --port 8893
 ```
 
-ROS 2 node (the script's id `0x01020381` = `16909185` must be an operator):
+ROS 2 node (defaults admit every remote; only the port needs overriding):
 
 ```sh
-printf '/machine_bridge:\n  ros__parameters:\n    software:\n      port: 8894\n      operators: [16909185]\n' > /tmp/pstop_test.yaml
+printf '/machine_bridge:\n  ros__parameters:\n    software:\n      port: 8894\n' > /tmp/pstop_test.yaml
 ros2 run protective_stop_machine machine_bridge_node --ros-args --params-file /tmp/pstop_test.yaml &
-python3 tools/pstop_test_remote.py --port 8894
+cd tools && uv run python pstop_test_remote.py --port 8894
 ```
 
 Asserts (exit 0 = all pass):
@@ -49,12 +55,15 @@ to `host/machine_app_runner.c`, `ros2/`, `common/pstop_aux_channel.h` or a
 Drives N scripted software remotes (each its own device_id + counter handshake)
 against a dedicated `machine_app_runner` to validate the many-to-one logic
 across the corner-case matrix: independent arming, the any-STOP OR, arming
-ownership, heartbeat loss, unbond, capacity overflow, allowlist deny, stop-only
-operators, malformed/bad-CRC/invalid-type traffic, and network chaos (via §2).
-32 assertions covering the fail-safe invariants (I1–I7).
+ownership, heartbeat loss, unbond, capacity overflow, admission allow/denylist
+(incl. the addressed `UNBOND` reply and deny-wins), remote-announced stop-only
+vs operator authority, the LIVE role flip (a demoted owner keeps the machine
+running but cannot re-arm it after the next STOP), a mixed operator/stop-only
+fleet, malformed/bad-CRC/invalid-type traffic, and network chaos (via §2).
+47 assertions covering the fail-safe invariants (I1–I7).
 
 ```sh
-python3 tools/pstop_multi_remote_test.py     # exit 0 = all invariants held
+cd tools && uv run python pstop_multi_remote_test.py     # exit 0 = all invariants held
 ```
 
 Full write-up + invariant list: `MULTI_REMOTE_VALIDATION_2026-07-22.md`.
@@ -67,7 +76,7 @@ UDP proxy interposed in the pstop path
 runtime via a UDP control port (8892) without re-bonding:
 
 ```sh
-python3 tools/pstop_chaos_proxy.py --listen 8891 --fwd 8890 --ctrl 8892
+cd tools && uv run python pstop_chaos_proxy.py --listen 8891 --fwd 8890 --ctrl 8892
 curl -X POST "http://$CHIP/api/pstop_peer?ip=<proxy-host>&port=8891"
 echo 'loss=0.05 delay_ms=100 jitter_ms=50' > /dev/udp/127.0.0.1/8892
 echo 'clear=1'                             > /dev/udp/127.0.0.1/8892

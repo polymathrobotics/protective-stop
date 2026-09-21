@@ -13,7 +13,7 @@ before opening a pull request.
 | `firmware/`   | ESP-IDF v5.5 project; builds `pstop_remote.bin` for the ESP32-S3 remote.   |
 | `components/` | Shared ESP-IDF components (`microlink`, `ml_dev_tether`, `pstop`).         |
 | `host/`       | Plain-C `machine_app_runner` (robot-side pstop machine; no ESP-IDF).       |
-| `tools/`      | Python test tools and `misra_check.sh` (cppcheck MISRA pre-check).         |
+| `tools/`      | Python test tools and `misra_check.sh` (cppcheck MISRA pre-check). Run them with `uv` — see `tools/README.md`. |
 | `test/`       | Bash test ladders (chaos, netem, soak, recovery).                         |
 | `docs/`       | Design and test documentation.                                            |
 | `hardware/`   | Certified enclosure CAD, schematic, STEP files, BOM, and assembly guide.  |
@@ -50,7 +50,27 @@ network tether once TinyUSB starts and the serial console goes quiet. Use
 adapter to the UART0 pins. Full first-time walkthrough: `docs/QUICKSTART.md`.
 
 `sdkconfig.credentials` holds secrets (Wi-Fi, Tailscale auth key, admin
-password) and is gitignored — never commit it.
+password) and is gitignored — never commit it. Every value in it is compiled
+into the `.bin` **and** the `.elf` as a plain string, so a build made with a
+credentials file present is private and must never be attached to a GitHub
+release or shared outside the organisation.
+
+### Publishing release binaries
+
+Only builds made **without** a credentials file go on a release. Build them in a
+clean checkout with `idf.py -DPROJECT_VER=<tag>-public build merge-bin` (the
+`-public` suffix keeps `fw_ver` distinguishable from private builds of the same
+commit), then run the guard on every artifact before `gh release upload`:
+
+```sh
+tools/release_guard.sh firmware/build/pstop_remote.bin firmware/build/pstop_remote.elf ...
+```
+
+It refuses (exit 1) any file that carries the private-build brand (every
+image compiled while a credentials file was present is branded
+`ML-BUILD-WITH-CREDENTIALS`, so the verdict does not depend on which
+credentials file the checking machine has), any value of a local credentials
+file, or a secret-shaped string (`tskey-…`, PEM keys, literal auth tokens).
 
 ### Host runner (robot-side machine)
 
@@ -65,7 +85,8 @@ make                    # produces ./machine_app_runner
 
 - **Remote protocol / arming policy:** `tools/pstop_test_remote.py` bonds
   over the real wire protocol and runs timed STOP/OK sequences against a
-  runner instance. See `docs/TESTING.md`.
+  runner instance. Run it as `cd tools && uv run python
+  pstop_test_remote.py`; see `docs/TESTING.md` and `tools/README.md`.
 - **Test ladders:** the scripts in `test/` (`chaos_ladder.sh`,
   `netem_ladder.sh`, `longsoak.sh`, `test_suite.sh`, recovery scripts)
   exercise the system under packet loss, latency, and fault injection.
@@ -105,6 +126,16 @@ Note `pstop_c/` is intentionally excluded from the C/C++ hooks.
 - **No changes to `pstop_c/`** (contribute upstream instead).
 - **Clear commits.** Explain the design intent, not just the diff.
   Reference the relevant `docs/` design note where one applies.
+- **Keep safety traceability lint clean.** The linter checks requirement and
+  function mappings, statuses, evidence citations, and ownership of numeric
+  coverage claims. Generated coverage becomes stale whenever document
+  citations or statuses change; refresh it with
+  `cd tools && uv run python -m safety_lint --write` (see `tools/README.md`
+  for the environment). This command recounts
+  citations and statuses from the documents; it does not execute tests or
+  establish that cited tests pass. Write mode refuses to modify the document
+  while unbaselined errors exist. Automatic pre-commit rewriting is
+  deliberately not configured because coverage drops require human review.
 
 Contributions are licensed according to where they land: software and firmware
 under Apache-2.0, hardware design files under CERN-OHL-P-2.0, and documentation

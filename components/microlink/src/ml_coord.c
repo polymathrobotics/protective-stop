@@ -36,6 +36,7 @@
 #include "lwip/sockets.h"
 #include "mbedtls/base64.h"
 #include "microlink_internal.h"
+#include "ml_coord_frame_budget.h"
 #include "x25519.h"
 
 static const char * TAG = "ml_coord";
@@ -150,34 +151,83 @@ static int coord_send(microlink_t * ml, const uint8_t * data, size_t len)
   return 0;
 }
 
-static int coord_recv(microlink_t * ml, uint8_t * buf, size_t len)
+/* Wall-clock budget for finishing ONE partial Noise frame (issue #127): policy
+ * and rationale in ml_coord_frame_budget.h (host-tested). Once a frame is
+ * partial, each wait is bounded by the nearer of the 10 s no-progress window
+ * (restarted by every byte) and a hard cap scaled by the frame size, via
+ * select() — not by the socket's SO_RCVTIMEO (2 s long-poll / 60 s
+ * MapResponse). A stalled peer holds the coord task — and delays the
+ * ML_CTRL_WATCHDOG_MS check that runs between reads — for at most 10 s; a slow
+ * but live MapResponse frame keeps going as long as bytes arrive. */
+static int coord_recv_budget(microlink_t * ml, uint8_t * buf, size_t len, ml_coord_frame_budget_t * b)
 {
   size_t recvd = 0;
-  int retries = 0;
+  int timeouts = 0; /* bounded waits that expired since the frame went partial */
+  ml_coord_frame_budget_t * budget = b; /* caller-owned: one budget can span several reads of ONE frame */
   while (recvd < len) {
+    int64_t now_us = esp_timer_get_time();
+    if (ml_coord_frame_budget_expired(budget, now_us)) {
+      /* Overall deadline, not a per-read socket timeout: the frame is abandoned
+       * and the stream misaligned, so fail like a dead connection. errno must
+       * NOT stay EAGAIN — noise_recv/poll_map_update read that as "retry later"
+       * and would resume the misaligned stream. */
+      ESP_LOGE(
+        TAG,
+        "coord_recv deadline expired: %d/%d bytes, %d bounded waits (cap %lu ms)",
+        (int)recvd,
+        (int)len,
+        timeouts,
+        (unsigned long)ml_coord_frame_budget_total_ms(len));
+      errno = ETIMEDOUT;
+      return -1;
+    }
+    if (ml_coord_frame_budget_armed(budget)) {
+      /* Mid-frame: wait for readability at most the remaining budget. A 0 result
+       * loops back to the expiry check above; data/EOF/error fall through to
+       * recv(), which reports them. */
+      int64_t wait_us = ml_coord_frame_budget_wait_us(budget, now_us);
+      fd_set rfds;
+      FD_ZERO(&rfds);
+      FD_SET(ml->coord_sock, &rfds);
+      struct timeval tv = {.tv_sec = (time_t)(wait_us / 1000000LL), .tv_usec = (suseconds_t)(wait_us % 1000000LL)};
+      int sel = ml_select_fds(ml->coord_sock + 1, &rfds, NULL, NULL, &tv);
+      if (sel == 0) {
+        timeouts++;
+        continue;
+      }
+      if (sel < 0 && errno == EINTR) continue;
+    }
     int n = ml_recv(ml->coord_sock, buf + recvd, len - recvd, 0);
     if (n <= 0) {
-      if (errno == EAGAIN || errno == EWOULDBLOCK) {
-        if (recvd == 0) {
-          /* No data consumed yet — timeout is fine, caller can retry */
+      if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+        if (recvd == 0 && !ml_coord_frame_budget_armed(budget)) {
+          /* Idle stream, nothing of this frame consumed — caller can retry */
           return -1;
         }
-        /* Partial data consumed — we MUST finish this read or the
-                 * Noise frame stream will be misaligned. Retry with backoff. */
-        if (++retries > 300) { /* ~3 seconds */
-          ESP_LOGE(TAG, "coord_recv partial timeout: %d/%d bytes", (int)recvd, (int)len);
-          return -1;
-        }
+        /* Partial data consumed — we MUST finish this read or the Noise frame
+         * stream will be misaligned. select() said readable but recv() had
+         * nothing (spurious wakeup / socket timeout): retry until the budget. */
+        timeouts++; /* outside ESP_LOGW: its args are compiled out below LOG_LOCAL_LEVEL */
+        ESP_LOGW(TAG, "coord_recv socket timeout #%d mid-frame: %d/%d bytes", timeouts, (int)recvd, (int)len);
         vTaskDelay(pdMS_TO_TICKS(10));
         continue;
       }
+      if (n == 0) errno = ECONNRESET; /* orderly EOF: recv() need not set errno */
       ESP_LOGE(TAG, "coord_recv failed: %d (errno %d, recvd %d/%d)", n, errno, (int)recvd, (int)len);
       return -1;
     }
+    ml_coord_frame_budget_on_bytes(
+      budget, esp_timer_get_time()); /* arms on the first byte, restarts the no-progress window on every byte */
     recvd += n;
-    retries = 0; /* Reset on successful read */
   }
   return 0;
+}
+
+static int coord_recv(microlink_t * ml, uint8_t * buf, size_t len)
+{
+  ml_coord_frame_budget_t budget; /* this read is the whole frame */
+  ml_coord_frame_budget_init(&budget, len);
+  return coord_recv_budget(ml, buf, len, &budget);
 }
 
 /* ============================================================================
@@ -209,9 +259,14 @@ static int noise_send(microlink_t * ml, ml_noise_state_t * noise, const uint8_t 
 /* Receive and decrypt a Noise transport frame, returns plaintext length */
 static int noise_recv(microlink_t * ml, ml_noise_state_t * noise, uint8_t * plaintext, size_t max_len)
 {
-  /* Read 3-byte frame header */
+  /* ONE budget for the whole frame: it arms on the header's first byte and,
+   * once the header says how long the payload is, its hard cap is re-sized for
+   * header + payload from that same first byte. Header and payload therefore
+   * share a single no-progress window and a single size-scaled cap. */
+  ml_coord_frame_budget_t budget;
+  ml_coord_frame_budget_init(&budget, 3);
   uint8_t hdr[3];
-  if (coord_recv(ml, hdr, 3) < 0) return -1;
+  if (coord_recv_budget(ml, hdr, 3, &budget) < 0) return -1;
 
   if (hdr[0] != 0x04) {
     ESP_LOGE(TAG, "Unexpected Noise frame type: 0x%02x", hdr[0]);
@@ -229,16 +284,14 @@ static int noise_recv(microlink_t * ml, ml_noise_state_t * noise, uint8_t * plai
   uint8_t * ciphertext = ml_psram_malloc(ct_len);
   if (!ciphertext) return -1;
 
-  /* Header already consumed — payload read MUST complete or stream
-     * alignment is permanently lost. Retry EAGAIN (coord_recv returns -1
-     * with errno==EAGAIN if recvd==0 on first byte). */
-  int payload_retries = 0;
-  while (coord_recv(ml, ciphertext, ct_len) < 0) {
-    if ((errno == EAGAIN || errno == EWOULDBLOCK) && ++payload_retries <= 300) {
-      vTaskDelay(pdMS_TO_TICKS(10));
-      continue;
-    }
-    ESP_LOGE(TAG, "noise_recv payload failed: ct_len=%d retries=%d errno=%d", ct_len, payload_retries, errno);
+  /* Header already consumed — the payload read MUST complete or stream
+   * alignment is permanently lost. The budget is already armed (header bytes),
+   * so every payload wait is bounded from the first byte; past the budget,
+   * ETIMEDOUT makes the caller reconnect instead of resuming misaligned. */
+  ml_coord_frame_budget_set_frame_len(&budget, 3u + (size_t)ct_len);
+  if (coord_recv_budget(ml, ciphertext, ct_len, &budget) < 0) {
+    if (errno == EAGAIN || errno == EWOULDBLOCK) errno = ETIMEDOUT; /* header consumed: not retryable */
+    ESP_LOGE(TAG, "noise_recv payload failed: ct_len=%d errno=%d", ct_len, errno);
     free(ciphertext);
     return -1;
   }

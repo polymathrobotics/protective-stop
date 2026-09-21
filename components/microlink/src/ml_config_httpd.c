@@ -719,6 +719,23 @@ static esp_err_t handler_get_peers(httpd_req_t * req)
       cJSON_AddBoolToObject(peer, "active", info.online);
       cJSON_AddBoolToObject(peer, "pinned", ml_wg_is_pinned_peer(ml, info.vpn_ip));
       cJSON_AddBoolToObject(peer, "health", ml_wg_is_health_tracked(info.vpn_ip));
+      /* Path-recovery forensics (bench 2026-09-19): enough to tell, after the
+       * fact, why a safety peer was or was not being reached directly. */
+      cJSON_AddBoolToObject(peer, "wg_up", info.wg_up);
+      cJSON_AddBoolToObject(peer, "wg_active", info.wg_active);
+      cJSON_AddBoolToObject(peer, "wg_send_hs", info.wg_send_hs);
+      cJSON_AddBoolToObject(peer, "wg_hs_pending", info.wg_hs_pending);
+      cJSON_AddNumberToObject(peer, "wg_init_age_ms", info.wg_init_age_ms);
+      cJSON_AddNumberToObject(peer, "eps", info.endpoint_count);
+      char ep_str[24];
+      microlink_ip_to_str(info.best_ip, ip_str);
+      snprintf(ep_str, sizeof(ep_str), "%s:%u", ip_str, (unsigned)info.best_port);
+      cJSON_AddStringToObject(peer, "best", ep_str);
+      microlink_ip_to_str(info.hs_cand_ip, ip_str);
+      snprintf(ep_str, sizeof(ep_str), "%s:%u", ip_str, (unsigned)info.hs_cand_port);
+      cJSON_AddStringToObject(peer, "hs_cand", ep_str);
+      cJSON_AddNumberToObject(peer, "ping_age_ms", info.ping_age_ms);
+      cJSON_AddNumberToObject(peer, "backoff_ms", info.backoff_ms);
       cJSON_AddItemToArray(arr, peer);
     }
   }
@@ -1127,6 +1144,12 @@ static esp_err_t handler_monitor(httpd_req_t * req)
       cJSON_AddNumberToObject(json, "remove_vetoes", rg[3]);
       cJSON_AddNumberToObject(json, "evict_safety_skips", rg[4]);
       cJSON_AddNumberToObject(json, "relay_disco_resets", rg[5]);
+      /* Relay-stuck coord re-fetch: how many reconnects we asked for, and the
+       * backoff (s) now gating the most recently re-fetched peer (90 s doubling
+       * to a 30 min cap; ~equal to ml_reconnects on a permanently relay-bound
+       * unit, which is how #117 was diagnosed). */
+      cJSON_AddNumberToObject(json, "relay_refetch_reqs", ml_wg_get_relay_refetch_reqs());
+      cJSON_AddNumberToObject(json, "relay_refetch_interval_s", ml_wg_get_relay_refetch_interval_s());
 
       /* WG session health (run-20/21 ENOTCONN forensics). The failure
        * signature to watch: wg_kp_age_max climbing past 120000 (rekey
@@ -1137,8 +1160,14 @@ static esp_err_t handler_monitor(httpd_req_t * req)
        * table wedge being absorbed instead of going terminal). */
       extern volatile uint32_t wireguardif_tx_keypair_expired;
       extern volatile uint32_t wireguardif_tx_no_valid_keys;
+      extern volatile uint32_t wireguardif_hs_cand_sends;
       cJSON_AddNumberToObject(json, "wg_tx_keypair_expired", wireguardif_tx_keypair_expired);
       cJSON_AddNumberToObject(json, "wg_tx_no_valid_keys", wireguardif_tx_no_valid_keys);
+      cJSON_AddNumberToObject(json, "wg_hs_cand_sends", wireguardif_hs_cand_sends);
+      extern uint32_t ml_wg_get_hs_cand_pings(void);
+      cJSON_AddNumberToObject(json, "disco_hs_cand_pings", ml_wg_get_hs_cand_pings());
+      extern uint32_t ml_wg_get_safety_reconnects(void);
+      cJSON_AddNumberToObject(json, "wg_safety_reconnects", ml_wg_get_safety_reconnects());
       extern uint32_t ml_derp_get_route_fallbacks(void);
       cJSON_AddNumberToObject(json, "derp_route_fallbacks", ml_derp_get_route_fallbacks());
       /* home_pumps: home-conn rx drains performed DURING an aux DERP connect,
@@ -1172,7 +1201,7 @@ static esp_err_t handler_monitor(httpd_req_t * req)
              * 2=vpn_ip 3=disco_key 4=hostname 5=region 6=endpoints */
             for (int i = 0; i < 7; i++) cJSON_AddItemToArray(sfa, cJSON_CreateNumber(sf[i]));
           }
-          uint32_t fl[3] = {0};
+          uint32_t fl[4] = {0};
           ml_peer_nvs_get_flush_diag(fl);
           cJSON_AddNumberToObject(json, "nvs_flush_last_ms", fl[0]);
           cJSON_AddNumberToObject(json, "nvs_flush_max_ms", fl[1]);
@@ -1444,6 +1473,9 @@ static esp_err_t handler_ota(httpd_req_t * req)
       ESP_LOGI(
         TAG, "OTA: %3d%%  (%d / %d bytes, %d KB remaining)", pct, total_written, req->content_len, remaining / 1024);
     }
+    /* Block one tick so fast uploads cannot starve the idle watchdog tasks.
+     * taskYIELD() does not schedule lower-priority tasks. */
+    vTaskDelay(1);
   }
 
   free(buf);

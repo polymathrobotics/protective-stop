@@ -35,10 +35,11 @@
  *
  * pstop_c (certification track) is UNMODIFIED — this file is the shell.
  * Design: docs/MACHINE_ESP32_DESIGN.md. Scaffold status: timing config is
- * compile-time constants; operator authorization is now NVS-backed (the
- * operator allowlist via dcs_operator_*, managed at /api/operators) so unlisted
- * remotes are STOP-ONLY by default. Telemetry reuses the dcs comparator/core
- * atomics (machn-specific /state.json fields are a follow-up).
+ * compile-time constants. Admission (may a remote BOND at all) is the optional
+ * NVS-backed allow/denylist (dcs_list_*, managed at /api/admission; both empty
+ * = everyone). Re-arm authority is the REMOTE's own announced role, re-read on
+ * every frame. Telemetry reuses the dcs comparator/core atomics (machn-specific
+ * /state.json fields are a follow-up).
  */
 
 #include <stdatomic.h>
@@ -193,15 +194,17 @@ typedef struct
 
 static machn_seen_t g_seen[DCS_MACHN_MAX_REMOTES];
 
-/* The callbacks have no context argument. Expose only the BOND staged for the
- * current core window; pstop_c latches stop_only into each accepted client. */
-static atomic_uint_fast32_t g_bond_role_id;
-static atomic_uint_fast32_t g_bond_role;
+/* The callbacks have no context argument. Expose the announced role of the
+ * valid frame staged for the current core window; the remote_details callback
+ * seeds is_stop_only from it at BOND, and each core refreshes the bonded
+ * client's is_stop_only from it on every later frame (role is live). */
+static atomic_uint_fast32_t g_frame_role_id;
+static atomic_uint_fast32_t g_frame_role;
 
-static pstop_aux_role_t bond_role_get(uint32_t id)
+static pstop_aux_role_t frame_role_get(uint32_t id)
 {
-  return ((uint32_t)atomic_load(&g_bond_role_id) == id) ? (pstop_aux_role_t)atomic_load(&g_bond_role)
-                                                        : PSTOP_AUX_ROLE_UNSPECIFIED;
+  return ((uint32_t)atomic_load(&g_frame_role_id) == id) ? (pstop_aux_role_t)atomic_load(&g_frame_role)
+                                                         : PSTOP_AUX_ROLE_UNSPECIFIED;
 }
 
 static void seen_note(uint32_t id, uint32_t ip, uint64_t now, uint64_t received_stamp)
@@ -289,25 +292,19 @@ static volatile uint32_t g_cycle_seq;
 static remote_details_t details_default(const device_id_t * device_id)
 {
   remote_details_t d;
-  /* Authorization policy. Every bonding remote is ACCEPTED (allowed=true) and
-     * heartbeat-monitored, but STOP-ONLY by default: it may command STOP, never
-     * re-arm (STOP->OK). Only a remote whose 32-bit pstop id is on the
-     * NVS-backed operator allowlist (dcs_operator_*, empty on blank NVS) is a
-     * full operator (stop_only=false). This REPLACES the old bench scaffold that
-     * accepted any remote as a full operator. Read is lock-free RAM (safe on the
-     * safety cores). Latched onto the client at bond (pstop_c machine.c
-     * add_new_client) — an operator added later applies on the remote's next
-     * bond. */
-  const bool is_listed = (device_id != NULL) && dcs_operator_is_listed(device_id->data);
-  /* AND-rule: a remote may re-arm only if it BOTH announces the operator role
-     * (aux uplink) AND is on the machine allowlist. A stop-only/unspecified
-     * claim, or an unlisted id, stays stop-only. Strictly more conservative than
-     * the allowlist alone: a provisioning gap surfaces as stop-only, never as an
-     * unexpected operator. The role is immutable for the remote's boot and is
-     * latched with is_stop_only at bond. */
-  const pstop_aux_role_t claimed = (device_id != NULL) ? bond_role_get(device_id->data) : PSTOP_AUX_ROLE_UNSPECIFIED;
-  const bool is_operator = is_listed && pstop_aux_role_is_operator(claimed);
-  remote_detail_set(&d, true, MACHN_DEFAULT_HEARTBEAT_MS, !is_operator);
+  /* ADMISSION (optional): may this remote bond at all? Decided by the
+     * NVS-backed allow/denylist (dcs_admission_allows, both empty on blank NVS
+     * = everyone admitted). A refused id gets an UNBOND reply (pstop_c prepares
+     * it; the comparator sends it). Read is lock-free RAM (safe on the safety
+     * cores).
+     * AUTHORITY: the remote alone declares stop-only vs operator in every
+     * frame (aux uplink). Seeded here at BOND; refreshed per frame in
+     * core_task so a live role change follows without a re-bond. Unspecified
+     * (old firmware / bad decode) is stop-only = fail-safe. */
+  const uint32_t id = (device_id != NULL) ? device_id->data : 0u;
+  const bool admitted = (id != 0u) && dcs_admission_allows(id);
+  const pstop_aux_role_t claimed = frame_role_get(id);
+  remote_detail_set(&d, admitted, MACHN_DEFAULT_HEARTBEAT_MS, !pstop_aux_role_is_operator(claimed));
   return d;
 }
 
@@ -373,9 +370,32 @@ static void core_task(void * arg)
     if (g_rx_pending != 0) {
       pstop_msg_t req;
       pstop_message_decode(&req, g_rx_bytes);
+      /* Live role (shared policy, common/pstop_aux_channel.h): refresh the
+             * bonded client's is_stop_only from THIS frame and release any
+             * arming-cycle ownership a stop-only remote holds. Both cores
+             * decode the same bytes => identical decision. */
+      const bool addressed_to_us =
+        (req.checksum == req.calculated_checksum) && (req.receiver_id.data == MACHN_MACHINE_ID);
+      if (addressed_to_us) {
+        pstop_aux_apply_role_pre(&mc->machine, &req);
+      }
       pstop_message_init(&mc->resp);
       mc->err = machine_process_message(&mc->machine, &req, &mc->resp);
+      /* A stop-only remote's STOP never opens an arming cycle. */
+      if (addressed_to_us) {
+        pstop_aux_apply_role_post(&mc->machine, &req, mc->err);
+      }
       if (mc->err == PSTOP_OK) {
+        pstop_message_encode(&mc->resp, mc->resp_bytes);
+      } else if (mc->err == PSTOP_OPERATOR_NOT_ALLOWED) {
+        /* Admission refused: pstop_c prepared an UNBOND reply but left the
+                 * addressing blank. Fill it deterministically (no clock: both
+                 * cores must produce identical bytes) so the remote learns it
+                 * was refused instead of hearing silence. */
+        mc->resp.id.data = MACHN_MACHINE_ID;
+        mc->resp.receiver_id.data = req.id.data;
+        mc->resp.received_counter = req.counter;
+        mc->resp.received_stamp = req.stamp;
         pstop_message_encode(&mc->resp, mc->resp_bytes);
       } else {
         memset(mc->resp_bytes, 0, sizeof(mc->resp_bytes));
@@ -601,19 +621,17 @@ static void comparator_task(void * arg)
               * ticks — remotes publish at >= 200 ms spacing per unit. */
     }
 
-    /* Publish only a valid BOND's role for the upcoming core window. Invalid
-         * requests leave no persistent role state to pollute or exhaust. */
-    atomic_store(&g_bond_role_id, 0u);
-    atomic_store(&g_bond_role, PSTOP_AUX_ROLE_UNSPECIFIED);
+    /* Publish the staged valid frame's announced role for the upcoming core
+         * window (remote_details_cb seeds a new client's is_stop_only from
+         * it). Invalid requests leave no persistent role state. */
+    atomic_store(&g_frame_role_id, 0u);
+    atomic_store(&g_frame_role, PSTOP_AUX_ROLE_UNSPECIFIED);
     if (g_rx_pending != 0) {
       pstop_msg_t rx;
       pstop_message_decode(&rx, g_rx_bytes);
-      if (
-        rx.checksum == rx.calculated_checksum && rx.message == PSTOP_MESSAGE_BOND &&
-        rx.receiver_id.data == MACHN_MACHINE_ID)
-      {
-        atomic_store(&g_bond_role, pstop_aux_decode_role(&rx));
-        atomic_store(&g_bond_role_id, rx.id.data);
+      if (rx.checksum == rx.calculated_checksum && rx.receiver_id.data == MACHN_MACHINE_ID) {
+        atomic_store(&g_frame_role, pstop_aux_decode_role(&rx));
+        atomic_store(&g_frame_role_id, rx.id.data);
       }
     }
 
@@ -641,10 +659,15 @@ static void comparator_task(void * arg)
              * core eventually trips the task WDT into a (safe) reset. */
       mismatch++;
     } else if (g_rx_pending != 0) {
-      bool agree =
-        (g_core[0].err == g_core[1].err) &&
-        ((g_core[0].err != PSTOP_OK) || (memcmp(g_core[0].resp_bytes, g_core[1].resp_bytes, PSTOP_MESSAGE_SIZE) == 0));
-      if (agree && (g_core[0].err == PSTOP_OK)) {
+      /* Every reply that reaches the wire (OK, and the admission-refusal
+             * UNBOND) must be byte-identical across both cores. */
+      const bool forwarded = (g_core[0].err == PSTOP_OK) || (g_core[0].err == PSTOP_OPERATOR_NOT_ALLOWED);
+      bool agree = (g_core[0].err == g_core[1].err) &&
+                   (!forwarded || (memcmp(g_core[0].resp_bytes, g_core[1].resp_bytes, PSTOP_MESSAGE_SIZE) == 0));
+      if (agree && forwarded) {
+        /* OK: the library's reply. OPERATOR_NOT_ALLOWED: the UNBOND both cores
+                 * filled identically — tells the refused remote to stop
+                 * knocking (it parks until a manual rebond). */
         (void)sendto(sock, g_core[0].resp_bytes, PSTOP_MESSAGE_SIZE, 0, (struct sockaddr *)&from, from_len);
         processed++;
       } else if (!agree) {
@@ -773,16 +796,19 @@ static void relay_gpio_init(void)
 /* microlink "keep this peer past the ML_MAX_PEERS cap" hook.
  *
  * The tailnet can exceed ML_MAX_PEERS, so every chip trims its netmap. A machn
- * pins nothing by default, so a freshly-added operator remote (no recent
- * activity) gets dropped from the netmap and machn never learns its WG key ->
- * the remote's handshakes get no session and it never bonds. Fix: when the peer
- * table is full, keep any incoming peer whose device identity is on the
- * OPERATOR allowlist (bounded, <= DCS_MAX_OPERATORS). Stop-only accept-all
- * remotes are intentionally NOT pinned here and remain best-effort.
+ * pins nothing by default, so a freshly-added remote (no recent activity) gets
+ * dropped from the netmap and machn never learns its WG key -> the remote's
+ * handshakes get no session and it never bonds. Fix: when the peer table is
+ * full, keep any incoming peer whose device identity this machine wants
+ * pinned (dcs_peer_pin_wanted: on the admission ALLOWLIST or the PIN list,
+ * and not denylisted; each bounded <= DCS_MAX_LIST_IDS). The PIN list is
+ * seeded from the pre-admission operator list at upgrade so previously
+ * pinned remotes stay pinned; in open mode with no pins nothing is pinned
+ * and remotes remain best-effort, as before.
  *
  * Identity scheme: the remote's tailnet hostname is "pstop-01<mac24>" — the 8
  * lowercase hex digits after "pstop-" ARE the 32-bit pstop id (e.g.
- * "pstop-01d7f344" -> 0x01d7f344), the exact value dcs_operator_* stores and
+ * "pstop-01d7f344" -> 0x01d7f344), the exact value dcs_list_* stores and
  * compares, so parsing the hex as a uint32_t needs no byte-order fixup.
  * Robust to any hostname that doesn't match the pattern (returns false).
  *
@@ -819,7 +845,7 @@ static bool machn_peer_wanted_cb(void * ctx, const char * hostname, uint32_t vpn
     return false;
   }
   const uint32_t id = (uint32_t)strtoul(hex, NULL, 16);
-  return dcs_operator_is_listed(id);
+  return dcs_peer_pin_wanted(id);
 }
 
 void app_main(void);

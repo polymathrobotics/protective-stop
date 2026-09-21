@@ -34,8 +34,9 @@ are load-bearing).
    (any private /24; the chip takes a lease from it).
 5. **Configure**: edit `tools/hil/hil.toml` — set `ncm_iface`, `host_ip`,
    and the relay polarity if the rig was rewired.
-6. **Validate the rig**: `cd tools/hil && ./run.sh test_00_rig.py` — this
-   creates the venv on first run and proves the wiring channel-by-channel.
+6. **Validate the rig**: `cd tools && uv sync`, then
+   `cd hil && ./run.sh test_00_rig.py` — this proves the wiring
+   channel-by-channel. See [`../README.md`](../README.md) to install uv.
 7. **Full suite**: `./run.sh` (power cycles included) or
    `./run.sh -m 'not power'` for the quick loop.
 
@@ -97,7 +98,7 @@ path there:
      unit into download mode over HTTP and flashes over USB. Needs the
      (git-ignored) `production_image/` secrets baked locally on the runner.
    Fleet-server URL and API key are PROPRIETARY: provide them to the runner
-   as environment/secret (`PSTOP_FLEET_URL`, key file) — they must never
+   as environment/secret (`PSTOP_CHECKIN_URL`, `PSTOP_CHECKIN_API_KEY_FILE`) — they must never
    appear in committed files (same rule as `sdkconfig.credentials`).
 3. **Flash verification — DONE (firmware >= 4c90711)**: `state.json`
    reports `fw_ver` (git short hash) and `fw_sha` (truncated ELF SHA-256).

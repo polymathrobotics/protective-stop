@@ -60,7 +60,7 @@ curl -s http://$CHIP/state.json | python3 -m json.tool
 | 11 | BROWNOUT | Supply dipped | power supply / cable (not counted toward rollback) |
 
 `reset_reason` is sticky from the last boot. Reason 4 with
-`boot_count = 0` means the 120 s age-out already cleared the counter —
+`boot_count = 0` means the 10 min age-out already cleared the counter —
 the chip is currently healthy.
 
 ## Getting the crash log
@@ -90,7 +90,7 @@ xtensa-esp32s3-elf-addr2line -e firmware/build/pstop_remote.elf 0x4037.... 0x403
   `"rollback_occurred": true` with the partition it rolled back from.
   ~17 s from bad OTA push to back on the good image, no user action.
 - **Crash counter:** `boot_count` in `/state.json`; counter clears after
-  120 s healthy uptime. `boot_count > 3` invokes rollback (with a
+  10 min healthy uptime. `boot_count > 3` invokes rollback (with a
   never-brick guard if the other slot is also invalid).
 - **Degradation ladder:** `boot_count==1` → `derp_only=1` for that boot
   (relay-level latency, auto-restarts back to full speed after the
@@ -137,7 +137,7 @@ disco heartbeat and the ≤10 s direct→DERP failover.
 ### Tunnel latency ~100–200 ms instead of ~5–25 ms
 
 The chip is riding a DERP relay instead of the direct UDP path:
-1. `derp_only=1` in `/state.json` → post-crash ladder; wait ~2 min for
+1. `derp_only=1` in `/state.json` → post-crash ladder; wait ~10 min for
    the auto-restart, or restart manually.
 2. Direct path never formed → NAT/firewall/different LAN between chip
    and peer. DERP works, just slower; the pstop link stays up either way.
@@ -197,6 +197,32 @@ The chip increments its counter every tick but only sends on lockstep
 agreement, so a gap means messages were dropped OR withheld
 (mismatch/boot-priming hold) — not necessarily wire loss. Persistent
 gaps + `max_lost_messages` (10) exceeded → MSG_LOST STOP.
+
+### Remote shows `REJECTED` on a machine slot / `last_msg = UNBOND`
+
+The machine refused this remote's BOND — it is on the machine's **denylist**, or
+the machine runs a non-empty **allowlist** that does not include it
+(`GET /api/admission` on machn; `software.allowlist`/`denylist` on the ROS 2
+node; `[policy]` in `machine.toml`). The remote parks the slot deliberately and
+**does not retry**. Fix the list on the machine, then press **Rebond** on the
+remote's machine-peer row (or `POST /api/pstop_peers?slot=N&rebond=1`). A slot
+reconfigure or reboot also retries.
+
+### After upgrading a machine, its old operator list is gone
+
+Expected. The old list granted *re-arm* authority, which is now the remote's own
+announced role. At first boot the machine moves those ids into its **pin list**
+(`GET /api/admission` → `pinlist`; one WARN log line) so they keep their
+WireGuard pinning, and starts with open admission. Promote the remotes that
+should arm (`/api/role`) and, only if you want to restrict bonding, build the
+admission allowlist (`/api/admission?allow=`).
+
+### Remote bonds and sends OK but the machine never arms
+
+The remote announces `stop_only`. Check `GET /api/role` on the **remote**
+(`state.json` `role`) and promote it with `POST /api/role?role=operator` (admin
+auth). Applies live — no reboot, no re-bond. The machine has no operator list
+any more; only the remote's announced role grants re-arm.
 
 ### Tailscale reachable from some hosts, not the operator laptop
 

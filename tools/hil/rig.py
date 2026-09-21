@@ -13,6 +13,7 @@ Three actors:
 
 from __future__ import annotations
 
+import base64
 import json
 import re
 import subprocess
@@ -77,13 +78,26 @@ class Chip:
         except (urllib.error.URLError, OSError, TimeoutError) as e:
             raise ChipUnreachable(f'GET {path}: {e}') from e
 
-    def _post(self, path: str) -> str:
+    def _post(self, path: str, admin_password: str | None = None) -> str:
         req = urllib.request.Request(self.base + path, method='POST', data=b'')
+        if admin_password is not None:
+            token = base64.b64encode(f'admin:{admin_password}'.encode()).decode()
+            req.add_header('Authorization', f'Basic {token}')
         try:
             with urllib.request.urlopen(req, timeout=self.timeout) as r:
                 return r.read().decode()
         except (urllib.error.URLError, OSError, TimeoutError) as e:
             raise ChipUnreachable(f'POST {path}: {e}') from e
+
+    def role(self) -> str | None:
+        """The self-role this remote announces ('stop_only' | 'operator')."""
+        return self.state().get('role')
+
+    def set_role(self, role: str, admin_password: str) -> None:
+        """Set the announced role. Applies LIVE (no reboot) on firmware with
+        the live-role change; older builds reboot, so callers should
+        wait_reachable() afterwards."""
+        self._post(f'/api/role?role={role}', admin_password=admin_password)
 
     def state(self) -> dict:
         return json.loads(self._get('/state.json'))
@@ -217,7 +231,8 @@ class MachineRunner:
             f'max_missed_heartbeats = {self.timing["max_missed_heartbeats"]}\n'
             'max_remotes = 3\n'
             '[policy]\n'
-            'allow_unlisted = true\n'
+            'allowlist = []\n'
+            'denylist = []\n'
             f'default_heartbeat_ms = {self.timing["heartbeat_ms"]}\n'
             f'min_stop_ms = {self.timing["min_stop_ms"]}\n'
         )

@@ -85,7 +85,7 @@ curl -s http://$CHIP/state.json | jq '.boot_count, .reset_reason, .rst_hist'
   gateway AND pstop have both been silent 180 s on a previously healthy
   uplink — and that reboot does NOT count toward rollback.
 - `boot_count` 1 = one crash boot, normal recovery (this boot runs
-  DERP-only, auto-restores after 120 s healthy).
+  DERP-only, auto-restores after 10 min healthy).
 - `boot_count` 3 = one more crash-class boot triggers rollback. Ship a
   fix soon.
 - Grab `/api/last_log` before the next reboot overwrites context.
@@ -200,6 +200,10 @@ configured heartbeat rate, the build is healthy.
 
 ## Required tools on the bench host
 
-`curl`, `jq`, Python 3 (stdlib only, for the `tools/` scripts), and
-ESP-IDF 5.5 (`source ~/esp-idf-5.5/export.sh`) for builds. The machine
-side needs only `cc` + `make` (see `host/README.md`).
+`curl`, `jq`, and [uv](https://docs.astral.sh/uv/) for the `tools/` scripts
+(`cd tools && uv sync`; see `tools/README.md`).
+A sourced ESP-IDF is not enough for them — the flashing tools need the
+`esptool` v5 pinned in `tools/pyproject.toml`, and IDF 5.5 constrains
+`esptool~=4.12`.
+ESP-IDF 5.5 (`source ~/esp-idf-5.5/export.sh`) is for builds and `idf.py flash`.
+The machine side needs only `cc` + `make` (see `host/README.md`).

@@ -53,6 +53,7 @@
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "hal/gpio_ll.h" /* gpio_ll_get_io_config — pad-config read-back (SR-R-09) */
+#include "lockstep_window.h"
 #include "lwip/sockets.h"
 #include "pstop/protocol_data.h"
 #include "pstop/pstop_msg.h"
@@ -153,6 +154,8 @@ static const char * TAG = "dcs_main";
 extern atomic_uint_fast32_t g_dcs_pstop_last_msg;
 extern atomic_uint_fast32_t g_dcs_pstop_replies;
 extern atomic_uint_fast32_t g_dcs_pstop_rebonds;
+extern atomic_uint_fast32_t g_dcs_pstop_mm[7]; /* lockstep-mismatch attribution (soak item 5; dcs_internal.h) */
+extern atomic_uint_fast32_t g_dcs_pstop_mm_seq; /* seqlock for g_dcs_pstop_mm (odd while being written) */
 
 /* ============================================================================
  * Lockstep state — one tick's worth of inputs for every active session,
@@ -168,6 +171,9 @@ typedef struct
   uint32_t received_counter;
   uint64_t received_stamp;
   uint32_t receiver_id; /* this machine's device id */
+  uint8_t role; /* announced role (pstop_aux_role_t), snapshotted per tick so
+                 * both cores encode the same value even if /api/role flips
+                 * between their encodes (role is live, no reboot) */
 } tick_input_t;
 
 static tick_input_t g_tick[PSTOP_MAX_MACHINES];
@@ -180,6 +186,7 @@ static uint8_t g_encoded[2][PSTOP_MAX_MACHINES][PSTOP_MESSAGE_SIZE];
 static uint8_t g_verdict[2]; /* for telemetry */
 static SemaphoreHandle_t g_done[2]; /* core_id → comparator */
 static TaskHandle_t g_core_h[2]; /* comparator → core_id */
+static atomic_uint_fast64_t g_core_done_us[2]; /* esp_timer stamp of each core's last publish (telemetry) */
 
 /* ============================================================================
  * Dual-channel hardware E-stop loops.
@@ -565,8 +572,9 @@ static void core_task(void * arg)
       msg.counter = in[i].counter;
       msg.received_counter = in[i].received_counter;
       msg.heartbeat_timeout = HEARTBEAT_TIMEOUT_MS;
-      /* The role is immutable for this boot; changing it persists and reboots. */
-      pstop_aux_encode_role(&msg, (pstop_aux_role_t)dcs_role_get());
+      /* Announced role, from the comparator's per-tick snapshot (live-editable
+             * via /api/role; the machine re-reads it on every frame). */
+      pstop_aux_encode_role(&msg, (pstop_aux_role_t)in[i].role);
       /* pstop_message_encode computes the CRC over the payload and writes it to
              * the last 2 bytes — both cores produce byte-identical buffers given
              * identical input fields. */
@@ -586,6 +594,7 @@ static void core_task(void * arg)
     /* Feed the TWDT — proves THIS core task ran to completion this tick. */
     (void)esp_task_wdt_reset();
 
+    atomic_store(&g_core_done_us[core_id], (uint64_t)esp_timer_get_time());
     xSemaphoreGive(g_done[core_id]);
   }
 }
@@ -602,7 +611,10 @@ typedef enum
 {
   SESS_IDLE = 0, /* slot not configured */
   SESS_BONDING = 1, /* configured; (re)bonding — heartbeats not flowing */
-  SESS_BONDED = 2 /* counter handshake done; heartbeats flowing */
+  SESS_BONDED = 2, /* counter handshake done; heartbeats flowing */
+  SESS_REJECTED = 3 /* machine answered BOND with UNBOND (admission refused).
+                     * Parked: no retries until a manual rebond
+                     * (/api/pstop_peers?slot=N&rebond=1), reconfigure or reboot. */
 } sess_state_t;
 
 typedef struct
@@ -625,6 +637,7 @@ typedef struct
   uint32_t bond_counter;
   uint64_t bond_sent_ms; /* 0 = no BOND in flight */
   uint64_t last_reply_ms;
+  uint32_t rebond_gen; /* last-seen dcs_pstop_rebond_generation(slot) */
   uint64_t tx_stamp_history[16];
 
   /* Sustained-ENOTCONN escalation state (cold-bond far-side gap,
@@ -722,6 +735,9 @@ static void sess_reconfigure(pstop_sess_t * s, bool configured, uint32_t ip, uin
   s->ip = ip;
   s->port = port;
   s->machine_id = machine_id;
+  /* Adopt the slot's current rebond generation: the memset above zeroed our
+   * copy, and a stale mismatch would fire a spurious "manual rebond" tick. */
+  s->rebond_gen = dcs_pstop_rebond_generation((int)(s - g_sess));
   if (configured) {
     sess_start_bonding(s);
   } else {
@@ -1003,6 +1019,26 @@ static uint32_t sess_drain_replies(pstop_sess_t * s, int slot, uint64_t now_ms)
         (unsigned long)sess_send_period_ms(s));
     }
 
+    if (resp.message == PSTOP_MESSAGE_UNBOND) {
+      /* Admission refused: the machine's allow/denylist rejected us and told
+             * us so (pstop_c replies UNBOND for a not-allowed id). This can
+             * arrive for a BOND, or mid-session when the machine denylists us
+             * live — pstop_c re-runs admission on EVERY frame. Either way,
+             * park the session (no automatic retries), surface it (state 3 in
+             * /state.json + web UI) and do NOT adopt the reply's zeroed
+             * counter/stamp or refresh last_reply_ms: a parked slot must read
+             * as dead, not healthy. Exit only via manual rebond, slot
+             * reconfigure or reboot. This remote never sends UNBOND itself, so
+             * no legitimate UNBOND reply exists to confuse this with. */
+      const bool was_bonded = (s->state == SESS_BONDED);
+      s->state = SESS_REJECTED;
+      s->last_msg = PSTOP_MESSAGE_UNBOND;
+      s->bond_sent_ms = 0;
+      ESP_LOGW(
+        TAG, "m%d %s REJECTED by machine (UNBOND) — parked until manual rebond", slot, was_bonded ? "session" : "BOND");
+      got++;
+      continue;
+    }
     if (s->state == SESS_BONDING) {
       /* Bond response: adopt the machine's counter/stamp so the first OK
              * heartbeat carries the right context (mirrors the handshake in
@@ -1061,6 +1097,13 @@ static void comparator_task(void * arg)
   }
 
   uint32_t mismatch = 0;
+  /* Mismatch attribution (soak item 5) -> /state.json pstop_mm_*; layout documented at g_dcs_pstop_mm in
+   * dcs_internal.h: [0] timeout count [1] content count [2] last packed [3] late ms [4] at ms [5..6] lat max. */
+  uint32_t mm[7] = {0};
+  uint32_t mm_late =
+    0; /* late-core mask of the last timeout: bit c stays set until core c has published for that tick */
+  uint64_t mm_late_notify_us = 0; /* notify time of the tick that timed out (attribution reference) */
+  uint64_t notify_us = 0;
   uint64_t last_unhealthy_kick_ms = 0;
   bool xc_announced = false;
   TickType_t xc_fault_tick = 0;
@@ -1153,6 +1196,21 @@ static void comparator_task(void * arg)
       if (!s->configured) {
         continue;
       }
+      {
+        /* Manual rebond (/api/pstop_peers?slot=N&rebond=1 / web UI button).
+                 * The only exit from REJECTED; harmless in any other state. */
+        uint32_t gen = dcs_pstop_rebond_generation(i);
+        if (gen != s->rebond_gen) {
+          s->rebond_gen = gen;
+          ESP_LOGI(TAG, "m%d manual rebond requested (was %d)", i, (int)s->state);
+          s->rebonds++;
+          atomic_fetch_add(&g_dcs_pstop_rebonds, 1);
+          sess_start_bonding(s);
+        }
+      }
+      if (s->state == SESS_REJECTED) {
+        continue; /* parked: the machine refused us; nothing to send */
+      }
       if (!sess_ensure_socket(s, i)) {
         continue; /* binding unavailable (VPN down): dark = fail-safe */
       }
@@ -1176,11 +1234,30 @@ static void comparator_task(void * arg)
         g_tick[i].received_counter = s->pd.last_received_counter;
         g_tick[i].received_stamp = s->pd.last_timestamp;
         g_tick[i].receiver_id = s->machine_id;
+        g_tick[i].role = dcs_role_get();
         s->tx_stamp_history[s->pd.msg_counter & 15] = now_ms;
         any_active = true;
       }
     }
 
+    if (mm_late != 0u) {
+      /* A previous tick timed out: attribute each late core once it has actually
+       * published for THAT tick (done > that tick's notify). A core that has not
+       * landed yet is not "0 ms late" — its bit stays pending (and this tick's own
+       * take below counts it again). mm[3] = the slowest late core's real
+       * notify->publish ms for the last event; both-late events record the max. */
+      for (int c = 0; c < 2; c++) {
+        if ((mm_late & (1u << c)) == 0u) continue;
+        uint64_t done = (uint64_t)atomic_load(&g_core_done_us[c]);
+        if (done > mm_late_notify_us) {
+          uint32_t lat = (uint32_t)((done - mm_late_notify_us) / 1000u);
+          if (lat > mm[5 + c]) mm[5 + c] = lat; /* the worst-case gauge must include exactly these slow publishes */
+          if (((mm[2] >> 28) == 1u) && (lat > mm[3]))
+            mm[3] = lat; /* only while the record still describes that timeout */
+          mm_late &= ~(1u << c);
+        }
+      }
+    }
     /* 3. Drain any stale completion signal before notifying. If a core
          *    published just *after* CORE_PUBLISH_TIMEOUT on a previous tick,
          *    its g_done give is still pending and would otherwise satisfy this
@@ -1193,30 +1270,80 @@ static void comparator_task(void * arg)
 
     /* 4. Notify both cores; they sample their loop, encode every active
          *    slot, and signal back. */
+    notify_us = (uint64_t)esp_timer_get_time();
     xTaskNotifyGive(g_core_h[0]);
     xTaskNotifyGive(g_core_h[1]);
 
-    bool both_in = (xSemaphoreTake(g_done[0], CORE_PUBLISH_TIMEOUT) == pdTRUE) &
-                   (xSemaphoreTake(g_done[1], CORE_PUBLISH_TIMEOUT) == pdTRUE);
+    /* Sequential takes so the late core is known, but ONE absolute deadline for
+     * both: core 1 gets the remainder of CORE_PUBLISH_TIMEOUT, not a fresh budget
+     * after core 0's timeout (which gave it 160 ms and reported a both-late event
+     * as "core 0 late"). Worst-case tick stall is CORE_PUBLISH_TIMEOUT. */
+    const TickType_t take_t0 = xTaskGetTickCount();
+    const bool in0 = (xSemaphoreTake(g_done[0], CORE_PUBLISH_TIMEOUT) == pdTRUE);
+    const TickType_t take_used = xTaskGetTickCount() - take_t0;
+    const bool in1 =
+      (xSemaphoreTake(
+         g_done[1], (TickType_t)lockstep_second_wait_ticks((uint32_t)CORE_PUBLISH_TIMEOUT, (uint32_t)take_used)) ==
+       pdTRUE); /* lockstep_window.h, host-tested */
+    bool both_in = in0 && in1;
 
     /* 5. Lockstep check across ALL active slots. Any disagreement taints
          *    the DEVICE — send nothing to anyone this tick; every machine
          *    fail-safes independently on its heartbeat timeout. */
     bool lockstep_ok = both_in;
+    int mm_slot = -1; /* first disagreeing frame: slot + first differing byte */
+    int mm_off = 0;
     if (both_in) {
       for (int i = 0; i < PSTOP_MAX_MACHINES; i++) {
         if (g_tick[i].active && (memcmp(g_encoded[0][i], g_encoded[1][i], PSTOP_MESSAGE_SIZE) != 0)) {
           lockstep_ok = false;
+          if (mm_slot < 0) { /* memcmp != 0 bounds the scan */
+            for (mm_off = 0; g_encoded[0][i][mm_off] == g_encoded[1][i][mm_off]; mm_off++) {
+            }
+            mm_slot = i;
+          }
         }
+      }
+      for (int c = 0; c < 2; c++) { /* per-core notify->publish latency, worst this boot */
+        uint64_t done = (uint64_t)atomic_load(&g_core_done_us[c]);
+        uint32_t lat = (done > notify_us) ? (uint32_t)((done - notify_us) / 1000u) : 0u;
+        mm[5 + c] = (lat > mm[5 + c]) ? lat : mm[5 + c];
       }
     }
 
     bool sent_any = false;
     if (!both_in) {
       mismatch++;
+      mm[0]++;
+      mm_late = 0u; /* a new event supersedes a still-pending attribution */
+      mm_late_notify_us = notify_us;
+      mm[3] = 0u; /* filled in by the next ticks as the late core(s) land */
+      if (!in0) {
+        mm_late |= 1u;
+      }
+      if (!in1) {
+        mm_late |= 2u;
+      }
+      for (int c = 0; c < 2; c++) { /* the core that DID publish in time: fold its latency into the gauge now */
+        if ((mm_late & (1u << c)) != 0u) continue;
+        uint64_t done = (uint64_t)atomic_load(&g_core_done_us[c]);
+        uint32_t lat = (done > notify_us) ? (uint32_t)((done - notify_us) / 1000u) : 0u;
+        if (lat > mm[5 + c]) mm[5 + c] = lat;
+      }
+      /* verdict bytes: the late core has not published for THIS tick, so its byte is
+       * from its previous publish — the late mask in the same word says which. */
+      mm[2] = ((uint32_t)1u << 28) | (mm_late << 26) | ((uint32_t)0xFFu << 16) | ((uint32_t)g_verdict[0] << 8);
+      mm[2] |= g_verdict[1];
+      mm[4] = (uint32_t)now_ms;
       ESP_LOGW(TAG, "core publish timeout — sending nothing (mismatch=%lu)", (unsigned long)mismatch);
     } else if (!lockstep_ok) {
       mismatch++;
+      mm[1]++;
+      mm[3] =
+        0u; /* late-core latency is a timeout-class field: n/a for a content event (a still-pending attribution goes to mm[5+c] only) */
+      mm[2] = ((uint32_t)2u << 28) | ((uint32_t)mm_slot << 24) | ((uint32_t)mm_off << 16);
+      mm[2] |= ((uint32_t)g_verdict[0] << 8) | g_verdict[1];
+      mm[4] = (uint32_t)now_ms;
       ESP_LOGW(TAG, "ENCODING MISMATCH v0=%u v1=%u — sending nothing to any machine", g_verdict[0], g_verdict[1]);
     } else if (!estop_primed()) {
       /* Boot-priming hold: both E-stop channels haven't yet been sampled
@@ -1450,6 +1577,13 @@ static void comparator_task(void * arg)
     atomic_store(&g_dcs_pstop_last_msg, agg_msg);
     atomic_store(&g_dcs_pstop_replies, agg_replies);
     dcs_publish_comparator(agg_sent, mismatch, agg_fail, agg_last_reply, agg_rtt);
+    /* 7-word record published under a seqlock (odd = in flux) so a /state.json
+     * reader (dcs_pstop_mm_snapshot) never mixes two events; single writer. */
+    (void)atomic_fetch_add(&g_dcs_pstop_mm_seq, 1u);
+    for (int i = 0; i < 7; i++) {
+      atomic_store(&g_dcs_pstop_mm[i], mm[i]);
+    }
+    (void)atomic_fetch_add(&g_dcs_pstop_mm_seq, 1u);
 
     /* Aggregate PRIORITY-peer health (kept alongside the per-slot
          * notifications above, which cover each machine target individually):

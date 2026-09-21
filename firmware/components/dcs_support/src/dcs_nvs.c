@@ -14,7 +14,10 @@
  *   ring_off  u8   LED-ring rotation: physical pixel index of LED 1 (default 0)
  *   ps_peers  blob multi-machine peer table: version byte + per-slot records
  *                  (absent -> migrate legacy ps_ip/ps_port into slot 0)
- *   operators blob operator allowlist: count byte + u32 ids
+ *   adm_allow blob admission allowlist: count byte + u32 ids
+ *   adm_deny  blob admission denylist: same layout
+ *   adm_pin   blob WG pin list: same layout (seeded once from the legacy operators blob)
+ *   operators blob LEGACY operator list — migrated into adm_pin then erased at boot
  *   wifi_txp  u8   WiFi max TX power, quarter-dBm (8..84); 0/absent = config default
  *   led_bri   u8   master LED brightness, 0..100%; absent/corrupt = default 50
  *   ctrl_rst  u8   one-shot controlled-reset cause crumb (DCS_CTRL_RST_*)
@@ -26,10 +29,32 @@
 #include "dcs_internal.h"
 #include "esp_err.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "nvs.h"
 #include "pstop_aux_channel.h"
 
 static const char * TAG = "dcs_nvs";
+
+/* Every dcs-side READWRITE handle is timed from open to close: any NVS
+ * program/erase suspends flash-resident execution on BOTH cores, so every write
+ * path — not only the health blob — must show up in the nvs_dcs gauge that the
+ * lockstep-mismatch attribution is correlated against. Start and duration are
+ * published as ONE 64-bit word (start << 32 | duration) plus a max-hold. */
+static esp_err_t nvs_open_rw(nvs_handle_t * h, uint32_t * t0_ms)
+{
+  *t0_ms = (uint32_t)(esp_timer_get_time() / 1000);
+  return nvs_open(DCS_NVS_NS, NVS_READWRITE, h);
+}
+
+static void nvs_close_rw(nvs_handle_t h, uint32_t t0_ms)
+{
+  nvs_close(h);
+  const uint32_t dur = (uint32_t)(esp_timer_get_time() / 1000) - t0_ms;
+  atomic_store(&g_dcs_nvs_write, ((uint64_t)t0_ms << 32) | (uint64_t)dur);
+  if (dur > (uint32_t)atomic_load(&g_dcs_nvs_write_max)) {
+    atomic_store(&g_dcs_nvs_write_max, dur);
+  }
+}
 
 bool dcs_nvs_read_usb_enabled(void)
 {
@@ -44,13 +69,14 @@ bool dcs_nvs_read_usb_enabled(void)
 esp_err_t dcs_nvs_write_usb_enabled(bool enable)
 {
   nvs_handle_t h;
-  esp_err_t r = nvs_open(DCS_NVS_NS, NVS_READWRITE, &h);
+  uint32_t t0 = 0;
+  esp_err_t r = nvs_open_rw(&h, &t0);
   if (r != ESP_OK) return r;
   r = nvs_set_u8(h, DCS_NVS_KEY_USB_EN, enable ? 1 : 0);
   if (r == ESP_OK) {
     r = nvs_commit(h);
   }
-  nvs_close(h);
+  nvs_close_rw(h, t0);
   return r;
 }
 
@@ -67,13 +93,14 @@ bool dcs_nvs_read_ts_boot_en(void)
 esp_err_t dcs_nvs_write_ts_boot_en(bool enable)
 {
   nvs_handle_t h;
-  esp_err_t r = nvs_open(DCS_NVS_NS, NVS_READWRITE, &h);
+  uint32_t t0 = 0;
+  esp_err_t r = nvs_open_rw(&h, &t0);
   if (r != ESP_OK) return r;
   r = nvs_set_u8(h, DCS_NVS_KEY_TS_BOOT_EN, enable ? 1 : 0);
   if (r == ESP_OK) {
     r = nvs_commit(h);
   }
-  nvs_close(h);
+  nvs_close_rw(h, t0);
   return r;
 }
 
@@ -90,13 +117,14 @@ uint16_t dcs_nvs_read_boot_count(void)
 esp_err_t dcs_nvs_write_boot_count(uint16_t v)
 {
   nvs_handle_t h;
-  esp_err_t r = nvs_open(DCS_NVS_NS, NVS_READWRITE, &h);
+  uint32_t t0 = 0;
+  esp_err_t r = nvs_open_rw(&h, &t0);
   if (r != ESP_OK) return r;
   r = nvs_set_u16(h, DCS_NVS_KEY_BOOT_COUNT, v);
   if (r == ESP_OK) {
     r = nvs_commit(h);
   }
-  nvs_close(h);
+  nvs_close_rw(h, t0);
   return r;
 }
 
@@ -127,7 +155,8 @@ uint16_t dcs_nvs_read_pstop_peer_port(void)
 esp_err_t dcs_nvs_write_pstop_peer(uint32_t ip, uint16_t port)
 {
   nvs_handle_t h;
-  esp_err_t r = nvs_open(DCS_NVS_NS, NVS_READWRITE, &h);
+  uint32_t t0 = 0;
+  esp_err_t r = nvs_open_rw(&h, &t0);
   if (r != ESP_OK) return r;
   r = nvs_set_u32(h, DCS_NVS_KEY_PSTOP_IP, ip);
   if (r == ESP_OK) {
@@ -136,7 +165,7 @@ esp_err_t dcs_nvs_write_pstop_peer(uint32_t ip, uint16_t port)
   if (r == ESP_OK) {
     r = nvs_commit(h);
   }
-  nvs_close(h);
+  nvs_close_rw(h, t0);
   return r;
 }
 
@@ -145,47 +174,51 @@ esp_err_t dcs_nvs_write_pstop_peer(uint32_t ip, uint16_t port)
 void dcs_nvs_set_xcheck_detail(uint8_t detail)
 {
   nvs_handle_t h;
-  if (nvs_open(DCS_NVS_NS, NVS_READWRITE, &h) != ESP_OK) {
+  uint32_t t0 = 0;
+  if (nvs_open_rw(&h, &t0) != ESP_OK) {
     ESP_LOGW(TAG, "xc_det: nvs_open failed");
     return;
   }
   if (nvs_set_u8(h, "xc_det", detail) != ESP_OK || nvs_commit(h) != ESP_OK) {
     ESP_LOGW(TAG, "xc_det: write failed");
   }
-  nvs_close(h);
+  nvs_close_rw(h, t0);
 }
 
 uint8_t dcs_nvs_take_xcheck_detail(void)
 {
   nvs_handle_t h;
+  uint32_t t0 = 0;
   uint8_t v = 0;
-  if (nvs_open(DCS_NVS_NS, NVS_READWRITE, &h) != ESP_OK) return 0;
+  if (nvs_open_rw(&h, &t0) != ESP_OK) return 0;
   if (nvs_get_u8(h, "xc_det", &v) == ESP_OK) {
     if (nvs_erase_key(h, "xc_det") != ESP_OK || nvs_commit(h) != ESP_OK) {
       ESP_LOGW(TAG, "xc_det: erase failed");
     }
   }
-  nvs_close(h);
+  nvs_close_rw(h, t0);
   return v;
 }
 
 void dcs_nvs_set_ctrl_reset_cause(uint8_t cause)
 {
   nvs_handle_t h;
-  if (nvs_open(DCS_NVS_NS, NVS_READWRITE, &h) != ESP_OK) {
+  uint32_t t0 = 0;
+  if (nvs_open_rw(&h, &t0) != ESP_OK) {
     ESP_LOGW(TAG, "ctrl-reset crumb open failed (cause %u will be lost)", (unsigned)cause);
     return;
   }
   if (nvs_set_u8(h, DCS_NVS_KEY_CTRL_RST, cause) != ESP_OK || nvs_commit(h) != ESP_OK) {
     ESP_LOGW(TAG, "ctrl-reset crumb write failed (cause %u will be lost)", (unsigned)cause);
   }
-  nvs_close(h);
+  nvs_close_rw(h, t0);
 }
 
 uint8_t dcs_nvs_take_ctrl_reset_cause(void)
 {
   nvs_handle_t h;
-  if (nvs_open(DCS_NVS_NS, NVS_READWRITE, &h) != ESP_OK) return 0;
+  uint32_t t0 = 0;
+  if (nvs_open_rw(&h, &t0) != ESP_OK) return 0;
   uint8_t v = 0;
   if (nvs_get_u8(h, DCS_NVS_KEY_CTRL_RST, &v) == ESP_OK) {
     /* One-shot: a stale crumb must not mislabel a later POWERON/panic. The
@@ -195,14 +228,15 @@ uint8_t dcs_nvs_take_ctrl_reset_cause(void)
       ESP_LOGW(TAG, "ctrl-reset crumb erase failed (stale value may persist)");
     }
   }
-  nvs_close(h);
+  nvs_close_rw(h, t0);
   return v;
 }
 
 void dcs_nvs_push_reset_reason(uint8_t reason)
 {
   nvs_handle_t h;
-  if (nvs_open(DCS_NVS_NS, NVS_READWRITE, &h) != ESP_OK) return;
+  uint32_t t0 = 0;
+  if (nvs_open_rw(&h, &t0) != ESP_OK) return;
   uint8_t hist[DCS_RST_HIST_LEN] = {0};
   size_t len = sizeof(hist);
   (void)nvs_get_blob(h, DCS_NVS_KEY_RST_HIST, hist, &len); /* absent -> stays zeroed */
@@ -213,7 +247,7 @@ void dcs_nvs_push_reset_reason(uint8_t reason)
       ESP_LOGW(TAG, "reset-history commit failed");
     }
   }
-  nvs_close(h);
+  nvs_close_rw(h, t0);
 }
 
 uint8_t dcs_nvs_read_pstop_unit_num(void)
@@ -229,13 +263,14 @@ uint8_t dcs_nvs_read_pstop_unit_num(void)
 esp_err_t dcs_nvs_write_pstop_unit_num(uint8_t n)
 {
   nvs_handle_t h;
-  esp_err_t r = nvs_open(DCS_NVS_NS, NVS_READWRITE, &h);
+  uint32_t t0 = 0;
+  esp_err_t r = nvs_open_rw(&h, &t0);
   if (r != ESP_OK) return r;
   r = nvs_set_u8(h, DCS_NVS_KEY_PSTOP_NUM, n);
   if (r == ESP_OK) {
     r = nvs_commit(h);
   }
-  nvs_close(h);
+  nvs_close_rw(h, t0);
   return r;
 }
 
@@ -252,13 +287,14 @@ uint8_t dcs_nvs_read_ring_offset(void)
 esp_err_t dcs_nvs_write_ring_offset(uint8_t off)
 {
   nvs_handle_t h;
-  esp_err_t r = nvs_open(DCS_NVS_NS, NVS_READWRITE, &h);
+  uint32_t t0 = 0;
+  esp_err_t r = nvs_open_rw(&h, &t0);
   if (r != ESP_OK) return r;
   r = nvs_set_u8(h, DCS_NVS_KEY_RING_OFF, (uint8_t)(off & 0x0Fu));
   if (r == ESP_OK) {
     r = nvs_commit(h);
   }
-  nvs_close(h);
+  nvs_close_rw(h, t0);
   return r;
 }
 
@@ -279,13 +315,14 @@ esp_err_t dcs_nvs_write_wifi_tx_power(uint8_t quarter_dbm)
 {
   if ((quarter_dbm < 8u) || (quarter_dbm > 84u)) return ESP_ERR_INVALID_ARG;
   nvs_handle_t h;
-  esp_err_t r = nvs_open(DCS_NVS_NS, NVS_READWRITE, &h);
+  uint32_t t0 = 0;
+  esp_err_t r = nvs_open_rw(&h, &t0);
   if (r != ESP_OK) return r;
   r = nvs_set_u8(h, DCS_NVS_KEY_WIFI_TXP, quarter_dbm);
   if (r == ESP_OK) {
     r = nvs_commit(h);
   }
-  nvs_close(h);
+  nvs_close_rw(h, t0);
   return r;
 }
 
@@ -306,13 +343,14 @@ esp_err_t dcs_nvs_write_led_brightness(uint8_t pct)
 {
   if (pct > 100u) return ESP_ERR_INVALID_ARG;
   nvs_handle_t h;
-  esp_err_t r = nvs_open(DCS_NVS_NS, NVS_READWRITE, &h);
+  uint32_t t0 = 0;
+  esp_err_t r = nvs_open_rw(&h, &t0);
   if (r != ESP_OK) return r;
   r = nvs_set_u8(h, DCS_NVS_KEY_LED_BRIGHT, pct);
   if (r == ESP_OK) {
     r = nvs_commit(h);
   }
-  nvs_close(h);
+  nvs_close_rw(h, t0);
   return r;
 }
 
@@ -334,13 +372,14 @@ esp_err_t dcs_nvs_write_role(uint8_t role)
     return ESP_ERR_INVALID_ARG;
   }
   nvs_handle_t h;
-  esp_err_t r = nvs_open(DCS_NVS_NS, NVS_READWRITE, &h);
+  uint32_t t0 = 0;
+  esp_err_t r = nvs_open_rw(&h, &t0);
   if (r != ESP_OK) return r;
   r = nvs_set_u8(h, DCS_NVS_KEY_ROLE, role);
   if (r == ESP_OK) {
     r = nvs_commit(h);
   }
-  nvs_close(h);
+  nvs_close_rw(h, t0);
   return r;
 }
 
@@ -437,7 +476,8 @@ esp_err_t dcs_nvs_write_pstop_peers(const dcs_pstop_peer_rec_t recs[DCS_PSTOP_MA
   }
 
   nvs_handle_t h;
-  esp_err_t r = nvs_open(DCS_NVS_NS, NVS_READWRITE, &h);
+  uint32_t t0 = 0;
+  esp_err_t r = nvs_open_rw(&h, &t0);
   if (r != ESP_OK) return r;
   r = nvs_set_blob(h, DCS_NVS_KEY_PSTOP_PEERS, blob, sizeof(blob));
   if (r == ESP_OK) {
@@ -454,34 +494,41 @@ esp_err_t dcs_nvs_write_pstop_peers(const dcs_pstop_peer_rec_t recs[DCS_PSTOP_MA
   if (r == ESP_OK) {
     r = nvs_commit(h);
   }
-  nvs_close(h);
+  nvs_close_rw(h, t0);
   return r;
 }
 
-/* operators blob layout (byte-serialized):
- *   [0]            count (0..DCS_MAX_OPERATORS)
+/* admission list blob layout (byte-serialized):
+ *   [0]            count (0..DCS_MAX_LIST_IDS)
  *   per id, big-endian u32
- * Absent/corrupt -> empty list (0 operators = every remote stop-only = safe). */
-#define OPERATORS_BLOB_LEN (1 + (DCS_MAX_OPERATORS * 4))
+ * Absent/corrupt -> empty list. */
+#define LIST_BLOB_LEN (1 + (DCS_MAX_LIST_IDS * 4))
 
-int dcs_nvs_read_operators(uint32_t out[DCS_MAX_OPERATORS])
+static const char * list_key(dcs_list_t which)
 {
-  (void)memset(out, 0, DCS_MAX_OPERATORS * sizeof(out[0]));
+  if (which == DCS_LIST_DENY) return DCS_NVS_KEY_DENYLIST;
+  if (which == DCS_LIST_PIN) return DCS_NVS_KEY_PINLIST;
+  return DCS_NVS_KEY_ALLOWLIST;
+}
 
-  uint8_t blob[OPERATORS_BLOB_LEN] = {0};
+int dcs_nvs_read_list(dcs_list_t which, uint32_t out[DCS_MAX_LIST_IDS])
+{
+  (void)memset(out, 0, DCS_MAX_LIST_IDS * sizeof(out[0]));
+
+  uint8_t blob[LIST_BLOB_LEN] = {0};
   size_t len = sizeof(blob);
   nvs_handle_t h;
   esp_err_t r = ESP_FAIL;
   if (nvs_open(DCS_NVS_NS, NVS_READONLY, &h) == ESP_OK) {
-    r = nvs_get_blob(h, DCS_NVS_KEY_OPERATORS, blob, &len);
+    r = nvs_get_blob(h, list_key(which), blob, &len);
     nvs_close(h);
   }
   if ((r != ESP_OK) || (len < 1u)) {
-    return 0; /* blank NVS: empty allowlist */
+    return 0; /* blank NVS: empty list */
   }
   int count = blob[0];
-  if (count > DCS_MAX_OPERATORS) {
-    count = DCS_MAX_OPERATORS; /* corrupt length degrades safely (never over-reads) */
+  if (count > DCS_MAX_LIST_IDS) {
+    count = DCS_MAX_LIST_IDS; /* corrupt length degrades safely (never over-reads) */
   }
   int n = 0;
   for (int i = 0; i < count; i++) {
@@ -497,24 +544,80 @@ int dcs_nvs_read_operators(uint32_t out[DCS_MAX_OPERATORS])
   return n;
 }
 
-esp_err_t dcs_nvs_write_operators(const uint32_t ids[DCS_MAX_OPERATORS], int count)
+/* The pre-admission "operators" blob meant "may RE-ARM" (and those remotes were
+ * WG-pinned as a side effect). The admission allowlist means "may BOND", so the
+ * blob must NOT be read as one: on a machine with a populated operator list that
+ * would refuse every other remote after an OTA. What must survive the upgrade
+ * is the pinning — losing it reopens the cold-bond ENOTCONN wedge on a large
+ * tailnet — so the ids move into the PIN list (no admission effect), and the
+ * legacy key is erased. Idempotent: absent key => nothing to do. */
+int dcs_nvs_migrate_legacy_operators(void)
 {
-  if ((count < 0) || (count > DCS_MAX_OPERATORS)) {
+  uint8_t blob[LIST_BLOB_LEN] = {0};
+  size_t len = sizeof(blob);
+  nvs_handle_t h;
+  uint32_t t0 = 0;
+  if (nvs_open_rw(&h, &t0) != ESP_OK) {
+    return 0;
+  }
+  esp_err_t r = nvs_get_blob(h, DCS_NVS_KEY_LEGACY_OPERATORS, blob, &len);
+  if (r != ESP_OK) {
+    nvs_close_rw(h, t0);
+    return 0; /* no legacy list: normal */
+  }
+  int count = (len >= 1u) ? blob[0] : 0;
+  if (count > DCS_MAX_LIST_IDS) count = DCS_MAX_LIST_IDS;
+  uint32_t pins[DCS_MAX_LIST_IDS];
+  int n = dcs_nvs_read_list(DCS_LIST_PIN, pins);
+  int migrated = 0;
+  for (int i = 0; i < count; i++) {
+    size_t off = (size_t)1 + ((size_t)i * 4u);
+    if ((off + 4u) > len) break;
+    uint32_t id = ps_peers_get_u32(&blob[off]);
+    if (id == 0u) continue;
+    bool present = false;
+    for (int k = 0; k < n; k++) {
+      if (pins[k] == id) present = true;
+    }
+    if (!present && (n < DCS_MAX_LIST_IDS)) {
+      pins[n++] = id;
+      migrated++;
+    }
+  }
+  if (migrated > 0) {
+    (void)dcs_nvs_write_list(DCS_LIST_PIN, pins, n);
+  }
+  if (nvs_erase_key(h, DCS_NVS_KEY_LEGACY_OPERATORS) == ESP_OK) {
+    (void)nvs_commit(h);
+  }
+  nvs_close_rw(h, t0);
+  ESP_LOGW(
+    TAG,
+    "legacy 'operators' list: %d id(s) migrated to the WG pin list (admission stays open; re-arm authority is the "
+    "remote's own role)",
+    migrated);
+  return migrated;
+}
+
+esp_err_t dcs_nvs_write_list(dcs_list_t which, const uint32_t ids[DCS_MAX_LIST_IDS], int count)
+{
+  if ((count < 0) || (count > DCS_MAX_LIST_IDS)) {
     return ESP_ERR_INVALID_ARG;
   }
-  uint8_t blob[OPERATORS_BLOB_LEN] = {0};
+  uint8_t blob[LIST_BLOB_LEN] = {0};
   blob[0] = (uint8_t)count;
   for (int i = 0; i < count; i++) {
     ps_peers_put_u32(&blob[1 + (i * 4)], ids[i]);
   }
   nvs_handle_t h;
-  esp_err_t r = nvs_open(DCS_NVS_NS, NVS_READWRITE, &h);
+  uint32_t t0 = 0;
+  esp_err_t r = nvs_open_rw(&h, &t0);
   if (r != ESP_OK) return r;
-  r = nvs_set_blob(h, DCS_NVS_KEY_OPERATORS, blob, sizeof(blob));
+  r = nvs_set_blob(h, list_key(which), blob, sizeof(blob));
   if (r == ESP_OK) {
     r = nvs_commit(h);
   }
-  nvs_close(h);
+  nvs_close_rw(h, t0);
   return r;
 }
 
@@ -557,12 +660,13 @@ esp_err_t dcs_nvs_write_health(const dcs_health_counters_t * c)
   uint8_t blob[DCS_HEALTH_BLOB_LEN];
   dcs_health_encode(c, blob);
   nvs_handle_t h;
-  esp_err_t r = nvs_open(DCS_NVS_NS, NVS_READWRITE, &h);
+  uint32_t t0 = 0;
+  esp_err_t r = nvs_open_rw(&h, &t0);
   if (r != ESP_OK) return r;
-  r = nvs_set_blob(h, DCS_NVS_KEY_HEALTH, blob, sizeof(blob));
+  r = nvs_set_blob(h, DCS_NVS_KEY_HEALTH, blob, sizeof(blob)); /* flash program/erase happens HERE (commit = no-op) */
   if (r == ESP_OK) {
     r = nvs_commit(h);
   }
-  nvs_close(h);
+  nvs_close_rw(h, t0);
   return r;
 }

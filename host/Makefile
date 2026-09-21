@@ -58,12 +58,25 @@ test_crypto_kat: test_crypto_kat.c $(CRYPTO_SRCS)
 test_demote_veto: test_demote_veto.c $(MICROLINK)/include/ml_demote_verdict.h
 	$(CC) $(CFLAGS) -I$(MICROLINK)/include -o $@ test_demote_veto.c
 
+# WireGuard re-establishment decision on a direct-path regain
+# (ml_wg_regain_policy.h): pure header-only logic, no ESP-IDF/lwIP.
+test_wg_regain_policy: test_wg_regain_policy.c $(MICROLINK)/include/ml_wg_regain_policy.h
+	$(CC) $(CFLAGS) -I$(MICROLINK)/include -o $@ test_wg_regain_policy.c
+
+# Partial coordination-frame wall-clock budget (ml_coord_frame_budget.h, #127):
+# pure header-only logic, no ESP-IDF/lwIP.
+test_coord_frame_budget: test_coord_frame_budget.c $(MICROLINK)/include/ml_coord_frame_budget.h
+	$(CC) $(CFLAGS) -I$(MICROLINK)/include -o $@ test_coord_frame_budget.c
+
 .PHONY: test clean
-test: test_clock_guard test_crypto_kat test_demote_veto test_aux_channel
+test: test_clock_guard test_crypto_kat test_demote_veto test_aux_channel test_wg_regain_policy test_coord_frame_budget
 	./test_clock_guard
 	./test_crypto_kat
 	./test_demote_veto
 	./test_aux_channel
+	./test_wg_regain_policy
+	./test_coord_frame_budget
 
 clean:
-	rm -f machine_app_runner test_clock_guard test_crypto_kat test_demote_veto test_aux_channel
+	rm -f machine_app_runner test_clock_guard test_crypto_kat test_demote_veto test_aux_channel \
+		test_wg_regain_policy test_coord_frame_budget

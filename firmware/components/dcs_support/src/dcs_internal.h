@@ -38,7 +38,13 @@ extern "C"
 #define DCS_NVS_KEY_PSTOP_NUM "ps_num" /* USB "PSTOPxx" unit number (0=auto) */
 #define DCS_NVS_KEY_RING_OFF "ring_off" /* ring rotation: physical index of LED 1 */
 #define DCS_NVS_KEY_PSTOP_PEERS "ps_peers" /* multi-machine peer table (blob, see dcs_nvs.c) */
-#define DCS_NVS_KEY_OPERATORS "operators" /* operator allowlist (blob: count byte + u32 ids) */
+#define DCS_NVS_KEY_ALLOWLIST "adm_allow" /* admission allowlist (blob: count byte + u32 ids) */
+#define DCS_NVS_KEY_DENYLIST "adm_deny" /* admission denylist (same blob layout) */
+#define DCS_NVS_KEY_PINLIST "adm_pin" /* WG-pin list (same blob layout); seeded from the legacy operators blob */
+#define DCS_NVS_KEY_LEGACY_OPERATORS \
+  "operators" /* pre-admission operator allowlist: erased at boot, NOT reused (its
+                                                    * meaning was re-arm authority; reading it as an admission
+                                                    * allowlist would lock out every other remote after an OTA) */
 #define DCS_NVS_KEY_WIFI_TXP "wifi_txp" /* WiFi max TX power, quarter-dBm (8..84); 0/absent = config default */
 #define DCS_NVS_KEY_LED_BRIGHT "led_bri" /* master LED brightness, 0..100%; absent = default */
 #define DCS_NVS_KEY_ROLE "role" /* remote self-role: pstop_aux_role_t value (1=stop_only default, 2=operator) */
@@ -65,7 +71,13 @@ extern "C"
 #define DCS_PSTOP_PEER_DEFAULT_PORT 8890
 
 #define DCS_SAFETY_MAX_RAPID_BOOTS 3
-#define DCS_SAFETY_CLEAR_AFTER_MS 120000
+/* Healthy uptime after which the crash counter is cleared. Must exceed the
+ * slowest crash the ladder is meant to catch: a build that panicked ~150 s
+ * after boot (2026-09-17, W5500 RX path) looped indefinitely under the old
+ * 120 s window because every crash counted as boot #1. Network + Tailscale
+ * bring-up alone takes ~60 s and the coord re-register cycle is 300 s, so
+ * 10 min is the first point at which "up" says anything about "healthy". */
+#define DCS_SAFETY_CLEAR_AFTER_MS 600000
 
 /* Network-interface route priorities. Higher wins the default route.
  * Ethernet must beat USB-NCM (bumped to 110 in ml_dev_tether) and WiFi STA
@@ -159,6 +171,24 @@ extern "C"
   extern atomic_uint_fast32_t g_dcs_pstop_replies; /* machine replies received */
   extern atomic_uint_fast32_t g_dcs_pstop_last_msg; /* last message TYPE from the machine (PSTOP_MESSAGE_*) */
   extern atomic_uint_fast32_t g_dcs_pstop_mismatch;
+  /* pstop_mismatch attribution (soak item 5; comparator-written; /state.json pstop_mm_*): [0] timeout-class
+   * count (a core missed CORE_PUBLISH_TIMEOUT), [1] content-class count (both published, frames differed),
+   * [2] last event packed = kind<<28 (1 timeout, 2 content) | late_core_mask<<26 (bit0 core0, bit1 core1) |
+   * slot<<24 | first_differing_byte<<16 (0xFF n/a) | verdict0<<8 | verdict1 (on a timeout record the LATE core's
+   * verdict byte is from its previous publish — the late mask says which), [3] slowest late core's actual
+   * notify->publish ms for a timeout record (0 = not landed yet / n/a for a content record), [4] last event
+   * uptime ms, [5],[6] worst notify->publish ms per core this boot, including late publishes. */
+  extern atomic_uint_fast32_t g_dcs_pstop_mm[7];
+  /* Seqlock for g_dcs_pstop_mm: the comparator (single writer) bumps it before and after the 7 stores, so it is
+   * odd while the record is in flux. Readers use dcs_pstop_mm_snapshot() and never see two events mixed. */
+  extern atomic_uint_fast32_t g_dcs_pstop_mm_seq;
+  void dcs_pstop_mm_snapshot(uint32_t out[7]);
+  /* Last dcs-side NVS write (dcs_nvs.c times EVERY read-write handle open->close; both cores stall for the
+   * flash op), ONE 64-bit word so start and duration are always from the same write: start uptime ms << 32 |
+   * duration ms; plus the max duration this boot. Peer-cache flushes have their own diag
+   * (ml_peer_nvs_get_flush_diag). /state.json nvs_dcs = [start, duration, max] / nvs_pf. */
+  extern atomic_uint_fast64_t g_dcs_nvs_write;
+  extern atomic_uint_fast32_t g_dcs_nvs_write_max;
   extern atomic_uint_fast32_t g_dcs_pstop_send_fail;
   /* send_fail split by cause (errno at the failing sendto): ENOMEM =
    * TX-queue/pbuf pressure (typically DERP relay backpressure), route =
@@ -271,6 +301,8 @@ extern "C"
   extern atomic_uint_fast32_t g_dcs_eth_rec_r3;
   extern atomic_uint_fast32_t g_dcs_eth_rec_reason;
   extern atomic_uint_fast32_t g_dcs_eth_spi_err;
+  extern atomic_uint_fast32_t g_dcs_eth_int_low_ticks; /* W5500 INT-line gauge: 20 ms samples that found INT asserted */
+  extern atomic_uint_fast32_t g_dcs_eth_int_low_max_ms; /* longest SAMPLED continuous INT-low span, ms (stall gauge) */
 
   /* RGB status-LED loop counter — incremented once per blink cycle by dcs_rgb,
  * read by /state.json so the task's liveness is observable (a frozen counter
@@ -361,11 +393,15 @@ extern "C"
   void dcs_nvs_read_pstop_peers(dcs_pstop_peer_rec_t out[DCS_PSTOP_MAX_MACHINES]);
   esp_err_t dcs_nvs_write_pstop_peers(const dcs_pstop_peer_rec_t recs[DCS_PSTOP_MAX_MACHINES]);
 
-  /* Operator allowlist (blob: count byte + count*u32 ids, big-endian). Read
-   * fills out[] and returns the count (0 on blank NVS = empty = all stop-only).
-   * Write persists the given ids. See dcs_operator_* in dcs_support.h. */
-  int dcs_nvs_read_operators(uint32_t out[DCS_MAX_OPERATORS]);
-  esp_err_t dcs_nvs_write_operators(const uint32_t ids[DCS_MAX_OPERATORS], int count);
+  /* Admission lists (blob: count byte + count*u32 ids, big-endian). Read
+   * fills out[] and returns the count (0 on blank NVS = empty). Write persists
+   * the given ids. See dcs_list_* in dcs_support.h. */
+  int dcs_nvs_read_list(dcs_list_t which, uint32_t out[DCS_MAX_LIST_IDS]);
+  /* One-shot upgrade: move the pre-admission "operators" blob (meaning: may
+   * RE-ARM, and incidentally WG-pinned) into the PIN list, then erase it. It is
+   * NOT read as an admission list. Returns the number of ids migrated. */
+  int dcs_nvs_migrate_legacy_operators(void);
+  esp_err_t dcs_nvs_write_list(dcs_list_t which, const uint32_t ids[DCS_MAX_LIST_IDS], int count);
 
   /* Lifetime health counters blob (dcs_health.c owns the RAM copy). */
   bool dcs_nvs_read_health(dcs_health_counters_t * out);

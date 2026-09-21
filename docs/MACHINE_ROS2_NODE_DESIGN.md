@@ -92,8 +92,8 @@ eliminating hand-rolled `declare_parameter` + validation boilerplate.
 
 **Static (`read_only`, require reconfigure):**
 `autostart`, `backend` (`software|hardware`), `machine_id`, `frame_id`, software
-`bind_addr`/`port`, software `default_stop_only`/`operators` (operator
-authorization, SR-SYS-09 — an unlisted remote is stop-only), hardware
+`bind_addr`/`port`, software `allowlist`/`denylist` (optional admission —
+who may bond; re-arm authority is the remote's own announced role), hardware
 `device_url`/`admin_user`, the `rates.*` group (`state_poll_hz`,
 `publish_rate_hz`, `diagnostics_rate_hz` — read at configure/activate), and the
 optional fleet groups `announce.*` and `fleet.*`.
@@ -321,13 +321,15 @@ ros2 run protective_stop_machine machine_bridge_node \
     software:                   # used when backend == software
       bind_addr: 0.0.0.0
       port: 8890                # read_only
-      # Operator authorization (SAFETY, SR-SYS-09). A bonded remote is accepted
-      # and heartbeat-monitored but STOP-ONLY by default: it may command STOP,
-      # never re-arm. Only a remote whose 32-bit pstop id is listed in
-      # `operators` gets re-arm authority. Empty (the default) = every remote is
-      # stop-only = maximally safe, and the machine can never be armed.
-      default_stop_only: true   # read_only
-      # operators: [30234300]   # read_only; ids granted re-arm (default: none)
+      # Admission (OPTIONAL): who may BOND. Both empty (default) = everyone.
+      # A non-empty allowlist admits ONLY the listed 32-bit pstop ids; the
+      # denylist always refuses and wins. A refused BOND is answered UNBOND.
+      # Re-arm authority is NOT here: each remote announces its own
+      # stop_only/operator role (remote /api/role) and the node honours it
+      # live — a demoted operator keeps an armed machine running but cannot
+      # re-arm it after the next STOP.
+      # allowlist: [30234300]   # read_only
+      # denylist: []            # read_only
 
     hardware:                   # used when backend == hardware
       device_url: http://100.84.155.111
@@ -346,7 +348,7 @@ ros2 run protective_stop_machine machine_bridge_node \
     # Optional fleet console check-in (software backend only, both default
     # DISABLED on an empty url). Prefer the ENVIRONMENT for the secrets:
     # PSTOP_ANNOUNCE_URL / PSTOP_ANNOUNCE_KEY_FILE and
-    # PSTOP_FLEET_CHECKIN_URL / PSTOP_FLEET_API_KEY_FILE override these.
+    # PSTOP_CHECKIN_URL / PSTOP_CHECKIN_API_KEY_FILE override these.
     announce:                   # lightweight overview check-in
       url: ''                   # read_only; empty = disabled
       key_file: ''              # read_only; chmod-600 bearer token

@@ -129,26 +129,31 @@ Test-file shorthand:
 
 ### 3.1 Headline numbers
 
-- **(a) SRs with ≥1 passing verifying test: 32 / 40 = 80.0 %** [Reconciled
+<!-- BEGIN GENERATED: safety-lint headline -->
+- **SRs with at least one cited verifying test: 32 / 40 = 80.0 %**‡
+- **Strict, fully-verified only: 17 / 40 = 42.5 %**
+- **Functions traced to at least one SR: 22 / 27 = 81.5 %**
+- **Functions traced excluding declared non-safety functions: 22 / 25 = 88.0 %**
+
+‡ Citation resolution, not test execution or passing state, is checked by the linter.
+<!-- END GENERATED: safety-lint headline -->
+
+- **(a) Requirements coverage:** See the generated citation and fully-verified figures above. [Reconciled
   2026-08-07: +4 as DU-1/2/3/4 closures gained tests — SR-H-03/SR-H-04 now
   Verified, SR-R-03/SR-R-09 now Partially-verified].
-  (17 Verified + 14 Partially-verified + 1 Residual-with-test [SR-M-06]. The
-  remaining Residual [SR-M-04] is inspection-only; the 7 Unverified-gap SRs
-  have no test.)
-  **Strict, fully-verified only: 17 / 40 = 42.5 %.** This is the honest number
-  for "requirement completely discharged by test" — the 14 Partials each leave a
-  named leg (end-to-end, quantification, golden-vector/replay, fault-injection
-  divergence, or the operator-list config plumbing) untested.
+  The Partially-verified requirements each leave a named leg untested — end-to-end,
+  quantification, golden-vector/replay, fault-injection divergence, or the
+  operator-list config plumbing. SR-M-04 is Residual and inspection-only; the
+  Unverified-gap requirements have no test at all.
 
-- **(b) Safety functions F-xx traced to ≥1 SR: 22 / 27 = 81.5 %.**
-  Five functions carry **no** requirement (§5): F-R-08, F-R-10 (both declared
-  **non-safety**), and **F-H-04, F-M-01, F-M-06** (undeclared — genuine
-  requirements-coverage holes). Excluding the two declared-non-safety functions:
-  22 / 25 = 88.0 %.
+- **(b) Function traceability:** See the generated figures above. Section 5 records
+  functions with no requirement and distinguishes declared non-safety functions
+  from genuine requirements-coverage holes.
 
 ### 3.2 Breakdown by area
 
-| Area | Count | Verified | Partially-verified | Unverified-gap | Residual-accepted | ≥1-test % | Fully-verified % |
+<!-- BEGIN GENERATED: safety-lint areas -->
+| Area | Count | Verified | Partially-verified | Unverified-gap | Residual-accepted | ≥1 cited test % | Fully-verified % |
 |---|---|---|---|---|---|---|---|
 | SR-SYS | 9 | 2 | 6 | 1 | 0 | 88.9 % | 22.2 % |
 | SR-R | 15 | 6 | 3 | 6 | 0 | 60.0 % | 40.0 % |
@@ -156,9 +161,11 @@ Test-file shorthand:
 | SR-M | 6 | 3 | 1 | 0 | 2 | 83.3 %† | 50.0 % |
 | SR-I | 4 | 1 | 3 | 0 | 0 | 100 % | 25.0 % |
 | **Total** | **40** | **17** | **14** | **7** | **2** | **80.0 %** | **42.5 %** |
+<!-- END GENERATED: safety-lint areas -->
 
-† SR-M ≥1-test counts SR-M-01/03/05 (Verified) + SR-M-02 (Partial) + SR-M-06
-(Residual-with-test) = 5/6 = 83.3 % (SR-M-01/03 verified 2026-08-02).
+† The SR-M cited-test percentage includes SR-M-06 as Residual-with-test; see the
+generated SR-M row above. Citation resolution does not establish test execution or
+passing state.
 
 **Reading:** SR-I is fully *touched* by the pre-qualified `pstop_c` suite but
 never *completed* (golden-vector + replay integration missing). **SR-R is the

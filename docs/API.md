@@ -27,13 +27,13 @@ Query parameters are shown where required. Unless noted, POST bodies are empty.
 | POST | `/api/usb_enable` | Flip the USB-NCM NVS flag and reboot |
 | POST | `/api/ts_boot` | Flip the Tailscale-on-boot NVS flag (effective next reboot) |
 | POST | `/api/pstop_peer?ip=A.B.C.D&port=N` | Set + persist the pstop machine target (= peer slot 0, legacy single-machine call) |
-| POST | `/api/pstop_peers?slot=N&ip=A.B.C.D&port=P[&id=HEX]` | Multi-machine peer table: set slot 0..3 (id = the machine's `machine_device_id`, default `0x01020304`). `?slot=N&clear=1` empties a slot. Applies live within one 100 ms tick, persists to NVS |
+| POST | `/api/pstop_peers?slot=N&ip=A.B.C.D&port=P[&id=HEX]` | Multi-machine peer table: set slot 0..3 (id = the machine's `machine_device_id`, default `0x01020304`). `?slot=N&clear=1` empties a slot. `?slot=N&rebond=1` restarts that slot's bond — the only way out of `REJECTED` (state 3: the machine refused the BOND with `UNBOND`; the remote does not retry by itself). Applies live within one 100 ms tick, persists to NVS |
 | POST | `/api/pstop_num?n=N` | Set the USB "PSTOPxx" unit number (0 = auto) |
 | POST | `/api/ring_offset?n=N` | Set + persist the LED-ring rotation offset (0..15) — which physical pixel is "LED 1". Applies immediately, survives reboots and firmware updates (NVS `ring_off`) |
 | POST | `/api/ring_led1?on=0\|1` | Locate mode: light ONLY LED 1 solid white (overrides state colours) so the offset can be verified during install; auto-expires after 5 min |
 | POST | `/api/enter_download?confirm=1` | Enter USB download (flashing) mode (**admin auth**) |
-| GET  | `/api/role` | Remote self-role (**admin auth**): `{"ok":true,"role":"stop_only"\|"operator"}`. Announced in every pstop frame; the machine ANDs an `operator` claim with its own operator allowlist. Default `stop_only`. Remote only |
-| POST | `/api/role?role=stop_only\|operator` | Persist the self-role to NVS and **reboot** to apply (**admin auth**). Promoting to `operator` is one of the two gates for re-arm; the other is the machine's allowlist (`software.operators` on the ROS node, `[[operator]]` in `machine.toml`, `/api/operators` on machn). Remote only |
+| GET  | `/api/role` | Remote self-role (**admin auth**): `{"ok":true,"role":"stop_only"\|"operator"}`. Announced in every pstop frame; this alone decides whether the remote may re-arm a machine (the machine has no operator list). Default `stop_only`. Remote only |
+| POST | `/api/role?role=stop_only\|operator` | Persist the self-role to NVS and apply it **live** (**admin auth**, no reboot). An armed machine keeps running when its operator demotes itself, but refuses the next re-arm until a remote announcing `operator` performs STOP → OK. Remote only |
 | GET  | `/api/health` | Lifetime wear/health counters (see [Health](#health-lifetime-counters-and-warnings)) |
 | POST | `/api/health/reset?what=button\|all&confirm=1` | Zero the button counters after a switch replacement (`button`, bumps `button_swaps`) or everything (`all`, refurbished unit). **Admin auth** |
 
@@ -163,15 +163,18 @@ All routes require admin Basic-auth (enforced in-handler, same credential as `/a
 
 | Method | Route | Purpose |
 |--------|-------|---------|
-| GET    | `/api/operators` | List the operator allowlist — the remote device IDs permitted to re-arm |
-| POST   | `/api/operators?add=ID` | Add a remote device ID (hex `0x..`/`..` or decimal) to the operator allowlist (that remote becomes `stop_only=false`). Persisted to NVS |
-| POST   | `/api/operators?del=ID` | Remove a remote from the allowlist (it reverts to stop-only). Persisted to NVS |
+| GET    | `/api/admission` | Admission lists (**admin auth**): `{"ok":true,"allowlist":[..],"denylist":[..],"pinlist":[..]}`. Allow/deny both empty (default) = every remote may bond |
+| POST   | `/api/admission?allow=ID` / `?unallow=ID` | Add/remove a remote device ID (hex `0x..` or decimal) on the **allowlist**. Non-empty allowlist = only listed ids may bond ("paranoid" mode). Persisted to NVS |
+| POST   | `/api/admission?deny=ID` / `?undeny=ID` | Add/remove an ID on the **denylist** — never admitted, wins over the allowlist. Persisted to NVS |
+| POST   | `/api/admission?pin=ID` / `?unpin=ID` | Add/remove an ID on the **pin list**: keep that remote's WireGuard peer across netmap trims on a large tailnet so it can always reach this machine. No admission effect. Allowlisted IDs are pinned implicitly; denylisted IDs never. Seeded once at upgrade from the pre-admission operator list |
 
-The machine's `/state.json` exposes the authorization state: an `operators`
-array (the configured operator device IDs) and, per bonded remote, a `stop_only`
-boolean — `true` = accepted, stop-capable, heartbeat-monitored, re-arm-**IN**capable;
-`false` = full operator (stop **and** re-arm). A remote absent from `operators`
-reads `stop_only=true`.
+Admission decides only whether a remote may **bond**; a refused BOND is answered
+with `UNBOND` and the remote parks itself (`REJECTED`) until manually rebonded.
+Re-arm authority is **not** configured on the machine: each remote announces its
+own `stop_only`/`operator` role (`/api/role`) and the machine honours it live.
+The machine's `/state.json` exposes `allowlist`/`denylist` and, per bonded
+remote, its current `stop_only` — `true` = may STOP, cannot re-arm; `false` =
+may also re-arm.
 
 ### Machine arming/restart telemetry (`/state.json`)
 
@@ -181,8 +184,9 @@ lockstep instance; both fields read `0` on remotes):
 - `remote_stop_id` — pstop_c `robot_state.remote_stop_id`: the remote device
   ID that stopped the robot, or that owns the in-progress stop/OK arming
   cycle. `0` = none (fresh boot, or robot running with no cycle open). This is
-  the **arming owner**: cross-check it against `operators` to see whether the
-  arming gesture is coming from an authorized remote.
+  the **arming owner**. Only a remote currently announcing `operator` can hold
+  it; a remote that demotes itself releases it (and the machine keeps running
+  until the next STOP).
 - `restart_state` — pstop_c `ROBOT_RESTART_STATE_*`:
   `0` = OK (an OK message may complete re-arming), `1` = NEED_STOP (the
   machine refuses OK until a STOP gesture arrives first — e.g. after a

@@ -69,39 +69,30 @@ max_remotes = 3
 verbose = false
 
 [policy]
-# ADMISSION (not authority). allow_unlisted controls ONLY whether a remote that
-# is not named in an [[operator]] block may BOND at all — it does NOT decide
-# whether that remote may arm the machine. That is default_stop_only, below. So a
-# remote can bond and look perfectly healthy (RX <- OK, crc=ok, counter advancing)
-# and the machine can STILL hold STOP, if authority is withheld. Two axes, both
-# must line up.
-#   allow_unlisted = true  -> any remote that bonds is admitted (handy for bring-up)
-#   allow_unlisted = false -> only remotes named in an [[operator]] block are admitted
-allow_unlisted = true
-# Heartbeat expected from unlisted remotes (and from listed ones that omit it).
+# ADMISSION (optional) — may a remote BOND at all? Two independent global lists
+# of 32-bit remote ids (0x01xxxxxx, see [[remote]] below). Both empty = OPEN:
+# every remote is admitted. This is the default and the normal way to run.
+#
+#   allowlist = [...]  non-empty => ONLY these ids may bond ("paranoid" mode).
+#   denylist  = [...]  these ids may NEVER bond, regardless of the allowlist.
+#
+# A refused BOND is answered with UNBOND; the remote shows REJECTED and stops
+# retrying until an operator asks it to rebond. Admission is NOT re-arm
+# authority: each remote announces its own stop-only/operator role in every
+# frame and this machine honours it live — a remote that demotes itself while
+# the machine is armed keeps it running but is refused at the next re-arm.
+allowlist = []
+denylist = []
+# Heartbeat expected from remotes without a [[remote]] override below.
 # THE MACHINE OWNS THIS RATE: it is what this machine's safety case requires,
 # and pstop_c advertises it to the remote in the heartbeat_timeout field of
 # every reply (bond ack included). The remote firmware adopts it per session
 # and transmits at half this window (2x margin), clamped between its 100 ms
 # lockstep tick and 1000 ms — so tightening or relaxing this value (or a
-# per-operator heartbeat_ms below) retunes the remote's publish rate with no
+# per-remote heartbeat_ms below) retunes the remote's publish rate with no
 # remote-side configuration. 400 => remotes publish every 200 ms (5 Hz);
 # with max_missed_heartbeats = 5 the machine STOPs after ~2.0 s of silence.
 default_heartbeat_ms = 400
-# AUTHORITY. Whether a bonded-but-unlisted remote is an OPERATOR (may re-arm the
-# machine, STOP->OK) or STOP-ONLY (may command STOP and is heartbeat-monitored,
-# but may NEVER re-arm). This axis — not allow_unlisted above — is what decides
-# whether the machine will actually arm off an unlisted remote's OK.
-#
-# *** BENCH-TEST DEFAULT: false ***  An unlisted remote is eligible to be an
-# operator, but it must also announce OPERATOR in its BOND. New remotes announce
-# stop-only until promoted through their authenticated /api/role endpoint.
-#
-# PRODUCTION-LIKE run: set this back to true and grant re-arm authority
-# explicitly via an [[operator]] entry (stop_only = false) per remote, below.
-# With it true and the operator list empty, every remote is stop-only and the
-# machine never arms — the safe default the safety case assumes.
-default_stop_only = false
 # ARMING POLICY. Minimum time (ms) between the STOP that opens an arming
 # cycle and the OK that completes it; an earlier OK is refused (machine
 # replies STOP and stays STOPPED — the episode can still complete by waiting
@@ -128,38 +119,18 @@ announce_name = ""
 announce_interval_s = 60
 
 # -----------------------------------------------------------------------------
-# Per-remote operator entries (repeatable). Each maps a remote UUID
-# (pstop_msg.id) to its operator_details_t in the library:
-#   device_id    : the remote's UUID. Each pstop remote now derives a UNIQUE
-#                  per-unit ID from its eFuse MAC: 0x01xxxxxx, where xxxxxx is
-#                  the low 24 bits of the MAC. It is printed at boot
-#                  ("device_id=0x01xxxxxx") and shown on the admin page, and it
-#                  matches the remote's Tailscale node name "pstop-01xxxxxx".
-#                  To pin a specific remote, copy its value into an entry below.
+# Per-remote tuning entries (repeatable, OPTIONAL). Membership-neutral: an entry
+# here neither admits nor authorizes anything — see [policy] for admission; the
+# remote's own announced role decides re-arm authority.
+#   device_id    : the remote's UUID. Each pstop remote derives a UNIQUE per-unit
+#                  ID from its eFuse MAC: 0x01xxxxxx, where xxxxxx is the low 24
+#                  bits of the MAC. Printed at boot ("device_id=0x01xxxxxx"),
+#                  shown on the admin page, and it matches the remote's Tailscale
+#                  node name "pstop-01xxxxxx".
 #   heartbeat_ms : how often this remote must check in (0 => default above).
 #                  Advertised to the remote in every reply; the remote adapts
 #                  its publish rate to it (see default_heartbeat_ms note).
-#   stop_only    : true => this remote may STOP the machine but never arm it OK.
-#   allowed      : false => the machine rejects this remote's bonds outright.
-#
-# This is the OPERATOR ALLOWLIST and it is EMPTY by default: with no entries,
-# every remote that bonds is stop-only (default_stop_only above) and NONE can
-# re-arm. To grant a specific remote re-arm authority, add an entry for its
-# 0x01xxxxxx ID with stop_only = false. (With allow_unlisted = false these
-# entries also become the only remotes accepted at all.)
 # -----------------------------------------------------------------------------
-# Example operator (commented out) — uncomment and set the real ID to grant this
-# remote FULL operator authority (may STOP *and* re-arm):
-# [[operator]]
-# device_id    = 0x01xxxxxx   # a specific pstop remote (see its boot log)
-# heartbeat_ms = 1000
-# stop_only    = false        # false => may re-arm; true => stop-only override
-# allowed      = true
-
-# Example second remote (commented out) — an explicit STOP-ONLY entry (same as
-# the default treatment, but pinned so it survives allow_unlisted = false):
-# [[operator]]
-# device_id    = 0x01020381
-# heartbeat_ms = 500
-# stop_only    = true
-# allowed      = true
+# [[remote]]
+# device_id    = 0x01xxxxxx
+# heartbeat_ms = 200

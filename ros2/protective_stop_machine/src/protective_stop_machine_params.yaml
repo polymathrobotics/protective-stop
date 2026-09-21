@@ -29,21 +29,23 @@ protective_stop_machine:
       description: UDP port for the in-process software backend.
       validation:
         bounds<>: [1, 65535]
-    # Operator authorization (SAFETY). A bonded remote is accepted and
-    # heartbeat-monitored but STOP-ONLY by default: it may command STOP but may
-    # NEVER re-arm (STOP -> OK). Only a remote whose 32-bit pstop id is listed in
-    # `operators` gets re-arm authority. An empty list (the default) leaves every
-    # remote stop-only = maximally safe out of the box.
-    default_stop_only:
-      type: bool
-      default_value: true
-      read_only: true
-      description: Policy for UNLISTED remotes. True (the default, and what a deployment should keep) makes them stop-only, so they may STOP but never re-arm.
-    operators:
+    # Admission (OPTIONAL). Decides only whether a remote may BOND at all.
+    # Both lists empty (the default) = every remote is admitted. A non-empty
+    # allowlist admits ONLY the listed 32-bit pstop ids ("paranoid" mode); the
+    # denylist always refuses the listed ids and wins over the allowlist. A
+    # refused BOND is answered with UNBOND. Admission is NOT re-arm authority:
+    # each remote announces its own stop-only/operator role in every frame and
+    # the machine honours it live.
+    allowlist:
       type: int_array
       default_value: []
       read_only: true
-      description: 32-bit pstop ids granted re-arm authority, e.g. [30234300]. Empty (default) means no remote may re-arm.
+      description: If non-empty, only these 32-bit pstop ids may bond (e.g. [30234300]). Empty = everyone.
+    denylist:
+      type: int_array
+      default_value: []
+      read_only: true
+      description: These 32-bit pstop ids may never bond, regardless of the allowlist.
 
   hardware:
     device_url:
@@ -138,14 +140,14 @@ protective_stop_machine:
         gt_eq<>: 1
 
   # Optional fleet DEVICE CHECK-IN (software backend only). Registers this
-  # software machine with pstop-fleet EXACTLY like an ESP32 machine does — a
+  # software machine with the management backend EXACTLY like an ESP32 machine does — a
   # `device_type:"machine"` device record with full metadata — by POSTing the
   # ESP32 check-in schema to <checkin_url>/api/v1/checkin every check_interval_s
   # (plus an immediate boot check-in). Complementary to announce.* (which feeds
   # the live overview); default DISABLED (empty url). Entirely off the safety
   # path: a dead fleet only logs, and no firmware OTA is ever attempted. Prefer
-  # the ENVIRONMENT for the secrets — PSTOP_FLEET_CHECKIN_URL and
-  # PSTOP_FLEET_API_KEY_FILE override the two keys below so the proprietary fleet
+  # the ENVIRONMENT for the secrets — PSTOP_CHECKIN_URL and
+  # PSTOP_CHECKIN_API_KEY_FILE override the two keys below so the proprietary fleet
   # URL/key stay out of committed config.
   fleet:
     checkin_url:

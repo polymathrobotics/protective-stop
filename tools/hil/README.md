@@ -38,15 +38,19 @@ it on teardown; slot 0 belongs to whatever real bench machine exists.
 
 ```sh
 cd tools/hil
-python3 -m pytest                 # everything (incl. power cycles, slow)
-python3 -m pytest -m 'not power'  # skip the power-cycle tests
-python3 -m pytest test_00_rig.py  # rig self-check after (re)wiring
+./run.sh                    # everything (incl. power cycles, slow)
+./run.sh -m 'not power'     # skip the power-cycle tests
+./run.sh test_00_rig.py     # rig self-check after (re)wiring
 ```
 
-Requires: pyserial, pytest (system python3 is fine — nothing is
-installed). If the loops aren't wired yet, everything that needs them
-**skips** with a message rather than failing; `test_00_rig.py` tells
-you whether the wiring is live.
+`run.sh` runs pytest in the `tools/` uv environment and strips
+`PYTHONPATH`, which a sourced ROS setup otherwise fills with broken
+plugins. One-time setup is `cd tools && uv sync`; see
+[`../README.md`](../README.md) for installing uv.
+
+If the loops aren't wired yet, everything that needs them **skips**
+with a message rather than failing; `test_00_rig.py` tells you whether
+the wiring is live.
 
 ## What is covered
 

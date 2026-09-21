@@ -156,15 +156,23 @@ colcon build --packages-up-to protective_stop_machine
 source install/setup.bash
 ```
 
-Build from `ros2/`, not the repo root. Write the node's parameters (the node
-listens on UDP 8890 on every interface by default):
+Build from `ros2/`, not the repo root. The defaults are all you need (the node
+listens on UDP 8890 on every interface and admits every remote):
+
+```sh
+ros2 run protective_stop_machine machine_bridge_node
+```
+
+To restrict *which remotes may bond at all* (optional), give it an allowlist
+and/or denylist of 32-bit remote ids:
 
 ```sh
 cat > pstop_machine.yaml <<EOF
 /machine_bridge:
   ros__parameters:
     software:
-      operators: [$REMOTE_ID]       # remotes allowed to ARM; everyone else is stop-only
+      allowlist: [$REMOTE_ID]       # only these may bond (empty = everyone)
+      denylist: []                  # never these
 EOF
 ros2 run protective_stop_machine machine_bridge_node --ros-args --params-file pstop_machine.yaml
 ```
@@ -188,14 +196,16 @@ curl -X POST "http://$REMOTE/api/pstop_peer?ip=$LAPTOP_TS&port=8890"
 ```
 
 A new remote is **stop-only**: it can stop the machine but never arm it.
-Promote it once (reboots the remote, ~20 s):
+Promote it once (applies live, no reboot):
 
 ```sh
 curl -u "admin:$ADMIN_PW" -X POST "http://$REMOTE/api/role?role=operator"
+# expect: {"ok":true,"role":"operator","message":"applied"}
 ```
 
-Arming needs both this and the `operators` entry from step 6. Either one alone
-leaves the remote stop-only.
+That is the only gate: the remote decides its own role and the machine honours
+it. `role=stop_only` demotes it again at any time — an armed machine keeps
+running, but refuses the next re-arm until an `operator` remote does STOP → OK.
 
 ## 8. Test station
 
@@ -227,9 +237,10 @@ curl -s "http://$REMOTE/api/health"                 # lifetime counters: presses
 
 `pstop_sent` and `pstop_replies` climbing together means the bond is healthy.
 
-No hardware yet? `python3 tools/pstop_test_remote.py --port 8890` is a
-software remote that runs the same arming sequence against the node (add its
-id `16909185` to `operators` first); see [`TESTING.md`](TESTING.md).
+No hardware yet? `cd tools && uv run python pstop_test_remote.py --port 8890`
+is a software remote that runs the same arming sequence against the node; see
+[`TESTING.md`](TESTING.md) and [`../tools/README.md`](../tools/README.md) for
+the one-time uv setup.
 
 ## 9. Troubleshooting
 
@@ -239,7 +250,8 @@ id `16909185` to `operators` first); see [`TESTING.md`](TESTING.md).
 | `esp-pstop0` up, no `pstop-` in `tailscale status` after 2 min | Key wrong or single-use: `curl -u admin:PW http://10.42.0.X/admin/api/status` (find `10.42.0.X` with `ip neigh show dev esp-pstop0`) → `state`. Fix the key via the admin page at `http://10.42.0.X/admin/` without reflashing. Device approval on and key not pre-approved? Approve it in the console. |
 | `ml_state` stuck at 0–3 | Laptop has no internet, or NAT not active: `sudo nmcli con show esp-pstop \| grep ipv4.method` → `shared`. |
 | Ring stays white after `pstop_peer` | POST failed; re-run and read the JSON. |
-| Ring blue, never green | Two gates: `/api/role` returns `operator`? `REMOTE_ID` in `operators`? Node running? `/machine_bridge/remotes` shows `stop_only: true` while either gate is open. |
+| Ring blue, never green | `/api/role` on the remote returns `operator`? Node running? `/machine_bridge/remotes` shows `stop_only: true` while the remote announces stop-only. |
+| Remote row shows `REJECTED` | The node's `allowlist`/`denylist` refused the bond. Fix the list, then press **Rebond** on the remote (or `POST /api/pstop_peers?slot=0&rebond=1`). |
 | Ring red pulsing (slow) | Peer configured but unreachable: node down, wrong `$LAPTOP_TS`, or ufw. `tailscale ping $REMOTE` from the laptop. |
 | Ring purple | One switch loop open while the other is closed: wiring fault. See [`hardware/README.md`](../hardware/README.md). |
 | Need to reflash a running unit | It has no serial port. Hold BOOT, tap RESET, then `idf.py -p /dev/ttyACM0 flash`; or `curl -u admin:PW -X POST "http://$REMOTE/api/enter_download?confirm=1"`. Settings in flash (key, peer, role) survive a reflash. |
@@ -256,8 +268,7 @@ every state change, which the ROS node does not:
 
 ```sh
 cd host && make
-$EDITOR machine.toml     # add an [[operator]] block with device_id = 0x01xxxxxx, stop_only = false
-./machine_app_runner machine.toml
+./machine_app_runner machine.toml   # admits every remote; [policy] allowlist/denylist to restrict
 # expect: machine_app_runner listening on 0.0.0.0:8890
 #         pstop 0x01XXXXXX -> BOND
 #         ARMED by 0x01XXXXXX: STOP held 804 ms (policy minimum 500 ms)
@@ -292,7 +303,7 @@ The remote tries uplinks in order: Ethernet (6 s DHCP wait), USB tether, WiFi.
 | Tailscale node identity | NVS | yes | no (new machine on tailnet) |
 | Machine peer, self-role | NVS | yes | no |
 | Lifetime health counters (`/api/health`) | NVS | yes | no |
-| Operator allowlist (`operators`) | laptop: `pstop_machine.yaml` / `machine.toml` | n/a (not on the remote) | n/a |
+| Admission lists (`allowlist`/`denylist`) | laptop: `pstop_machine.yaml` / `machine.toml` | n/a (not on the remote) | n/a |
 
 Changing the key baked into a new image does not replace a key that was ever
 saved through the admin page; NVS takes priority at boot.

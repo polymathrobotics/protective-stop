@@ -34,6 +34,7 @@
 #include "microlink_internal.h"
 #include "ml_config_httpd.h"
 #include "ml_demote_verdict.h"
+#include "ml_wg_regain_policy.h"
 #include "nacl_box.h"
 #include "wireguard.h"
 #include "wireguardif.h"
@@ -451,6 +452,10 @@ static esp_err_t wg_init_interface(microlink_t * ml)
      * + udp_new. These run at boot — low risk in practice (TCPIP thread
      * isn't processing real traffic yet) but unsafe without the lock per
      * upstream PR#14 audit. */
+  /* #157: monotonic handshake timestamps across reboots — one NVS commit, done
+   * BEFORE taking the TCPIP core lock so the flash write stalls no lwIP caller. */
+  (void)wireguard_tai64n_epoch_init();
+
   bool init_need_lock = ml_lwip_core_lock_needed();
   if (init_need_lock) {
     LOCK_TCPIP_CORE();
@@ -772,6 +777,25 @@ static bool is_safety_peer(microlink_t * ml, uint32_t vpn_ip)
   return (ml->config.priority_peer_ip != 0 && vpn_ip == ml->config.priority_peer_ip) || is_health_tracked(vpn_ip);
 }
 
+/* True when ANY safety link exists: the priority peer or at least one
+ * registered health peer (machn's bonded remotes / a remote's machine slots).
+ * The DERP home-retry ladder keys on this, not on priority_peer_ip alone: a
+ * multi-machine remote and every machn have no priority IP set, so their
+ * DERP failover path was retried at the calm 60 s cadence while a safety
+ * heartbeat depended on it.
+ * Called from the DERP task; lock-free like every other reader of
+ * s_health_peers (httpd via ml_wg_is_health_tracked, the aggregate-health
+ * check below). .ip is an aligned 32-bit word, so a read is never torn; a
+ * stale read only picks the other retry cadence for one round. */
+bool ml_wg_has_safety_peers(const microlink_t * ml)
+{
+  if (ml->config.priority_peer_ip != 0) return true;
+  for (int i = 0; i < ML_EXTRA_PINS; i++) {
+    if (s_health_peers[i].ip != 0) return true;
+  }
+  return false;
+}
+
 /* DERP home region of a peer identified by its 32-byte WG public key.
  * 0 = unknown peer or region not learned. Called from ml_derp_queue_send on the
  * wg_mgr task (the peer-table owner), so this is a same-task read — no lock. */
@@ -894,10 +918,24 @@ void ml_wg_get_rehome_diag(uint32_t out[6])
  * diag pattern above. Read via /admin/api/monitor. */
 static uint32_t s_diag_relay_retries; /* CMM + forced-sweep rounds fired      */
 static uint32_t s_diag_direct_regains; /* has_direct_path false -> true edges */
-static uint64_t s_last_relay_refetch_ms; /* rate-limit coord re-fetch on relay-stuck symmetric-NAT safety peer */
+static uint64_t s_last_relay_refetch_ms; /* fleet-wide floor: last coord re-fetch issued for ANY safety peer */
 static uint32_t s_diag_relay_refetch_reqs; /* coord re-fetch (reconnect) requests issued for endpoint refresh */
+static uint32_t s_diag_relay_refetch_interval_s; /* backoff now gating the most recently re-fetched peer */
+
+uint32_t ml_wg_get_relay_refetch_reqs(void)
+{
+  return s_diag_relay_refetch_reqs;
+}
+
+uint32_t ml_wg_get_relay_refetch_interval_s(void)
+{
+  return s_diag_relay_refetch_interval_s;
+}
+
 static uint32_t s_diag_relay_disco_resets; /* per-peer from-scratch disco resets on a relay-stuck safety peer
                                             * (v2: rate-limited per-peer via p->disco_reset_next_ms) */
+static uint32_t s_diag_hs_cand_pings; /* disco pings fanned out to the WG handshake candidate */
+static uint32_t s_diag_safety_reconnects; /* wireguardif_connect() on a keyless safety peer regaining direct */
 static uint32_t s_diag_ep_learn_evictions; /* learn-from-ping ring-evictions on a full endpoint table —
                                             * nonzero = the B-1 wedge trigger occurred and was absorbed */
 static uint32_t s_diag_peer_table_full; /* over-cap add refusals; the LOG is rate-limited (task #60: the
@@ -966,6 +1004,16 @@ void ml_wg_get_reingest_diag(uint32_t out[6])
  * the WORST safety-peer keypair/init ages. wg_kp_age_max steadily ~<120000
  * (rekey cadence) = healthy; climbing past 120000 = a rekey is starving; a
  * green drop then follows ~60 s later when REJECT_AFTER_TIME kills the key. */
+uint32_t ml_wg_get_hs_cand_pings(void)
+{
+  return s_diag_hs_cand_pings;
+}
+
+uint32_t ml_wg_get_safety_reconnects(void)
+{
+  return s_diag_safety_reconnects;
+}
+
 void ml_wg_get_session_diag(microlink_t * ml, uint32_t out[7])
 {
   out[0] = s_diag_ep_learn_evictions;
@@ -2292,9 +2340,18 @@ static int add_peer(microlink_t * ml, const ml_peer_update_t * update, bool * sk
     p->last_derp_reconnect_ms = 0;
     p->relay_retry_next_ms = 0;
     p->relay_retry_count = 0;
+    /* Coord re-fetch backoff too: an evicted peer parked at the 30 min cap must
+     * not hand that wait to the fresh peer landing in its slot (@claude, #134). */
+    p->relay_refetch_interval_ms = 0;
+    p->relay_refetch_next_ms = 0;
     /* CMM chain-breaker throttle: an evicted slot's stale stamp would eat the
      * fresh peer's first CallMeMaybe for up to ML_DISCO_CMM_MIN_INTERVAL_MS. */
     p->last_cmm_sent_ms = 0;
+    /* WG re-establishment state (ml_wg_regain_policy.h): a predecessor's connect
+     * stamp would pace the fresh safety peer's first connect() by up to 5 s, and
+     * its one-shot flag would deny a fresh bulk peer its single initiation. */
+    p->last_safety_connect_ms = 0;
+    p->tried_initial_handshake = false;
   }
 
   char ip_str[16];
@@ -2711,6 +2768,26 @@ static void disco_send_ping_to_peer(microlink_t * ml, int peer_idx, bool force)
         }
       }
     }
+    /* Handshake-candidate leg (safety peers): the source of the most recent
+     * DIRECT disco packet from this peer, as remembered by wireguardif for the
+     * initiation second leg. Pinging it too keeps the far side's lazy
+     * wireguard-go peer configured (only an inbound disco PING does that — a
+     * bare WG initiation never re-adds a trimmed peer) and yields the pong the
+     * normal direct regain needs, even when the candidate table lacks it. */
+    if (has_udp && ml->wg_netif && p->wg_peer_index >= 0 && is_safety_peer(ml, p->vpn_ip)) {
+      uint32_t cand_ip = 0;
+      u16_t cand_port = 0;
+      if (
+        wireguardif_get_hs_candidate((struct netif *)ml->wg_netif, (u8_t)p->wg_peer_index, &cand_ip, &cand_port) ==
+          ERR_OK &&
+        cand_ip != 0 && !(best_sent && cand_ip == p->best_ip && cand_port == p->best_port) &&
+        !peer_has_endpoint(p, cand_ip, cand_port, false))
+      {
+        (void)disco_udp_sendto(ml, pkt, pkt_len, cand_ip, cand_port);
+        s_diag_hs_cand_pings++;
+        direct_sent = true;
+      }
+    }
     if (!has_udp) {
       ESP_LOGW(TAG, "  no UDP path for %s (sock4=%d)", p->hostname, ml->disco_sock4);
     } else if (!direct_sent && p->endpoint_count > 0) {
@@ -2855,6 +2932,19 @@ static void process_disco_ping(
      * flips has_direct_path). Without this, a chip whose stored candidate
      * list is empty (netmap endpoints missed or wiped) stays DERP-only
      * forever even while the peer pings it directly every few seconds. */
+  /* 4a. Handshake second leg (safety peers): remember this direct ping's
+   * source so wireguardif mirrors our initiations there while the peer is
+   * DERP-only — the machine host pinging us directly proves reachability even
+   * when our own probes/pongs are not getting through (bench 2026-09-19). */
+  if (
+    !pkt->via_derp && pkt->src_ip != 0 && pkt->src_port != 0 && is_safety_peer(ml, p->vpn_ip) && ml->wg_netif &&
+    p->wg_peer_index >= 0)
+  {
+    ip_addr_t cand;
+    IP_SET_TYPE_VAL(cand, IPADDR_TYPE_V4);
+    ip4_addr_set_u32(ip_2_ip4(&cand), htonl(pkt->src_ip));
+    (void)wireguardif_set_hs_candidate((struct netif *)ml->wg_netif, (u8_t)p->wg_peer_index, &cand, pkt->src_port);
+  }
   if (!pkt->via_derp && pkt->src_ip != 0 && pkt->src_port != 0 && !p->has_direct_path) {
     bool known = peer_has_endpoint(p, pkt->src_ip, pkt->src_port, false);
     if (!known) {
@@ -2977,6 +3067,8 @@ static void process_disco_pong(
          * so the NEXT outage starts the CMM/sweep cycle from 30 s again. */
         p->relay_retry_next_ms = 0;
         p->relay_retry_count = 0;
+        p->relay_refetch_interval_ms = 0; /* next outage starts the coord re-fetch ladder at 90 s again */
+        p->relay_refetch_next_ms = 0;
         s_diag_direct_regains++;
         if (is_prio) {
           /* SAFETY-peer regains only (priority peer or health-tracked pstop
@@ -3040,6 +3132,9 @@ static void process_disco_pong(
         IP_SET_TYPE_VAL(ep_ip, IPADDR_TYPE_V4);
         ip4_addr_set_u32(ip_2_ip4(&ep_ip), htonl(pkt->src_ip));
         wireguardif_update_endpoint(netif, (u8_t)p->wg_peer_index, &ep_ip, pkt->src_port);
+        if (is_safety_peer(ml, p->vpn_ip)) { /* handshake second leg candidate, see ping path */
+          (void)wireguardif_set_hs_candidate(netif, (u8_t)p->wg_peer_index, &ep_ip, pkt->src_port);
+        }
 
         /* Only call connect (forces handshake) if:
                  * 1. Peer has an active WG session, AND
@@ -3080,7 +3175,26 @@ static void process_disco_pong(
                      * Instead, just fire a single handshake init. If the peer
                      * has us configured, it will respond and establish session.
                      * If not, we stop and wait for them to initiate. */
-          if (!p->tried_initial_handshake) {
+          /* Decision table in ml_wg_regain_policy.h (host-tested). Safety peer
+           * (the machine) with NO session on a direct endpoint — first pong after
+           * boot, or a regain after the demote's connect_derp() left the LIVE
+           * endpoint (peer->ip) at 0.0.0.0 so initiations went relay-only
+           * (update_endpoint() above only stores connect_ip): connect() re-points
+           * peer->ip and retries every REKEY_TIMEOUT (bench 2026-09-19: the
+           * one-shot deadlocked with the relay dead — the host's wireguard-go
+           * initiates only when it has data). Paced to REKEY_TIMEOUT because pongs
+           * arrive several times a second and connect() resets the pending
+           * handshake; inside the window NOTHING runs — in particular not the
+           * bulk-peer one-shot, which clears active and would cancel the retries. */
+          ml_wg_regain_action_t regain = ml_wg_regain_action(
+            is_safety_peer(ml, p->vpn_ip), p->tried_initial_handshake, now, p->last_safety_connect_ms);
+          if (regain == ML_WG_REGAIN_CONNECT_RETRYING) {
+            p->last_safety_connect_ms = now;
+            p->tried_initial_handshake = true; /* the one-shot path is for bulk peers only */
+            wireguardif_connect(netif, (u8_t)p->wg_peer_index);
+            s_diag_safety_reconnects++;
+            ESP_LOGW(TAG, "WG safety peer %s: direct endpoint, no session — connecting with retries", p->hostname);
+          } else if (regain == ML_WG_REGAIN_ONE_SHOT_INIT) {
             p->tried_initial_handshake = true;
             /* Store endpoint so wireguardif_connect sends to it */
             wireguardif_update_endpoint(netif, (u8_t)p->wg_peer_index, &ep_ip, pkt->src_port);
@@ -4227,15 +4341,36 @@ static void disco_periodic_probes(microlink_t * ml)
          * Control-plane only (WG heartbeat/green untouched); only fires when the
          * path is ALREADY relay (no healthy path to disturb); rate-limited so a
          * persistently-relay peer can't storm reconnects. */
+        /* Per-peer escalating backoff (90 s doubling to ML_RELAY_REFETCH_MAX_MS,
+         * reset on direct regain): a transient NAT outage still gets four fast
+         * rounds in the first ~10 min; a permanently relay-bound peer drops
+         * from ~40 self-inflicted reconnects/h to ~2/h. The fleet-wide 90 s
+         * floor stays so two stuck peers can't interleave into a storm. */
         if (
-          p->relay_retry_count >= 1u && ml->coord_cmd_queue != NULL &&
+          p->relay_retry_count >= 1u && ml->coord_cmd_queue != NULL && now >= p->relay_refetch_next_ms &&
           (s_last_relay_refetch_ms == 0 || now - s_last_relay_refetch_ms >= ML_RELAY_REFETCH_MIN_MS))
         {
-          s_last_relay_refetch_ms = now;
-          s_diag_relay_refetch_reqs++;
           ml_coord_cmd_t rc = ML_CMD_FORCE_RECONNECT;
-          (void)xQueueSend(ml->coord_cmd_queue, &rc, 0);
-          ESP_LOGW(TAG, "relay-stuck safety peer %s: coord re-fetch (reconnect) for endpoint refresh", p->hostname);
+          if (xQueueSend(ml->coord_cmd_queue, &rc, 0) == pdTRUE) {
+            uint32_t iv_ms =
+              (p->relay_refetch_interval_ms != 0u) ? p->relay_refetch_interval_ms : ML_RELAY_REFETCH_MIN_MS;
+            p->relay_refetch_next_ms = now + iv_ms;
+            uint32_t next_ms = iv_ms * 2u;
+            p->relay_refetch_interval_ms = (next_ms > ML_RELAY_REFETCH_MAX_MS) ? ML_RELAY_REFETCH_MAX_MS : next_ms;
+            s_last_relay_refetch_ms = now;
+            s_diag_relay_refetch_reqs++;
+            s_diag_relay_refetch_interval_s = iv_ms / 1000u;
+            ESP_LOGW(
+              TAG,
+              "relay-stuck safety peer %s: coord re-fetch (reconnect) for endpoint refresh; next for this peer in %lu "
+              "s",
+              p->hostname,
+              (unsigned long)(iv_ms / 1000u));
+          } else {
+            /* Queue full = a reconnect is already pending; don't spin the
+             * gate every disco tick. Hold the fleet-wide floor from now. */
+            s_last_relay_refetch_ms = now;
+          }
         }
         /* Escalation: the coord re-fetch above refreshes the PEER's endpoints,
          * but a re-fetch re-ingests an EXISTING peer with disco state PRESERVED
@@ -4418,7 +4553,50 @@ void ml_wg_mgr_task(void * arg)
   int cached = ml_peer_nvs_load_all(ml->peers, ML_MAX_PEERS);
   if (cached > 0) {
     ml->peer_count = cached;
-    ESP_LOGI(TAG, "Pre-loaded %d cached peers from NVS", cached);
+    /* The cache is a boot accelerator, not a second admission path: apply
+     * the same two gates add_peer() applies to a netmap-delivered peer, to
+     * TABLE OCCUPANCY. The install loop below already skipped non-allowed
+     * cached peers, but left them ACTIVE — so a device's stale cache could
+     * fill every slot, including all of them below the runtime max_peers
+     * cap that add_peer() searches for a free one, and a newly allowlisted
+     * (or, with the filter off, simply new) non-pinned peer never got a slot.
+     * DUT 2026-09-16: max_peers=32, 125/128 slots held by allowed:false cache
+     * entries; the laptop's re-add hit peer_table_full forever.
+     *   1. allowlist — ml_config_peer_is_allowed() (pinned peers exempt inside)
+     *   2. runtime max_peers cap — same eff_max add_peer() uses; pinned peers
+     *      are exempt here too (add_peer() takes them past the cap via the
+     *      LRU-evict path). Which non-pinned entries survive is cache order,
+     *      not recency: they only bridge the seconds until the netmap
+     *      arrives, and the pins — what the preseed exists for — always do. */
+    int eff_max = ML_MAX_PEERS;
+    uint8_t cfg_mp = ml_config_get_max_peers(ml->config_httpd);
+    if (cfg_mp > 0u && (int)cfg_mp < eff_max) {
+      eff_max = (int)cfg_mp;
+    }
+    int dropped_allow = 0, dropped_cap = 0, kept_unpinned = 0;
+    for (int i = 0; i < cached; i++) {
+      if (!ml_config_peer_is_allowed(ml->config_httpd, ml->peers[i].vpn_ip)) {
+        ml->peers[i].active = false;
+        dropped_allow++;
+      } else if (!is_pinned_peer(ml, ml->peers[i].vpn_ip)) {
+        if (kept_unpinned >= eff_max) {
+          ml->peers[i].active = false;
+          dropped_cap++;
+        } else {
+          kept_unpinned++;
+        }
+      }
+    }
+    while (ml->peer_count > 0 && !ml->peers[ml->peer_count - 1].active) {
+      ml->peer_count--;
+    }
+    ESP_LOGI(
+      TAG,
+      "Pre-loaded %d cached peers from NVS (%d not allowlisted, %d over max_peers=%d: slots released)",
+      cached,
+      dropped_allow,
+      dropped_cap,
+      eff_max);
   }
 
   /* Cold-bond far-side recovery (bench 2026-08-08): a rebooted machine whose

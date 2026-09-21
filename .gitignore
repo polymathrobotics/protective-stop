@@ -18,6 +18,8 @@ host/machine_app_runner
 host/test_clock_guard
 host/test_crypto_kat
 host/test_demote_veto
+host/test_wg_regain_policy
+host/test_coord_frame_budget
 host/test_aux_channel
 # cppcheck
 *.ctu-info
@@ -54,9 +56,13 @@ ros2/build-cov/
 ros2/install-cov/
 ros2/log/
 firmware/test/test_estop_verdict
+firmware/test/test_dcs_health_logic
 firmware/test/coverage-summary.json
 
 build/
 install/
 log/
 tools/fleet.env
+
+# uv-managed environment (tools/, and any stale one left by an older run.sh)
+.venv/

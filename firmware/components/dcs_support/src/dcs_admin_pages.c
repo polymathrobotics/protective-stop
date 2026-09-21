@@ -56,10 +56,13 @@
 #include "freertos/task.h"
 #include "microlink.h"
 #include "ml_app.h"
+#include "ml_usb_tx.h"
 #include "panic_log.h"
 #include "pstop_aux_channel.h"
 #include "soc/rtc_cntl_reg.h"
 #include "wireguardif.h"
+
+#include "wireguard-platform.h" /* wireguard_tai64n_epoch() */
 
 static const char * TAG = "dcs_admin";
 
@@ -229,14 +232,16 @@ static esp_err_t page_state(httpd_req_t * req)
    */
   enum
   {
-    JSON_CAP = 4096 /* eth-watchdog fields + bonded-remote stop_only + operator list
+    JSON_CAP = 4864 /* + 5 usb_tx_* counters (<= ~120 B). eth-watchdog fields + bonded-remote stop_only + operator list
                        + instantaneous internal-heap fields (heap_free_int/heap_lfb_int).
                        remote_stop_id + restart_state add <= 47 B worst case against
                        ~940 B live headroom (measured 2026-08-09). derp_region_locked
                        adds <= 27 B. Region auto-negotiation surfacing (source string
                        + auto_applied + counters + mbb_state + switches_1h) adds
                        <= ~160 B worst case — bumped 3776 -> 4096 to keep comfortable
-                       headroom rather than shave the measured margin. */
+                       headroom rather than shave the measured margin. Lockstep-mismatch
+                       attribution (pstop_mm_timeout/content/last, pstop_core_lat_max_ms,
+                       nvs_pf, nvs_dcs) adds <= ~230 B worst case: 4352 -> 4864. */
   };
 
   char * buf = heap_caps_malloc(JSON_CAP, MALLOC_CAP_SPIRAM);
@@ -246,6 +251,14 @@ static esp_err_t page_state(httpd_req_t * req)
     return httpd_resp_sendstr(req, "{\"ok\":false,\"error\":\"oom\"}");
   }
   const int cap = JSON_CAP;
+  ml_usb_tx_diag_t usb_tx;
+  ml_usb_tx_get_diag(&usb_tx); /* zeros until the tether has ever started */
+  extern void ml_peer_nvs_get_flush_diag(uint32_t out[4]); /* peer-cache flash flush: last/max/count/start ms */
+  uint32_t pf[4] = {0};
+  ml_peer_nvs_get_flush_diag(pf); /* seqlock-consistent copy (ml_peer_nvs.c) */
+  uint32_t mm[7] = {0};
+  dcs_pstop_mm_snapshot(mm); /* seqlock-consistent copy of the comparator's record */
+  const uint64_t nvs_w = (uint64_t)atomic_load(&g_dcs_nvs_write);
   int n = snprintf(
     buf,
     cap,
@@ -256,24 +269,28 @@ static esp_err_t page_state(httpd_req_t * req)
     "\"e_hi0\":%lu,\"e_lo0\":%lu,\"e_hi1\":%lu,\"e_lo1\":%lu,"
     "\"active_iface\":%d,\"net_sup_kicks\":%lu,\"eth_link\":%d,"
     "\"eth_recoveries\":%lu,\"eth_rec_r1\":%lu,\"eth_rec_r2\":%lu,\"eth_rec_r3\":%lu,"
-    "\"eth_rec_reason\":%lu,\"eth_spi_err\":%lu,"
+    "\"eth_rec_reason\":%lu,\"eth_spi_err\":%lu,\"eth_int_low_ticks\":%lu,\"eth_int_low_max_ms\":%lu,"
     "\"eth_en\":%d,\"wifi_en\":%d,\"usbncm_en\":%d,"
     "\"wifi_disc\":%d,\"wifi_conn\":%d,\"wifi_idx\":%d,\"wifi_n\":%d,"
     "\"eth_ip\":%lu,\"usb_ip\":%lu,\"wifi_ip\":%lu,\"local_ip\":%lu,"
-    "\"rgb_cycles\":%lu,\"uptime_ms\":%llu,"
+    "\"rgb_cycles\":%lu,"
     "\"derp_paused\":%d,\"derp_delay_ms\":%d,\"wg_paused\":%d,"
     "\"usb_enabled\":%d,\"ts_boot_en\":%d,\"derp_only\":%d,"
+    "\"usb_tx_sent\":%lu,\"usb_tx_busy_retries\":%lu,\"usb_tx_expired\":%lu,\"usb_tx_full_drops\":%lu,\"usb_tx_"
+    "pending\":%lu,\"usb_tx_timeout_uncertain\":%lu,"
     "\"boot_count\":%u,\"reset_reason\":%u,\"ctrl_reset_cause\":%u,"
     "\"crash_present\":%d,\"crash_pc\":%lu,\"crash_task\":\"%s\",\"crash_sha\":\"%s\","
     "\"xcheck_last_detail\":%u,\"log_lines_s\":%lu,\"log_lines_s_peak\":%lu,\"log_console_skipped\":%lu,"
     "\"health\":%d,\"fw_ver\":\"%s\",\"fw_sha\":\"%s\","
-    "\"ml_state\":%d,\"ml_reconnects\":%lu,\"vpn_ip\":%lu,\"public_ip\":%lu,\"derp_region\":%d,"
+    "\"ml_state\":%d,\"ml_reconnects\":%lu,\"wg_epoch\":%lu,\"vpn_ip\":%lu,\"public_ip\":%lu,\"derp_region\":%d,"
     "\"derp_region_locked\":%d,"
     "\"derp_region_source\":\"%s\",\"derp_region_auto_applied\":%d,"
     "\"derp_auto_applies\":%lu,\"derp_auto_apply_s\":%lu,"
     "\"derp_mbb_state\":%d,\"derp_switches_1h\":%lu,"
     "\"pstop_peer_ip\":%lu,\"pstop_peer_port\":%lu,"
     "\"pstop_sent\":%lu,\"pstop_replies\":%lu,\"pstop_last_msg\":%lu,\"pstop_mismatch\":%lu,"
+    "\"pstop_mm_timeout\":%lu,\"pstop_mm_content\":%lu,\"pstop_mm_last\":[%lu,%lu,%lu],"
+    "\"pstop_core_lat_max_ms\":[%lu,%lu],\"nvs_pf\":[%lu,%lu,%lu],\"nvs_dcs\":[%lu,%lu,%lu],"
     "\"pstop_send_fail\":%lu,\"pstop_sf_nomem\":%lu,\"pstop_sf_route\":%lu,"
     "\"pstop_sf_txdrv\":%lu,\"pstop_sf_txdrv_recovered\":%lu,\"pstop_sf_other\":%lu,"
     "\"pstop_sf_enotconn\":%lu,\"pstop_sf_enotconn_kicks\":%lu,\"pstop_sf_errno\":%d,\"pstop_"
@@ -311,6 +328,8 @@ static esp_err_t page_state(httpd_req_t * req)
     (unsigned long)atomic_load(&g_dcs_eth_rec_r3),
     (unsigned long)atomic_load(&g_dcs_eth_rec_reason),
     (unsigned long)atomic_load(&g_dcs_eth_spi_err),
+    (unsigned long)atomic_load(&g_dcs_eth_int_low_ticks),
+    (unsigned long)atomic_load(&g_dcs_eth_int_low_max_ms),
     dcs_eth_is_enabled() ? 1 : 0,
     dcs_wifi_is_enabled() ? 1 : 0,
     dcs_usb_is_enabled() ? 1 : 0,
@@ -323,13 +342,18 @@ static esp_err_t page_state(httpd_req_t * req)
     (unsigned long)netif_ip_by_key("WIFI_STA_DEF"),
     (unsigned long)local_ip,
     (unsigned long)atomic_load(&g_dcs_rgb_cycles),
-    (unsigned long long)esp_timer_get_time() / 1000ULL,
     microlink_is_derp_paused() ? 1 : 0,
     microlink_get_derp_loop_delay_ms(),
     atomic_load(&g_dcs_wg_paused),
     g_dcs.usb_enabled ? 1 : 0,
     g_dcs.ts_boot_en ? 1 : 0,
     g_dcs.derp_only_mode ? 1 : 0,
+    (unsigned long)usb_tx.sent,
+    (unsigned long)usb_tx.busy_retries,
+    (unsigned long)usb_tx.expired,
+    (unsigned long)usb_tx.full_drops,
+    (unsigned long)usb_tx.pending,
+    (unsigned long)usb_tx.timeout_uncertain,
     (unsigned int)g_dcs.boot_count,
     (unsigned int)g_dcs.reset_reason,
     (unsigned int)g_dcs.ctrl_reset_cause,
@@ -346,6 +370,7 @@ static esp_err_t page_state(httpd_req_t * req)
     fw_sha,
     ml_state,
     (unsigned long)ml_reconnects,
+    (unsigned long)wireguard_tai64n_epoch(), /* 0 = handshake epoch not persisted this boot (#157 degraded) */
     (unsigned long)vpn_ip,
     (unsigned long)public_ip,
     derp_region,
@@ -362,6 +387,19 @@ static esp_err_t page_state(httpd_req_t * req)
     (unsigned long)atomic_load(&g_dcs_pstop_replies),
     (unsigned long)atomic_load(&g_dcs_pstop_last_msg),
     (unsigned long)atomic_load(&g_dcs_pstop_mismatch),
+    (unsigned long)mm[0],
+    (unsigned long)mm[1],
+    (unsigned long)mm[2], /* packed detail — layout in dcs_internal.h */
+    (unsigned long)mm[3], /* late core's actual publish latency ms */
+    (unsigned long)mm[4], /* last event uptime ms */
+    (unsigned long)mm[5],
+    (unsigned long)mm[6],
+    (unsigned long)pf[3], /* nvs_pf: start uptime ms, duration ms, max duration ms */
+    (unsigned long)pf[0],
+    (unsigned long)pf[1],
+    (unsigned long)(uint32_t)(nvs_w >> 32), /* nvs_dcs: start uptime ms, duration ms (one 64-bit word), max ms */
+    (unsigned long)(uint32_t)(nvs_w & 0xFFFFFFFFu),
+    (unsigned long)atomic_load(&g_dcs_nvs_write_max),
     (unsigned long)atomic_load(&g_dcs_pstop_send_fail),
     (unsigned long)atomic_load(&g_dcs_pstop_sf_nomem),
     (unsigned long)atomic_load(&g_dcs_pstop_sf_route),
@@ -489,21 +527,29 @@ static esp_err_t page_state(httpd_req_t * req)
       first = false;
     }
   }
-  /* Operator allowlist (machine-role): the 32-bit pstop ids granted re-arm
-     * authority. Empty => every remote is stop-only. Observable so config
-     * tooling and HIL can confirm the active policy. */
-  n += snprintf(buf + n, cap - n, "],\"operators\":[");
+  /* Admission lists (machine-role): which 32-bit pstop ids may BOND. Both
+     * empty => every remote admitted. Observable so config tooling and HIL can
+     * confirm the active policy. Authority (re-arm) is NOT here: it is the
+     * remote's own announced role. */
+  n += snprintf(buf + n, cap - n, "],\"allowlist\":[");
   CLAMP_N();
   {
-    uint32_t ops[DCS_MAX_OPERATORS];
-    int nops = dcs_operator_get_list(ops);
-    for (int i = 0; i < nops; i++) {
-      n += snprintf(buf + n, cap - n, "%s%lu", (i != 0) ? "," : "", (unsigned long)ops[i]);
+    uint32_t ids[DCS_MAX_LIST_IDS];
+    int nids = dcs_list_get(DCS_LIST_ALLOW, ids);
+    for (int i = 0; i < nids; i++) {
+      n += snprintf(buf + n, cap - n, "%s%lu", (i != 0) ? "," : "", (unsigned long)ids[i]);
+      CLAMP_N();
+    }
+    n += snprintf(buf + n, cap - n, "],\"denylist\":[");
+    CLAMP_N();
+    nids = dcs_list_get(DCS_LIST_DENY, ids);
+    for (int i = 0; i < nids; i++) {
+      n += snprintf(buf + n, cap - n, "%s%lu", (i != 0) ? "," : "", (unsigned long)ids[i]);
       CLAMP_N();
     }
   }
-  /* Remote self-role (informational): the role this device announces to
-     * machines. Inert on machine-role builds, which do not announce a role. */
+  /* Remote self-role: the role this device announces to machines (live —
+     * changes apply on the next frame). Inert on machine-role builds. */
   n += snprintf(buf + n, cap - n, "],\"role\":\"%s\",\"tk0\":", pstop_aux_role_str((pstop_aux_role_t)dcs_role_get()));
   CLAMP_N();
   n += emit_bucket(buf + n, cap - n, &snap.b[0]);
@@ -516,7 +562,14 @@ static esp_err_t page_state(httpd_req_t * req)
   CLAMP_N();
   n += emit_bucket(buf + n, cap - n, &snap.b[2]);
   CLAMP_N();
-  n += snprintf(buf + n, cap - n, ",\"oths\":%lu}", (unsigned long)snap.b[2].other_pct);
+  /* Sample uptime after reply timestamps so concurrent RX cannot put them
+   * in the future. Older reply samples only overestimate their age. */
+  n += snprintf(
+    buf + n,
+    cap - n,
+    ",\"oths\":%lu,\"uptime_ms\":%llu}",
+    (unsigned long)snap.b[2].other_pct,
+    (unsigned long long)esp_timer_get_time() / 1000ULL);
   CLAMP_N();
 #undef CLAMP_N
 
@@ -693,8 +746,10 @@ static esp_err_t api_pstop_peer(httpd_req_t * req)
  * Multi-machine peer table. slot = 0..DCS_PSTOP_MAX_MACHINES-1; id is the
  * machine's device id (pstop_msg.receiver_id), default 0x01020304 to match
  * machine_app_runner's default machine_device_id. ?slot=N&clear=1 empties a
- * slot. Applies live (comparator picks the change up within one tick) and
- * persists to NVS. Slot 0 mirrors the legacy /api/pstop_peer target. */
+ * slot; ?slot=N&rebond=1 restarts that slot's bond (the only way out of the
+ * REJECTED state after the machine answered UNBOND). Applies live (comparator
+ * picks the change up within one tick) and persists to NVS. Slot 0 mirrors the
+ * legacy /api/pstop_peer target. */
 static esp_err_t api_pstop_peers(httpd_req_t * req)
 {
   char query[128];
@@ -702,7 +757,8 @@ static esp_err_t api_pstop_peers(httpd_req_t * req)
   (void)httpd_resp_set_type(req, "application/json");
   if (httpd_req_get_url_query_str(req, query, sizeof(query)) != ESP_OK) {
     (void)httpd_resp_set_status(req, "400 Bad Request");
-    return httpd_resp_sendstr(req, "{\"ok\":false,\"error\":\"missing ?slot=N&ip=A.B.C.D&port=P (or &clear=1)\"}");
+    return httpd_resp_sendstr(
+      req, "{\"ok\":false,\"error\":\"missing ?slot=N&ip=A.B.C.D&port=P (or &clear=1 / &rebond=1)\"}");
   }
   if (httpd_query_key_value(query, "slot", val, sizeof(val)) != ESP_OK) {
     (void)httpd_resp_set_status(req, "400 Bad Request");
@@ -712,6 +768,14 @@ static esp_err_t api_pstop_peers(httpd_req_t * req)
   if ((slot < 0) || (slot >= DCS_PSTOP_MAX_MACHINES)) {
     (void)httpd_resp_set_status(req, "400 Bad Request");
     return httpd_resp_sendstr(req, "{\"ok\":false,\"error\":\"slot out of range\"}");
+  }
+
+  if ((httpd_query_key_value(query, "rebond", val, sizeof(val)) == ESP_OK) && (val[0] == '1')) {
+    /* Manual rebond: the only way out of REJECTED (machine answered UNBOND). */
+    dcs_pstop_request_rebond(slot);
+    char resp[64];
+    int n = snprintf(resp, sizeof(resp), "{\"ok\":true,\"slot\":%d,\"rebond\":true}", slot);
+    return httpd_resp_send(req, resp, n);
   }
 
   if ((httpd_query_key_value(query, "clear", val, sizeof(val)) == ESP_OK) && (val[0] == '1')) {
@@ -847,7 +911,7 @@ static esp_err_t page_perf(httpd_req_t * req)
 static esp_err_t api_coredump(httpd_req_t * req)
 {
   /* A coredump is a raw RAM image — task stacks can hold WG/Noise/machine key
-   * material — so this is admin-gated like enter_download/operators (review 🔴). */
+   * material — so this is admin-gated like enter_download/admission (review 🔴). */
   if (!ml_app_check_admin_auth(req)) {
     httpd_resp_set_status(req, "401 Unauthorized");
     httpd_resp_set_hdr(req, "WWW-Authenticate", "Basic realm=\"pstop admin\"");
@@ -887,8 +951,17 @@ static esp_err_t api_last_log(httpd_req_t * req)
   if (!panic_log_has_snapshot()) {
     return httpd_resp_sendstr(req, "");
   }
-  size_t cap = 4096;
-  char * buf = malloc(cap);
+  /* Copy the FULL retained ring. A 4096-byte prefix discarded the newest
+   * ~3 KiB, including the panic banner/backtrace we need after a reset.
+   * HTTP-only scratch belongs in PSRAM, like the boot snapshot itself. */
+  size_t cap = PANIC_LOG_BUF_SIZE + 1u;
+  char * buf = heap_caps_malloc(cap, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+  if (!buf) {
+    /* Fragmented PSRAM: degrade to the old truncated export rather than fail
+     * (same fallback every other PSRAM alloc in this file takes). */
+    cap = 4096u;
+    buf = malloc(cap);
+  }
   if (!buf) {
     (void)httpd_resp_set_status(req, "500 Internal Server Error");
     return httpd_resp_sendstr(req, "malloc failed");
@@ -1130,19 +1203,27 @@ static esp_err_t api_ring_led1(httpd_req_t * req)
   return httpd_resp_send(req, buf, len);
 }
 
-/* === /api/operators — machine-role operator allowlist ===================== *
- * SAFETY-config surface: the operator allowlist decides which remotes may
- * RE-ARM the machine (unlisted remotes are stop-only). Admin-authenticated
- * (same Basic-auth credential as /admin and /api/enter_download) because it
- * changes who can clear the robot to run.
+/* === /api/admission — machine-role admission lists (OPTIONAL) ============= *
+ * Admission decides only whether a remote may BOND. Re-arm authority is the
+ * remote's own announced role (common/pstop_aux_channel.h) and is not gated
+ * here. Both lists empty (blank NVS) => every remote is admitted. A non-empty
+ * allowlist admits only listed ids ("paranoid" mode); the denylist always
+ * refuses listed ids and wins over the allowlist. A refused BOND is answered
+ * with UNBOND. Admin-authenticated (same Basic-auth as /admin).
  *
- *   GET  /api/operators                       -> {"ok":true,"operators":[...]}
- *   POST /api/operators?add=<id>              add an operator (hex 0x.. or dec)
- *   POST /api/operators?del=<id>              remove an operator
+ *   GET  /api/admission                -> {"ok":true,"allowlist":[..],"denylist":[..],"pinlist":[..]}
+ *   POST /api/admission?allow=<id>     add to allowlist   (hex 0x.. or dec)
+ *   POST /api/admission?unallow=<id>   remove from allowlist
+ *   POST /api/admission?deny=<id>      add to denylist
+ *   POST /api/admission?undeny=<id>    remove from denylist
+ *   POST /api/admission?pin=<id>       keep this remote's WG peer across netmap trims (no admission effect)
+ *   POST /api/admission?unpin=<id>     remove from the pin list
  *
- * Applies live to the RAM cache AND persists to NVS. New authority takes effect
- * on a remote's next BOND (pstop_c latches is_stop_only at bond). */
-static bool operators_require_admin(httpd_req_t * req)
+ * Applies live to the RAM cache AND persists to NVS. pstop_c re-runs admission
+ * on EVERY frame, so denying an already-bonded remote evicts it on its next
+ * heartbeat (it gets UNBOND and parks as REJECTED); the machine then STOPs via
+ * liveness. Adding to the allowlist admits on the remote's next BOND. */
+static bool admin_required(httpd_req_t * req)
 {
   if (ml_app_check_admin_auth(req)) {
     return true;
@@ -1154,15 +1235,34 @@ static bool operators_require_admin(httpd_req_t * req)
   return false;
 }
 
-static esp_err_t operators_send_list(httpd_req_t * req, bool ok)
+static int admission_emit_list(char * buf, size_t cap, dcs_list_t which)
 {
-  uint32_t ops[DCS_MAX_OPERATORS];
-  int n = dcs_operator_get_list(ops);
-  /* {"ok":true,"count":16,"operators":[4294967295,...]} — 16 * 11 digits + commas */
-  char buf[64 + (DCS_MAX_OPERATORS * 12)];
-  int len = snprintf(buf, sizeof(buf), "{\"ok\":%s,\"count\":%d,\"operators\":[", ok ? "true" : "false", n);
-  for (int i = 0; (i < n) && (len < (int)sizeof(buf)); i++) {
-    len += snprintf(buf + len, sizeof(buf) - (size_t)len, "%s%lu", (i != 0) ? "," : "", (unsigned long)ops[i]);
+  uint32_t ids[DCS_MAX_LIST_IDS];
+  int n = dcs_list_get(which, ids);
+  int len = 0;
+  for (int i = 0; (i < n) && ((size_t)len < cap); i++) {
+    len += snprintf(buf + len, cap - (size_t)len, "%s%lu", (i != 0) ? "," : "", (unsigned long)ids[i]);
+  }
+  return len;
+}
+
+static esp_err_t admission_send(httpd_req_t * req)
+{
+  /* {"ok":true,"allowlist":[...],"denylist":[...],"pinlist":[...]} — 3 * 16 * 11 digits + commas */
+  char buf[100 + (3 * DCS_MAX_LIST_IDS * 12)];
+  int len = snprintf(buf, sizeof(buf), "{\"ok\":true,\"allowlist\":[");
+  len += admission_emit_list(buf + len, sizeof(buf) - (size_t)len, DCS_LIST_ALLOW);
+  if (len < (int)sizeof(buf)) {
+    len += snprintf(buf + len, sizeof(buf) - (size_t)len, "],\"denylist\":[");
+  }
+  if (len < (int)sizeof(buf)) {
+    len += admission_emit_list(buf + len, sizeof(buf) - (size_t)len, DCS_LIST_DENY);
+  }
+  if (len < (int)sizeof(buf)) {
+    len += snprintf(buf + len, sizeof(buf) - (size_t)len, "],\"pinlist\":[");
+  }
+  if (len < (int)sizeof(buf)) {
+    len += admission_emit_list(buf + len, sizeof(buf) - (size_t)len, DCS_LIST_PIN);
   }
   if (len < (int)sizeof(buf)) {
     len += snprintf(buf + len, sizeof(buf) - (size_t)len, "]}");
@@ -1171,58 +1271,77 @@ static esp_err_t operators_send_list(httpd_req_t * req, bool ok)
   return httpd_resp_send(req, buf, len);
 }
 
-static esp_err_t api_operators_get(httpd_req_t * req)
+static esp_err_t api_admission_get(httpd_req_t * req)
 {
-  if (!operators_require_admin(req)) {
+  if (!admin_required(req)) {
     return ESP_OK;
   }
-  return operators_send_list(req, true);
+  return admission_send(req);
 }
 
-static esp_err_t api_operators_post(httpd_req_t * req)
+static esp_err_t api_admission_post(httpd_req_t * req)
 {
-  if (!operators_require_admin(req)) {
+  if (!admin_required(req)) {
     return ESP_OK;
   }
   char query[64], val[20];
   (void)httpd_resp_set_type(req, "application/json");
   if (httpd_req_get_url_query_str(req, query, sizeof(query)) != ESP_OK) {
     (void)httpd_resp_set_status(req, "400 Bad Request");
-    return httpd_resp_sendstr(req, "{\"ok\":false,\"error\":\"missing ?add=<id> or ?del=<id>\"}");
+    return httpd_resp_sendstr(req, "{\"ok\":false,\"error\":\"need ?allow=|unallow=|deny=|undeny=|pin=|unpin=<id>\"}");
   }
-  bool adding;
-  if (httpd_query_key_value(query, "add", val, sizeof(val)) == ESP_OK) {
-    adding = true;
-  } else if (httpd_query_key_value(query, "del", val, sizeof(val)) == ESP_OK) {
-    adding = false;
-  } else {
+
+  static const struct
+  {
+    const char * key;
+    dcs_list_t which;
+    bool adding;
+  } kOps[] = {
+    {"allow", DCS_LIST_ALLOW, true},
+    {"unallow", DCS_LIST_ALLOW, false},
+    {"deny", DCS_LIST_DENY, true},
+    {"undeny", DCS_LIST_DENY, false},
+    {"pin", DCS_LIST_PIN, true},
+    {"unpin", DCS_LIST_PIN, false},
+  };
+
+  int op = -1;
+  for (int i = 0; i < (int)(sizeof(kOps) / sizeof(kOps[0])); i++) {
+    if (httpd_query_key_value(query, kOps[i].key, val, sizeof(val)) == ESP_OK) {
+      op = i;
+      break;
+    }
+  }
+  if (op < 0) {
     (void)httpd_resp_set_status(req, "400 Bad Request");
-    return httpd_resp_sendstr(req, "{\"ok\":false,\"error\":\"need ?add=<id> or ?del=<id>\"}");
+    return httpd_resp_sendstr(req, "{\"ok\":false,\"error\":\"need ?allow=|unallow=|deny=|undeny=|pin=|unpin=<id>\"}");
   }
   uint32_t id = (uint32_t)strtoul(val, NULL, 0); /* 0x.. hex or decimal */
   if (id == 0u) {
     (void)httpd_resp_set_status(req, "400 Bad Request");
     return httpd_resp_sendstr(req, "{\"ok\":false,\"error\":\"bad id (nonzero 32-bit pstop id)\"}");
   }
-  esp_err_t r = adding ? dcs_operator_add(id) : dcs_operator_del(id);
+  esp_err_t r = kOps[op].adding ? dcs_list_add(kOps[op].which, id) : dcs_list_del(kOps[op].which, id);
   if (r == ESP_ERR_NO_MEM) {
     (void)httpd_resp_set_status(req, "409 Conflict");
-    return httpd_resp_sendstr(req, "{\"ok\":false,\"error\":\"operator list full\"}");
+    return httpd_resp_sendstr(req, "{\"ok\":false,\"error\":\"list full\"}");
   }
   if (r != ESP_OK) {
     (void)httpd_resp_set_status(req, "500 Internal Server Error");
     return httpd_resp_sendstr(req, "{\"ok\":false,\"error\":\"NVS write failed\"}");
   }
-  return operators_send_list(req, true);
+  return admission_send(req);
 }
 
 #ifndef DCS_PAGE_MACHINE
 /* Remote self-role config: this remote announces stop-only vs operator in every
- * pstop frame (see common/pstop_aux_channel.h). The machine ANDs an operator
- * claim with its own allowlist, so promoting a remote here only *enables* the
- * possibility of re-arm; the machine still gates it.
+ * pstop frame (see common/pstop_aux_channel.h). The REMOTE alone owns its role;
+ * the machine honours whatever is announced. Applies live: the next frame
+ * carries the new role and the machine re-reads it per frame, so an armed
+ * machine keeps running but refuses the next re-arm once every bonded remote
+ * announces stop-only.
  *   GET  /api/role                            -> {"ok":true,"role":"stop_only"}
- *   POST /api/role?role=stop_only|operator    persist and reboot. */
+ *   POST /api/role?role=stop_only|operator    persist + apply (no reboot). */
 static esp_err_t role_send(httpd_req_t * req, bool ok)
 {
   char buf[64];
@@ -1238,7 +1357,7 @@ static esp_err_t role_send(httpd_req_t * req, bool ok)
 
 static esp_err_t api_role_get(httpd_req_t * req)
 {
-  if (!operators_require_admin(req)) {
+  if (!admin_required(req)) {
     return ESP_OK;
   }
   return role_send(req, true);
@@ -1246,7 +1365,7 @@ static esp_err_t api_role_get(httpd_req_t * req)
 
 static esp_err_t api_role_post(httpd_req_t * req)
 {
-  if (!operators_require_admin(req)) {
+  if (!admin_required(req)) {
     return ESP_OK;
   }
   (void)httpd_resp_set_type(req, "application/json");
@@ -1275,12 +1394,9 @@ static esp_err_t api_role_post(httpd_req_t * req)
   int len = snprintf(
     resp,
     sizeof(resp),
-    "{\"ok\":true,\"role\":\"%s\",\"message\":\"rebooting to apply role\"}",
+    "{\"ok\":true,\"role\":\"%s\",\"message\":\"applied\"}",
     pstop_aux_role_str((pstop_aux_role_t)role));
-  (void)httpd_resp_send(req, resp, len);
-  vTaskDelay(pdMS_TO_TICKS(200));
-  esp_restart();
-  return ESP_OK;
+  return httpd_resp_send(req, resp, len);
 }
 #endif
 
@@ -1385,7 +1501,7 @@ static esp_err_t api_health_get(httpd_req_t * req)
 
 static esp_err_t api_health_reset(httpd_req_t * req)
 {
-  if (!operators_require_admin(req)) {
+  if (!admin_required(req)) {
     return ESP_OK;
   }
   (void)httpd_resp_set_type(req, "application/json");
@@ -1442,8 +1558,8 @@ void dcs_admin_pages_register(ml_app_t * app)
   (void)ml_app_add_page(app, "/api/led_brightness", HTTP_POST, api_led_brightness);
   (void)ml_app_add_page(app, "/api/ring_led1", HTTP_POST, api_ring_led1);
   (void)ml_app_add_page(app, "/api/enter_download", HTTP_POST, api_enter_download);
-  (void)ml_app_add_page(app, "/api/operators", HTTP_GET, api_operators_get);
-  (void)ml_app_add_page(app, "/api/operators", HTTP_POST, api_operators_post);
+  (void)ml_app_add_page(app, "/api/admission", HTTP_GET, api_admission_get);
+  (void)ml_app_add_page(app, "/api/admission", HTTP_POST, api_admission_post);
   (void)ml_app_add_page(app, "/api/health", HTTP_GET, api_health_get);
   (void)ml_app_add_page(app, "/api/health/reset", HTTP_POST, api_health_reset);
 #ifndef DCS_PAGE_MACHINE

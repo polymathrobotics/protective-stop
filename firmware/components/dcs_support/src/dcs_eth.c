@@ -117,6 +117,9 @@ static bool s_wd_started = false; /* watchdog task spawned exactly once */
  * never blocks or touches the comparator/send loop; never changes fail-safe
  * semantics. After a full ladder it enters a cooldown so it can never thrash. */
 #define DCS_ETHWD_POLL_MS 1000u /* 1 Hz health check                         */
+#define DCS_ETHWD_TICK_MS \
+  20u /* watchdog task tick: the RX kick runs every tick, the
+                               * health check every DCS_ETHWD_POLL_MS / TICK ticks */
 #define DCS_ETHWD_CONFIRM_TICKS 3u /* consecutive suspicion ticks before acting */
 #define DCS_ETHWD_SILENCE_MS 8000u /* pstop + gateway silent this long => wedge */
 #define DCS_ETHWD_RUNG_TIMEOUT_MS 8000u /* per-rung wait for link + probe pass  */
@@ -354,10 +357,50 @@ static bool eth_run_recovery(void)
   return restored;
 }
 
+/* W5500 INT-line gauge — measures the driver's known missed-interrupt stall.
+ *
+ * The IDF driver arms the W5500 INT line as an EDGE interrupt (GPIO_INTR_NEGEDGE,
+ * esp_eth_mac_w5500.c) on a chip that signals by LEVEL: INT goes low when a frame
+ * lands and stays low until Sn_IR is cleared. A frame that arrives while
+ * w5500_tsk is still servicing the previous one keeps the line low with no new
+ * falling edge, so no ISR fires and the task sleeps in its 1000 ms
+ * ulTaskNotifyTake re-check. Espressif's maintainers acknowledged the race for
+ * "short, quickly repeated payloads" (esp-idf #6233); that re-check IS their
+ * recovery. On a 400 ms heartbeat with a 1.6 s stop-on-silence budget it costs
+ * up to 1000 ms of the budget per occurrence (bench 2026-09-19: a 1.2 s
+ * receive-side stall, TX unaffected; Sep-2026 campaign: 1140 ms reply ages).
+ *
+ * Every DCS_ETHWD_TICK_MS this samples the INT line and records the longest
+ * SAMPLED continuous low span (eth_int_low_max_ms) and how many samples found
+ * it asserted (eth_int_low_ticks). It is telemetry only — a 20 ms sampler can
+ * miss a brief high pulse between two assertions, so a long span is evidence,
+ * not proof, of one stall. The remedy is CONFIG_DCS_ETH_W5500_POLL_MS (SDK
+ * polling mode, public API): the driver task is woken by its own esp_timer
+ * every period and reads Sn_IR, so RX latency is bounded by the period with
+ * no dependence on the INT edge. The gauge stays on in both modes so the
+ * before/after comparison is the same measurement. */
+static uint32_t s_int_low_run_ticks; /* current continuous-low run; reset while the driver is down */
+
+static void eth_int_gauge_tick(void)
+{
+  uint32_t low_run_ticks = s_int_low_run_ticks;
+  if (gpio_get_level(DCS_ETH_PIN_INT) != 0) {
+    s_int_low_run_ticks = 0u; /* INT idle (high) */
+    return;
+  }
+  s_int_low_run_ticks = ++low_run_ticks;
+  (void)atomic_fetch_add(&g_dcs_eth_int_low_ticks, 1u);
+  uint32_t low_ms = low_run_ticks * DCS_ETHWD_TICK_MS;
+  if (low_ms > atomic_load(&g_dcs_eth_int_low_max_ms)) {
+    atomic_store(&g_dcs_eth_int_low_max_ms, low_ms);
+  }
+}
+
 static void eth_watchdog_task(void * arg)
 {
   (void)arg;
   uint32_t suspect_ticks = 0u;
+  uint32_t tick = 0u;
   uint64_t cooldown_until_ms = 0u;
   ESP_LOGI(
     TAG,
@@ -368,12 +411,18 @@ static void eth_watchdog_task(void * arg)
     (unsigned)DCS_ETHWD_COOLDOWN_MS);
 
   for (;;) {
-    vTaskDelay(pdMS_TO_TICKS(DCS_ETHWD_POLL_MS));
+    vTaskDelay(pdMS_TO_TICKS(DCS_ETHWD_TICK_MS));
 
     if ((s_eth_handle == NULL) || !atomic_load(&s_enabled)) {
       suspect_ticks = 0u; /* driver down (boot / admin-disabled) — nothing to guard */
+      s_int_low_run_ticks = 0u; /* a low run must not span a stop/restart of the driver */
       continue;
     }
+    eth_int_gauge_tick();
+    if (++tick < (DCS_ETHWD_POLL_MS / DCS_ETHWD_TICK_MS)) {
+      continue; /* health check below keeps its 1 Hz cadence */
+    }
+    tick = 0u;
     uint64_t now_ms = (uint64_t)esp_timer_get_time() / 1000u;
     if (now_ms < cooldown_until_ms) {
       suspect_ticks = 0u; /* post-ladder hold-off */
@@ -508,8 +557,28 @@ esp_err_t dcs_eth_start(void)
   };
 
   eth_w5500_config_t w5500_config = ETH_W5500_DEFAULT_CONFIG(DCS_ETH_SPI_HOST, &spi_devcfg);
-  w5500_config.int_gpio_num = DCS_ETH_PIN_INT; /* interrupt-driven RX */
+#if CONFIG_DCS_ETH_W5500_POLL_MS > 0
+  /* SDK polling mode: the driver's own esp_timer wakes w5500_tsk every period,
+   * so RX latency is bounded by the period and no longer depends on catching
+   * the INT falling edge (see the INT-line gauge above). The INT pin is still
+   * sampled by the gauge; configure it as a plain pulled-up input ourselves
+   * since the driver no longer does. */
+  w5500_config.int_gpio_num = -1;
+  w5500_config.poll_period_ms = CONFIG_DCS_ETH_W5500_POLL_MS;
+  {
+    gpio_config_t int_in = {
+      .pin_bit_mask = 1ULL << DCS_ETH_PIN_INT,
+      .mode = GPIO_MODE_INPUT,
+      .pull_up_en = GPIO_PULLUP_ENABLE,
+      .pull_down_en = GPIO_PULLDOWN_DISABLE,
+      .intr_type = GPIO_INTR_DISABLE,
+    };
+    (void)gpio_config(&int_in);
+  }
+#else
+  w5500_config.int_gpio_num = DCS_ETH_PIN_INT; /* interrupt-driven RX (legacy; 1000 ms stall class) */
   w5500_config.poll_period_ms = 0;
+#endif
 
   mac = esp_eth_mac_new_w5500(&w5500_config, &mac_config);
   phy = esp_eth_phy_new_w5500(&phy_config);

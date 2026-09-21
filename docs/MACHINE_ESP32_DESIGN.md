@@ -99,7 +99,7 @@ carries **no safety responsibility**.
 - The machine runs the same fleet check-in code but registers with
   **`device_type: "machine"`** in the check-in payload (new field,
   remotes implicitly `"remote"`).
-- **Server-side enforcement (required, fleet-console work):** the console
+- **Server-side enforcement (required, management-console work):** the console
   must refuse to assign remote firmware to `device_type != remote` —
   machines get their own image lineage or nothing. This needs a handoff
   item to the console session before any machine unit ships.
@@ -112,8 +112,9 @@ carries **no safety responsibility**.
 ## Config
 
 The `machine.toml` knobs move to NVS + admin UI (same pattern as the
-remote's settings): operator allowlist (`allow_unlisted`, per-remote
-`stop_only`/`heartbeat_ms`), `max_missed_heartbeats`, `min_stop_ms`
+remote's settings): admission allow/denylist (`/api/admission`, optional —
+who may bond; re-arm authority is each remote's own announced role),
+`max_missed_heartbeats`, `min_stop_ms`
 (→ library `delay_between_stop_ms`), `machine_device_id`, listen port.
 Persisted, live-applied where safe.
 
