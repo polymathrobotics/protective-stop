@@ -23,7 +23,7 @@ the ROS 2 install.
 | USB-C data cable | Power, and the network if you use USB. |
 | Ethernet cable and a DHCP LAN with internet | Only for the Ethernet path. A PoE switch port powers the remote too. |
 | Laptop | Ubuntu 24.04 with internet (22.04 works with ROS 2 Humble). |
-| Python 3 | For flashing: `python3 -m pip install esptool` |
+| Python 3 | Step 3 installs `esptool` with it. |
 | ROS 2 Jazzy | [Install guide](https://docs.ros.org/en/jazzy/Installation/Ubuntu-Install-Debs.html); `ros-jazzy-ros-base` is enough. |
 | Tailscale account | Free tier is fine. |
 
@@ -73,6 +73,7 @@ Into an empty folder, download three files from the
 mode) and, using the exact filename you downloaded:
 
 ```sh
+python3 -m pip install --user esptool      # once; the repo's tools/ venv (uv) also has it, see tools/README.md
 sha256sum -c SHA256SUMS --ignore-missing   # expect: two lines ending in OK
 ls /dev/ttyACM*                            # expect: /dev/ttyACM0
 python3 -m esptool --chip esp32s3 -p /dev/ttyACM0 -b 460800 write_flash 0x0 pstop_remote-<version>-public-fullflash.bin
@@ -150,7 +151,7 @@ if device approval is on and you did not pre-approve the key, **approve** it.
 source /opt/ros/jazzy/setup.bash
 sudo apt install -y ros-jazzy-generate-parameter-library ros-jazzy-diagnostic-updater \
                     ros-jazzy-rclcpp-lifecycle ros-jazzy-rclcpp-components libcurl4-openssl-dev
-cd <path-to>/protective-stop/ros2    # the clone from step 2; build from ros2/, not the repo root
+cd ros2                              # from the repo root (step 2); build from ros2/, not the repo root
 colcon build --packages-up-to protective_stop_machine
 source install/setup.bash
 ros2 run protective_stop_machine machine_bridge_node
@@ -228,7 +229,10 @@ Remote-side counters: `curl -s "http://$REMOTE/state.json" | python3 -m json.too
 The remote tries uplinks in order: Ethernet (6 s DHCP wait), USB, WiFi.
 Ethernet wins over USB whenever both are connected, including hot-plug on a
 running unit; pulling it falls back to USB with one ~5 s Tailscale re-register
-that a bonded machine rides through.
+that a bonded machine rides through — provided the laptop has run
+`host/setup/install.sh` (step 2), which is what gives the USB link an address
+and internet. On the Ethernet path that script is optional; run it if you want
+the USB cable to be a working fallback rather than power only.
 
 WiFi: add the network under **WiFi Networks** on the admin page (its own
 section, above Device Settings), or bake it in (Appendix E). A remote that **boots** with neither Ethernet nor USB and cannot
@@ -348,6 +352,7 @@ cd firmware
 idf.py build
 grep CONFIG_ML_TAILSCALE_AUTH_KEY sdkconfig  # expect: your key, not the XXXXX placeholder
 idf.py -p /dev/ttyACM0 flash
+cd ..                                        # back to the repo root for step 5
 ```
 
 If the grep shows the placeholder, the build reused a stale `sdkconfig`:
