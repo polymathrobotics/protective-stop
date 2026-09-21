@@ -30,6 +30,7 @@ uint32_t wireguard_sys_now() {
 // epoch from NVS, incremented once per boot, provides the monotonic high bits:
 // seconds = TAI(0) + (epoch << 32) + uptime_s.
 static uint64_t s_boot_epoch_s; // (epoch << 32); 0 = not initialised (uptime-only, pre-#157 behaviour)
+static bool s_epoch_failed;     // init attempted and NVS refused: degraded (reported as UINT32_MAX)
 
 // Call once at startup, before the WireGuard interface comes up: one NVS
 // read-increment-commit, kept off the handshake path. Returns false (and logs)
@@ -54,6 +55,7 @@ bool wireguard_tai64n_epoch_init(void) {
         nvs_close(h);
     }
     if (err != ESP_OK) {
+        s_epoch_failed = true;
         printf("[WG] ERROR: handshake epoch not persisted (%d) - post-reboot initiations may be rejected as replays\n", (int)err);
         return false;
     }
@@ -61,8 +63,10 @@ bool wireguard_tai64n_epoch_init(void) {
     return true;
 }
 
-// 0 = epoch not persisted this boot (degraded: device-initiated handshakes may be rejected as replays)
+// 0 = not initialised yet (WG interface not up); UINT32_MAX = init failed (degraded: device-initiated
+// handshakes may be rejected as replays); otherwise the persisted per-boot epoch.
 uint32_t wireguard_tai64n_epoch(void) {
+    if (s_epoch_failed) return 0xFFFFFFFFu;
     return (uint32_t)(s_boot_epoch_s >> 32);
 }
 

@@ -116,6 +116,18 @@ static bool usb_drain(void)
         atomic_fetch_add(&s_sent, 1u);
       } else {
         atomic_fetch_add(&s_timeout_uncertain, 1u); /* TIMEOUT: sent or withdrawn, unknown — given up, not retried */
+        /* The timed-out offer's deferred callback may still sit in the TinyUSB
+         * event queue. It reads a SHARED packet pointer, so publishing the next
+         * frame before it has run can transmit that frame twice (#161) — a
+         * doubled handshake response is the #157 outage. Deferred callbacks and
+         * USB events share one FIFO: once that queue is observed empty, every
+         * earlier callback has executed (harmlessly: the vendor pointer is NULL
+         * and its semaphore is held until the next offer). Wait for that,
+         * bounded — past the bound the TinyUSB task is starved and the ring's
+         * frames are expiring anyway. */
+        for (int waited_ms = 0; tud_task_event_ready() && waited_ms < (int)TX_SYNC_WAIT_MS; waited_ms++) {
+          vTaskDelay(pdMS_TO_TICKS(1));
+        }
       }
     }
     atomic_store_explicit(&s_head, head + 1u, memory_order_release);
