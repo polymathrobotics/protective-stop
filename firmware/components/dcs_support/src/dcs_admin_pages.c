@@ -269,7 +269,7 @@ static esp_err_t page_state(httpd_req_t * req)
     "\"e_hi0\":%lu,\"e_lo0\":%lu,\"e_hi1\":%lu,\"e_lo1\":%lu,"
     "\"active_iface\":%d,\"net_sup_kicks\":%lu,\"eth_link\":%d,"
     "\"eth_recoveries\":%lu,\"eth_rec_r1\":%lu,\"eth_rec_r2\":%lu,\"eth_rec_r3\":%lu,"
-    "\"eth_rec_reason\":%lu,\"eth_spi_err\":%lu,"
+    "\"eth_rec_reason\":%lu,\"eth_spi_err\":%lu,\"eth_int_low_ticks\":%lu,\"eth_int_low_max_ms\":%lu,"
     "\"eth_en\":%d,\"wifi_en\":%d,\"usbncm_en\":%d,"
     "\"wifi_disc\":%d,\"wifi_conn\":%d,\"wifi_idx\":%d,\"wifi_n\":%d,"
     "\"eth_ip\":%lu,\"usb_ip\":%lu,\"wifi_ip\":%lu,\"local_ip\":%lu,"
@@ -328,6 +328,8 @@ static esp_err_t page_state(httpd_req_t * req)
     (unsigned long)atomic_load(&g_dcs_eth_rec_r3),
     (unsigned long)atomic_load(&g_dcs_eth_rec_reason),
     (unsigned long)atomic_load(&g_dcs_eth_spi_err),
+    (unsigned long)atomic_load(&g_dcs_eth_int_low_ticks),
+    (unsigned long)atomic_load(&g_dcs_eth_int_low_max_ms),
     dcs_eth_is_enabled() ? 1 : 0,
     dcs_wifi_is_enabled() ? 1 : 0,
     dcs_usb_is_enabled() ? 1 : 0,

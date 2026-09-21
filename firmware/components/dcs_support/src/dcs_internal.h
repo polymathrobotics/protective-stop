@@ -301,6 +301,8 @@ extern "C"
   extern atomic_uint_fast32_t g_dcs_eth_rec_r3;
   extern atomic_uint_fast32_t g_dcs_eth_rec_reason;
   extern atomic_uint_fast32_t g_dcs_eth_spi_err;
+  extern atomic_uint_fast32_t g_dcs_eth_int_low_ticks; /* W5500 INT-line gauge: 20 ms samples that found INT asserted */
+  extern atomic_uint_fast32_t g_dcs_eth_int_low_max_ms; /* longest SAMPLED continuous INT-low span, ms (stall gauge) */
 
   /* RGB status-LED loop counter — incremented once per blink cycle by dcs_rgb,
  * read by /state.json so the task's liveness is observable (a frozen counter
