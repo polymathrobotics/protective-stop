@@ -162,7 +162,7 @@ static int derp_tls_write_all(microlink_t * ml, ml_derp_conn_t * c, const uint8_
   (void)ml;
   size_t written = 0;
   int retries = 0;
-  const int max_retries = 50; /* 50 * 10ms = 500ms max */
+  const int max_retries = 5; /* 5 * 10ms = 50ms max to prevent stalling entire DERP task pass */
 
   while (written < len) {
     int ret = mbedtls_ssl_write(&c->ssl, data + written, len - written);
@@ -179,7 +179,6 @@ static int derp_tls_write_all(microlink_t * ml, ml_derp_conn_t * c, const uint8_
       return -1;
     }
     written += ret;
-    retries = 0;
   }
   return (int)written;
 }
