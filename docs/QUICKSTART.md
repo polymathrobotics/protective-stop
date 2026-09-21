@@ -65,14 +65,17 @@ Ethernet path: nothing to prepare; the remote gets its address from your LAN.
 
 ## 3. Flash the remote
 
-Download `pstop_remote-<version>-public-fullflash.bin` and `SHA256SUMS` from the
-[latest release](https://github.com/polymathrobotics/protective-stop/releases/latest),
-connect the remote by USB (a blank board is already in download mode) and:
+Into an empty folder, download three files from the
+[latest release](https://github.com/polymathrobotics/protective-stop/releases/latest):
+`pstop_remote-<version>-public-fullflash.bin` (factory image, used now),
+`pstop_remote-<version>-public.bin` (app image, for updates later) and
+`SHA256SUMS`. Connect the remote by USB (a blank board is already in download
+mode) and, using the exact filename you downloaded:
 
 ```sh
-sha256sum -c SHA256SUMS --ignore-missing   # expect: pstop_remote-…-fullflash.bin: OK
+sha256sum -c SHA256SUMS --ignore-missing   # expect: two lines ending in OK
 ls /dev/ttyACM*                            # expect: /dev/ttyACM0
-python3 -m esptool --chip esp32s3 -p /dev/ttyACM0 -b 460800 write_flash 0x0 pstop_remote-*-public-fullflash.bin
+python3 -m esptool --chip esp32s3 -p /dev/ttyACM0 -b 460800 write_flash 0x0 pstop_remote-<version>-public-fullflash.bin
 # expect: … Hash of data verified. … Hard resetting via RTS pin…
 ```
 
@@ -86,6 +89,14 @@ variable for the commands that follow:
 ADMIN_PW=microlink
 ```
 
+**Provision on a network you control.** Until step 4 is done the remote sits
+on your LAN with a public password and no key; anyone on that LAN could paste
+their own key first. Do step 4 on the USB tether, or on a LAN with only your
+own machines on it (a switch on the desk, not the office network). If several
+people provision at once (a workshop), use the USB path or one switch per
+person, and build images with your own password (Appendix E) before any
+remote goes on a shared network for good.
+
 (Updating a remote that already runs this firmware, or one you have already
 configured: Appendix C — the factory image would erase its settings.)
 
@@ -98,7 +109,7 @@ Ethernet, **green** on USB. Find the full address:
 
 | Path | Address |
 |---|---|
-| Ethernet | Your LAN's subnet plus the blinked digits, e.g. `192.168.1.` + `47`. Or read it from your router's DHCP table (hostname `pstop-01xxxxxx`). |
+| Ethernet | Your LAN's subnet plus the blinked digits, e.g. `192.168.1.` + `47`. Missed the blink? Power-cycle the remote and watch again, or look in your router's DHCP table for the lease that appeared when you plugged it in (the remote sends no hostname). |
 | USB | `ip neigh show dev esp-pstop0` → `10.42.0.X`; your laptop is `10.42.0.1`. |
 
 ```sh
@@ -139,7 +150,7 @@ if device approval is on and you did not pre-approve the key, **approve** it.
 source /opt/ros/jazzy/setup.bash
 sudo apt install -y ros-jazzy-generate-parameter-library ros-jazzy-diagnostic-updater \
                     ros-jazzy-rclcpp-lifecycle ros-jazzy-rclcpp-components libcurl4-openssl-dev
-cd ros2                              # inside the clone from step 2; build from here, not the repo root
+cd <path-to>/protective-stop/ros2    # the clone from step 2; build from ros2/, not the repo root
 colcon build --packages-up-to protective_stop_machine
 source install/setup.bash
 ros2 run protective_stop_machine machine_bridge_node
@@ -219,8 +230,8 @@ Ethernet wins over USB whenever both are connected, including hot-plug on a
 running unit; pulling it falls back to USB with one ~5 s Tailscale re-register
 that a bonded machine rides through.
 
-WiFi: enter the network under **Settings** on the admin page (or bake it in,
-Appendix E). A remote that **boots** with neither Ethernet nor USB and cannot
+WiFi: add the network under **WiFi Networks** on the admin page (its own
+section, above Device Settings), or bake it in (Appendix E). A remote that **boots** with neither Ethernet nor USB and cannot
 join WiFi within 60 s opens its own access point `microlink-XXYYZZ` (password
 `microlink`) with the admin page at `http://192.168.4.1/admin`. This is a
 boot-time fallback only: a unit that loses its wired/USB link while running
@@ -250,8 +261,9 @@ admin page takes priority over one baked into the image.
 
 ## Appendix C: updating, reflashing, and what persists
 
-**Update a running unit** (keeps every setting): send the app image over the
-network.
+**Update a running unit** (keeps every setting): send the app image
+(`pstop_remote-<version>-public.bin`, downloaded in step 3 or from the new
+release) over the network; the remote reboots into it.
 
 ```sh
 curl -u "admin:$ADMIN_PW" --data-binary @pstop_remote-<version>-public.bin -X POST "http://$REMOTE/admin/api/ota"
@@ -263,14 +275,16 @@ then flash. The full-flash image is the factory image (step 3) and erases the
 settings; to keep them, use the OTA command above instead.
 
 **Start over**: flash the full-flash image, or
-`python3 -m esptool --chip esp32s3 -p /dev/ttyACM0 erase_flash`. Either wipes
-the Tailscale identity, key, peer, role and health counters; the remote comes
-back as a new machine on the tailnet.
+`python3 -m esptool --chip esp32s3 -p /dev/ttyACM0 erase_flash` (then flash the
+full-flash image; an erased chip has no firmware). Either wipes the Tailscale
+identity, key, peer, role and health counters. The remote does not come back
+on the tailnet by itself: repeat step 4 (new key paste), then step 6; it
+registers as a new machine.
 
 | Data | Lives in | Survives OTA / app-image flash | Survives full-flash image | Survives `erase_flash` |
 |---|---|---|---|---|
 | Tailscale auth key, WiFi | NVS if set via `/admin/` (or the firmware image when built with credentials) | yes (NVS wins over image) | no | no |
-| Admin password | firmware image only (`microlink` in release builds) | yes | whatever the new image bakes in | no (no firmware left) |
+| Admin password | firmware image only (`microlink` in release builds) | whatever the new image bakes in (a release image resets it to `microlink`) | whatever the new image bakes in | no (no firmware left) |
 | Tailscale node identity | NVS | yes | no (new machine on tailnet) | no |
 | Machine peer, self-role | NVS | yes | no | no |
 | Lifetime health counters (`/api/health`) | NVS | yes | no | no |
@@ -278,9 +292,12 @@ back as a new machine on the tailnet.
 
 ## Appendix D: machine-side options
 
-**Restrict which remotes may bond** (the default admits every remote):
+**Restrict which remotes may bond** (the default admits every remote). Run
+this in the terminal where `REMOTE_ID` was set in step 4, or set it again
+first; if it is empty the list becomes `[]`, which admits everyone:
 
 ```sh
+echo "${REMOTE_ID:?set REMOTE_ID first (step 4)}"
 cat > pstop_machine.yaml <<EOF
 /machine_bridge:
   ros__parameters:
