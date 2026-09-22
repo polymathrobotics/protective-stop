@@ -487,7 +487,7 @@ esp_err_t ml_derp_queue_send(microlink_t * ml, const uint8_t * dest_key, const u
      * the multi-region pool. 0 = peer/region unknown -> routed on the HOME
      * connection (effective home region). */
     .region_id = ml_wg_region_for_pubkey(ml, dest_key),
-    .enq_ms = (uint32_t)ml_get_time_ms(),
+    .enq_ms = ml_derp_enq_stamp(),
   };
   memcpy(item.dest_pubkey, dest_key, 32);
 
@@ -1200,7 +1200,7 @@ static uint32_t s_diag_rx_gap_worst_ms; /* Stage-0 gauge: worst gap between rx p
 
 static void derp_gauge_dequeue(const ml_derp_tx_item_t * it, bool prio, uint32_t now_ms)
 {
-  if (it->enq_ms == 0u) return; /* producer predates the stamp (never on this build) */
+  if (it->enq_ms == 0u) return; /* unstamped producer */
   uint32_t dwell = now_ms - it->enq_ms;
   if (prio) {
     int b = (dwell <= 50u) ? 0 : (dwell <= 200u) ? 1 : (dwell <= 400u) ? 2 : (dwell <= 1000u) ? 3 : 4;
@@ -1211,12 +1211,9 @@ static void derp_gauge_dequeue(const ml_derp_tx_item_t * it, bool prio, uint32_t
   }
   if (it->leg2) {
     if (dwell > s_g_dwell_leg2_max) s_g_dwell_leg2_max = dwell;
-    /* the stage-2 candidate: a heartbeat mirror older than one period at dequeue.
-     * Handshake mirrors (also leg2) are excluded — they must never be expired. */
-    if (
-      dwell > 400u && it->frame_type == DERP_FRAME_SEND_PACKET && it->len > 32u &&
-      !ml_wg_is_handshake_frame(it->data + 32, it->len - 32u))
-    {
+    /* stage-2 candidate: a heartbeat mirror older than one period at dequeue.
+     * it->data is the raw WG payload (same bytes the producer classified). */
+    if (dwell > 400u && it->frame_type == DERP_FRAME_SEND_PACKET && !ml_wg_is_handshake_frame(it->data, it->len)) {
       s_g_leg2_hb_stale++;
     }
   }

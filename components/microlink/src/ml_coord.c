@@ -2967,7 +2967,7 @@ void ml_coord_task(void * arg)
               .data = ka_data,
               .len = 1,
               .frame_type = 0x07, /* NotePreferred */
-              .enq_ms = (uint32_t)ml_get_time_ms(),
+              .enq_ms = ml_derp_enq_stamp(),
             };
             memset(ka_item.dest_pubkey, 0, 32);
             if (xQueueSend(ml->derp_tx_queue, &ka_item, 0) != pdTRUE) {

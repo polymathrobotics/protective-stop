@@ -538,7 +538,7 @@ extern "C"
     bool leg2; /* path-diversity mirror (safety frames): route on a CONNECTED
                 * conn DISTINCT from the primary leg's; silently skipped when
                 * no distinct conn exists. Receiver WG anti-replay dedups. */
-    uint32_t enq_ms; /* ml_get_time_ms() at enqueue: queue dwell gauge (#164) */
+    uint32_t enq_ms; /* ml_derp_enq_stamp() at enqueue: queue dwell gauge (#164); 0 = unstamped */
   } ml_derp_tx_item_t;
 
   /* Received packet (from net_io to disco/wg queues) */
@@ -1293,6 +1293,13 @@ extern "C"
 
   /* Utility */
   uint64_t ml_get_time_ms(void);
+
+  /* Enqueue stamp for ml_derp_tx_item_t.enq_ms: never 0, so 0 stays 'unstamped'. */
+  static inline uint32_t ml_derp_enq_stamp(void)
+  {
+    uint32_t t = (uint32_t)ml_get_time_ms();
+    return t ? t : 1u;
+  }
 
   /* ============================================================================
  * Network socket aliases — thin names over the BSD socket API so call sites
