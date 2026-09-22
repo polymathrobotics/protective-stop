@@ -108,9 +108,10 @@ chip's USB-NCM runs **no DHCP server** — the host must own the link
 (NetworkManager `shared` mode: host = `10.42.0.1`, DHCP + NAT for the
 chip). Without it the host waits forever for DHCP that never comes,
 and the chip, seeing no usable USB uplink, falls back to its
-provisioned WiFi. Fix (two files, once per host): install
-`host/70-esp-pstop.link` and add the shared profile — full steps in
-`host/README.md` → "USB tether — one-time host setup". After replug
+provisioned WiFi. Fix (once per host): run `host/setup/install.sh`
+(per-unit `esp-pstop<N>` naming + the shared `pstop-br` bridge; any
+number of units) — full steps in `host/README.md` → "USB tether —
+one-time host setup". After replug
 the chip DHCPs to `10.42.0.x` and prefers the USB uplink. Point it at a
 machine node on the host with `POST /api/pstop_peer?ip=10.42.0.1&port=8890`
 (a fresh unit has no peer configured).

@@ -1,10 +1,14 @@
 #!/bin/sh
 # SPDX-FileCopyrightText: 2026 Polymath Robotics
 # SPDX-License-Identifier: Apache-2.0
-# NetworkManager dispatcher: clear stale ARP/neighbor cache when the pstop
-# tether comes up, so the host doesn't sit on an INCOMPLETE neighbor from a
-# previous boot (one half of the "needs a power cycle" symptom).
+# NetworkManager dispatcher: clear stale ARP/neighbor cache when a pstop tether
+# comes up, so the host doesn't sit on an INCOMPLETE neighbor from a previous
+# boot (one half of the "needs a power cycle" symptom).
+# The host's L3 end of every tether is the pstop-br bridge, so that is the
+# device whose neighbor table is flushed -- on the bridge itself coming up and
+# on any esp-pstop<N> port attaching (each unit's replug/re-enumeration).
 # Install: sudo cp to /etc/NetworkManager/dispatcher.d/ ; chmod +x
-[ "$1" = "esp-pstop0" ] || exit 0
-[ "$2" = "up" ] && ip neigh flush dev esp-pstop0
+case "$1" in
+  pstop-br|esp-pstop*) [ "$2" = "up" ] && ip neigh flush dev pstop-br 2>/dev/null ;;
+esac
 exit 0

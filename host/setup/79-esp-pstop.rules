@@ -1,0 +1,19 @@
+# SPDX-FileCopyrightText: 2026 Polymath Robotics
+# SPDX-License-Identifier: Apache-2.0
+#
+# Name every pstop USB-NCM tether esp-pstop<N>, where N is the kernel's own
+# usb<N> index (lowest free). Several units on one host therefore get distinct,
+# predictable names -- esp-pstop0, esp-pstop1, ... -- with no per-unit
+# registration, and the pstop-port profile (match esp-pstop*) picks each one up
+# and puts it on the pstop-br bridge.
+#
+# Replaces the earlier 70-esp-pstop.link, which pinned a single fixed name
+# (esp-pstop0) to the VID:PID: the second unit's rename hit EEXIST, stayed
+# usb<N>, matched no profile and got no DHCP -- "only one USB Ethernet appears".
+#
+# Matches the app-mode device by VID:PID (303a:4001) on the USB parent, so it
+# ignores download mode (303a:1001) and needs no ID_* imports. Sorted before
+# 80-net-setup-link.rules, whose .link handling (including Ubuntu's
+# 73-usb-net-by-mac.link -> enx<mac>) only applies while NAME is still empty.
+# Install: sudo cp to /etc/udev/rules.d/ ; udevadm control --reload
+SUBSYSTEM=="net", ACTION=="add", ATTRS{idVendor}=="303a", ATTRS{idProduct}=="4001", NAME="esp-pstop%n"

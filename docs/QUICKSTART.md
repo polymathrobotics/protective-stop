@@ -70,8 +70,9 @@ cd protective-stop
 host/setup/install.sh
 ```
 
-Nothing to verify yet; the interface `esp-pstop0` appears the first time a
-running remote is plugged in. Details and Windows/macOS notes:
+Nothing to verify yet; the bridge `pstop-br` (`10.42.0.1/24`) carries every
+tether, and an `esp-pstop<N>` port appears each time a running remote is
+plugged in. Details and Windows/macOS notes:
 [`USB_NCM_SETUP.md`](USB_NCM_SETUP.md).
 
 ## 4. Build and flash the firmware
@@ -120,7 +121,8 @@ Unplug and replug the remote after flashing (so the tether re-enumerates
 under the new interface name).
 
 ```sh
-ip addr show esp-pstop0              # expect: inet 10.42.0.1/24  (within ~10 s)
+ip addr show pstop-br                # expect: inet 10.42.0.1/24  (within ~10 s)
+bridge link                          # expect: one esp-pstop<N> per plugged remote
 tailscale status | grep pstop-       # expect: 100.a.b.c  pstop-01xxxxxx  …  (within ~60 s)
 ```
 
@@ -246,9 +248,9 @@ the one-time uv setup.
 
 | Symptom | Check |
 |---|---|
-| No `esp-pstop0` after replug | `lsusb \| grep 303a` — `303a:4001` is a running remote, `303a:1001` is download mode (flash failed or BOOT held). `nmcli con show esp-pstop` exists? Re-run `host/setup/install.sh`. |
-| `esp-pstop0` up, no `pstop-` in `tailscale status` after 2 min | Key wrong or single-use: `curl -u admin:PW http://10.42.0.X/admin/api/status` (find `10.42.0.X` with `ip neigh show dev esp-pstop0`) → `state`. Fix the key via the admin page at `http://10.42.0.X/admin/` without reflashing. Device approval on and key not pre-approved? Approve it in the console. |
-| `ml_state` stuck at 0–3 | Laptop has no internet, or NAT not active: `sudo nmcli con show esp-pstop \| grep ipv4.method` → `shared`. |
+| No `esp-pstop<N>` port after replug | `lsusb \| grep 303a` — `303a:4001` is a running remote, `303a:1001` is download mode (flash failed or BOOT held). `nmcli con show pstop-br` and `pstop-port` exist? Re-run `host/setup/install.sh`. |
+| `esp-pstop<N>` up, no `pstop-` in `tailscale status` after 2 min | Key wrong or single-use: `curl -u admin:PW http://10.42.0.X/admin/api/status` (find `10.42.0.X` with `ip neigh show dev pstop-br`) → `state`. Fix the key via the admin page at `http://10.42.0.X/admin/` without reflashing. Device approval on and key not pre-approved? Approve it in the console. |
+| `ml_state` stuck at 0–3 | Laptop has no internet, or NAT not active: `sudo nmcli con show pstop-br \| grep ipv4.method` → `shared`. |
 | Ring stays white after `pstop_peer` | POST failed; re-run and read the JSON. |
 | Ring blue, never green | `/api/role` on the remote returns `operator`? Node running? `/machine_bridge/remotes` shows `stop_only: true` while the remote announces stop-only. |
 | Remote row shows `REJECTED` | The node's `allowlist`/`denylist` refused the bond. Fix the list, then press **Rebond** on the remote (or `POST /api/pstop_peers?slot=0&rebond=1`). |
@@ -292,7 +294,8 @@ The remote tries uplinks in order: Ethernet (6 s DHCP wait), USB tether, WiFi.
   opens its own access point `microlink-XXYYZZ` (password `microlink`) with the
   admin page at the gateway address, where WiFi and the auth key can be fixed
   without a reflash. <!-- VERIFY: AP gateway address, expected 192.168.4.1 -->
-- Two remotes on one laptop by USB: only the first gets `esp-pstop0`; see
+- Several remotes on one laptop by USB: supported out of the box — each is an
+  `esp-pstop<N>` port of `pstop-br`, all in `10.42.0.0/24`; see
   [`USB_NCM_SETUP.md`](USB_NCM_SETUP.md).
 
 ## Appendix C: what persists where
