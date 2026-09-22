@@ -96,13 +96,13 @@ extern "C"
   typedef void (*microlink_data_cb_t)(
     microlink_t * ml, uint32_t src_ip, const uint8_t * data, size_t len, void * user_data);
 
-  /* Application hook asked, when the WG peer table is FULL, whether an incoming
-   * peer must be kept anyway. Returning true makes microlink pin the peer (it
-   * evicts an LRU non-pinned peer to make room and persists the pin for future
-   * netmap syncs). Used by machn to keep operator-allowlist remotes that would
-   * otherwise be trimmed by the ML_MAX_PEERS cap and never learn the remote's
-   * WG key. Must be side-effect-free and fast (called on the coord->wg path).
-   * The application must only return true for a BOUNDED set of peers. */
+  /* Application hook asked whether an incoming peer must be kept: when the WG
+   * peer table is FULL, and when the peer allowlist would reject it. Returning
+   * true makes microlink pin the peer (it evicts an LRU non-pinned peer to make
+   * room, and pinned peers pass every allowlist gate), so one entry in the app's
+   * own list (machn admission allow/pin) is enough. Must be side-effect-free
+   * and fast (called on the coord->wg path). The application must only return
+   * true for a BOUNDED set of peers (pins are capped, see microlink_pin_peer_ip). */
   typedef bool (*microlink_peer_wanted_cb_t)(void * ctx, const char * hostname, uint32_t vpn_ip);
 
   /**
@@ -422,9 +422,21 @@ extern "C"
  *
  * Pinned peers survive the ML_MAX_PEERS trim and evict an LRU peer to
  * enter a full table. Register every peer the SAFETY path depends on
- * (e.g. all configured pstop machine targets). Up to 8 extra pins.
+ * (e.g. all configured pstop machine targets). Up to 16 extra pins; a full
+ * table drops the request silently.
  */
   void microlink_pin_peer_ip(microlink_t * ml, uint32_t vpn_ip, bool pin);
+
+  /**
+ * @brief Add a VPN IP to the peer allowlist if, and only if, that list is active.
+ *
+ * An empty list means "allow all", so inserting into it would switch the
+ * filter on and lock everyone else out; this call is then a no-op. A newly
+ * listed IP triggers the immediate coord re-register the admin POST performs.
+ * @return ESP_OK (added, already listed, or list inactive), ESP_ERR_NO_MEM (full),
+ *         ESP_ERR_TIMEOUT (list busy), ESP_ERR_INVALID_STATE (no config context).
+ */
+  esp_err_t microlink_allowlist_add(microlink_t * ml, uint32_t vpn_ip, const char * label);
 
   /**
  * @brief Per-peer variant of microlink_notify_priority_health(): report the
