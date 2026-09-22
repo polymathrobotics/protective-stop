@@ -946,13 +946,8 @@ static esp_err_t api_coredump(httpd_req_t * req)
 #endif
 }
 
-/* GET /api/intr — per-core interrupt routing (esp_intr_dump), text/plain.
- * Verification gauge for #158: a SHARED source (the S3's single RMT line)
- * must appear on exactly ONE CPU. Split across both, the non-owning core's
- * shared vector storms whenever the owner has non-IRAM interrupts masked
- * (flash op) — the v1.3 7a60 IWDT. Also the audit tool for any future
- * driver init from an unpinned task (esp_intr_alloc binds to the caller's
- * core). */
+/* GET /api/intr — esp_intr_dump() as text/plain: per-core interrupt routing.
+ * Fleet check for #158: a shared source (RMT) must appear on exactly one CPU. */
 static esp_err_t api_intr(httpd_req_t * req)
 {
   (void)httpd_resp_set_type(req, "text/plain");

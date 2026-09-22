@@ -250,17 +250,10 @@ static void rgb_task(void * arg)
 void dcs_rgb_start(void)
 {
   /* PSRAM stack: status LED is non-safety, does no flash/NVS.
-   * Pinned to CPU0 (#158): rgb_task allocates its RMT channel, and the S3 has
-   * ONE RMT interrupt source shared by every channel. esp_intr_alloc binds the
-   * vector to the CALLING core, so an unpinned task turned this into a per-boot
-   * lottery: on boots where it landed on CPU1 the source was routed to both
-   * cores (ring channel on CPU0, RGB on CPU1). IDF's shared_intr_isr on the
-   * non-owning core finds no matching status bit and returns WITHOUT clearing
-   * the level line, so it re-enters until the owner clears it. Normally that is
-   * microseconds — but while a flash op has CPU0 parked in spi_flash_op_block_func
-   * with non-IRAM interrupts masked and the CPU1 initiator is still in the
-   * cache-disable handshake, a ring TX_DONE storms CPU1 forever (it out-ranks the
-   * lower-numbered tick), the initiator never runs, CPU0 never clears: IWDT.
-   * That is the v1.3 7a60 coredump. Both RMT users must sit on the same core. */
+   * CPU0, not tskNO_AFFINITY: rgb_task allocates an RMT channel, and the S3's
+   * single RMT interrupt is shared with the ring channel (allocated on CPU0).
+   * esp_intr_alloc binds the vector to the calling core; split across cores,
+   * the non-owner storms during flash ops -> IWDT (#158). Any task that
+   * allocates an ISR must be pinned. */
   (void)dcs_task_spawn_psram(rgb_task, "rgb_blink", 4096, NULL, 2, 0);
 }

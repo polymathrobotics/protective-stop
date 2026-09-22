@@ -550,11 +550,7 @@ void dcs_pstop_ring_start(void)
   atomic_store(&s_ring_offset, dcs_nvs_read_ring_offset());
   atomic_store(&s_ring_brightness_pct, dcs_nvs_read_led_brightness());
   /* PSRAM stack: LED ring is non-safety, does no flash/NVS.
-   * Pinned to CPU0 (#158): ring_hw_init() normally runs first from the boot
-   * sign-of-life on the main task (CPU0), but ring_task calls it too, and the
-   * RMT interrupt source is shared with the RGB channel — every RMT user must
-   * allocate from the same core or the shared vector splits across cores and
-   * storms the non-owner during flash ops. See dcs_rgb_start(). */
+   * CPU0: shares the RMT interrupt with the RGB channel, see dcs_rgb_start() (#158). */
   (void)dcs_task_spawn_psram(ring_task, "pstop_ring", 4096, NULL, 2, 0);
 }
 
