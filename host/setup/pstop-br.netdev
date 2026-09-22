@@ -1,0 +1,18 @@
+# SPDX-FileCopyrightText: 2026 Polymath Robotics
+# SPDX-License-Identifier: Apache-2.0
+#
+# systemd-networkd: the bridge that is the host end of EVERY pstop USB-NCM
+# tether. Each esp-pstop<N> (see 79-esp-pstop.rules) is enslaved by
+# 80-esp-pstop.network; the bridge's address/DHCP/NAT live in 79-pstop-br.network.
+# One L2/L3 segment for all units => every unit lands in 10.42.0.0/24 and the
+# chip's factory-default machine peer (10.42.0.1:8890) is right for all of them.
+# Install to /etc/systemd/network/ ; networkctl reload creates the netdev.
+[NetDev]
+Name=pstop-br
+Kind=bridge
+
+[Bridge]
+# STP would hold each newly attached port in listening/learning for
+# 2x forward-delay (30 s) before forwarding -- a unit would sit without DHCP
+# for that long on every replug. Nothing here can loop.
+STP=no

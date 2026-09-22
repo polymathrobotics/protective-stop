@@ -82,30 +82,29 @@ new "wired" connection sits in *connecting…* forever while the unit
 silently falls back to its provisioned WiFi. The chip's USB-NCM tether
 deliberately runs **no DHCP server** — the HOST is expected to own the
 link (serve DHCP, NAT it out), which NetworkManager calls `shared`
-mode. Two files fix it permanently:
+mode. `setup/install.sh` fixes it permanently, for any number of units
+on the host (tested layout: up to 4):
 
-1. Pin every pstop to one predictable interface name (`esp-pstop0`),
-   keyed on the USB VID:PID so it holds across units and reboots:
+1. Every pstop gets its own predictable interface name, `esp-pstop<N>`
+   (`setup/79-esp-pstop.rules`, keyed on the USB VID:PID; N = the lowest
+   index not already in use, allocated by the `setup/esp-pstop-name`
+   helper — *not* the kernel's `usb<N>` index, which the kernel reuses
+   once the first unit has been renamed away from `usb0`).
+2. One shared-mode bridge, **`pstop-br` = `10.42.0.1/24`** (DHCP + NAT),
+   and one multi-connect port profile that puts every `esp-pstop<N>` on
+   it. All units land in `10.42.0.0/24`, so the factory-default peer
+   `10.42.0.1:8890` is right for each of them and plug order is
+   irrelevant.
 
    ```sh
-   sudo cp 70-esp-pstop.link /etc/systemd/network/   # ships in this directory
-   sudo udevadm control --reload
+   setup/install.sh          # idempotent; migrates the old single-unit layout
    ```
 
-2. Bind a shared-mode NetworkManager profile to that name:
-
-   ```sh
-   sudo nmcli con add type ethernet ifname esp-pstop0 con-name esp-pstop \
-        ipv4.method shared connection.autoconnect yes
-   ```
-
-Replug the unit. The host takes `10.42.0.1`, the chip DHCPs to
-`10.42.0.x` and switches its active uplink to USB. A fresh unit has no
-machine peer configured (ring white); point it at this host with the
-`pstop_peer` call below.
-
-Caveat: only the first unit plugged in gets `esp-pstop0`; simultaneous
-extra units fall back to `enx<mac>` names and need their own profiles.
+Replug the unit(s). The host holds `10.42.0.1` on `pstop-br`, each chip
+DHCPs to `10.42.0.x` and switches its active uplink to USB. A fresh unit
+has no machine peer configured (ring white); point it at this host with
+the `pstop_peer` call below. Manual steps, systemd-networkd hosts and
+Windows/macOS notes: [`docs/USB_NCM_SETUP.md`](../docs/USB_NCM_SETUP.md).
 
 ## Point the remote at this host
 

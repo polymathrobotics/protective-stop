@@ -60,6 +60,10 @@ remote, internet sharing), once per laptop:
 host/setup/install.sh
 ```
 
+This also handles several remotes on one laptop: each tether becomes an
+`esp-pstop<N>` port of one bridge, `pstop-br` (`10.42.0.1/24`), so every
+remote's factory-default machine peer `10.42.0.1:8890` is already right.
+
 Ethernet path: nothing to prepare; the remote gets its address from your LAN.
 (WiFi, or moving a remote between uplinks later: Appendix A.)
 
@@ -111,7 +115,7 @@ Ethernet, **green** on USB. Find the full address:
 | Path | Address |
 |---|---|
 | Ethernet | Your LAN's subnet plus the blinked digits, e.g. `192.168.1.` + `47`. Missed the blink? Power-cycle the remote and watch again, or look in your router's DHCP table for the lease that appeared when you plugged it in (the remote sends no hostname). |
-| USB | `ip neigh show dev esp-pstop0` → `10.42.0.X`; your laptop is `10.42.0.1`. |
+| USB | `ip neigh show dev pstop-br` → `10.42.0.X` (one per plugged remote); your laptop is `10.42.0.1`. |
 
 ```sh
 DEV=<that address>
@@ -210,9 +214,9 @@ else lives in the appendices.
 | Symptom | Check |
 |---|---|
 | esptool cannot connect | Hold BOOT, tap RESET, release BOOT, retry. `lsusb \| grep 303a`: `303a:1001` is download mode (good), `303a:4001` is a running remote. |
-| LED does not blink an address | Ethernet: no DHCP lease — cable, switch port, DHCP server. USB: `lsusb \| grep 303a` shows `303a:4001`? `nmcli con show esp-pstop` exists? Re-run `host/setup/install.sh`, replug. |
-| Admin page does not load on `$DEV` | Same LAN? A laptop on a different subnet or on WiFi with client isolation cannot reach it. USB: `ip addr show esp-pstop0` must show `10.42.0.1`. |
-| LED strobes red | Local link up but no internet: the remote cannot reach Tailscale. Ethernet: LAN has no internet. USB: laptop has no internet or sharing is off (`nmcli con show esp-pstop \| grep ipv4.method` → `shared`). |
+| LED does not blink an address | Ethernet: no DHCP lease — cable, switch port, DHCP server. USB: `lsusb \| grep 303a` shows `303a:4001`? `nmcli con show pstop-br` and `pstop-port` exist, and `bridge link` lists an `esp-pstop<N>`? Re-run `host/setup/install.sh`, replug. |
+| Admin page does not load on `$DEV` | Same LAN? A laptop on a different subnet or on WiFi with client isolation cannot reach it. USB: `ip addr show pstop-br` must show `10.42.0.1`. |
+| LED strobes red | Local link up but no internet: the remote cannot reach Tailscale. Ethernet: LAN has no internet. USB: laptop has no internet or sharing is off (`nmcli con show pstop-br \| grep ipv4.method` → `shared`). |
 | No `pstop-` in `tailscale status` after 2 min | Key wrong, single-use or expired: `curl -u "admin:$ADMIN_PW" http://$DEV/admin/api/status` → `state`. Device approval on and key not pre-approved → approve in the console. |
 | `ml_state` stuck below 4 | Same as above (no internet, or key not accepted). |
 | Ring stays white after `pstop_peer` | The POST failed; re-run and read the JSON. |
@@ -247,7 +251,8 @@ tailnet, WiFi). Before putting a remote on a shared LAN or WiFi, build the
 image with your own password (Appendix E); the release image's `microlink` is
 public.
 
-Two remotes on one laptop by USB: only the first gets `esp-pstop0`; see
+Several remotes on one laptop by USB work out of the box: each is an
+`esp-pstop<N>` port of `pstop-br`, all in `10.42.0.0/24`; see
 [`USB_NCM_SETUP.md`](USB_NCM_SETUP.md), which also has Windows/macOS notes.
 
 ## Appendix B: Tailscale key settings and fleet isolation
