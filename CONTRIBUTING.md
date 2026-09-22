@@ -126,6 +126,14 @@ Note `pstop_c/` is intentionally excluded from the C/C++ hooks.
 - **No changes to `pstop_c/`** (contribute upstream instead).
 - **Clear commits.** Explain the design intent, not just the diff.
   Reference the relevant `docs/` design note where one applies.
+- **Comments carry constraints, not stories.** A code comment states what the
+  reader cannot infer from the code — an ordering, a unit, an ownership rule, a
+  "must not" with its consequence — in a few lines. The incident, the analysis
+  and the alternatives go in the commit message, PR or issue, and the comment
+  points there (`#158`). Write the rationale once, at the code that owns the
+  decision; every other site gets one line and a pointer (`see dcs_rgb_start()`,
+  `see ml_peer_nvs.c`). If the same paragraph would be right in two places, it
+  belongs in neither.
 - **Keep safety traceability lint clean.** The linter checks requirement and
   function mappings, statuses, evidence citations, and ownership of numeric
   coverage claims. Generated coverage becomes stale whenever document
