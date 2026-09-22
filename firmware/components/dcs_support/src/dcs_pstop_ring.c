@@ -549,8 +549,9 @@ void dcs_pstop_ring_start(void)
      * up) — the ring task lives on a PSRAM stack and must not touch NVS. */
   atomic_store(&s_ring_offset, dcs_nvs_read_ring_offset());
   atomic_store(&s_ring_brightness_pct, dcs_nvs_read_led_brightness());
-  /* PSRAM stack: LED ring is non-safety, does no flash/NVS. */
-  (void)dcs_task_spawn_psram(ring_task, "pstop_ring", 4096, NULL, 2, tskNO_AFFINITY);
+  /* PSRAM stack: LED ring is non-safety, does no flash/NVS.
+   * CPU0: shares the RMT interrupt with the RGB channel, see dcs_rgb_start() (#158). */
+  (void)dcs_task_spawn_psram(ring_task, "pstop_ring", 4096, NULL, 2, 0);
 }
 
 void dcs_pstop_ring_set_offset(uint8_t off)

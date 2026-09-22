@@ -46,6 +46,7 @@
 #include "esp_flash.h"
 #include "esp_heap_caps.h"
 #include "esp_http_server.h"
+#include "esp_intr_alloc.h"
 #include "esp_log.h"
 #include "esp_ota_ops.h"
 #include "esp_rom_sys.h"
@@ -945,6 +946,31 @@ static esp_err_t api_coredump(httpd_req_t * req)
 #endif
 }
 
+/* GET /api/intr — esp_intr_dump() as text/plain: per-core interrupt routing.
+ * Fleet check for #158: a shared source (RMT) must appear on exactly one CPU. */
+static esp_err_t api_intr(httpd_req_t * req)
+{
+  (void)httpd_resp_set_type(req, "text/plain");
+  const size_t cap = 8192u; /* ~60 lines x ~70 chars with both cores populated */
+  char * buf = heap_caps_calloc(1, cap, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+  if (!buf) {
+    buf = calloc(1, cap);
+  }
+  if (!buf) {
+    return httpd_resp_send_500(req);
+  }
+  FILE * f = fmemopen(buf, cap - 1u, "w"); /* newlib truncates silently past cap */
+  if (!f) {
+    free(buf);
+    return httpd_resp_send_500(req);
+  }
+  (void)esp_intr_dump(f);
+  (void)fclose(f); /* flush; calloc + cap-1 keep it NUL-terminated */
+  esp_err_t r = httpd_resp_sendstr(req, buf);
+  free(buf);
+  return r;
+}
+
 static esp_err_t api_last_log(httpd_req_t * req)
 {
   (void)httpd_resp_set_type(req, "text/plain");
@@ -1549,6 +1575,7 @@ void dcs_admin_pages_register(ml_app_t * app)
   (void)ml_app_add_page(app, "/api/pstop_peer", HTTP_POST, api_pstop_peer);
   (void)ml_app_add_page(app, "/api/pstop_peers", HTTP_POST, api_pstop_peers);
   (void)ml_app_add_page(app, "/api/last_log", HTTP_GET, api_last_log);
+  (void)ml_app_add_page(app, "/api/intr", HTTP_GET, api_intr);
   (void)ml_app_add_page(app, "/api/coredump", HTTP_GET, api_coredump);
   (void)ml_app_add_page(app, "/api/iface/eth", HTTP_POST, api_iface_eth);
   (void)ml_app_add_page(app, "/api/iface/wifi", HTTP_POST, api_iface_wifi);
