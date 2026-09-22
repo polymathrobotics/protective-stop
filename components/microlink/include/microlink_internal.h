@@ -538,6 +538,7 @@ extern "C"
     bool leg2; /* path-diversity mirror (safety frames): route on a CONNECTED
                 * conn DISTINCT from the primary leg's; silently skipped when
                 * no distinct conn exists. Receiver WG anti-replay dedups. */
+    uint32_t enq_ms; /* ml_derp_enq_stamp() at enqueue: queue dwell gauge (#164); 0 = unstamped */
   } ml_derp_tx_item_t;
 
   /* Received packet (from net_io to disco/wg queues) */
@@ -1062,6 +1063,16 @@ extern "C"
   /* Stage-0 gauges: out[0]=worst single DERP-task iteration ms, out[1]=worst
    * gap between consecutive rx-poll passes ms (both since boot). */
   void ml_derp_get_iter_diag(uint32_t out[2]);
+/* #164 stage-1 gauges (telemetry only). Dwell = dequeue - enqueue on the DERP
+   * TX queues; TLS = one derp_tls_write_all() call's occupancy on a connection.
+   *   out[0..4]  prio-queue dwell histogram: <=50, <=200, <=400, <=1000, >1000 ms
+   *   out[5]     prio-queue dwell max ms          out[6]  normal-queue dwell max ms
+   *   out[7]     leg2 (mirror) dwell max ms        out[8]  leg2 heartbeat mirrors dequeued >400 ms old
+   *   out[9]     TLS write occupancy max ms (any conn)
+   *   out[10..12] TLS retries: WANT_READ, WANT_WRITE, TIMEOUT   out[13] TLS writes abandoned (retry cap)
+   *   out[14]    TLS write calls that needed >=1 retry          out[15] conn slot of the worst occupancy */
+#define ML_DERP_GAUGES_N 16
+  void ml_derp_get_gauges(uint32_t out[ML_DERP_GAUGES_N]);
   /* Tear down a specific pool connection (frees its mbedTLS contexts + socket). */
   void ml_derp_disconnect(microlink_t * ml, ml_derp_conn_t * c);
   esp_err_t ml_derp_queue_send(microlink_t * ml, const uint8_t * dest_key, const uint8_t * data, size_t len);
@@ -1282,6 +1293,13 @@ extern "C"
 
   /* Utility */
   uint64_t ml_get_time_ms(void);
+
+  /* Enqueue stamp for ml_derp_tx_item_t.enq_ms: never 0, so 0 stays 'unstamped'. */
+  static inline uint32_t ml_derp_enq_stamp(void)
+  {
+    uint32_t t = (uint32_t)ml_get_time_ms();
+    return t ? t : 1u;
+  }
 
   /* ============================================================================
  * Network socket aliases — thin names over the BSD socket API so call sites

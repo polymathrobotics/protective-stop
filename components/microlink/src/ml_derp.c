@@ -40,6 +40,13 @@ static atomic_int s_derp_paused = 0;
 static const char * TAG = "ml_derp";
 
 static uint32_t s_diag_wg_rx_drops; /* wg_rx_queue full at THIS producer (edge shed) */
+/* #164 stage-1 gauges — plain counters, DERP task is the only writer of the
+ * dwell/TLS fields; readers take a torn-tolerant snapshot (diagnostics). */
+static uint32_t s_g_dwell_hist[5]; /* prio queue: <=50 <=200 <=400 <=1000 >1000 ms */
+static uint32_t s_g_dwell_prio_max, s_g_dwell_norm_max, s_g_dwell_leg2_max, s_g_leg2_hb_stale;
+static uint32_t s_g_tls_occ_max, s_g_tls_occ_slot, s_g_tls_want_read, s_g_tls_want_write, s_g_tls_timeout;
+static uint32_t s_g_tls_abandoned, s_g_tls_retried_calls;
+
 static uint16_t s_diag_last_dns_ms; /* most recent blocking DNS resolve duration */
 static uint16_t s_pass_rx_gap; /* rx-poll gap measured this pass (ring input) */
 
@@ -159,29 +166,47 @@ static const uint8_t DISCO_MAGIC[6] = {'T', 'S', 0xf0, 0x9f, 0x92, 0xac};
  */
 static int derp_tls_write_all(microlink_t * ml, ml_derp_conn_t * c, const uint8_t * data, size_t len)
 {
-  (void)ml;
   size_t written = 0;
   int retries = 0;
   const int max_retries = 50; /* 50 * 10ms = 500ms max */
+  uint32_t t0_ms = ml_get_time_ms(); /* #164 gauge: how long this call held the DERP task */
+  bool retried = false;
+  int result = (int)len;
 
   while (written < len) {
     int ret = mbedtls_ssl_write(&c->ssl, data + written, len - written);
     if (ret < 0) {
       if (ret == MBEDTLS_ERR_SSL_WANT_READ || ret == MBEDTLS_ERR_SSL_WANT_WRITE || ret == MBEDTLS_ERR_SSL_TIMEOUT) {
+        retried = true;
+        if (ret == MBEDTLS_ERR_SSL_WANT_READ)
+          s_g_tls_want_read++;
+        else if (ret == MBEDTLS_ERR_SSL_WANT_WRITE)
+          s_g_tls_want_write++;
+        else
+          s_g_tls_timeout++;
         vTaskDelay(pdMS_TO_TICKS(10));
         if (++retries > max_retries) {
           ESP_LOGW(TAG, "TLS write timeout after %d retries", retries);
-          return -1;
+          s_g_tls_abandoned++;
+          result = -1;
+          break;
         }
         continue;
       }
       ESP_LOGE(TAG, "TLS write failed: -0x%04x", -ret);
-      return -1;
+      result = -1;
+      break;
     }
     written += ret;
     retries = 0;
   }
-  return (int)written;
+  if (retried) s_g_tls_retried_calls++;
+  uint32_t occ = ml_get_time_ms() - t0_ms;
+  if (occ > s_g_tls_occ_max) {
+    s_g_tls_occ_max = occ;
+    s_g_tls_occ_slot = (uint32_t)(c - ml->derp); /* which pool connection stalled the pass */
+  }
+  return result;
 }
 
 /* Write a complete DERP frame via TLS */
@@ -462,6 +487,7 @@ esp_err_t ml_derp_queue_send(microlink_t * ml, const uint8_t * dest_key, const u
      * the multi-region pool. 0 = peer/region unknown -> routed on the HOME
      * connection (effective home region). */
     .region_id = ml_wg_region_for_pubkey(ml, dest_key),
+    .enq_ms = ml_derp_enq_stamp(),
   };
   memcpy(item.dest_pubkey, dest_key, 32);
 
@@ -1172,6 +1198,43 @@ static int s_home_retry_burst; /* consecutive failed home attempts (was block-st
 static uint32_t s_diag_max_iter_ms; /* Stage-0 gauge: worst single task iteration */
 static uint32_t s_diag_rx_gap_worst_ms; /* Stage-0 gauge: worst gap between rx polls */
 
+static void derp_gauge_dequeue(const ml_derp_tx_item_t * it, bool prio, uint32_t now_ms)
+{
+  if (it->enq_ms == 0u) return; /* unstamped producer */
+  uint32_t dwell = now_ms - it->enq_ms;
+  if (prio) {
+    int b = (dwell <= 50u) ? 0 : (dwell <= 200u) ? 1 : (dwell <= 400u) ? 2 : (dwell <= 1000u) ? 3 : 4;
+    s_g_dwell_hist[b]++;
+    if (dwell > s_g_dwell_prio_max) s_g_dwell_prio_max = dwell;
+  } else if (dwell > s_g_dwell_norm_max) {
+    s_g_dwell_norm_max = dwell;
+  }
+  if (it->leg2) {
+    if (dwell > s_g_dwell_leg2_max) s_g_dwell_leg2_max = dwell;
+    /* stage-2 candidate: a heartbeat mirror older than one period at dequeue.
+     * it->data is the raw WG payload (same bytes the producer classified). */
+    if (dwell > 400u && it->frame_type == DERP_FRAME_SEND_PACKET && !ml_wg_is_handshake_frame(it->data, it->len)) {
+      s_g_leg2_hb_stale++;
+    }
+  }
+}
+
+void ml_derp_get_gauges(uint32_t out[ML_DERP_GAUGES_N])
+{
+  for (int i = 0; i < 5; i++) out[i] = s_g_dwell_hist[i];
+  out[5] = s_g_dwell_prio_max;
+  out[6] = s_g_dwell_norm_max;
+  out[7] = s_g_dwell_leg2_max;
+  out[8] = s_g_leg2_hb_stale;
+  out[9] = s_g_tls_occ_max;
+  out[10] = s_g_tls_want_read;
+  out[11] = s_g_tls_want_write;
+  out[12] = s_g_tls_timeout;
+  out[13] = s_g_tls_abandoned;
+  out[14] = s_g_tls_retried_calls;
+  out[15] = s_g_tls_occ_slot;
+}
+
 void ml_derp_get_iter_diag(uint32_t out[2])
 {
   out[0] = s_diag_max_iter_ms;
@@ -1465,6 +1528,7 @@ void ml_derp_tx_task(void * arg)
           if (xQueueReceive(txq, &item, 0) != pdTRUE) {
             break;
           }
+          derp_gauge_dequeue(&item, q == 0, (uint32_t)ml_get_time_ms());
           ml_derp_conn_t * c = derp_route_conn(ml, item.region_id, !item.leg2);
           if (item.leg2) {
             /* Path-diversity mirror: needs a conn DISTINCT from the primary

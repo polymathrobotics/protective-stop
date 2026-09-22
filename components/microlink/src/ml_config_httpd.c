@@ -1244,6 +1244,24 @@ static esp_err_t handler_monitor(httpd_req_t * req)
         ml_derp_get_iter_diag(it);
         cJSON_AddNumberToObject(json, "derp_max_iter_ms", it[0]);
         cJSON_AddNumberToObject(json, "derp_rx_poll_gap_worst_ms", it[1]);
+        { /* #164 stage-1 gauges: TX queue dwell + per-call TLS write occupancy */
+          uint32_t g[ML_DERP_GAUGES_N] = {0};
+          ml_derp_get_gauges(g);
+          cJSON * dh = cJSON_CreateArray();
+          for (int i = 0; i < 5; i++) cJSON_AddItemToArray(dh, cJSON_CreateNumber(g[i]));
+          cJSON_AddItemToObject(json, "derp_txq_dwell_hist", dh); /* prio: <=50 <=200 <=400 <=1000 >1000 ms */
+          cJSON_AddNumberToObject(json, "derp_txq_dwell_prio_max_ms", g[5]);
+          cJSON_AddNumberToObject(json, "derp_txq_dwell_norm_max_ms", g[6]);
+          cJSON_AddNumberToObject(json, "derp_leg2_dwell_max_ms", g[7]);
+          cJSON_AddNumberToObject(json, "derp_leg2_hb_stale", g[8]); /* heartbeat mirrors dequeued >400 ms old */
+          cJSON_AddNumberToObject(json, "derp_tls_write_max_ms", g[9]);
+          cJSON_AddNumberToObject(json, "derp_tls_write_max_slot", g[15]);
+          cJSON_AddNumberToObject(json, "derp_tls_want_read", g[10]);
+          cJSON_AddNumberToObject(json, "derp_tls_want_write", g[11]);
+          cJSON_AddNumberToObject(json, "derp_tls_timeout", g[12]);
+          cJSON_AddNumberToObject(json, "derp_tls_abandoned", g[13]);
+          cJSON_AddNumberToObject(json, "derp_tls_retried_calls", g[14]);
+        }
         cJSON_AddNumberToObject(json, "wg_max_iter_ms", ml_wg_get_max_iter_ms());
         {
           uint32_t dv[3] = {0};
