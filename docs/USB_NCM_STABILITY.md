@@ -21,13 +21,21 @@ MAC-affecting change and never matched a *different* unit.
 
 `host/setup/` in this repo, applied by `host/setup/install.sh`:
 
-1. **`79-esp-pstop.rules`** → `/etc/udev/rules.d/`: names each tether
-   `esp-pstop<N>` (N = kernel `usb<N>` index) by matching VID:PID
-   `303a:4001` on the USB parent (ignores bootloader mode `303a:1001`;
-   applies to any pstop unit regardless of MAC). Sorts before
-   `80-net-setup-link.rules`, so the default `73-` `.link` policy never sees
-   an empty `NAME`. (Replaced the original `70-esp-pstop.link`, which pinned
-   the single fixed name `esp-pstop0` and so served only one unit per host.)
+1. **`79-esp-pstop.rules`** + **`esp-pstop-name`** (→ `/etc/udev/rules.d/`,
+   `/usr/local/lib/udev/`): names each tether `esp-pstop<N>` by matching
+   VID:PID `303a:4001` on the USB parent (ignores bootloader mode
+   `303a:1001`; applies to any pstop unit regardless of MAC). N is the
+   lowest index not already present in `/sys/class/net`, handed out by the
+   helper under a lock with a 10 s reservation so simultaneous
+   enumerations cannot collide. It is deliberately *not* the kernel's
+   `usb<N>` index (`NAME="esp-pstop%n"`): the kernel reuses the lowest free
+   `usb<N>`, so once unit 1 is `esp-pstop0`, unit 2 also enumerates as
+   `usb0`, `%n` = 0, and the rename fails with EEXIST — the unit stays
+   `usb0`, matches no profile and gets no DHCP (seen on the bench,
+   2026-09-21). Sorts before `80-net-setup-link.rules`, so the default `73-`
+   `.link` policy never sees an empty `NAME`. (Replaced the original
+   `70-esp-pstop.link`, which pinned the single fixed name `esp-pstop0` and
+   so served only one unit per host.)
 2. **NM bridge `pstop-br`** (`ipv4.method shared`, `10.42.0.1/24`, STP off)
    plus **port profile `pstop-port`** (`match.interface-name esp-pstop*`,
    `multi-connect multiple`) — every unit auto-attaches to the one host end.

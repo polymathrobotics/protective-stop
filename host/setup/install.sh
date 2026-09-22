@@ -6,8 +6,10 @@
 # reflash. Idempotent; safe to re-run to migrate from the old single-unit layout.
 #
 # Layout (both managers):
-#   79-esp-pstop.rules  every 303a:4001 tether is named esp-pstop<N> (kernel
-#                       usb<N> index, lowest free) -- distinct per unit.
+#   79-esp-pstop.rules  every 303a:4001 tether is named esp-pstop<N>, N = the
+#   + esp-pstop-name    lowest free index, allocated by the helper under a lock
+#                       (NOT the kernel's usb<N> index, which is reused once the
+#                       first unit is renamed -> EEXIST on the second unit).
 #   pstop-br            one bridge = the host end of ALL tethers: 10.42.0.1/24,
 #                       DHCP server, NAT. Every esp-pstop<N> is a bridge port.
 # Because every unit lands in 10.42.0.0/24, the chip's factory-default machine
@@ -24,6 +26,7 @@ D="$(cd "$(dirname "$0")" && pwd)"
 
 # --- manager-agnostic: per-unit interface names ------------------------------
 sudo cp "$D/79-esp-pstop.rules" /etc/udev/rules.d/79-esp-pstop.rules
+sudo install -D -m 0755 "$D/esp-pstop-name" /usr/local/lib/udev/esp-pstop-name
 # Superseded by the udev rule (it pinned ONE fixed name to the VID:PID).
 sudo rm -f /etc/systemd/network/70-esp-pstop.link
 sudo udevadm control --reload

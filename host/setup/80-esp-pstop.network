@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # systemd-networkd: make every pstop USB-NCM tether a port of the pstop-br
-# bridge. 79-esp-pstop.rules names each unit esp-pstop<N> (kernel usb<N> index),
+# bridge. 79-esp-pstop.rules names each unit esp-pstop<N> (lowest free index),
 # so the glob matches units 0..N with no per-unit file; the bridge itself is
 # named pstop-br precisely so this glob cannot match it. Address, DHCP server
 # and NAT live on the bridge (79-pstop-br.network). Install to

@@ -86,8 +86,10 @@ mode. `setup/install.sh` fixes it permanently, for any number of units
 on the host (tested layout: up to 4):
 
 1. Every pstop gets its own predictable interface name, `esp-pstop<N>`
-   (`setup/79-esp-pstop.rules`, keyed on the USB VID:PID; N = the
-   kernel's `usb<N>` index).
+   (`setup/79-esp-pstop.rules`, keyed on the USB VID:PID; N = the lowest
+   index not already in use, allocated by the `setup/esp-pstop-name`
+   helper — *not* the kernel's `usb<N>` index, which the kernel reuses
+   once the first unit has been renamed away from `usb0`).
 2. One shared-mode bridge, **`pstop-br` = `10.42.0.1/24`** (DHCP + NAT),
    and one multi-connect port profile that puts every `esp-pstop<N>` on
    it. All units land in `10.42.0.0/24`, so the factory-default peer

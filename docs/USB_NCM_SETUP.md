@@ -55,7 +55,9 @@ host/setup/install.sh
 Replug the unit(s) afterward so the `esp-pstop<N>` rename takes effect.
 
 **Several units on one host work out of the box.** Each tether is named
-`esp-pstop<N>` (N = the kernel's `usb<N>` index, lowest free), and all of
+`esp-pstop<N>` (N = the lowest index not already in use, allocated by the
+`esp-pstop-name` udev helper — not the kernel's `usb<N>` index, which is
+reused for the next unit as soon as the first has been renamed), and all of
 them are ports of one bridge, **`pstop-br` = `10.42.0.1/24`**, which is the
 single host end of every tether (DHCP server + NAT). Because every unit
 lands in `10.42.0.0/24`, the chip's factory-default machine peer
@@ -75,6 +77,7 @@ is still empty:
 
 ```sh
 sudo cp host/setup/79-esp-pstop.rules /etc/udev/rules.d/
+sudo install -D -m 0755 host/setup/esp-pstop-name /usr/local/lib/udev/esp-pstop-name
 sudo rm -f /etc/systemd/network/70-esp-pstop.link      # old single-name rule
 sudo udevadm control --reload
 ```
