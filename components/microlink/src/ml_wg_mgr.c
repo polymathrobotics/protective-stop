@@ -2058,11 +2058,19 @@ static int add_peer(microlink_t * ml, const ml_peer_update_t * update, bool * sk
      * pacing slot or trigger a wg-rx drain (run-39: rejects saturated the
      * pacing cap uncounted, stretching re-ingests over dozens of passes).
      * Pins are exempt INSIDE ml_config_peer_is_allowed() — centralized there
-     * so the disco/probe/preseed gates inherit it too (f498 root cause). */
+     * so the disco/probe/preseed gates inherit it too (f498 root cause).
+     * A peer the app wants (peer_wanted_cb: machn's admission allow/pin lists)
+     * is pinned here for the same reason, so one entry there admits it at
+     * every gate without a second entry in this allowlist. */
   if (!ml_config_peer_is_allowed(ml->config_httpd, update->vpn_ip)) {
-    s_diag_allowlist_rejects++;
-    if (skipped) *skipped = true;
-    return -1;
+    if (ml->peer_wanted_cb != NULL && ml->peer_wanted_cb(ml->peer_wanted_ctx, update->hostname, update->vpn_ip)) {
+      microlink_pin_peer_ip(ml, update->vpn_ip, true); /* no-op when the pin table is full */
+    }
+    if (!ml_config_peer_is_allowed(ml->config_httpd, update->vpn_ip)) {
+      s_diag_allowlist_rejects++;
+      if (skipped) *skipped = true;
+      return -1;
+    }
   }
 
   /* Check if peer already exists */
