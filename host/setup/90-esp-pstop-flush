@@ -5,10 +5,12 @@
 # comes up, so the host doesn't sit on an INCOMPLETE neighbor from a previous
 # boot (one half of the "needs a power cycle" symptom).
 # The host's L3 end of every tether is the pstop-br bridge, so that is the
-# device whose neighbor table is flushed -- on the bridge itself coming up and
-# on any esp-pstop<N> port attaching (each unit's replug/re-enumeration).
+# table flushed -- on the bridge itself coming up and on any esp-pstop<N> port
+# attaching. Only unresolved entries go: a resolved one is correct by
+# construction (eFuse-stable MAC, lease follows the MAC), and dropping it would
+# make every OTHER unit on the bridge re-ARP for one unit's replug.
 # Install: sudo cp to /etc/NetworkManager/dispatcher.d/ ; chmod +x
 case "$1" in
-  pstop-br|esp-pstop*) [ "$2" = "up" ] && ip neigh flush dev pstop-br 2>/dev/null ;;
+  pstop-br|esp-pstop*) [ "$2" = "up" ] && ip neigh flush dev pstop-br nud incomplete nud failed 2>/dev/null ;;
 esac
 exit 0

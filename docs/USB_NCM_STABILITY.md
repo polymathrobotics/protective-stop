@@ -39,9 +39,10 @@ MAC-affecting change and never matched a *different* unit.
 2. **NM bridge `pstop-br`** (`ipv4.method shared`, `10.42.0.1/24`, STP off)
    plus **port profile `pstop-port`** (`match.interface-name esp-pstop*`,
    `multi-connect multiple`) — every unit auto-attaches to the one host end.
-3. **`90-esp-pstop-flush`** dispatcher: `ip neigh flush dev pstop-br` when the
-   bridge or any `esp-pstop<N>` port comes up, clearing the stale-ARP half of
-   the "needs a power cycle" symptom.
+3. **`90-esp-pstop-flush`** dispatcher: flushes the *unresolved*
+   (`incomplete`/`failed`) neighbor entries on `pstop-br` when the bridge or
+   any `esp-pstop<N>` port comes up, clearing the stale-ARP half of the "needs
+   a power cycle" symptom without making the other units re-ARP.
 4. `dhcp-authoritative` in the shared dnsmasq for faster re-lease (the MAC
    is stable so the chip gets the same IP deterministically — DHCP is
    effectively static already).

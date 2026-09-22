@@ -7,7 +7,7 @@
 # host doesn't sit on an INCOMPLETE neighbor from a previous boot (one half of
 # the "needs a power cycle" symptom). The host's L3 end of every tether is the
 # pstop-br bridge, so that is the table flushed -- on the bridge itself and on
-# any esp-pstop<N> port (each unit's replug/re-enumeration).
+# any esp-pstop<N> port. Only unresolved entries (see 90-esp-pstop-flush).
 #
 # networkd-dispatcher runs per-state hooks and passes the interface in $IFACE
 # (not $1/$2 like the NM dispatcher). Install this SAME script into BOTH
@@ -18,6 +18,6 @@
 # DISABLED — then a correctly-placed hook never fires. install.sh runs
 # `systemctl enable --now networkd-dispatcher`; verify it is active.
 case "$IFACE" in
-  pstop-br|esp-pstop*) ip neigh flush dev pstop-br 2>/dev/null ;;
+  pstop-br|esp-pstop*) ip neigh flush dev pstop-br nud incomplete nud failed 2>/dev/null ;;
 esac
 exit 0

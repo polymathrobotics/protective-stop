@@ -21,7 +21,10 @@
 # Idempotent: a synthetic re-add (udevadm trigger) of an already-named unit
 # keeps its name.
 set -u
-LOCK=/run/lock/esp-pstop-name.lock
+# Both files live in /run (root-only), not /run/lock: that directory is
+# world-writable, so an unprivileged user could pre-plant a symlink there for
+# this root helper to open and truncate.
+LOCK=/run/esp-pstop-name.lock
 RES=/run/esp-pstop-name.reserved     # lines: "<N> <epoch-seconds>"
 TTL=10
 
@@ -30,7 +33,7 @@ case "${INTERFACE:-}" in
 esac
 
 exec 9>"$LOCK" || exit 1
-flock 9
+flock 9 || exit 1   # a non-zero exit makes udev skip the rule: no name is better than a duplicate
 
 now=$(date +%s)
 if [ -f "$RES" ]; then
