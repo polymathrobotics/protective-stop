@@ -69,6 +69,9 @@ extern "C"
                                                  at a static/const buffer). */
   } ml_app_config_t;
 
+/// Admin password of a unit with no provisioned ML_SECRET_ADMIN_PASSWORD.
+#define ML_ADMIN_PASSWORD_DEFAULT "microlink"
+
 #define ML_APP_CONFIG_DEFAULT()                                            \
   {                                                                        \
     .wifi_tx_power_dbm = 20, /* max within ESP_PHY_MAX_WIFI_TX_POWER=20 */ \
@@ -137,12 +140,13 @@ extern "C"
 
   /**
  * @brief Check HTTP Basic admin auth on a request, using the same
- *        admin:CONFIG_ML_ADMIN_PASSWORD credential that guards the
- *        built-in /admin/ routes. Lets an app protect its own
+ *        credential that guards the built-in /admin/ routes: user "admin",
+ *        the provisioned ML_SECRET_ADMIN_PASSWORD, else
+ *        ML_ADMIN_PASSWORD_DEFAULT. Lets an app protect its own
  *        sensitive user-registered pages (which otherwise have no auth).
- * @return true if authorized (or if no admin password is configured, in
- *         which case the whole admin surface is open by design); false
- *         means the caller should return 401.
+ * @return true if authorized, or when built without
+ *         CONFIG_ML_ENABLE_CONFIG_HTTPD; false means the caller should
+ *         return 401.
  */
   bool ml_app_check_admin_auth(httpd_req_t * req);
 

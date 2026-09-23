@@ -192,8 +192,7 @@ CONFIG_ESP_COREDUMP_MAX_TASKS_NUM=64
 # Centralized configuration management / OTA. The firmware's check-in and
 # OTA tooling is intended to pair with a management backend of your own;
 # none is included in this project. The backend address, URL, and API key
-# are site-specific and live in sdkconfig.credentials (never committed):
-# CONFIG_ML_FLEET_SERVER_IP, CONFIG_ML_OTA_BACKEND_URL, CONFIG_ML_OTA_API_KEY.
+# are site-specific secrets flashed per device (tools/credentials.env).
 
 # mbedTLS allocates its TLS working buffers from PSRAM, not internal RAM.
 # Internal RAM runs 5-13KB free on this build; a DERP TLS handshake needs

@@ -95,7 +95,7 @@ on your LAN with a public password and no key; anyone on that LAN could paste
 their own key first. Do step 4 on the USB tether, or on a LAN with only your
 own machines on it (a switch on the desk, not the office network). If several
 people provision at once (a workshop), use the USB path or one switch per
-person, and build images with your own password (Appendix E) before any
+person, and provision your own password (Appendix E) before any
 remote goes on a shared network for good.
 
 (Updating a remote that already runs this firmware, or one you have already
@@ -235,7 +235,7 @@ and internet. On the Ethernet path that script is optional; run it if you want
 the USB cable to be a working fallback rather than power only.
 
 WiFi: add the network under **WiFi Networks** on the admin page (its own
-section, above Device Settings), or bake it in (Appendix E). A remote that **boots** with neither Ethernet nor USB and cannot
+section, above Device Settings), or provision it (Appendix E). A remote that **boots** with neither Ethernet nor USB and cannot
 join WiFi within 60 s opens its own access point `microlink-XXYYZZ` (password
 `microlink`) with the admin page at `http://192.168.4.1/admin`. This is a
 boot-time fallback only: a unit that loses its wired/USB link while running
@@ -243,9 +243,8 @@ falls back to the configured WiFi but does not open the access point;
 power-cycle it to get there.
 
 The admin page listens on **every** network the remote joins (tether, LAN,
-tailnet, WiFi). Before putting a remote on a shared LAN or WiFi, build the
-image with your own password (Appendix E); the release image's `microlink` is
-public.
+tailnet, WiFi). Before putting a remote on a shared LAN or WiFi, provision
+your own password (Appendix E); the default `microlink` is public.
 
 Two remotes on one laptop by USB: only the first gets `esp-pstop0`; see
 [`USB_NCM_SETUP.md`](USB_NCM_SETUP.md), which also has Windows/macOS notes.
@@ -261,7 +260,7 @@ Two remotes on one laptop by USB: only the first gets `esp-pstop0`; see
 
 The key is stored in the remote's settings area and survives OTA updates and
 app-image flashes (not the factory image, Appendix C). A key saved through the
-admin page takes priority over one baked into the image.
+admin page takes priority over a provisioned one (Appendix E).
 
 ## Appendix C: updating, reflashing, and what persists
 
@@ -287,8 +286,8 @@ registers as a new machine.
 
 | Data | Lives in | Survives OTA / app-image flash | Survives full-flash image | Survives `erase_flash` |
 |---|---|---|---|---|
-| Tailscale auth key, WiFi | NVS if set via `/admin/` (or the firmware image when built with credentials) | yes (NVS wins over image) | no | no |
-| Admin password | firmware image only (`microlink` in release builds) | whatever the new image bakes in (a release image resets it to `microlink`) | whatever the new image bakes in | no (no firmware left) |
+| Tailscale auth key, WiFi | NVS if set via `/admin/`, else the provisioned secrets (Appendix E) | yes (NVS wins over provisioned) | no (re-provision, Appendix E) | no |
+| Admin password | provisioned secrets (Appendix E), else `microlink` | yes | no (back to `microlink` until re-provisioned) | no (no firmware left) |
 | Tailscale node identity | NVS | yes | no (new machine on tailnet) | no |
 | Machine peer, self-role | NVS | yes | no | no |
 | Lifetime health counters (`/api/health`) | NVS | yes | no | no |
@@ -336,29 +335,49 @@ Same pairing steps as section 6. Details: [`host/README.md`](../host/README.md).
 is a software remote that runs the same arming sequence against the node
 ([`TESTING.md`](TESTING.md), [`../tools/README.md`](../tools/README.md)).
 
-## Appendix E: build the firmware yourself
+## Appendix E: provision your own credentials
 
-Needed only to bake your own credentials into the image (a different admin
-password, WiFi, a Tailscale key without the admin-page step) or to change the
-firmware. Install ESP-IDF **v5.5**
+Your own admin password, WiFi, or a Tailscale key without the admin-page step
+go into each remote's encrypted secrets partition; no firmware image contains
+them. With the remote flashed (step 3) and in download mode:
+
+```sh
+cd tools
+cp credentials.env.example credentials.env
+$EDITOR credentials.env                      # set TAILSCALE_AUTH_KEY and ADMIN_PASSWORD, leave the rest
+uv run python provision_secrets.py provision --port /dev/ttyACM0 secrets.bin
+uv run esptool --chip esp32s3 -p /dev/ttyACM0 write-flash 0x1C000 secrets.bin
+rm secrets.bin
+cd ..                                        # back to the repo root for step 5
+```
+
+The first run permanently burns a random key into the chip's eFuse and keeps
+a copy in `tools/device_keys/<mac>.bin`; the partition is encrypted to it.
+Re-run both commands to change the credentials, or after the full-flash image
+or `erase_flash` wiped the partition. Keep `tools/device_keys/` private and
+backed up: without a unit's file, its provisioned credentials cannot be
+replaced (the admin page still overrides them).
+`tools/flash_pstop.sh` does all of this in one go for staged builds.
+Then skip the admin-page part of step 4 and set `ADMIN_PW` to your password.
+
+The encryption keeps credentials out of every `.bin`, backup, and flash dump.
+It does not stop someone holding the unit from flashing their own firmware and
+having the chip decrypt the partition; that takes Secure Boot, which this
+project does not enable.
+
+## Appendix F: build the firmware yourself
+
+Needed only to change the firmware. Install ESP-IDF **v5.5**
 ([guide](https://docs.espressif.com/projects/esp-idf/en/v5.5/esp32s3/get-started/linux-macos-setup.html);
 older IDF will not build, the USB tether needs a 5.5 fix), then:
 
 ```sh
-cp firmware/sdkconfig.credentials.example firmware/sdkconfig.credentials
-$EDITOR firmware/sdkconfig.credentials       # set CONFIG_ML_TAILSCALE_AUTH_KEY and CONFIG_ML_ADMIN_PASSWORD, leave the rest
 cd firmware
 . ~/esp/esp-idf/export.sh                    # wherever you installed IDF 5.5
 idf.py build
-grep CONFIG_ML_TAILSCALE_AUTH_KEY sdkconfig  # expect: your key, not the XXXXX placeholder
-idf.py -p /dev/ttyACM0 flash
-cd ..                                        # back to the repo root for step 5
+idf.py -p /dev/ttyACM0 flash                 # keeps the secrets partition
+cd ..
 ```
 
-If the grep shows the placeholder, the build reused a stale `sdkconfig`:
-`rm sdkconfig && idf.py build`. Do not run `idf.py monitor`: the USB port
-becomes the network tether a few seconds into boot and the serial console goes
-quiet by design. With the key baked in, skip the admin-page part of step 4 and
-set `ADMIN_PW` to your password. Never publish an image built with a
-credentials file: every value in it is compiled in as plain text
-(`tools/release_guard.sh` refuses such images).
+Do not run `idf.py monitor`: the USB port becomes the network tether a few
+seconds into boot and the serial console goes quiet by design.

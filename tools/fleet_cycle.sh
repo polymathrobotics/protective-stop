@@ -9,13 +9,14 @@
 #   1. fullclean build of BOTH roles (incremental builds keep a stale
 #      git-describe — fleet lineage purity requires clean builds)
 #   2. verify the expected version string is inside BOTH binaries
-#   3. verify credentials made it into BOTH sdkconfigs (a worktree/clone with
-#      a missing sdkconfig.credentials builds fine but homes the wrong region)
-#   4. OTA the machine FIRST, wait for it back, then every remote
-#   5. verify fw_ver on EVERY device (a mixed fleet invalidated run-32a)
-#   6. upload both binaries to the firmware registry
-#   7. archive both ELFs per lineage (coredump decode needs the EXACT build;
+#   3. OTA the machine FIRST, wait for it back, then every remote
+#   4. verify fw_ver on EVERY device (a mixed fleet invalidated run-32a)
+#   5. upload both binaries to the firmware registry
+#   6. archive both ELFs per lineage (coredump decode needs the EXACT build;
 #      clean rebuilds silently destroy the only copy)
+#
+# OTA carries no credentials: each unit keeps the secrets partition it was
+# flashed with (tools/flash_pstop.sh).
 #
 # Fleet addresses and credentials are PROPRIETARY and live in a gitignored
 # env file — nothing sensitive is in this script. Create fleet.env next to
@@ -48,14 +49,13 @@ echo "== lineage $VERSION"
 
 for role in firmware machn; do
   echo "== fullclean build: $role"
-  # fullclean does NOT delete sdkconfig, and ESP-IDF merges SDKCONFIG_DEFAULTS
-  # (incl. sdkconfig.credentials) only when sdkconfig is absent — a stale
-  # sdkconfig would pass the non-empty credential check below with the WRONG
-  # value (review red: the exact worktree trap this script exists to catch).
+  # fullclean does NOT delete sdkconfig, and ESP-IDF merges sdkconfig.defaults
+  # only when sdkconfig is absent — a stale sdkconfig would build with stale
+  # options.
   (cd "$REPO/$role" && rm -f sdkconfig sdkconfig.old && idf.py fullclean >/dev/null && idf.py build >/dev/null)
 done
 
-echo "== verify version string + credentials"
+echo "== verify version string"
 strings "$REPO/firmware/build/pstop_remote.bin" | grep -q "$VERSION" || {
   echo "remote binary missing $VERSION" >&2
   exit 1
@@ -64,12 +64,6 @@ strings "$REPO/machn/build/machn_machine.bin" | grep -q "$VERSION" || {
   echo "machine binary missing $VERSION" >&2
   exit 1
 }
-for role in firmware machn; do
-  grep -q "CONFIG_ML_FLEET_SERVER_IP=\"..*\"" "$REPO/$role/sdkconfig" || {
-    echo "$role/sdkconfig has empty fleet credentials" >&2
-    exit 1
-  }
-done
 
 ota() { # ota <ip> <binary>
   curl -sf -m 180 -u "$DEVICE_AUTH" --data-binary @"$2" "http://$1/admin/api/ota" >/dev/null

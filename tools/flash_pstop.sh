@@ -6,21 +6,26 @@
 # known-good image.
 #
 # Flashes the pre-built binaries (bootloader, partition table, otadata, app) to
-# an ESP32-S3 over USB. Use this to bring up new units in production from ONE
-# compiled image per role — no ESP-IDF or rebuild needed, just the `tools/` uv
-# environment (`cd tools && uv sync`), which supplies the esptool v5 this uses;
-# the v4 esptool ESP-IDF 5.5 ships will not do. After
-# flashing, the chip self-provisions (per-unit ID from its MAC, auto-joins
-# Tailscale, checks in to the OTA backend if one is configured) and takes all
-# future updates over the network.
+# an ESP32-S3 over USB, plus that unit's encrypted secrets partition, built
+# from tools/credentials.env by provision_secrets.py. Use this to bring up new
+# units in production from ONE compiled image per role — no ESP-IDF or rebuild
+# needed, just the `tools/` uv environment (`cd tools && uv sync`), which
+# supplies the esptool v5 this uses; the v4 esptool ESP-IDF 5.5 ships will not
+# do. After flashing, the chip self-provisions (per-unit ID from its MAC,
+# auto-joins Tailscale, checks in to the OTA backend if one is configured) and
+# takes all future updates over the network.
+#
+# The first flash of a unit burns a per-unit HMAC key into eFuse BLOCK_KEY5
+# (irreversible) and keeps it as tools/device_keys/<mac>.bin; later flashes
+# reuse it. Keep device_keys/ private: each file decrypts that unit's secrets.
 #
 # Two device roles, each with its own staged image directory:
 #   remote  -> tools/production_image/        (app: pstop_remote.bin)
 #   machine -> tools/production_image_machn/   (app: machn_machine.bin)
 # If you don't pass --remote/--machine, the tool ASKS which one to flash.
 #
-# The image directories contain secrets (Tailscale key, WiFi creds, admin
-# password, OTA API key) and are git-ignored — never commit them.
+# The image directories hold no secrets. credentials.env and device_keys/ do,
+# and are git-ignored — never commit them.
 #
 # Usage:
 #   tools/flash_pstop.sh                 # ask role, auto-detect a chip in download mode
@@ -29,6 +34,8 @@
 #   tools/flash_pstop.sh /dev/ttyACM0    # explicit port (still asks role)
 #   tools/flash_pstop.sh --from-ip 10.42.0.106   # reflash a RUNNING unit
 #   tools/flash_pstop.sh --erase /dev/ttyACM0    # full chip erase first
+#   tools/flash_pstop.sh --credentials site.env  # secrets from another file
+#   tools/flash_pstop.sh --no-secrets            # leave the secrets partition alone
 #
 # A NEW/blank chip is already in download mode — just plug in USB and run.
 # An ALREADY-CONFIGURED unit has no serial port (USB-NCM); either pass
@@ -45,7 +52,12 @@ ERASE=0
 ROLE=""
 ADMIN_USER="admin"
 
-usage() { sed -n '2,35p' "$0"; exit "${1:-0}"; }
+CREDENTIALS="$HERE/credentials.env"
+KEYS_DIR="$HERE/device_keys"
+KEY_BLOCK=5
+SECRETS=1
+
+usage() { sed -n '2,44p' "$0"; exit "${1:-0}"; }
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -54,6 +66,10 @@ while [ $# -gt 0 ]; do
     --from-ip) FROM_IP="$2"; shift 2 ;;
     --erase)   ERASE=1; shift ;;
     --baud)    BAUD="$2"; shift 2 ;;
+    --credentials) CREDENTIALS="$2"; shift 2 ;;
+    --keys-dir)    KEYS_DIR="$2"; shift 2 ;;
+    --key-block)   KEY_BLOCK="$2"; shift 2 ;;
+    --no-secrets)  SECRETS=0; shift ;;
     -h|--help) usage 0 ;;
     -*)        echo "unknown option: $1" >&2; usage 1 ;;
     *)         PORT="$1"; shift ;;
@@ -89,10 +105,16 @@ for f in bootloader.bin partition-table.bin ota_data_initial.bin "$APP"; do
   [ -f "$IMG/$f" ] || { echo "ERROR: missing $IMG/$f — stage a $ROLE build into $(basename "$IMG")/ first." >&2; exit 1; }
 done
 
+if [ "$SECRETS" = "1" ] && [ ! -f "$CREDENTIALS" ]; then
+  echo "ERROR: no credentials file at $CREDENTIALS — cp tools/credentials.env.example tools/credentials.env and fill it in, pass --credentials, or --no-secrets." >&2
+  exit 1
+fi
+
 # --- esptool from the tools/ uv environment -------------------------------
 # Always run esptool through uv; the locked version is the only one used.
 if command -v uv >/dev/null 2>&1; then
   ESPTOOL=(env -u VIRTUAL_ENV uv run --project "$HERE" --quiet esptool)
+  PROVISION=(env -u VIRTUAL_ENV uv run --project "$HERE" --quiet python "$HERE/provision_secrets.py")
 else
   echo "ERROR: esptool not found. Install uv (https://docs.astral.sh/uv/), then 'cd tools && uv sync'." >&2
   exit 1
@@ -116,17 +138,16 @@ detect_port() {
 }
 
 # admin password for the enter_download call: $ADMIN_PASSWORD env wins,
-# else read it from the (git-ignored) build credentials on this machine.
+# else read it from the credentials file.
 admin_pw() {
   if [ -n "${ADMIN_PASSWORD:-}" ]; then printf '%s' "$ADMIN_PASSWORD"; return; fi
-  local cred="$HERE/../firmware/sdkconfig.credentials"
-  [ -f "$cred" ] && sed -n 's/^CONFIG_ML_ADMIN_PASSWORD="\(.*\)"/\1/p' "$cred" | head -1
+  [ -f "$CREDENTIALS" ] && sed -n 's/^\(CONFIG_ML_\)\{0,1\}ADMIN_PASSWORD="\{0,1\}\([^"]*\)"\{0,1\}$/\2/p' "$CREDENTIALS" | head -1
 }
 
 # --- reflash a running unit: force it into download mode over HTTP --------
 if [ -n "$FROM_IP" ]; then
   PW="$(admin_pw)"
-  [ -n "$PW" ] || { echo "ERROR: --from-ip needs the admin password. Set ADMIN_PASSWORD=... or keep firmware/sdkconfig.credentials on this machine." >&2; exit 1; }
+  [ -n "$PW" ] || { echo "ERROR: --from-ip needs the admin password. Set ADMIN_PASSWORD=... or put ADMIN_PASSWORD in $CREDENTIALS." >&2; exit 1; }
   echo ">> forcing unit at $FROM_IP into download mode (admin auth + confirm)..."
   resp="$(curl -s -m6 -u "$ADMIN_USER:$PW" -X POST "http://$FROM_IP/api/enter_download?confirm=1" 2>/dev/null || true)"
   case "$resp" in
@@ -167,6 +188,18 @@ echo " Flashing pstop $ROLE ($APP) -> $PORT"
 grep -E '^(version|app sha256):' "$IMG/MANIFEST.txt" 2>/dev/null || true
 echo "=========================================================="
 
+# Built before any erase or write, so a bad credentials file or unusable eFuse
+# block stops here with the unit untouched.
+SECRETS_ARGS=()
+if [ "$SECRETS" = "1" ]; then
+  echo ">> provisioning secrets (eFuse BLOCK_KEY$KEY_BLOCK)..."
+  SECRETS_DIR="$(mktemp -d)"
+  trap 'rm -rf "$SECRETS_DIR"' EXIT
+  "${PROVISION[@]}" provision --port "$PORT" --credentials "$CREDENTIALS" \
+    --keys-dir "$KEYS_DIR" --key-block "$KEY_BLOCK" "$SECRETS_DIR/secrets.bin"
+  SECRETS_ARGS=(0x1C000 "$SECRETS_DIR/secrets.bin")
+fi
+
 if [ "$ERASE" = "1" ]; then
   echo ">> erasing flash (full chip)..."
   "${ESPTOOL[@]}" --chip esp32s3 -p "$PORT" -b "$BAUD" erase-flash
@@ -178,6 +211,7 @@ fi
   0x0     "$IMG/bootloader.bin" \
   0x8000  "$IMG/partition-table.bin" \
   0x19000 "$IMG/ota_data_initial.bin" \
+  ${SECRETS_ARGS[@]+"${SECRETS_ARGS[@]}"} \
   0x20000 "$IMG/$APP"
 
 echo

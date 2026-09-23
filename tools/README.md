@@ -73,8 +73,12 @@ tools/flash_pstop.sh --remote
 `flash_pstop.sh` provisions one device over USB from a staged image directory;
 `flash_station.py` runs the unattended production loop.
 Both need a staged image in `tools/production_image/` (remote) or
-`tools/production_image_machn/` (machine), which carries per-fleet secrets and
-is git-ignored.
+`tools/production_image_machn/` (machine), and flash each unit's encrypted
+secrets partition, built by `provision_secrets.py` from `tools/credentials.env`
+(copy `credentials.env.example`).
+A unit's first flash burns its HMAC key into eFuse (irreversible) and keeps it
+in `tools/device_keys/<mac>.bin`; later flashes reuse it.
+`credentials.env` and `device_keys/` are git-ignored and private.
 See the header comment in each script for the full argument list.
 
 ## HIL suite

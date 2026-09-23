@@ -17,6 +17,7 @@ set(SRCS
     "src/ml_zerocopy.c"
     "src/ml_config_httpd.c"
     "src/ml_app.c"
+    "src/ml_secrets.c"
 )
 
 set(REQUIRES
@@ -43,6 +44,7 @@ idf_component_register(
         wireguard_lwip
         app_update
         esp_http_client
+        nvs_sec_provider
 )
 
 # Crypto speedup (from fast-crypto, 2026-08-04): compile the ALREADY-VETTED,

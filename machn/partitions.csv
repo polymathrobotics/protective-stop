@@ -19,10 +19,18 @@
 #     locates nvs/otadata at runtime via the partition API — so an old
 #     unit keeps its 24 KB NVS and its (identical) ota_0/ota_1/coredump
 #     offsets. The 64 KB NVS activates on the next cabled reflash.
+#
+# secrets (0x1C000, 12 KB, the minimum 3 NVS pages) holds the per-device
+# credentials, XTS-AES encrypted with an eFuse HMAC key; see
+# components/microlink/include/ml_secrets.h. It fills the tail of the gap
+# before ota_0, so ota_0/ota_1/coredump are unchanged again. Units on an
+# older table have no secrets partition and run unprovisioned until a cabled
+# reflash with tools/flash_pstop.sh.
 # Name,    Type, SubType, Offset,   Size,     Flags
 nvs,       data, nvs,     ,         0x10000,
 otadata,   data, ota,     ,         0x2000,
 phy_init,  data, phy,     ,         0x1000,
+secrets,   data, nvs,     ,         0x3000,
 ota_0,     app,  ota_0,   ,         0x3F0000,
 ota_1,     app,  ota_1,   ,         0x3D0000,
 coredump,  data, coredump,,         0x20000,

@@ -3,8 +3,8 @@
 
 [rig]
 # Chip admin/API host. "auto" discovers the USB-NCM neighbor on ncm_iface.
-# Admin Basic-auth for the role endpoint (CONFIG_ML_ADMIN_PASSWORD of the
-# build under test; username is always "admin"). The suite promotes the DUT to
+# Admin Basic-auth for the role endpoint (ADMIN_PASSWORD provisioned on the
+# unit under test, else the default "microlink"; username is always "admin"). The suite promotes the DUT to
 # the OPERATOR role at session start — a fresh remote announces stop-only and
 # would never arm the HIL machine.
 admin_password = "microlink"
