@@ -4,18 +4,18 @@
 #
 # release_guard.sh — refuse to publish firmware artifacts that carry secrets.
 #
-# Every value in the git-ignored sdkconfig.credentials (Tailscale auth key,
-# WiFi credentials, admin password, OTA URL/API key, management-server IP) is
-# compiled into BOTH the .bin and the .elf as a plain string. Only a build made
-# WITHOUT a credentials file may ever be attached to a public release.
+# Credentials are flashed per device (provision_secrets.py) and never compiled
+# in, so a current build carries none. This is the backstop for any artifact
+# that does anyway: an image built before secrets moved out, or a regression.
 #
 #   tools/release_guard.sh <artifact>...
 #
 # Three independent layers, so the verdict does not depend on which
 # credentials file happens to be on the machine running the guard:
-#   1. build brand   — any image compiled with a credentials file present carries
-#                      the ML-BUILD-WITH-CREDENTIALS marker (CMakeLists + ml_app.c)
-#   2. local values  — every value of a credentials file found in the tree
+#   1. build brand   — an image built with the retired sdkconfig.credentials
+#                      carries the ML-BUILD-WITH-CREDENTIALS marker
+#   2. local values  — every value of tools/credentials.env, or of a leftover
+#                      sdkconfig.credentials
 #   3. secret shapes — tskey-…, PEM private keys, literal HTTP auth tokens
 #
 # Exit 0 = every artifact clean. Exit 1 = a leak (pattern named, value never
@@ -26,10 +26,12 @@ set -euo pipefail
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 [[ $# -ge 1 ]] || { echo "usage: $0 <artifact>..." >&2; exit 2; }
 
-# Values that are already public (Kconfig defaults in the tracked tree, e.g. the
+# Values that are already public (Kconfig defaults in the tracked tree, and the
 # documented default admin password) are not secrets and must not trip the guard.
-public_defaults="$(grep -hoE 'default "[^"]+"' "$REPO"/components/microlink/Kconfig \
-  "$REPO"/firmware/components/*/Kconfig 2>/dev/null | sed -E 's/^default "//; s/"$//' || true)"
+public_defaults="$( {
+  grep -hoE 'default "[^"]+"' "$REPO"/components/microlink/Kconfig "$REPO"/firmware/components/*/Kconfig
+  grep -hoE '#define ML_[A-Z_]+_DEFAULT "[^"]+"' "$REPO"/components/microlink/include/*.h
+} 2>/dev/null | sed -E 's/^(default|#define [A-Z_]+) "//; s/"$//' || true)"
 
 # Kconfig writes strings with \" and \\ escaped; the compiler embeds the unescaped bytes.
 kconfig_unescape() { printf '%s' "$1" | sed -E 's/\\(["\\])/\1/g'; }
@@ -40,11 +42,12 @@ cstrings() { tr '\0' '\n' < "$1"; }
 
 # Layer 2 inputs: "KEY<TAB>value" lines from every credentials file in the tree.
 values=""
-for f in "$REPO"/firmware/sdkconfig.credentials "$REPO"/machn/sdkconfig.credentials; do
+for f in "$REPO"/tools/credentials.env "$REPO"/firmware/sdkconfig.credentials "$REPO"/machn/sdkconfig.credentials; do
   [[ -f "$f" ]] || continue
   while IFS= read -r line; do
-    [[ "$line" =~ ^(CONFIG_[A-Z0-9_]+)=\"(.*)\"$ ]] || continue
-    k="${BASH_REMATCH[1]}"; v="$(kconfig_unescape "${BASH_REMATCH[2]}")"
+    [[ "$line" =~ ^([A-Z][A-Z0-9_]*)=(.*)$ ]] || continue
+    k="${BASH_REMATCH[1]}"; v="${BASH_REMATCH[2]}"
+    if [[ "$v" =~ ^\"(.*)\"$ ]]; then v="$(kconfig_unescape "${BASH_REMATCH[1]}")"; fi
     [[ -n "$v" && "$v" != "y" && "$v" != "n" ]] || continue
     grep -qxF -- "$v" <<< "$public_defaults" && continue
     values+="$k"$'\t'"$v"$'\n'

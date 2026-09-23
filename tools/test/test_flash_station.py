@@ -201,3 +201,40 @@ def test_flash_refuses_early_on_missing_image(fake_cmd, argv_log, tmp_path, monk
     assert not ok
     assert 'missing' in err
     assert read_argv_log(argv_log) == []
+
+
+# --- secrets partition -----------------------------------------------------
+
+
+def test_flash_writes_extra_images_in_address_order(fake_cmd, argv_log, staged_images, tmp_path):
+    """The per-unit secrets image lands at its own offset, between otadata and the app."""
+    secrets_bin = tmp_path / 'secrets.bin'
+    secrets_bin.write_bytes(bytes(64))
+    ok, err = flash_station.flash(
+        fake_cmd, '/dev/ttyACM0', erase=False, on_progress=lambda f, p: None, extra=[(0x1C000, str(secrets_bin))]
+    )
+    assert ok, err
+    [entry] = read_argv_log(argv_log)
+    pairs = [(a, entry['argv'][i + 1]) for i, a in enumerate(entry['argv']) if a.startswith('0x')]
+    assert [a for a, _ in pairs] == ['0x0', '0x8000', '0x19000', '0x1c000', '0x20000']
+    assert pairs[3][1] == str(secrets_bin)
+
+
+def test_flash_one_fails_the_unit_before_writing_when_secrets_are_refused(
+    fake_cmd, argv_log, staged_images, tmp_path, monkeypatch
+):
+    """A unit whose eFuse block holds another host's key is failed at the
+    secrets stage; write-flash never runs."""
+    import provision_secrets
+
+    virt = provision_secrets.espefuse_base(None, tmp_path / 'efuse.bin')
+    creds = 'ADMIN_PASSWORD=bench-pw\n'
+    provision_secrets.provision(virt, creds, tmp_path / 'other_host', log=lambda m: None)
+    monkeypatch.setattr(provision_secrets, 'espefuse_base', lambda port: virt)
+    monkeypatch.setattr(flash_station, 'ts_status_hosts', lambda: {})
+
+    cfg = {'credentials': creds, 'keys_dir': tmp_path / 'keys', 'key_block': provision_secrets.DEFAULT_KEY_BLOCK}
+    ok, info = flash_station.flash_one(fake_cmd, '/dev/ttyACM0', False, 1, secrets_cfg=cfg)
+    assert not ok
+    assert info['stage'] == 'secrets'
+    assert all('write-flash' not in e['argv'] for e in read_argv_log(argv_log))

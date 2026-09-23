@@ -96,10 +96,11 @@ path there:
      new firmware. Zero USB fiddling, exercises the real update path.
    - **USB flash**: `tools/flash_pstop.sh --from-ip <chip>` kicks a running
      unit into download mode over HTTP and flashes over USB. Needs the
-     (git-ignored) `production_image/` secrets baked locally on the runner.
+     (git-ignored) `tools/credentials.env` and the unit's `tools/device_keys/`
+     file on the runner.
    Fleet-server URL and API key are PROPRIETARY: provide them to the runner
    as environment/secret (`PSTOP_CHECKIN_URL`, `PSTOP_CHECKIN_API_KEY_FILE`) — they must never
-   appear in committed files (same rule as `sdkconfig.credentials`).
+   appear in committed files (same rule as `tools/credentials.env`).
 3. **Flash verification — DONE (firmware >= 4c90711)**: `state.json`
    reports `fw_ver` (git short hash) and `fw_sha` (truncated ELF SHA-256).
    CI runs the suite with the build under test pinned:

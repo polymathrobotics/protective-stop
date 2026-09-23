@@ -26,10 +26,13 @@ host/test_aux_channel
 cppcheck-build/
 firmware/managed_components/
 
-# Production flash images (remote + machine roles) — contain baked-in secrets
-# (Tailscale key, WiFi creds, admin password, fleet key). Never commit.
+# Production flash images (remote + machine roles).
 tools/production_image/
 tools/production_image_machn/
+# Per-device secrets: credentials flashed into every unit, and each unit's
+# eFuse HMAC key. Never commit.
+tools/credentials.env
+tools/device_keys/
 
 # analysis / CAD / stray artifacts
 *.dump

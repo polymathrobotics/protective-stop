@@ -14,19 +14,14 @@ set(EXTRA_COMPONENT_DIRS
     "components"
 )
 
-# Merge git-ignored credentials on top of defaults if present.
+# Secrets are flashed per device (tools/provision_secrets.py), never compiled in.
 if(EXISTS "${CMAKE_CURRENT_LIST_DIR}/sdkconfig.credentials")
-    set(SDKCONFIG_DEFAULTS "sdkconfig.defaults;sdkconfig.credentials")
+    message(WARNING "${CMAKE_CURRENT_LIST_DIR}/sdkconfig.credentials is ignored: "
+        "secrets are no longer compiled in. Move its values to tools/credentials.env "
+        "(see tools/credentials.env.example) and delete it.")
 endif()
 
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
-
-# A build made WITH a credentials file is private: brand the image (see
-# ml_app.c) so tools/release_guard.sh refuses it even on a machine that has a
-# different credentials file, or none.
-if(EXISTS "${CMAKE_CURRENT_LIST_DIR}/sdkconfig.credentials")
-    idf_build_set_property(COMPILE_DEFINITIONS "-DML_BUILD_WITH_CREDENTIALS=1" APPEND)
-endif()
 
 project(pstop_remote)
 

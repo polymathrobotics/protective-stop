@@ -35,6 +35,7 @@
 #include "esp_timer.h"
 #include "esp_wifi.h"
 #include "ml_config_httpd.h"
+#include "ml_secrets.h"
 #include "sdkconfig.h"
 
 static const char * TAG = "dcs_wifi";
@@ -106,8 +107,8 @@ void dcs_wifi_status(int * reason, int * connected, int * idx, int * count)
   }
 }
 
-/* Point the STA at the current list entry (or the compiled default if the list
- * is empty) and (re)connect. */
+/* Point the STA at the current list entry (or the provisioned primary network
+ * if the list is empty) and (re)connect. */
 static void apply_creds_and_connect(void)
 {
   char ssid[33] = {0}, pass[65] = {0};
@@ -116,8 +117,8 @@ static void apply_creds_and_connect(void)
     (void)snprintf(ssid, sizeof(ssid), "%s", s_list->entries[i].ssid);
     (void)snprintf(pass, sizeof(pass), "%s", s_list->entries[i].pass);
   } else {
-    (void)snprintf(ssid, sizeof(ssid), "%s", CONFIG_ML_WIFI_SSID);
-    (void)snprintf(pass, sizeof(pass), "%s", CONFIG_ML_WIFI_PASSWORD);
+    (void)snprintf(ssid, sizeof(ssid), "%s", ml_secrets_get(ML_SECRET_WIFI_SSID));
+    (void)snprintf(pass, sizeof(pass), "%s", ml_secrets_get(ML_SECRET_WIFI_PASSWORD));
   }
   wifi_config_t wc = {0};
   (void)memcpy(wc.sta.ssid, ssid, sizeof(wc.sta.ssid));
@@ -136,6 +137,24 @@ static void apply_creds_and_connect(void)
   err = esp_wifi_connect();
   if (err != ESP_OK) {
     ESP_LOGW(TAG, "esp_wifi_connect: %s", esp_err_to_name(err));
+  }
+}
+
+/* Fill `list` with the provisioned primary and secondary networks, skipping
+ * any with an empty SSID. */
+static void load_provisioned_list(ml_config_wifi_list_t * list)
+{
+  static const ml_secret_t SSIDS[] = {ML_SECRET_WIFI_SSID, ML_SECRET_WIFI_SSID_2};
+  static const ml_secret_t PASSES[] = {ML_SECRET_WIFI_PASSWORD, ML_SECRET_WIFI_PASSWORD_2};
+  (void)memset(list, 0, sizeof(*list));
+  list->active_idx = 0xFF;
+  for (size_t i = 0; i < (sizeof(SSIDS) / sizeof(SSIDS[0])); i++) {
+    const char * ssid = ml_secrets_get(SSIDS[i]);
+    if ('\0' != ssid[0]) {
+      (void)snprintf(list->entries[list->count].ssid, sizeof(list->entries[0].ssid), "%s", ssid);
+      (void)snprintf(list->entries[list->count].pass, sizeof(list->entries[0].pass), "%s", ml_secrets_get(PASSES[i]));
+      list->count++;
+    }
   }
 }
 
@@ -295,13 +314,14 @@ static esp_err_t wifi_set_enabled_locked(bool on)
     }
     s_backoff_ms = WIFI_BACKOFF_MIN_MS;
 
-    /* Load the configured network list (PSRAM; ~1.5 KB). NULL/empty → the
-         * compiled default is used by apply_creds_and_connect(). */
+    /* Load the configured network list (PSRAM; ~1.5 KB); with none saved, the
+         * provisioned networks. NULL → apply_creds_and_connect() uses the
+         * provisioned primary. */
     if (s_list == NULL) {
       s_list = heap_caps_malloc(sizeof(*s_list), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     }
-    if ((s_list != NULL) && (!ml_config_get_wifi_list(s_list))) {
-      s_list->count = 0;
+    if ((s_list != NULL) && ((!ml_config_get_wifi_list(s_list)) || (0u == s_list->count))) {
+      load_provisioned_list(s_list);
     }
     atomic_store(&s_idx, 0);
 

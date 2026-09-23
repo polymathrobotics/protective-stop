@@ -37,6 +37,7 @@
 #include "microlink.h"
 #include "microlink_internal.h"
 #include "ml_config_httpd.h"
+#include "ml_secrets.h"
 #include "nvs.h"
 #include "nvs_flash.h"
 
@@ -89,11 +90,11 @@ static ml_app_t * s_app = NULL;
  * HTTP Basic Auth
  * ========================================================================== */
 
-#ifdef CONFIG_ML_ADMIN_PASSWORD
+#ifdef CONFIG_ML_ENABLE_CONFIG_HTTPD
 static bool admin_auth_check(httpd_req_t * req)
 {
-  const char * password = CONFIG_ML_ADMIN_PASSWORD;
-  if (!password || password[0] == '\0') return true;
+  const char * password = ml_secrets_get(ML_SECRET_ADMIN_PASSWORD);
+  if ('\0' == password[0]) password = ML_ADMIN_PASSWORD_DEFAULT;
 
   char auth_hdr[256];
   if (httpd_req_get_hdr_value_str(req, "Authorization", auth_hdr, sizeof(auth_hdr)) != ESP_OK) {
@@ -119,11 +120,11 @@ static bool admin_auth_check(httpd_req_t * req)
 
 bool ml_app_check_admin_auth(httpd_req_t * req)
 {
-#ifdef CONFIG_ML_ADMIN_PASSWORD
+#ifdef CONFIG_ML_ENABLE_CONFIG_HTTPD
   return admin_auth_check(req);
 #else
   (void)req;
-  return true; /* no admin password configured → admin surface is open */
+  return true; /* no config server → no admin surface to guard */
 #endif
 }
 
@@ -361,14 +362,12 @@ static void ml_peer_callback(microlink_t * ml, const microlink_peer_info_t * pee
  * Fleet OTA Poll Task
  * ========================================================================== */
 
-#if defined(CONFIG_ML_OTA_BACKEND_URL) && defined(CONFIG_ML_OTA_API_KEY)
-
-  #define OTA_STATE_IDLE 0
-  #define OTA_STATE_CHECKING 1
-  #define OTA_STATE_FOUND 2
-  #define OTA_STATE_DOWNLOAD 3
-  #define OTA_STATE_REBOOT 4
-  #define OTA_STATE_ERROR -1
+#define OTA_STATE_IDLE 0
+#define OTA_STATE_CHECKING 1
+#define OTA_STATE_FOUND 2
+#define OTA_STATE_DOWNLOAD 3
+#define OTA_STATE_REBOOT 4
+#define OTA_STATE_ERROR -1
 
 static void ota_set_state(ml_app_t * app, int state, const char * msg)
 {
@@ -406,8 +405,8 @@ static bool fleet_ota_checkin(
   ml_app_t * app, char * out_url, int url_size, char * out_sha256, int * out_size, bool * out_reached)
 {
   if (out_reached) *out_reached = false;
-  const char * backend = CONFIG_ML_OTA_BACKEND_URL;
-  const char * api_key = CONFIG_ML_OTA_API_KEY;
+  const char * backend = ml_secrets_get(ML_SECRET_OTA_BACKEND_URL);
+  const char * api_key = ml_secrets_get(ML_SECRET_OTA_API_KEY);
   if (!backend[0] || !api_key[0]) return false;
 
   /* Build check-in JSON */
@@ -602,8 +601,8 @@ static bool fleet_ota_download_and_apply(
   mbedtls_sha256_init(&sha_ctx);
   mbedtls_sha256_starts(&sha_ctx, 0);
 
-  char auth_hdr[100];
-  snprintf(auth_hdr, sizeof(auth_hdr), "Bearer %s", CONFIG_ML_OTA_API_KEY);
+  char auth_hdr[sizeof("Bearer ") + ML_SECRETS_MAX_LEN];
+  snprintf(auth_hdr, sizeof(auth_hdr), "Bearer %s", ml_secrets_get(ML_SECRET_OTA_API_KEY));
 
   esp_http_client_config_t http_cfg = {
     .url = fw_url,
@@ -767,7 +766,7 @@ static esp_err_t handler_fleet_ota_status(httpd_req_t * req)
   cJSON_AddStringToObject(json, "message", app->ota_poll_msg);
   cJSON_AddBoolToObject(json, "auto_update", app->auto_update);
   cJSON_AddNumberToObject(json, "dl_percent", app->ota_dl_percent);
-  cJSON_AddStringToObject(json, "backend_url", CONFIG_ML_OTA_BACKEND_URL);
+  cJSON_AddStringToObject(json, "backend_url", ml_secrets_get(ML_SECRET_OTA_BACKEND_URL));
   cJSON_AddNumberToObject(json, "check_interval_s", app->check_interval_s);
   cJSON_AddBoolToObject(json, "verbose", app->verbose_log);
 
@@ -798,8 +797,8 @@ static esp_err_t handler_fleet_ota_toggle(httpd_req_t * req)
   bool new_val = !app->auto_update;
 
   /* Update backend (source of truth) */
-  const char * backend = CONFIG_ML_OTA_BACKEND_URL;
-  const char * api_key = CONFIG_ML_OTA_API_KEY;
+  const char * backend = ml_secrets_get(ML_SECRET_OTA_BACKEND_URL);
+  const char * api_key = ml_secrets_get(ML_SECRET_OTA_API_KEY);
   if (backend[0] && api_key[0]) {
     uint8_t mac[6];
     esp_read_mac(mac, ESP_MAC_WIFI_STA);
@@ -851,8 +850,8 @@ static esp_err_t handler_fleet_ota_toggle(httpd_req_t * req)
   return ESP_OK;
 }
 
-  #define NVS_NS_MLAPP "ml_app"
-  #define NVS_KEY_INTERVAL "ota_intv"
+#define NVS_NS_MLAPP "ml_app"
+#define NVS_KEY_INTERVAL "ota_intv"
 
 static void save_interval_to_nvs(int interval_s)
 {
@@ -864,10 +863,10 @@ static void save_interval_to_nvs(int interval_s)
   }
 }
 
-  /* The backend must hear from every unit at least this often; the check interval
+/* The backend must hear from every unit at least this often; the check interval
  * is capped here so no NVS/endpoint value can make a unit go quiet longer. */
-  #define ML_OTA_CHECK_INTERVAL_MAX_S 300 /* >= once per 5 minutes */
-  #define ML_OTA_CHECK_INTERVAL_MIN_S 60
+#define ML_OTA_CHECK_INTERVAL_MAX_S 300 /* >= once per 5 minutes */
+#define ML_OTA_CHECK_INTERVAL_MIN_S 60
 
 static int load_interval_from_nvs(int default_val)
 {
@@ -939,11 +938,11 @@ static void apply_log_level(ml_app_t * app)
   /* MicroLink protocol tags — respect debug checkboxes if set */
   /* Debug flags: bit0=DISCO, bit1=WG, bit2=DERP, bit3=COORD */
   uint8_t dbg = 0;
-  #ifdef CONFIG_ML_ENABLE_CONFIG_HTTPD
+#ifdef CONFIG_ML_ENABLE_CONFIG_HTTPD
   if (app->ml && app->ml->config_httpd) {
     dbg = ml_config_get_debug_flags(app->ml->config_httpd);
   }
-  #endif
+#endif
   esp_log_level_set("ml_wg_mgr", (dbg & 2) ? ESP_LOG_DEBUG : base);
   esp_log_level_set("ml_net_io", (dbg & 1) ? ESP_LOG_DEBUG : base);
   esp_log_level_set("ml_derp", (dbg & 4) ? ESP_LOG_DEBUG : base);
@@ -986,7 +985,10 @@ static void fleet_ota_task(void * arg)
   ml_app_t * app = (ml_app_t *)arg;
 
   ESP_LOGI(
-    TAG, "Fleet OTA task started (interval: %ds, backend: %s)", app->check_interval_s, CONFIG_ML_OTA_BACKEND_URL);
+    TAG,
+    "Fleet OTA task started (interval: %ds, backend: %s)",
+    app->check_interval_s,
+    ml_secrets_get(ML_SECRET_OTA_BACKEND_URL));
   ota_set_state(app, OTA_STATE_IDLE, "Waiting for Tailscale...");
 
   /* Wait for Tailscale connection before first check */
@@ -1075,8 +1077,6 @@ static void fleet_ota_task(void * arg)
   }
 }
 
-#endif /* CONFIG_ML_OTA_BACKEND_URL && CONFIG_ML_OTA_API_KEY */
-
 /* ============================================================================
  * Public API
  * ========================================================================== */
@@ -1099,27 +1099,20 @@ ml_app_t * ml_app_start(const ml_app_config_t * cfg)
   ESP_ERROR_CHECK(ret);
 
   ESP_LOGI(TAG, "MicroLink App Framework starting...");
-  /* Brand credentials-bearing images so tools/release_guard.sh can refuse them
-   * on any machine, whatever sdkconfig.credentials it does or doesn't have.
-   * The brand lives in a `used` object, not only in a log format string: an
-   * ESP_LOGI is compiled out below LOG_LOCAL_LEVEL and would silently defeat
-   * the guard (review). */
-#ifdef ML_BUILD_WITH_CREDENTIALS
-  static const char s_build_flavour[] __attribute__((used)) = "ML-BUILD-WITH-CREDENTIALS";
-  ESP_LOGW(TAG, "Build flavour: %s (private, not for release)", s_build_flavour);
-#else
-  static const char s_build_flavour[] __attribute__((used)) = "ML-BUILD-PUBLIC";
-  ESP_LOGW(TAG, "Build flavour: %s (no credentials compiled in)", s_build_flavour);
-#endif
+  (void)ml_secrets_init();
   ESP_LOGI(
     TAG,
     "Free heap: %lu bytes (PSRAM: %lu bytes)",
     (unsigned long)esp_get_free_heap_size(),
     (unsigned long)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
 
-  /* --- Load WiFi credentials (NVS -> Kconfig fallback) --- */
-  strlcpy(app->wifi_ssid, CONFIG_ML_WIFI_SSID, sizeof(app->wifi_ssid));
-  strlcpy(app->wifi_password, CONFIG_ML_WIFI_PASSWORD, sizeof(app->wifi_password));
+  /* --- Load WiFi credentials (NVS -> provisioned secrets fallback) --- */
+  const char * secret_ssid = ml_secrets_get(ML_SECRET_WIFI_SSID);
+  const char * secret_pass = ml_secrets_get(ML_SECRET_WIFI_PASSWORD);
+  const char * secret_ssid_2 = ml_secrets_get(ML_SECRET_WIFI_SSID_2);
+  const char * secret_pass_2 = ml_secrets_get(ML_SECRET_WIFI_PASSWORD_2);
+  strlcpy(app->wifi_ssid, secret_ssid, sizeof(app->wifi_ssid));
+  strlcpy(app->wifi_password, secret_pass, sizeof(app->wifi_password));
 
   memset(&app->wifi_list, 0, sizeof(app->wifi_list));
   app->wifi_list.active_idx = 0xFF;
@@ -1135,49 +1128,25 @@ ml_app_t * ml_app_start(const ml_app_config_t * cfg)
   {
     ESP_LOGI(TAG, "WiFi from NVS: %s", app->wifi_ssid);
   } else {
-    ESP_LOGI(TAG, "WiFi from Kconfig: %s", app->wifi_ssid);
+    ESP_LOGI(TAG, "WiFi from provisioned secrets: %s", app->wifi_ssid);
   }
 
-  /* Seed the NVS multi-SSID list from Kconfig defaults if it's empty AND
-     * we actually have a secondary SSID configured. This means a chip with
-     * fresh NVS (post-erase-flash) gets BOTH networks cycled through
-     * automatically — no user setup needed before AP fallback kicks in.
-     * Idempotent: only runs when the NVS wifi_list has 1 entry or fewer.
-     * Once the user provisions via admin UI, that list wins.
-     *
-     * Heap-alloc the seed struct (~1.5 KB) — putting it on the stack
-     * overflows app_main's task stack (default 3.5 KB).
-     */
-  if (app->wifi_list_count <= 1 && strlen(CONFIG_ML_WIFI_SSID) > 0 && strlen(CONFIG_ML_WIFI_SSID_2) > 0) {
-    ml_config_wifi_list_t * seed = calloc(1, sizeof(*seed));
-    if (seed) {
-      seed->count = 2;
-      seed->active_idx = 0xFF;
-      strlcpy(seed->entries[0].ssid, CONFIG_ML_WIFI_SSID, sizeof(seed->entries[0].ssid));
-      strlcpy(seed->entries[0].pass, CONFIG_ML_WIFI_PASSWORD, sizeof(seed->entries[0].pass));
-      strlcpy(seed->entries[1].ssid, CONFIG_ML_WIFI_SSID_2, sizeof(seed->entries[1].ssid));
-      strlcpy(seed->entries[1].pass, CONFIG_ML_WIFI_PASSWORD_2, sizeof(seed->entries[1].pass));
-
-      nvs_handle_t h;
-      if (nvs_open("ml_config", NVS_READWRITE, &h) == ESP_OK) {
-        size_t save_len = 2 + seed->count * sizeof(ml_config_wifi_entry_t);
-        if (nvs_set_blob(h, "wifi_list", seed, save_len) == ESP_OK) {
-          nvs_commit(h);
-          ESP_LOGI(
-            TAG,
-            "WiFi: seeded NVS list with 2 networks from Kconfig (%s + %s)",
-            seed->entries[0].ssid,
-            seed->entries[1].ssid);
-          app->wifi_list = *seed;
-          app->wifi_list_count = 2;
-          app->current_wifi_idx = 0;
-          strlcpy(app->wifi_ssid, seed->entries[0].ssid, sizeof(app->wifi_ssid));
-          strlcpy(app->wifi_password, seed->entries[0].pass, sizeof(app->wifi_password));
-        }
-        nvs_close(h);
-      }
-      free(seed);
-    }
+  /* Cycle both provisioned networks when NVS holds at most one. The list stays
+   * in RAM: provisioned passwords are never written to the plaintext nvs
+   * partition. Once the user provisions via admin UI, that list wins. */
+  if (app->wifi_list_count <= 1 && '\0' != secret_ssid[0] && '\0' != secret_ssid_2[0]) {
+    memset(&app->wifi_list, 0, sizeof(app->wifi_list));
+    app->wifi_list.count = 2;
+    app->wifi_list.active_idx = 0xFF;
+    strlcpy(app->wifi_list.entries[0].ssid, secret_ssid, sizeof(app->wifi_list.entries[0].ssid));
+    strlcpy(app->wifi_list.entries[0].pass, secret_pass, sizeof(app->wifi_list.entries[0].pass));
+    strlcpy(app->wifi_list.entries[1].ssid, secret_ssid_2, sizeof(app->wifi_list.entries[1].ssid));
+    strlcpy(app->wifi_list.entries[1].pass, secret_pass_2, sizeof(app->wifi_list.entries[1].pass));
+    app->wifi_list_count = 2;
+    app->current_wifi_idx = 0;
+    strlcpy(app->wifi_ssid, secret_ssid, sizeof(app->wifi_ssid));
+    strlcpy(app->wifi_password, secret_pass, sizeof(app->wifi_password));
+    ESP_LOGI(TAG, "WiFi: cycling 2 provisioned networks (%s + %s)", secret_ssid, secret_ssid_2);
   }
 
   /* --- Optional: try alternative network first (e.g. USB-CDC-NCM tether)
@@ -1231,7 +1200,7 @@ ml_app_t * ml_app_start(const ml_app_config_t * cfg)
   uint8_t max_peers =
     cfg->max_peers ? cfg->max_peers : (CONFIG_ML_DEFAULT_MAX_PEERS ? CONFIG_ML_DEFAULT_MAX_PEERS : CONFIG_ML_MAX_PEERS);
   microlink_config_t ml_cfg = {
-    .auth_key = CONFIG_ML_TAILSCALE_AUTH_KEY,
+    .auth_key = ml_secrets_get(ML_SECRET_TAILSCALE_AUTH_KEY),
     .device_name = (cfg->device_name && cfg->device_name[0]) ? cfg->device_name : CONFIG_ML_DEVICE_NAME,
     .enable_derp = cfg->enable_derp,
     .enable_stun = cfg->enable_stun,
@@ -1251,12 +1220,11 @@ ml_app_t * ml_app_start(const ml_app_config_t * cfg)
   /* --- Register admin routes at /admin/ with auth --- */
 #ifdef CONFIG_ML_ENABLE_CONFIG_HTTPD
   ml_config_httpd_register_routes(app->ml->config_httpd, NULL, app->httpd, "/admin");
-  #ifdef CONFIG_ML_ADMIN_PASSWORD
   ml_config_httpd_set_auth(app->ml->config_httpd, admin_auth_check);
-  ESP_LOGI(TAG, "Admin panel at /admin/ (password protected)");
-  #else
-  ESP_LOGI(TAG, "Admin panel at /admin/ (no password)");
-  #endif
+  ESP_LOGI(
+    TAG,
+    "Admin panel at /admin/ (%s password)",
+    '\0' != ml_secrets_get(ML_SECRET_ADMIN_PASSWORD)[0] ? "provisioned" : "default");
 #endif
 
   /* --- Set callbacks and start MicroLink (non-blocking) --- */
@@ -1265,13 +1233,12 @@ ml_app_t * ml_app_start(const ml_app_config_t * cfg)
   ESP_ERROR_CHECK(microlink_start(app->ml));
 
   /* --- Start fleet OTA poll task --- */
-#if defined(CONFIG_ML_OTA_BACKEND_URL) && defined(CONFIG_ML_OTA_API_KEY)
-  if (strlen(CONFIG_ML_OTA_BACKEND_URL) > 0 && strlen(CONFIG_ML_OTA_API_KEY) > 0) {
+  if ('\0' != ml_secrets_get(ML_SECRET_OTA_BACKEND_URL)[0] && '\0' != ml_secrets_get(ML_SECRET_OTA_API_KEY)[0]) {
     app->auto_update = true;
     app->check_interval_s = load_interval_from_nvs(CONFIG_ML_OTA_CHECK_INTERVAL_S);
-  #ifdef CONFIG_ML_OTA_AUTO_UPDATE
+#ifdef CONFIG_ML_OTA_AUTO_UPDATE
     app->auto_update = CONFIG_ML_OTA_AUTO_UPDATE;
-  #endif
+#endif
     xTaskCreatePinnedToCore(fleet_ota_task, "ml_ota", 8192, app, 3, NULL, 1);
 
     /* Register fleet OTA admin endpoints */
@@ -1288,7 +1255,6 @@ ml_app_t * ml_app_start(const ml_app_config_t * cfg)
       httpd_register_uri_handler(app->httpd, &fleet_uris[i]);
     }
   }
-#endif
 
   /* --- Register verbose log toggle (always available) --- */
   {

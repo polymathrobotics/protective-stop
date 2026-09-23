@@ -34,6 +34,7 @@
 #include "microlink_internal.h"
 #include "ml_config_httpd.h"
 #include "ml_demote_verdict.h"
+#include "ml_secrets.h"
 #include "ml_wg_regain_policy.h"
 #include "nacl_box.h"
 #include "wireguard.h"
@@ -594,14 +595,14 @@ static int find_peer_by_ip(microlink_t * ml, uint32_t vpn_ip)
   return -1;
 }
 
-/* Fleet coordination/OTA server VPN IP (CONFIG_ML_FLEET_SERVER_IP), parsed
+/* Fleet coordination/OTA server VPN IP (ML_SECRET_FLEET_SERVER_IP), parsed
  * once. 0 if unset. */
 static uint32_t fleet_server_ip_cached(void)
 {
   static uint32_t ip;
   static bool done;
   if (!done) {
-    ip = microlink_parse_ip(CONFIG_ML_FLEET_SERVER_IP);
+    ip = microlink_parse_ip(ml_secrets_get(ML_SECRET_FLEET_SERVER_IP));
     done = true;
   }
   return ip;

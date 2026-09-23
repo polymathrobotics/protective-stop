@@ -88,10 +88,13 @@ the ROS 2 machine node, pairing, and a bench test through STOP and ARM.
 The short version (ESP-IDF 5.5 required):
 
 ```sh
-cp firmware/sdkconfig.credentials.example firmware/sdkconfig.credentials
-$EDITOR firmware/sdkconfig.credentials            # Tailscale auth key + admin password
 cd firmware && . /path/to/esp-idf-v5.5/export.sh
 idf.py build && idf.py -p /dev/ttyACM0 flash
+
+cd ../tools && cp credentials.env.example credentials.env
+$EDITOR credentials.env                           # Tailscale auth key + admin password
+uv run python provision_secrets.py provision --port /dev/ttyACM0 secrets.bin
+uv run esptool --chip esp32s3 -p /dev/ttyACM0 write-flash 0x1C000 secrets.bin
 
 cd ../ros2 && colcon build --packages-up-to protective_stop_machine
 ros2 run protective_stop_machine machine_bridge_node

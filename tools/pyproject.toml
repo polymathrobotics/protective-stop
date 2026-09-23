@@ -14,6 +14,7 @@ requires-python = ">=3.11"
 # esptool is run as a subprocess, not imported; v5 renamed every flag.
 # pyserial is used by usb_relay4; esptool also pulls it in.
 dependencies = [
+  "esp-idf-nvs-partition-gen>=0.1.9",
   "esptool>=5.0",
   "pyserial>=3.5",
   "pytest>=8.0",

@@ -34,8 +34,11 @@ v5 command names are the ones passed below):
     uv run python flash_station.py --erase      # full chip-erase before each flash
     uv run python flash_station.py --selftest   # exercise the plumbing, no hardware
 
-tools/production_image/ carries secrets (Tailscale key, WiFi creds, admin
-password) and is git-ignored — never commit it.
+Each unit also gets its own encrypted secrets partition, built from
+tools/credentials.env by provision_secrets.py; a unit's first flash burns its
+HMAC key into eFuse (irreversible) and keeps it in tools/device_keys/. Both are
+git-ignored and private — never commit them. tools/production_image/ holds no
+secrets.
 """
 
 import argparse
@@ -44,8 +47,11 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.request
+
+import provision_secrets
 
 # Optional LOCAL build-source plugin (e.g. an internal build server). It is
 # git-ignored and not shipped with this repo; when present it lets the station
@@ -243,12 +249,14 @@ def read_mac(cmd, port, tries=READ_MAC_TRIES):
 
 
 # --- the flash, with a byte-accurate progress bar -------------------------
-def flash(cmd, port, erase, on_progress):
+def flash(cmd, port, erase, on_progress, extra=()):
+    """Write IMAGES, plus `extra` (addr, path) pairs, in one esptool run."""
     for _, fn in IMAGES:
         if not os.path.isfile(os.path.join(IMG, fn)):
             return False, f'missing {IMG}/{fn} — stage a build first'
+    images = sorted([(base, os.path.join(IMG, fn)) for base, fn in IMAGES] + list(extra))
 
-    sizes = {base: os.path.getsize(os.path.join(IMG, fn)) for base, fn in IMAGES}
+    sizes = {base: os.path.getsize(path) for base, path in images}
     total = sum(sizes.values())
     ordered = sorted(sizes.items())  # (base, size) low→high
 
@@ -295,8 +303,8 @@ def flash(cmd, port, erase, on_progress):
         FREQ,
         '80m',
     ]
-    for base, fn in IMAGES:
-        args += [hex(base), os.path.join(IMG, fn)]
+    for base, path in images:
+        args += [hex(base), path]
 
     # Retry the whole flash: a re-flash is idempotent (esptool re-syncs and
     # rewrites from scratch), so a transient connect/sync/write hiccup is
@@ -434,7 +442,24 @@ def confirm_hardware(ip):
 
 
 # --- one full unit cycle --------------------------------------------------
-def flash_one(cmd, port, erase, ip_timeout, app_ver='?', keep_peers=False):
+def provision_unit(port, secrets_cfg, dest_dir):
+    """Build the unit's secrets image into `dest_dir`: [(offset, path)], or (None, error)."""
+    try:
+        image = provision_secrets.provision(
+            provision_secrets.espefuse_base(port),
+            secrets_cfg['credentials'],
+            secrets_cfg['keys_dir'],
+            secrets_cfg['key_block'],
+            log=lambda m: line(f'  {m}'),
+        )
+    except provision_secrets.ProvisionError as e:
+        return None, str(e)
+    path = os.path.join(dest_dir, 'secrets.bin')
+    provision_secrets.write_private(path, image)
+    return [(provision_secrets.PARTITION_OFFSET, path)], ''
+
+
+def flash_one(cmd, port, erase, ip_timeout, app_ver='?', keep_peers=False, secrets_cfg=None):
     line(f'{C.BOLD}▶ unit on {port}{C.X}  (app {app_ver})')
     bar(0.02, 'read-mac')
     mac, mac24 = read_mac(cmd, port)
@@ -459,7 +484,15 @@ def flash_one(cmd, port, erase, ip_timeout, app_ver='?', keep_peers=False):
             lo, hi = 0.0, 0.05
         bar(lo + (hi - lo) * frac, phase)
 
-    ok, err = flash(cmd, port, erase, prog)
+    with tempfile.TemporaryDirectory() as tmp:
+        extra = []
+        if secrets_cfg is not None:
+            bar(0.03, 'secrets')
+            extra, err = provision_unit(port, secrets_cfg, tmp)
+            if extra is None:
+                line(f'  {C.R}✗ SECRETS NOT PROVISIONED: {err}{C.X}')
+                return False, {'port': port, 'node': host, 'stage': 'secrets', 'err': err}
+        ok, err = flash(cmd, port, erase, prog, extra)
     if not ok:
         line(f'  {C.R}✗ FLASH FAILED: {err}{C.X}')
         return False, {'port': port, 'node': host, 'stage': 'flash', 'err': err}
@@ -561,6 +594,16 @@ def main():
     ap.add_argument(
         '--keep-peers', action='store_true', help='do NOT reset machine-peer slots (default: leave fleet-only)'
     )
+    ap.add_argument(
+        '--credentials',
+        default=provision_secrets.DEFAULT_CREDENTIALS,
+        help='secrets flashed to every unit (default tools/credentials.env)',
+    )
+    ap.add_argument('--keys-dir', default=provision_secrets.DEFAULT_KEYS_DIR, help='per-unit HMAC keys')
+    ap.add_argument(
+        '--key-block', type=int, choices=range(6), default=provision_secrets.DEFAULT_KEY_BLOCK, help='eFuse key block'
+    )
+    ap.add_argument('--no-secrets', action='store_true', help='leave the secrets partition alone')
     ap.add_argument('--selftest', action='store_true', help='exercise plumbing, no hardware')
     args = ap.parse_args()
 
@@ -578,6 +621,15 @@ def main():
             f'{C.R}ERROR: boot images {boot_miss} not staged in {IMG} '
             f'(stage bootloader/partition-table/ota_data once).{C.X}'
         )
+
+    secrets_cfg = None
+    if not args.no_secrets:
+        try:
+            text = open(args.credentials).read()
+            provision_secrets.parse_credentials(text)
+        except (OSError, ValueError) as e:
+            sys.exit(f'{C.R}ERROR: credentials {args.credentials}: {e}{C.X}\n  Fix it, or pass --no-secrets.')
+        secrets_cfg = {'credentials': text, 'keys_dir': args.keys_dir, 'key_block': args.key_block}
 
     print(f'{C.BOLD}=== pstop flashing station ==={C.X}')
 
@@ -636,7 +688,7 @@ def main():
                     app_sha, app_ver = img['sha256'], img['version']
                     line(f'{C.B}  {_prov.LABEL}: newer build → {app_ver} ({app_sha[:12]}); flashing it.{C.X}')
             line('')
-            ok, info = flash_one(cmd, port, args.erase, args.ip_timeout, app_ver, args.keep_peers)
+            ok, info = flash_one(cmd, port, args.erase, args.ip_timeout, app_ver, args.keep_peers, secrets_cfg)
             if ok:
                 n_ok += 1
             else:

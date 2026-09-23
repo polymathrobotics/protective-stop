@@ -26,6 +26,7 @@
   #include "microlink.h"
   #include "microlink_internal.h"
   #include "ml_config_httpd.h"
+  #include "ml_secrets.h"
   #include "soc/soc_caps.h"
   #if SOC_TEMP_SENSOR_SUPPORTED
     #include "driver/temperature_sensor.h"
@@ -118,7 +119,8 @@ static void config_load_settings(ml_config_ctx_t * ctx)
 
   /* Seed empty fields from Kconfig compile-time defaults.
      * This ensures the web UI displays sdkconfig values even before
-     * the user saves anything via the web interface. */
+     * the user saves anything via the web interface. Provisioned secrets are
+     * not seeded: this blob is saved to the plaintext nvs partition. */
   #define SEED_STR(field, kconfig)                     \
     do {                                               \
       if ((field)[0] == '\0' && strlen(kconfig) > 0) { \
@@ -126,9 +128,6 @@ static void config_load_settings(ml_config_ctx_t * ctx)
       }                                                \
     } while (0)
 
-  SEED_STR(ctx->settings.wifi_ssid, CONFIG_ML_WIFI_SSID);
-  SEED_STR(ctx->settings.wifi_pass, CONFIG_ML_WIFI_PASSWORD);
-  SEED_STR(ctx->settings.auth_key, CONFIG_ML_TAILSCALE_AUTH_KEY);
   SEED_STR(ctx->settings.device_prefix, CONFIG_ML_DEVICE_NAME);
   if (ctx->settings.priority_peer_ip == 0 && strlen(CONFIG_ML_PRIORITY_PEER_IP) > 0) {
     ctx->settings.priority_peer_ip = microlink_parse_ip(CONFIG_ML_PRIORITY_PEER_IP);
@@ -285,7 +284,7 @@ bool ml_config_allowlist_active(const ml_config_ctx_t * ctx)
   return ctx && ctx->filter_enabled;
 }
 
-/* Fleet coordination/OTA server VPN IP (CONFIG_ML_FLEET_SERVER_IP), parsed
+/* Fleet coordination/OTA server VPN IP (ML_SECRET_FLEET_SERVER_IP), parsed
  * once. This peer is PERMANENTLY allowed and cannot be removed from the
  * allowlist — it is the configured central management server for the devices,
  * so it must always be reachable regardless of the user-editable allowlist. */
@@ -294,7 +293,7 @@ static uint32_t ml_config_fleet_server_ip(void)
   static uint32_t ip;
   static bool parsed;
   if (!parsed) {
-    ip = microlink_parse_ip(CONFIG_ML_FLEET_SERVER_IP);
+    ip = microlink_parse_ip(ml_secrets_get(ML_SECRET_FLEET_SERVER_IP));
     parsed = true;
   }
   return ip;
@@ -546,9 +545,11 @@ static esp_err_t handler_get_settings(httpd_req_t * req)
   if (!json) return ESP_FAIL;
 
   cJSON_AddStringToObject(json, "wifi_ssid", ctx->settings.wifi_ssid);
-  /* Don't expose password in plain text — show masked */
-  cJSON_AddStringToObject(json, "wifi_pass", ctx->settings.wifi_pass[0] ? "********" : "");
-  cJSON_AddStringToObject(json, "auth_key", ctx->settings.auth_key[0] ? "********" : "");
+  /* Masked when set in NVS or provisioned */
+  cJSON_AddStringToObject(
+    json, "wifi_pass", (ctx->settings.wifi_pass[0] || ml_secrets_get(ML_SECRET_WIFI_PASSWORD)[0]) ? "********" : "");
+  cJSON_AddStringToObject(
+    json, "auth_key", (ctx->settings.auth_key[0] || ml_secrets_get(ML_SECRET_TAILSCALE_AUTH_KEY)[0]) ? "********" : "");
   cJSON_AddStringToObject(json, "device_prefix", ctx->settings.device_prefix);
 
   /* v2 fields */
