@@ -69,8 +69,7 @@ static uint64_t now_ms()
 {
   struct timespec now;
   clock_gettime(CLOCK_MONOTONIC, &now);
-  return static_cast<uint64_t>(now.tv_sec) * 1000ULL + static_cast<uint64_t>(now.tv_nsec) /
-         1000000ULL;
+  return static_cast<uint64_t>(now.tv_sec) * 1000ULL + static_cast<uint64_t>(now.tv_nsec) / 1000000ULL;
 }
 
 static remote_details_t resolve_remote_details(const device_id_t * device_id)
@@ -94,8 +93,7 @@ static remote_details_t resolve_remote_details(const device_id_t * device_id)
     // frame in run() so a live role change follows without a re-bond.
     // Unspecified (old firmware / bad decode) is stop-only = fail-safe.
     const pstop_aux_role_t role =
-      (g_active_impl->frame_role_id == remote_id) ? g_active_impl->frame_role :
-      PSTOP_AUX_ROLE_UNSPECIFIED;
+      (g_active_impl->frame_role_id == remote_id) ? g_active_impl->frame_role : PSTOP_AUX_ROLE_UNSPECIFIED;
     stop_only = !pstop_aux_role_is_operator(role);
   }
   remote_detail_set(&details, allow, heartbeat_ms, stop_only);
@@ -146,8 +144,7 @@ bool SoftwareMachineBackend::start()
   pstop_application_init(&impl_->application);
   impl_->application.app_config.max_lost_messages = 10;
   impl_->application.app_config.max_missed_heartbeats = impl_->config.timing.max_missed;
-  impl_->application.app_config.delay_between_stop_ms =
-    static_cast<uint32_t>(impl_->config.timing.min_stop_ms);
+  impl_->application.app_config.delay_between_stop_ms = static_cast<uint32_t>(impl_->config.timing.min_stop_ms);
   impl_->application.remote_details_cb = resolve_remote_details;
   impl_->application.status_cb = ignore_status;
   impl_->application.log_message_cb = ignore_log;
@@ -155,9 +152,7 @@ bool SoftwareMachineBackend::start()
 
   machine_init(&impl_->machine, &impl_->application, impl_->clients.data(), kMaxRemotes);
 
-  if (transport_udp_listen(
-      &impl_->udp_transport, impl_->config.bind_addr.c_str(), impl_->config.port) < 0)
-  {
+  if (transport_udp_listen(&impl_->udp_transport, impl_->config.bind_addr.c_str(), impl_->config.port) < 0) {
     g_active_impl = nullptr;
     return false;
   }
@@ -166,7 +161,7 @@ bool SoftwareMachineBackend::start()
 
   impl_->reachable = true;
   impl_->running = true;
-  impl_->thread = std::thread([this] {impl_->run();});
+  impl_->thread = std::thread([this] { impl_->run(); });
   return true;
 }
 
@@ -209,8 +204,7 @@ void SoftwareMachineBackend::Impl::run()
     machine_validate_heartbeats(&machine);
 
     struct sockaddr_storage client_addr;
-    int bytes_read =
-      transport_udp_read(&udp_transport, request_bytes, PSTOP_MESSAGE_SIZE, &client_addr);
+    int bytes_read = transport_udp_read(&udp_transport, request_bytes, PSTOP_MESSAGE_SIZE, &client_addr);
     if (bytes_read == PSTOP_MESSAGE_SIZE) {
       pstop_message_decode(&req_msg, request_bytes);
       // Drop a non-BOND from an unknown/timed-out remote (upstream would
@@ -220,9 +214,7 @@ void SoftwareMachineBackend::Impl::run()
       if (is_bonded || req_msg.message == PSTOP_MESSAGE_BOND) {
         frame_role_id = 0U;
         frame_role = PSTOP_AUX_ROLE_UNSPECIFIED;
-        if (req_msg.checksum == req_msg.calculated_checksum &&
-          req_msg.receiver_id.data == config.machine_id)
-        {
+        if (req_msg.checksum == req_msg.calculated_checksum && req_msg.receiver_id.data == config.machine_id) {
           frame_role_id = req_msg.id.data;
           frame_role = pstop_aux_decode_role(&req_msg);
           // Live role (shared policy, common/pstop_aux_channel.h): refresh the
@@ -240,8 +232,8 @@ void SoftwareMachineBackend::Impl::run()
         }
         if (process_result == PSTOP_OK) {
           pstop_message_encode(&resp_msg, response_bytes);
-          transport_udp_write(&udp_transport, response_bytes, PSTOP_MESSAGE_SIZE,
-              reinterpret_cast<struct sockaddr_in *>(&client_addr));
+          transport_udp_write(
+            &udp_transport, response_bytes, PSTOP_MESSAGE_SIZE, reinterpret_cast<struct sockaddr_in *>(&client_addr));
         } else if (process_result == PSTOP_OPERATOR_NOT_ALLOWED) {
           // Admission refused: pstop_c prepared an UNBOND reply but left the
           // addressing blank. Fill it and send it so the remote learns it was
@@ -251,8 +243,8 @@ void SoftwareMachineBackend::Impl::run()
           resp_msg.received_counter = req_msg.counter;
           resp_msg.received_stamp = req_msg.stamp;
           pstop_message_encode(&resp_msg, response_bytes);
-          transport_udp_write(&udp_transport, response_bytes, PSTOP_MESSAGE_SIZE,
-              reinterpret_cast<struct sockaddr_in *>(&client_addr));
+          transport_udp_write(
+            &udp_transport, response_bytes, PSTOP_MESSAGE_SIZE, reinterpret_cast<struct sockaddr_in *>(&client_addr));
         }
         frame_role_id = 0U;
         frame_role = PSTOP_AUX_ROLE_UNSPECIFIED;
@@ -274,9 +266,8 @@ void SoftwareMachineBackend::Impl::rebuild_snapshot()
   rebuilt.relay.applicable = false;
   rebuilt.relay.run = rebuilt.running;
   rebuilt.relay.relay_stop = !rebuilt.running;
-  rebuilt.status_reason =
-    rebuilt.running ? "armed (cleared to run)" :
-    (rebuilt.need_stop ? "need_stop (awaiting arming gesture)" : "stopped");
+  rebuilt.status_reason = rebuilt.running ? "armed (cleared to run)"
+                                          : (rebuilt.need_stop ? "need_stop (awaiting arming gesture)" : "stopped");
 
   for (uint16_t slot = 0; slot < machine.remotes.max_remotes; ++slot) {
     const pstop_remote_data_t * remote_slot = &machine.remotes.remotes[slot];
@@ -285,9 +276,7 @@ void SoftwareMachineBackend::Impl::rebuild_snapshot()
     // or unbonds (it only sets remote_state = UNKNOWN, like the library's own
     // is-free tests), so filtering on the ids alone reports ghost remotes.
     // Also skip a never-populated slot (remote_id 0).
-    if (remote_slot->remote_state == PSTOP_REMOTE_UNKNOWN ||
-      remote_slot->remote_data.remote_id.data == 0U)
-    {
+    if (remote_slot->remote_state == PSTOP_REMOTE_UNKNOWN || remote_slot->remote_data.remote_id.data == 0U) {
       continue;
     }
     RemoteInfo remote;
@@ -295,8 +284,9 @@ void SoftwareMachineBackend::Impl::rebuild_snapshot()
     std::snprintf(id_text, sizeof(id_text), "%08x", remote_slot->remote_data.remote_id.data);
     remote.device_id = id_text;
     // Map pstop remote_state -> bond_state (1 connecting, 2 bonded, 3 stopped).
-    remote.bond_state = remote_slot->remote_state ==
-      PSTOP_REMOTE_INITING ? 1 : (remote_slot->remote_state == PSTOP_REMOTE_STOPPED ? 3 : 2);
+    remote.bond_state = remote_slot->remote_state == PSTOP_REMOTE_INITING
+                          ? 1
+                          : (remote_slot->remote_state == PSTOP_REMOTE_STOPPED ? 3 : 2);
     remote.in_use = robot_state->remote_stop_id == remote_slot->local_remote_id;
     remote.stop_only = remote_slot->is_stop_only;
     // reply_age / rtt / rebonds are microlink-side metrics not tracked by

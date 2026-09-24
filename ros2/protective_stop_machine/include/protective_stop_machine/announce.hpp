@@ -130,9 +130,7 @@ inline std::string build_announce_payload(
 class MachineAnnouncer
 {
 public:
-  MachineAnnouncer(
-    AnnounceConfig config, int port, uint32_t machine_id,
-    std::function<MachineSnapshot()> snapshot_fn);
+  MachineAnnouncer(AnnounceConfig config, int port, uint32_t machine_id, std::function<MachineSnapshot()> snapshot_fn);
   ~MachineAnnouncer();
 
   MachineAnnouncer(const MachineAnnouncer &) = delete;
@@ -166,4 +164,3 @@ private:
 };
 
 }  // namespace protective_stop_machine
-

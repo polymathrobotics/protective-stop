@@ -108,4 +108,3 @@ public:
 };
 
 }  // namespace protective_stop_machine
-

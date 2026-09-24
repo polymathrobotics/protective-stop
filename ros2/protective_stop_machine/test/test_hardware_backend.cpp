@@ -29,10 +29,9 @@ using pstop_test::LoopbackHttpStub;
 static constexpr const char * kClosedUrl = "http://127.0.0.1:9";
 
 // Poll snapshot() until pred holds or the deadline passes.
-template<typename Pred>
+template <typename Pred>
 static bool wait_for(
-  HardwareMachineBackend & backend, Pred pred,
-  std::chrono::milliseconds timeout = std::chrono::seconds(3))
+  HardwareMachineBackend & backend, Pred pred, std::chrono::milliseconds timeout = std::chrono::seconds(3))
 {
   const auto deadline = std::chrono::steady_clock::now() + timeout;
   while (std::chrono::steady_clock::now() < deadline) {
@@ -61,9 +60,7 @@ TEST(HwBackend, PollsStubRunning)
   HardwareMachineBackend backend(config_for(stub.url()));
   ASSERT_TRUE(backend.start());
   EXPECT_TRUE(
-    wait_for(
-      backend,
-      [](const MachineSnapshot & snapshot) {return snapshot.reachable && snapshot.running;}));
+    wait_for(backend, [](const MachineSnapshot & snapshot) { return snapshot.reachable && snapshot.running; }));
   backend.stop();
   // stop() wipes the snapshot -> unreachable (blind), never latched "run".
   EXPECT_FALSE(backend.snapshot().reachable);
@@ -76,9 +73,7 @@ TEST(HwBackend, PollsStubStopped)
   HardwareMachineBackend backend(config_for(stub.url()));
   ASSERT_TRUE(backend.start());
   EXPECT_TRUE(
-    wait_for(
-      backend,
-      [](const MachineSnapshot & snapshot) {return snapshot.reachable && !snapshot.running;}));
+    wait_for(backend, [](const MachineSnapshot & snapshot) { return snapshot.reachable && !snapshot.running; }));
   backend.stop();
 }
 
@@ -89,9 +84,7 @@ TEST(HwBackend, PollsStubEnumeratesRemote)
   LoopbackHttpStub stub(R"({"relay_stop":true,"bonded_remotes":[{"id":5,"state":2}]})");
   HardwareMachineBackend backend(config_for(stub.url()));
   ASSERT_TRUE(backend.start());
-  EXPECT_TRUE(
-    wait_for(
-      backend, [](const MachineSnapshot & snapshot) {return snapshot.active_remotes == 1U;}));
+  EXPECT_TRUE(wait_for(backend, [](const MachineSnapshot & snapshot) { return snapshot.active_remotes == 1U; }));
   backend.stop();
 }
 
@@ -101,7 +94,7 @@ TEST(HwBackend, ClosedPortUnreachable)
   HardwareMachineBackend backend(config_for(kClosedUrl));
   ASSERT_TRUE(backend.start());
   EXPECT_TRUE(wait_for(backend, [](const MachineSnapshot & snapshot) {
-      return !snapshot.reachable && snapshot.status_reason.find("unreachable") != std::string::npos;
+    return !snapshot.reachable && snapshot.status_reason.find("unreachable") != std::string::npos;
   }));
   backend.stop();
 }
@@ -112,8 +105,7 @@ TEST(HwBackend, Non2xxUnreachable)
   LoopbackHttpStub stub(R"({"relay_stop":false})", 503);
   HardwareMachineBackend backend(config_for(stub.url()));
   ASSERT_TRUE(backend.start());
-  EXPECT_TRUE(
-    wait_for(backend, [](const MachineSnapshot & snapshot) {return !snapshot.reachable;}));
+  EXPECT_TRUE(wait_for(backend, [](const MachineSnapshot & snapshot) { return !snapshot.reachable; }));
   backend.stop();
 }
 
@@ -188,7 +180,7 @@ TEST(HwBackend, PollWithBasicAuth)
   config.admin_pass = "s3cret";
   HardwareMachineBackend backend(config);
   ASSERT_TRUE(backend.start());
-  EXPECT_TRUE(wait_for(backend, [](const MachineSnapshot & snapshot) {return snapshot.reachable;}));
+  EXPECT_TRUE(wait_for(backend, [](const MachineSnapshot & snapshot) { return snapshot.reachable; }));
   backend.stop();
 }
 

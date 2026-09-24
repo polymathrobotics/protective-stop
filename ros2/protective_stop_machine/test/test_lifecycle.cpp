@@ -72,8 +72,7 @@ TEST_F(Lifecycle, RejectsOversizeHeartbeat)
 {
   EXPECT_THROW(
     std::make_shared<MachineBridgeNode>(
-      with({rclcpp::Parameter("backend", "software"),
-        rclcpp::Parameter("timing.heartbeat_ms", 5000)})),
+      with({rclcpp::Parameter("backend", "software"), rclcpp::Parameter("timing.heartbeat_ms", 5000)})),
     rclcpp::exceptions::InvalidParameterValueException);
 }
 

@@ -47,8 +47,7 @@ private:
   /// @brief Applies a live timing.* set by pushing it to the backend.
   /// The SR-M-01 floors are enforced by the generated ParamListener before this
   /// runs; a backend refusal is the only rejection made here.
-  rcl_interfaces::msg::SetParametersResult on_set_parameters(
-    const std::vector<rclcpp::Parameter> & params);
+  rcl_interfaces::msg::SetParametersResult on_set_parameters(const std::vector<rclcpp::Parameter> & params);
 
   ParamListener param_listener_;
   Params params_;
@@ -73,18 +72,13 @@ private:
   std::unique_ptr<MachineAnnouncer> announcer_;
   std::unique_ptr<FleetCheckin> fleet_checkin_;
 
-  rclcpp_lifecycle::LifecyclePublisher<protective_stop_msg::msg::ProtectiveStopStatus>::SharedPtr
-    state_pub_;
-  rclcpp_lifecycle::LifecyclePublisher<protective_stop_msg::msg::MachineRelayStatus>::SharedPtr
-    relay_pub_;
-  rclcpp_lifecycle::LifecyclePublisher<protective_stop_msg::msg::BondedRemoteArray>::SharedPtr
-    remotes_pub_;
-  rclcpp_lifecycle::LifecyclePublisher<
-    protective_stop_msg::msg::ProtectiveStopHeartbeat>::SharedPtr heartbeat_pub_;
+  rclcpp_lifecycle::LifecyclePublisher<protective_stop_msg::msg::ProtectiveStopStatus>::SharedPtr state_pub_;
+  rclcpp_lifecycle::LifecyclePublisher<protective_stop_msg::msg::MachineRelayStatus>::SharedPtr relay_pub_;
+  rclcpp_lifecycle::LifecyclePublisher<protective_stop_msg::msg::BondedRemoteArray>::SharedPtr remotes_pub_;
+  rclcpp_lifecycle::LifecyclePublisher<protective_stop_msg::msg::ProtectiveStopHeartbeat>::SharedPtr heartbeat_pub_;
   rclcpp::TimerBase::SharedPtr pub_timer_;
   std::shared_ptr<diagnostic_updater::Updater> diagnostics_updater_;
   rclcpp::node_interfaces::OnSetParametersCallbackHandle::SharedPtr param_cb_handle_;
 };
 
 }  // namespace protective_stop_machine
-

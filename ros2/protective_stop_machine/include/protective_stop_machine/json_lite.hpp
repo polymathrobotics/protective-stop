@@ -294,9 +294,8 @@ private:
     if (peek() == '-') {
       ++i_;
     }
-    while (i_ < s_.size() &&
-      (std::isdigit(static_cast<unsigned char>(s_[i_])) || s_[i_] == '.' || s_[i_] == 'e' ||
-      s_[i_] == 'E' || s_[i_] == '+' || s_[i_] == '-'))
+    while (i_ < s_.size() && (std::isdigit(static_cast<unsigned char>(s_[i_])) || s_[i_] == '.' || s_[i_] == 'e' ||
+                              s_[i_] == 'E' || s_[i_] == '+' || s_[i_] == '-'))
     {
       ++i_;
     }
@@ -340,4 +339,3 @@ inline bool parse(const std::string & text, Value & out)
 }
 
 }  // namespace jsonlite
-
