@@ -57,13 +57,13 @@ extern "C"
                                    * reboots, and leave no visible way back. Mirrors the
                                    * locate-mode timeout's anti-masking principle. */
 
-  /* Single floor-clamp for the brightness value — used by the NVS read path,
+/* Single floor-clamp for the brightness value — used by the NVS read path,
  * the ring setter and the API handler so the three sites cannot drift.
  * Sub-floor values clamp UP (never reject/blank). */
-  static inline uint8_t dcs_led_brightness_floor(uint8_t pct)
-  {
-    return (pct < DCS_LED_BRIGHTNESS_MIN) ? (uint8_t)DCS_LED_BRIGHTNESS_MIN : pct;
-  }
+static inline uint8_t dcs_led_brightness_floor(uint8_t pct)
+{
+  return (pct < DCS_LED_BRIGHTNESS_MIN) ? (uint8_t)DCS_LED_BRIGHTNESS_MIN : pct;
+}
 
 #define DCS_RST_HIST_LEN 16
 
@@ -84,145 +84,145 @@ extern "C"
  * (100, IDF default). The dcs_net_supervisor enforces the same order at 1 Hz. */
 #define DCS_ETH_ROUTE_PRIO 128
 
-  /* Active-interface codes published by dcs_net_supervisor for /state.json. */
-  typedef enum
-  {
-    DCS_IFACE_NONE = 0,
-    DCS_IFACE_ETH = 1, /* W5500 wired Ethernet */
-    DCS_IFACE_USB = 2, /* USB-CDC-NCM tether   */
-    DCS_IFACE_WIFI = 3, /* WiFi STA             */
-    DCS_IFACE_AP = 4, /* SoftAP setup mode    */
-  } dcs_iface_t;
+/* Active-interface codes published by dcs_net_supervisor for /state.json. */
+typedef enum
+{
+  DCS_IFACE_NONE = 0,
+  DCS_IFACE_ETH = 1, /* W5500 wired Ethernet */
+  DCS_IFACE_USB = 2, /* USB-CDC-NCM tether   */
+  DCS_IFACE_WIFI = 3, /* WiFi STA             */
+  DCS_IFACE_AP = 4, /* SoftAP setup mode    */
+} dcs_iface_t;
 
-  /* esp_netif if_key for an interface code, or NULL for NONE. Single source of
+/* esp_netif if_key for an interface code, or NULL for NONE. Single source of
  * truth shared by the supervisor, net-liveness, and the RGB LED so the keys
  * can't drift between modules. Keys must match how each netif is created:
  * dcs_eth.c ("DCS_ETH"), ml_dev_tether.c ("USB_NCM"), and IDF's
  * esp_netif_create_default_wifi_sta/ap ("WIFI_STA_DEF" / "WIFI_AP_DEF"). */
-  static inline const char * dcs_iface_ifkey(dcs_iface_t iface)
-  {
-    switch (iface) {
-      case DCS_IFACE_ETH:
-        return "DCS_ETH";
-      case DCS_IFACE_USB:
-        return "USB_NCM";
-      case DCS_IFACE_WIFI:
-        return "WIFI_STA_DEF";
-      case DCS_IFACE_AP:
-        return "WIFI_AP_DEF";
-      default:
-        return NULL;
-    }
+static inline const char * dcs_iface_ifkey(dcs_iface_t iface)
+{
+  switch (iface) {
+    case DCS_IFACE_ETH:
+      return "DCS_ETH";
+    case DCS_IFACE_USB:
+      return "USB_NCM";
+    case DCS_IFACE_WIFI:
+      return "WIFI_STA_DEF";
+    case DCS_IFACE_AP:
+      return "WIFI_AP_DEF";
+    default:
+      return NULL;
   }
+}
 
-  /* Resolved boot state — exact same shape as dcs_boot_state_t but referenced
+/* Resolved boot state — exact same shape as dcs_boot_state_t but referenced
  * from inside the component to avoid a circular include. */
-  typedef struct
-  {
-    bool usb_enabled;
-    bool ts_boot_en;
-    bool derp_only_mode;
-    uint16_t boot_count;
-    uint8_t reset_reason;
-    uint8_t ctrl_reset_cause; /* one-shot crumb taken at boot (DCS_CTRL_RST_*) */
-    bool crash_present; /* a coredump image sits in flash (cleared only by the next crash) */
-    uint32_t crash_pc; /* coredump summary: exception PC */
-    char crash_task[16]; /* coredump summary: crashing task name */
-    char crash_sha[17]; /* coredump summary: first 16 hex chars of the crashing
+typedef struct
+{
+  bool usb_enabled;
+  bool ts_boot_en;
+  bool derp_only_mode;
+  uint16_t boot_count;
+  uint8_t reset_reason;
+  uint8_t ctrl_reset_cause; /* one-shot crumb taken at boot (DCS_CTRL_RST_*) */
+  bool crash_present; /* a coredump image sits in flash (cleared only by the next crash) */
+  uint32_t crash_pc; /* coredump summary: exception PC */
+  char crash_task[16]; /* coredump summary: crashing task name */
+  char crash_sha[17]; /* coredump summary: first 16 hex chars of the crashing
                          * app's ELF SHA — dates the core to an exact build */
-    uint8_t xcheck_detail; /* one-shot xc_det crumb: (code<<4)|stalled_core,
+  uint8_t xcheck_detail; /* one-shot xc_det crumb: (code<<4)|stalled_core,
                             * nonzero only when ctrl_reset_cause==XCHECK */
-    microlink_t * ml_handle;
-    ml_app_t * app;
-  } dcs_state_t;
+  microlink_t * ml_handle;
+  ml_app_t * app;
+} dcs_state_t;
 
-  /* The one process-wide instance. Populated by dcs_support_init(). */
-  extern dcs_state_t g_dcs;
+/* The one process-wide instance. Populated by dcs_support_init(). */
+extern dcs_state_t g_dcs;
 
-  /* Atomic telemetry sinks — published by main.c via dcs_publish_*, read by
+/* Atomic telemetry sinks — published by main.c via dcs_publish_*, read by
  * dcs_admin_pages.c's /state.json handler. */
-  extern atomic_uint_fast32_t g_dcs_core_tick[2];
-  extern atomic_uint_fast32_t g_dcs_core_verdict[2];
-  extern atomic_uint_fast32_t g_dcs_load_pct[2];
+extern atomic_uint_fast32_t g_dcs_core_tick[2];
+extern atomic_uint_fast32_t g_dcs_core_verdict[2];
+extern atomic_uint_fast32_t g_dcs_load_pct[2];
 
-  /* E-stop loop diagnostics, published by main.c's core tasks (per channel):
+/* E-stop loop diagnostics, published by main.c's core tasks (per channel):
  * high_ok=1 → last drive-high tick echoed high (loop continuity proven);
  * low_ok=1  → last drive-low tick echoed low (no stuck-high short).
  * Both 1 ⇒ that channel's loop is closed-and-healthy. Read by /state.json so a
  * single-leg fault (which the DPST button can't reproduce — it opens both
  * poles) is pinpointable: which channel, and continuity-loss vs stuck-high. */
-  extern atomic_uint_fast32_t g_dcs_estop_high_ok[2];
-  extern atomic_uint_fast32_t g_dcs_estop_low_ok[2];
+extern atomic_uint_fast32_t g_dcs_estop_high_ok[2];
+extern atomic_uint_fast32_t g_dcs_estop_low_ok[2];
 
-  /* Dual-core mutual clock cross-check (SR-H-04 / DU-2). fault: 0=healthy,
+/* Dual-core mutual clock cross-check (SR-H-04 / DU-2). fault: 0=healthy,
    * 1=peer task/heartbeat stalled, 2=peer esp_timer clock frozen/backward.
    * hb[c] = the per-core heartbeat counter core c last published. Read by
    * /state.json so a cross-check trip is visible before the controlled reset. */
-  extern atomic_uint_fast32_t g_dcs_xcheck_fault;
-  extern atomic_uint_fast32_t g_dcs_xcheck_hb[2];
+extern atomic_uint_fast32_t g_dcs_xcheck_fault;
+extern atomic_uint_fast32_t g_dcs_xcheck_hb[2];
 
-  /* E-stop GPIO pad-config re-verification (SR-R-09 / DU-1). 0=both channels'
+/* E-stop GPIO pad-config re-verification (SR-R-09 / DU-1). 0=both channels'
    * pad config verified good this cycle; nonzero=latched config-integrity fault
    * (bit0 = channel A / GPIO40, bit1 = channel B / GPIO42). Read by /state.json
    * as gpio_cfg_fault so a lost pull-down (open loop -> false-OK) is visible. */
-  extern atomic_uint_fast32_t g_dcs_gpio_cfg_fault;
+extern atomic_uint_fast32_t g_dcs_gpio_cfg_fault;
 
-  extern atomic_uint_fast32_t g_dcs_pstop_sent;
-  extern atomic_uint_fast32_t g_dcs_pstop_replies; /* machine replies received */
-  extern atomic_uint_fast32_t g_dcs_pstop_last_msg; /* last message TYPE from the machine (PSTOP_MESSAGE_*) */
-  extern atomic_uint_fast32_t g_dcs_pstop_mismatch;
-  /* pstop_mismatch attribution (soak item 5; comparator-written; /state.json pstop_mm_*): [0] timeout-class
+extern atomic_uint_fast32_t g_dcs_pstop_sent;
+extern atomic_uint_fast32_t g_dcs_pstop_replies; /* machine replies received */
+extern atomic_uint_fast32_t g_dcs_pstop_last_msg; /* last message TYPE from the machine (PSTOP_MESSAGE_*) */
+extern atomic_uint_fast32_t g_dcs_pstop_mismatch;
+/* pstop_mismatch attribution (soak item 5; comparator-written; /state.json pstop_mm_*): [0] timeout-class
    * count (a core missed CORE_PUBLISH_TIMEOUT), [1] content-class count (both published, frames differed),
    * [2] last event packed = kind<<28 (1 timeout, 2 content) | late_core_mask<<26 (bit0 core0, bit1 core1) |
    * slot<<24 | first_differing_byte<<16 (0xFF n/a) | verdict0<<8 | verdict1 (on a timeout record the LATE core's
    * verdict byte is from its previous publish — the late mask says which), [3] slowest late core's actual
    * notify->publish ms for a timeout record (0 = not landed yet / n/a for a content record), [4] last event
    * uptime ms, [5],[6] worst notify->publish ms per core this boot, including late publishes. */
-  extern atomic_uint_fast32_t g_dcs_pstop_mm[7];
-  /* Seqlock for g_dcs_pstop_mm: the comparator (single writer) bumps it before and after the 7 stores, so it is
+extern atomic_uint_fast32_t g_dcs_pstop_mm[7];
+/* Seqlock for g_dcs_pstop_mm: the comparator (single writer) bumps it before and after the 7 stores, so it is
    * odd while the record is in flux. Readers use dcs_pstop_mm_snapshot() and never see two events mixed. */
-  extern atomic_uint_fast32_t g_dcs_pstop_mm_seq;
-  void dcs_pstop_mm_snapshot(uint32_t out[7]);
-  /* Last dcs-side NVS write (dcs_nvs.c times EVERY read-write handle open->close; both cores stall for the
+extern atomic_uint_fast32_t g_dcs_pstop_mm_seq;
+void dcs_pstop_mm_snapshot(uint32_t out[7]);
+/* Last dcs-side NVS write (dcs_nvs.c times EVERY read-write handle open->close; both cores stall for the
    * flash op), ONE 64-bit word so start and duration are always from the same write: start uptime ms << 32 |
    * duration ms; plus the max duration this boot. Peer-cache flushes have their own diag
    * (ml_peer_nvs_get_flush_diag). /state.json nvs_dcs = [start, duration, max] / nvs_pf. */
-  extern atomic_uint_fast64_t g_dcs_nvs_write;
-  extern atomic_uint_fast32_t g_dcs_nvs_write_max;
-  extern atomic_uint_fast32_t g_dcs_pstop_send_fail;
-  /* send_fail split by cause (errno at the failing sendto): ENOMEM =
+extern atomic_uint_fast64_t g_dcs_nvs_write;
+extern atomic_uint_fast32_t g_dcs_nvs_write_max;
+extern atomic_uint_fast32_t g_dcs_pstop_send_fail;
+/* send_fail split by cause (errno at the failing sendto): ENOMEM =
    * TX-queue/pbuf pressure (typically DERP relay backpressure), route =
    * EHOSTUNREACH/ENETUNREACH/EADDRNOTAVAIL (no path / tunnel down), other =
    * everything else. last_errno is the most recent failure's raw errno. */
-  extern atomic_uint_fast32_t g_dcs_pstop_sf_nomem;
-  extern atomic_uint_fast32_t g_dcs_pstop_sf_route;
-  extern atomic_uint_fast32_t g_dcs_pstop_sf_txdrv; /* lwip ERR_IF: uplink driver TX refused */
-  extern atomic_uint_fast32_t g_dcs_pstop_sf_txdrv_recovered; /* transient ERR_IF absorbed by same-tick retry */
-  extern atomic_uint_fast32_t g_dcs_pstop_sf_other;
-  /* ENOTCONN split out of "other": WG peer-present-but-no-keypair — the far
+extern atomic_uint_fast32_t g_dcs_pstop_sf_nomem;
+extern atomic_uint_fast32_t g_dcs_pstop_sf_route;
+extern atomic_uint_fast32_t g_dcs_pstop_sf_txdrv; /* lwip ERR_IF: uplink driver TX refused */
+extern atomic_uint_fast32_t g_dcs_pstop_sf_txdrv_recovered; /* transient ERR_IF absorbed by same-tick retry */
+extern atomic_uint_fast32_t g_dcs_pstop_sf_other;
+/* ENOTCONN split out of "other": WG peer-present-but-no-keypair — the far
    * side doesn't know our key (rebooted machine, netmap absent; 2026-08-08
    * incident). kicks = how many times the sustained-ENOTCONN escalation
    * (re-handshake + coord re-announce) fired. */
-  extern atomic_uint_fast32_t g_dcs_pstop_sf_enotconn;
-  extern atomic_uint_fast32_t g_dcs_pstop_sf_enotconn_kicks;
-  extern atomic_int g_dcs_pstop_sf_last_errno;
-  extern atomic_uint_fast32_t g_dcs_pstop_rebonds; /* link re-syncs after reply loss */
-  /* Machine-role relay supervision (always 0 on remotes): consecutive
+extern atomic_uint_fast32_t g_dcs_pstop_sf_enotconn;
+extern atomic_uint_fast32_t g_dcs_pstop_sf_enotconn_kicks;
+extern atomic_int g_dcs_pstop_sf_last_errno;
+extern atomic_uint_fast32_t g_dcs_pstop_rebonds; /* link re-syncs after reply loss */
+/* Machine-role relay supervision (always 0 on remotes): consecutive
    * contradiction ticks per channel + whether the persistent-fault stop
    * is currently forcing the robot STOPPED. */
-  extern atomic_uint_fast32_t g_dcs_relay_fault_a;
-  extern atomic_uint_fast32_t g_dcs_relay_fault_b;
-  extern atomic_uint_fast32_t g_dcs_relay_stop;
-  /* 1 = relay feedback is being sampled; 0 = descoped/not monitored (also the
+extern atomic_uint_fast32_t g_dcs_relay_fault_a;
+extern atomic_uint_fast32_t g_dcs_relay_fault_b;
+extern atomic_uint_fast32_t g_dcs_relay_stop;
+/* 1 = relay feedback is being sampled; 0 = descoped/not monitored (also the
    * default on remotes, which never publish). Lets consumers distinguish "no
    * fault" from "not monitored". */
-  extern atomic_uint_fast32_t g_dcs_relay_feedback_monitored;
+extern atomic_uint_fast32_t g_dcs_relay_feedback_monitored;
 
-  /* Machine-role bonded-remote table (all 0 on remotes): per entry the
+/* Machine-role bonded-remote table (all 0 on remotes): per entry the
    * remote's device id (0 = empty), pstop_remote_state_t, ms since last
    * accepted message, and stamp-echo RTT (includes the remote's hold time
    * between our reply and its next send — an upper bound, not a path RTT). */
-  /* Machine-role arming/restart state (always 0 on remotes), published once
+/* Machine-role arming/restart state (always 0 on remotes), published once
    * per comparator tick from core 0's pstop_c instance (lockstep — see the
    * publish site in machn/main/main.c for the diagnostics-safety argument):
    * arm_owner = robot_state.remote_stop_id (the remote id that owns the
@@ -231,21 +231,21 @@ extern "C"
    * Together these answer "who armed/stopped it, and will it accept an OK" —
    * the two facts missing during the 2026-08 disarmed-but-reported-green and
    * misdiagnosed-arming-failure incidents. */
-  extern atomic_uint_fast32_t g_dcs_machn_arm_owner;
-  extern atomic_uint_fast32_t g_dcs_machn_restart_state;
+extern atomic_uint_fast32_t g_dcs_machn_arm_owner;
+extern atomic_uint_fast32_t g_dcs_machn_restart_state;
 
-  extern atomic_uint_fast32_t g_dcs_machn_r_id[DCS_MACHN_MAX_REMOTES];
-  extern atomic_uint_fast32_t g_dcs_machn_r_state[DCS_MACHN_MAX_REMOTES];
-  extern atomic_uint_fast32_t g_dcs_machn_r_age_ms[DCS_MACHN_MAX_REMOTES];
-  extern atomic_uint_fast32_t g_dcs_machn_r_rtt_ms[DCS_MACHN_MAX_REMOTES];
-  extern atomic_uint_fast32_t g_dcs_machn_r_ip[DCS_MACHN_MAX_REMOTES]; /* UDP source = remote's tailnet IP */
-  extern atomic_uint_fast32_t g_dcs_machn_r_stop_only[DCS_MACHN_MAX_REMOTES]; /* 1 = stop-only (no re-arm) */
-  extern atomic_uint_fast32_t g_dcs_pstop_rtt_ms;
-  extern atomic_uint_fast64_t g_dcs_pstop_last_reply_ms;
-  extern atomic_uint_fast32_t g_dcs_pstop_peer_ip;
-  extern atomic_uint_fast32_t g_dcs_pstop_peer_port;
+extern atomic_uint_fast32_t g_dcs_machn_r_id[DCS_MACHN_MAX_REMOTES];
+extern atomic_uint_fast32_t g_dcs_machn_r_state[DCS_MACHN_MAX_REMOTES];
+extern atomic_uint_fast32_t g_dcs_machn_r_age_ms[DCS_MACHN_MAX_REMOTES];
+extern atomic_uint_fast32_t g_dcs_machn_r_rtt_ms[DCS_MACHN_MAX_REMOTES];
+extern atomic_uint_fast32_t g_dcs_machn_r_ip[DCS_MACHN_MAX_REMOTES]; /* UDP source = remote's tailnet IP */
+extern atomic_uint_fast32_t g_dcs_machn_r_stop_only[DCS_MACHN_MAX_REMOTES]; /* 1 = stop-only (no re-arm) */
+extern atomic_uint_fast32_t g_dcs_pstop_rtt_ms;
+extern atomic_uint_fast64_t g_dcs_pstop_last_reply_ms;
+extern atomic_uint_fast32_t g_dcs_pstop_peer_ip;
+extern atomic_uint_fast32_t g_dcs_pstop_peer_port;
 
-  /* === Multi-machine peer table + per-machine telemetry. ==================
+/* === Multi-machine peer table + per-machine telemetry. ==================
  *
  * Up to DCS_PSTOP_MAX_MACHINES machine targets (slots). Slot 0 is mirrored
  * into the legacy g_dcs_pstop_peer_ip/port atomics and the legacy NVS keys
@@ -258,58 +258,58 @@ extern "C"
  * benign by design: the wrong-id packet is rejected by the machine and the
  * session re-bonds on the next tick — fail-safe, never fail-wrong. */
 
-  extern atomic_uint_fast64_t g_dcs_pstop_slot_ep[DCS_PSTOP_MAX_MACHINES];
-  extern atomic_uint_fast32_t g_dcs_pstop_slot_id[DCS_PSTOP_MAX_MACHINES];
+extern atomic_uint_fast64_t g_dcs_pstop_slot_ep[DCS_PSTOP_MAX_MACHINES];
+extern atomic_uint_fast32_t g_dcs_pstop_slot_id[DCS_PSTOP_MAX_MACHINES];
 
-  /* Per-machine telemetry sinks, published by main.c's comparator via
+/* Per-machine telemetry sinks, published by main.c's comparator via
  * dcs_publish_pstop_machine(); read by /state.json and the LED ring. */
-  extern atomic_uint_fast32_t g_dcs_pstop_m_sent[DCS_PSTOP_MAX_MACHINES];
-  extern atomic_uint_fast32_t g_dcs_pstop_m_replies[DCS_PSTOP_MAX_MACHINES];
-  extern atomic_uint_fast32_t g_dcs_pstop_m_send_fail[DCS_PSTOP_MAX_MACHINES];
-  extern atomic_uint_fast32_t g_dcs_pstop_m_rebonds[DCS_PSTOP_MAX_MACHINES];
-  extern atomic_uint_fast32_t g_dcs_pstop_m_rtt_ms[DCS_PSTOP_MAX_MACHINES];
-  extern atomic_uint_fast32_t g_dcs_pstop_m_hb_ms[DCS_PSTOP_MAX_MACHINES]; /* machine-requested heartbeat window */
-  extern atomic_uint_fast32_t g_dcs_pstop_m_last_msg[DCS_PSTOP_MAX_MACHINES];
-  extern atomic_uint_fast32_t g_dcs_pstop_m_state[DCS_PSTOP_MAX_MACHINES]; /* 0=idle 1=bonding 2=bonded */
-  extern atomic_uint_fast64_t g_dcs_pstop_m_last_reply_ms[DCS_PSTOP_MAX_MACHINES];
+extern atomic_uint_fast32_t g_dcs_pstop_m_sent[DCS_PSTOP_MAX_MACHINES];
+extern atomic_uint_fast32_t g_dcs_pstop_m_replies[DCS_PSTOP_MAX_MACHINES];
+extern atomic_uint_fast32_t g_dcs_pstop_m_send_fail[DCS_PSTOP_MAX_MACHINES];
+extern atomic_uint_fast32_t g_dcs_pstop_m_rebonds[DCS_PSTOP_MAX_MACHINES];
+extern atomic_uint_fast32_t g_dcs_pstop_m_rtt_ms[DCS_PSTOP_MAX_MACHINES];
+extern atomic_uint_fast32_t g_dcs_pstop_m_hb_ms[DCS_PSTOP_MAX_MACHINES]; /* machine-requested heartbeat window */
+extern atomic_uint_fast32_t g_dcs_pstop_m_last_msg[DCS_PSTOP_MAX_MACHINES];
+extern atomic_uint_fast32_t g_dcs_pstop_m_state[DCS_PSTOP_MAX_MACHINES]; /* 0=idle 1=bonding 2=bonded */
+extern atomic_uint_fast64_t g_dcs_pstop_m_last_reply_ms[DCS_PSTOP_MAX_MACHINES];
 
-  /* Set + persist one peer slot (0..DCS_PSTOP_MAX_MACHINES-1). configured=false
+/* Set + persist one peer slot (0..DCS_PSTOP_MAX_MACHINES-1). configured=false
  * clears the slot. Slot 0 also updates the legacy atomics + NVS keys. Used by
  * the /api/pstop_peer(s) handlers. */
-  esp_err_t dcs_pstop_set_peer_slot(int slot, bool configured, uint32_t ip, uint16_t port, uint32_t machine_id);
+esp_err_t dcs_pstop_set_peer_slot(int slot, bool configured, uint32_t ip, uint16_t port, uint32_t machine_id);
 
-  /* WG-manager pause state (legacy /api/wg toggle). */
-  extern TaskHandle_t g_dcs_wg_handle;
-  extern atomic_int g_dcs_wg_paused;
+/* WG-manager pause state (legacy /api/wg toggle). */
+extern TaskHandle_t g_dcs_wg_handle;
+extern atomic_int g_dcs_wg_paused;
 
-  /* Heap-watermark snapshot maintained by load_sampler. */
-  extern atomic_uint_fast32_t g_dcs_heap_min_internal;
+/* Heap-watermark snapshot maintained by load_sampler. */
+extern atomic_uint_fast32_t g_dcs_heap_min_internal;
 
-  /* Currently-active network interface (dcs_iface_t), published by the
+/* Currently-active network interface (dcs_iface_t), published by the
  * net supervisor every second, read by /state.json. */
-  extern atomic_int g_dcs_active_iface;
+extern atomic_int g_dcs_active_iface;
 
-  /* W5500 SPI-Ethernet health-watchdog telemetry (dcs_eth.c), read by
+/* W5500 SPI-Ethernet health-watchdog telemetry (dcs_eth.c), read by
  * /state.json. recoveries = ladders that restored the link; rec_r1/r2/r3 =
  * per-rung success counts (stop-start / reinstall / HW-reset+reinstall);
  * rec_reason = last trip cause (0 none, 1 SPI-probe fault, 2 black-hole);
  * spi_err = cumulative read-only SPI-probe failures. All monotonic; a rising
  * value flags a wedge that self-healed rather than requiring a power-cycle. */
-  extern atomic_uint_fast32_t g_dcs_eth_recoveries;
-  extern atomic_uint_fast32_t g_dcs_eth_rec_r1;
-  extern atomic_uint_fast32_t g_dcs_eth_rec_r2;
-  extern atomic_uint_fast32_t g_dcs_eth_rec_r3;
-  extern atomic_uint_fast32_t g_dcs_eth_rec_reason;
-  extern atomic_uint_fast32_t g_dcs_eth_spi_err;
-  extern atomic_uint_fast32_t g_dcs_eth_int_low_ticks; /* W5500 INT-line gauge: 20 ms samples that found INT asserted */
-  extern atomic_uint_fast32_t g_dcs_eth_int_low_max_ms; /* longest SAMPLED continuous INT-low span, ms (stall gauge) */
+extern atomic_uint_fast32_t g_dcs_eth_recoveries;
+extern atomic_uint_fast32_t g_dcs_eth_rec_r1;
+extern atomic_uint_fast32_t g_dcs_eth_rec_r2;
+extern atomic_uint_fast32_t g_dcs_eth_rec_r3;
+extern atomic_uint_fast32_t g_dcs_eth_rec_reason;
+extern atomic_uint_fast32_t g_dcs_eth_spi_err;
+extern atomic_uint_fast32_t g_dcs_eth_int_low_ticks; /* W5500 INT-line gauge: 20 ms samples that found INT asserted */
+extern atomic_uint_fast32_t g_dcs_eth_int_low_max_ms; /* longest SAMPLED continuous INT-low span, ms (stall gauge) */
 
-  /* RGB status-LED loop counter — incremented once per blink cycle by dcs_rgb,
+/* RGB status-LED loop counter — incremented once per blink cycle by dcs_rgb,
  * read by /state.json so the task's liveness is observable (a frozen counter
  * means the LED task is wedged). */
-  extern atomic_uint_fast32_t g_dcs_rgb_cycles;
+extern atomic_uint_fast32_t g_dcs_rgb_cycles;
 
-  /* === Task creation convention (dcs_support.c). ===
+/* === Task creation convention (dcs_support.c). ===
  *
  * Spawn a task whose TCB+stack live in PSRAM (external SPI RAM) rather than the
  * scarce internal SRAM, so the internal heap stays free for the networking/TLS
@@ -328,209 +328,209 @@ extern "C"
  * tskNO_AFFINITY. Falls back to an internal-RAM stack if PSRAM is exhausted, so
  * a shortfall degrades rather than silently dropping the task. Returns the task
  * handle, or NULL on outright failure. */
-  TaskHandle_t dcs_task_spawn_psram(
-    TaskFunction_t fn, const char * name, uint32_t stack, void * arg, UBaseType_t prio, BaseType_t core);
+TaskHandle_t dcs_task_spawn_psram(
+  TaskFunction_t fn, const char * name, uint32_t stack, void * arg, UBaseType_t prio, BaseType_t core);
 
-  /* === Per-file bring-up hooks (internal). === */
+/* === Per-file bring-up hooks (internal). === */
 
-  /* dcs_nvs.c */
-  bool dcs_nvs_read_usb_enabled(void);
-  esp_err_t dcs_nvs_write_usb_enabled(bool enable);
-  bool dcs_nvs_read_ts_boot_en(void);
-  esp_err_t dcs_nvs_write_ts_boot_en(bool enable);
-  uint16_t dcs_nvs_read_boot_count(void);
-  esp_err_t dcs_nvs_write_boot_count(uint16_t v);
-  uint32_t dcs_nvs_read_pstop_peer_ip(void);
-  uint16_t dcs_nvs_read_pstop_peer_port(void);
-  esp_err_t dcs_nvs_write_pstop_peer(uint32_t ip, uint16_t port);
-  /* Reset-reason history ring: push records this boot's esp_reset_reason() (oldest
+/* dcs_nvs.c */
+bool dcs_nvs_read_usb_enabled(void);
+esp_err_t dcs_nvs_write_usb_enabled(bool enable);
+bool dcs_nvs_read_ts_boot_en(void);
+esp_err_t dcs_nvs_write_ts_boot_en(bool enable);
+uint16_t dcs_nvs_read_boot_count(void);
+esp_err_t dcs_nvs_write_boot_count(uint16_t v);
+uint32_t dcs_nvs_read_pstop_peer_ip(void);
+uint16_t dcs_nvs_read_pstop_peer_port(void);
+esp_err_t dcs_nvs_write_pstop_peer(uint32_t ip, uint16_t port);
+/* Reset-reason history ring: push records this boot's esp_reset_reason() (oldest
  * shifted out); read fills out[] newest-last and returns the count. Lets a crash
  * pattern be seen remotely via /state.json even across later clean reboots. */
-  void dcs_nvs_push_reset_reason(uint8_t reason);
-  void dcs_nvs_set_ctrl_reset_cause(uint8_t cause);
-  void dcs_nvs_set_xcheck_detail(uint8_t detail);
-  uint8_t dcs_nvs_take_xcheck_detail(void);
-  uint8_t dcs_nvs_take_ctrl_reset_cause(void);
-  int dcs_nvs_read_reset_history(uint8_t * out, int max);
-  uint8_t dcs_nvs_read_pstop_unit_num(void); /* 0 = auto (chip-ID derived) */
-  esp_err_t dcs_nvs_write_pstop_unit_num(uint8_t n);
-  /* Ring rotation offset: the PHYSICAL pixel index (0..15) that the installed
+void dcs_nvs_push_reset_reason(uint8_t reason);
+void dcs_nvs_set_ctrl_reset_cause(uint8_t cause);
+void dcs_nvs_set_xcheck_detail(uint8_t detail);
+uint8_t dcs_nvs_take_xcheck_detail(void);
+uint8_t dcs_nvs_take_ctrl_reset_cause(void);
+int dcs_nvs_read_reset_history(uint8_t * out, int max);
+uint8_t dcs_nvs_read_pstop_unit_num(void); /* 0 = auto (chip-ID derived) */
+esp_err_t dcs_nvs_write_pstop_unit_num(uint8_t n);
+/* Ring rotation offset: the PHYSICAL pixel index (0..15) that the installed
  * bezel makes "LED 1". Increasing the offset moves the displayed LED-1
  * position COUNTER-clockwise viewed from the front (bench-verified on the
  * assembled unit, 2026-07-24). Absent -> 0. */
-  uint8_t dcs_nvs_read_ring_offset(void);
-  esp_err_t dcs_nvs_write_ring_offset(uint8_t off);
-  /* WiFi max TX power persisted across power loss, in quarter-dBm (matches
+uint8_t dcs_nvs_read_ring_offset(void);
+esp_err_t dcs_nvs_write_ring_offset(uint8_t off);
+/* WiFi max TX power persisted across power loss, in quarter-dBm (matches
  * esp_wifi_set_max_tx_power units; valid 8..84). Read returns 0 when unset,
  * meaning "leave the microlink config default (20 dBm) in force". Applied at
  * WIFI_EVENT_STA_START so a runtime override survives reboot. */
-  uint8_t dcs_nvs_read_wifi_tx_power(void);
-  esp_err_t dcs_nvs_write_wifi_tx_power(uint8_t quarter_dbm);
+uint8_t dcs_nvs_read_wifi_tx_power(void);
+esp_err_t dcs_nvs_write_wifi_tx_power(uint8_t quarter_dbm);
 
-  /* Master LED brightness (0..100%) scaling ALL ring output. Read returns
+/* Master LED brightness (0..100%) scaling ALL ring output. Read returns
  * DCS_LED_BRIGHTNESS_DEFAULT when unset or the persisted value is corrupt
  * (>100); applied live by dcs_pstop_ring_set_brightness and re-loaded at boot. */
-  uint8_t dcs_nvs_read_led_brightness(void);
-  esp_err_t dcs_nvs_write_led_brightness(uint8_t pct);
+uint8_t dcs_nvs_read_led_brightness(void);
+esp_err_t dcs_nvs_write_led_brightness(uint8_t pct);
 
-  /* Remote self-role (see common/pstop_aux_channel.h). Read fails safe to
+/* Remote self-role (see common/pstop_aux_channel.h). Read fails safe to
    * stop_only for absent/corrupt/unknown values; write accepts only the
    * stop_only/operator enum values. */
-  uint8_t dcs_nvs_read_role(void);
-  esp_err_t dcs_nvs_write_role(uint8_t role);
+uint8_t dcs_nvs_read_role(void);
+esp_err_t dcs_nvs_write_role(uint8_t role);
 
-  /* Multi-machine peer table (ps_peers blob). One record per slot. Read
+/* Multi-machine peer table (ps_peers blob). One record per slot. Read
  * falls back to migrating the legacy ps_ip/ps_port pair into slot 0 when
  * the blob is absent (first boot on this firmware). */
-  typedef struct
-  {
-    bool configured;
-    uint32_t ip; /* host byte order */
-    uint16_t port;
-    uint32_t machine_id; /* pstop_msg.receiver_id for this machine */
-  } dcs_pstop_peer_rec_t;
+typedef struct
+{
+  bool configured;
+  uint32_t ip; /* host byte order */
+  uint16_t port;
+  uint32_t machine_id; /* pstop_msg.receiver_id for this machine */
+} dcs_pstop_peer_rec_t;
 
-  void dcs_nvs_read_pstop_peers(dcs_pstop_peer_rec_t out[DCS_PSTOP_MAX_MACHINES]);
-  esp_err_t dcs_nvs_write_pstop_peers(const dcs_pstop_peer_rec_t recs[DCS_PSTOP_MAX_MACHINES]);
+void dcs_nvs_read_pstop_peers(dcs_pstop_peer_rec_t out[DCS_PSTOP_MAX_MACHINES]);
+esp_err_t dcs_nvs_write_pstop_peers(const dcs_pstop_peer_rec_t recs[DCS_PSTOP_MAX_MACHINES]);
 
-  /* Admission lists (blob: count byte + count*u32 ids, big-endian). Read
+/* Admission lists (blob: count byte + count*u32 ids, big-endian). Read
    * fills out[] and returns the count (0 on blank NVS = empty). Write persists
    * the given ids. See dcs_list_* in dcs_support.h. */
-  int dcs_nvs_read_list(dcs_list_t which, uint32_t out[DCS_MAX_LIST_IDS]);
-  /* One-shot upgrade: move the pre-admission "operators" blob (meaning: may
+int dcs_nvs_read_list(dcs_list_t which, uint32_t out[DCS_MAX_LIST_IDS]);
+/* One-shot upgrade: move the pre-admission "operators" blob (meaning: may
    * RE-ARM, and incidentally WG-pinned) into the PIN list, then erase it. It is
    * NOT read as an admission list. Returns the number of ids migrated. */
-  int dcs_nvs_migrate_legacy_operators(void);
-  esp_err_t dcs_nvs_write_list(dcs_list_t which, const uint32_t ids[DCS_MAX_LIST_IDS], int count);
+int dcs_nvs_migrate_legacy_operators(void);
+esp_err_t dcs_nvs_write_list(dcs_list_t which, const uint32_t ids[DCS_MAX_LIST_IDS], int count);
 
-  /* Lifetime health counters blob (dcs_health.c owns the RAM copy). */
-  bool dcs_nvs_read_health(dcs_health_counters_t * out);
-  esp_err_t dcs_nvs_write_health(const dcs_health_counters_t * c);
+/* Lifetime health counters blob (dcs_health.c owns the RAM copy). */
+bool dcs_nvs_read_health(dcs_health_counters_t * out);
+esp_err_t dcs_nvs_write_health(const dcs_health_counters_t * c);
 
-  /* dcs_health.c */
-  void dcs_health_init(void); /* load NVS, account boot/flash/OTA. Call after
+/* dcs_health.c */
+void dcs_health_init(void); /* load NVS, account boot/flash/OTA. Call after
                                * dcs_safety_account_boot() and BEFORE anything
                                * can mark the OTA image valid. */
-  void dcs_health_start(void); /* spawn the flush/check task (internal stack) */
-  /* Fed from the dcs_publish_core_tick sink (remote only): both cores' latest
+void dcs_health_start(void); /* spawn the flush/check task (internal stack) */
+/* Fed from the dcs_publish_core_tick sink (remote only): both cores' latest
    * tick + verdict. Short critical section; no blocking. */
-  void dcs_health_note_core_tick(int core_id, uint32_t tick, uint8_t verdict);
+void dcs_health_note_core_tick(int core_id, uint32_t tick, uint8_t verdict);
 
-  /* dcs_safety.c */
-  void dcs_safety_account_boot(void); /* increments crash counter + applies
+/* dcs_safety.c */
+void dcs_safety_account_boot(void); /* increments crash counter + applies
                                             * rollback decision; may not return */
-  void dcs_safety_start_heartbeat(void); /* TWDT-fed task */
-  void dcs_safety_mark_ota_valid(void);
-  void dcs_safety_start_bc_clear(void); /* Layer 4 age-out */
-  /* Stamp an RTC_NOINIT flag marking the imminent abort() as a DELIBERATE
+void dcs_safety_start_heartbeat(void); /* TWDT-fed task */
+void dcs_safety_mark_ota_valid(void);
+void dcs_safety_start_bc_clear(void); /* Layer 4 age-out */
+/* Stamp an RTC_NOINIT flag marking the imminent abort() as a DELIBERATE
  * net_liveness wedge-recovery reboot, so the next boot's crash accounting does
  * NOT count it toward the firmware-rollback ladder (network/upstream conditions
  * must never downgrade the image — only a genuine code fault should). */
-  void dcs_safety_mark_liveness_abort(void);
+void dcs_safety_mark_liveness_abort(void);
 
-  /* dcs_boot.c */
-  esp_err_t dcs_boot_try_tether_or_skip(uint32_t timeout_ms);
-  void dcs_boot_wifi_idle_init(void);
-  bool dcs_boot_alt_network_won(void); /* Ethernet/USB took the default route */
-  esp_err_t dcs_usb_set_enabled(bool on); /* admin toggle: USB-CDC-NCM tether */
-  bool dcs_usb_is_enabled(void);
+/* dcs_boot.c */
+esp_err_t dcs_boot_try_tether_or_skip(uint32_t timeout_ms);
+void dcs_boot_wifi_idle_init(void);
+bool dcs_boot_alt_network_won(void); /* Ethernet/USB took the default route */
+esp_err_t dcs_usb_set_enabled(bool on); /* admin toggle: USB-CDC-NCM tether */
+bool dcs_usb_is_enabled(void);
 
-  /* dcs_eth.c — W5500 SPI Ethernet (highest-priority netif). */
-  esp_err_t dcs_eth_start(void); /* init + start; non-blocking */
-  bool dcs_eth_wait_for_ip(uint32_t timeout_ms); /* block for boot gating */
-  bool dcs_eth_link_up(void);
-  bool dcs_eth_has_ip(void);
-  esp_err_t dcs_eth_set_enabled(bool on); /* admin toggle: stop/start driver */
-  bool dcs_eth_is_enabled(void);
+/* dcs_eth.c — W5500 SPI Ethernet (highest-priority netif). */
+esp_err_t dcs_eth_start(void); /* init + start; non-blocking */
+bool dcs_eth_wait_for_ip(uint32_t timeout_ms); /* block for boot gating */
+bool dcs_eth_link_up(void);
+bool dcs_eth_has_ip(void);
+esp_err_t dcs_eth_set_enabled(bool on); /* admin toggle: stop/start driver */
+bool dcs_eth_is_enabled(void);
 
-  /* dcs_wifi.c — runtime WiFi-STA enable/disable (lazy init + failover). */
-  esp_err_t dcs_wifi_set_enabled(bool on);
-  bool dcs_wifi_is_enabled(void);
-  void dcs_wifi_status(int * reason, int * connected, int * idx, int * count);
+/* dcs_wifi.c — runtime WiFi-STA enable/disable (lazy init + failover). */
+esp_err_t dcs_wifi_set_enabled(bool on);
+bool dcs_wifi_is_enabled(void);
+void dcs_wifi_status(int * reason, int * connected, int * idx, int * count);
 
-  /* dcs_net_supervisor.c */
-  void dcs_net_supervisor_start(void); /* 1 Hz interface-priority enforcer */
-  unsigned dcs_net_supervisor_kicks(void); /* count of link-down event-driven wakes (telemetry) */
+/* dcs_net_supervisor.c */
+void dcs_net_supervisor_start(void); /* 1 Hz interface-priority enforcer */
+unsigned dcs_net_supervisor_kicks(void); /* count of link-down event-driven wakes (telemetry) */
 
-  /* dcs_rgb.c — onboard WS2812 (GPIO21): colour=active iface, blink=IP last octet. */
-  void dcs_rgb_start(void);
+/* dcs_rgb.c — onboard WS2812 (GPIO21): colour=active iface, blink=IP last octet. */
+void dcs_rgb_start(void);
 
-  /* dcs_pstop_ring.c — early power-on sign of life: init the ring's RMT channel
+/* dcs_pstop_ring.c — early power-on sign of life: init the ring's RMT channel
  * and paint all LEDs dim purple. Call FIRST in dcs_support_init(), before any
  * network bring-up; the ring task later reuses the channel and overwrites the
  * colour with the real link state. */
-  void dcs_pstop_ring_bootsign(void);
+void dcs_pstop_ring_bootsign(void);
 
-  /* dcs_pstop_ring.c — 16-LED WS2812 ring (GPIO17): solid colour = PSTOP safety
+/* dcs_pstop_ring.c — 16-LED WS2812 ring (GPIO17): solid colour = PSTOP safety
  * state (green=RUN, red=STOP, amber=link-lost, magenta=lockstep fault). */
-  void dcs_pstop_ring_start(void);
+void dcs_pstop_ring_start(void);
 
-  /* Ring rotation offset (live value, mirrors NVS ring_off): rotates every frame
+/* Ring rotation offset (live value, mirrors NVS ring_off): rotates every frame
  * so logical LED 1 lands on the installed bezel's physical LED-1 position.
  * set clamps to 0..15, takes effect on the next repaint (<=250 ms); the caller
  * persists to NVS separately (dcs_nvs_write_ring_offset). */
-  void dcs_pstop_ring_set_offset(uint8_t off);
-  uint8_t dcs_pstop_ring_get_offset(void);
+void dcs_pstop_ring_set_offset(uint8_t off);
+uint8_t dcs_pstop_ring_get_offset(void);
 
-  /* Master ring brightness (live value, mirrors NVS led_bri): a 0..100% scale
+/* Master ring brightness (live value, mirrors NVS led_bri): a 0..100% scale
  * applied to EVERY ring pixel at transmit time, so all state colours dim
  * proportionally. set clamps to 0..100 and takes effect on the next repaint
  * (<=250 ms); the caller persists to NVS separately (dcs_nvs_write_led_brightness). */
-  void dcs_pstop_ring_set_brightness(uint8_t pct);
-  uint8_t dcs_pstop_ring_get_brightness(void);
+void dcs_pstop_ring_set_brightness(uint8_t pct);
+uint8_t dcs_pstop_ring_get_brightness(void);
 
 /* Locate mode: paint ONLY logical LED 1 solid white so an installer can see /
  * verify the rotation offset. Overrides the state colours; auto-expires after
  * DCS_RING_LOCATE_TIMEOUT_MS so a forgotten locate can't mask STOP/OK forever. */
 #define DCS_RING_LOCATE_TIMEOUT_MS 300000u /* 5 min */
-  void dcs_pstop_ring_locate(bool on);
-  bool dcs_pstop_ring_locate_active(void);
+void dcs_pstop_ring_locate(bool on);
+bool dcs_pstop_ring_locate_active(void);
 
-  /* dcs_net_liveness.c */
-  void dcs_net_liveness_start(void); /* esp_ping + watchdog task */
-  /* Active-uplink gateway RTT telemetry (device-side latency, doesn't traverse the
+/* dcs_net_liveness.c */
+void dcs_net_liveness_start(void); /* esp_ping + watchdog task */
+/* Active-uplink gateway RTT telemetry (device-side latency, doesn't traverse the
  * monitoring host). rtt_ms: last; rtt_max_ms: peak since boot; replies/losses:
  * cumulative gateway-ping counts. Any pointer may be NULL. */
-  void dcs_net_liveness_stats(uint32_t * rtt_ms, uint32_t * rtt_max_ms, uint32_t * replies, uint32_t * losses);
-  /* ms the active uplink's gateway has been silent (0 = never armed / answering).
+void dcs_net_liveness_stats(uint32_t * rtt_ms, uint32_t * rtt_max_ms, uint32_t * replies, uint32_t * losses);
+/* ms the active uplink's gateway has been silent (0 = never armed / answering).
  * Used by the supervisor (with a pstop cross-check) to fail over off an uplink
  * whose upstream died but whose netif still holds a stale DHCP lease. */
-  uint32_t dcs_net_liveness_gw_silent_ms(void);
+uint32_t dcs_net_liveness_gw_silent_ms(void);
 
-  /* dcs_net_inet.c — internet-reachability probe (1.1.1.1 / 8.8.8.8), display
+/* dcs_net_inet.c — internet-reachability probe (1.1.1.1 / 8.8.8.8), display
  * + telemetry only; NEVER reboots. The status LED blinks red while down. */
-  void dcs_net_inet_start(void);
-  bool dcs_net_inet_down(void); /* true once both targets silent ~20s */
-  uint32_t dcs_net_inet_silent_ms(void); /* ms since either target last replied */
+void dcs_net_inet_start(void);
+bool dcs_net_inet_down(void); /* true once both targets silent ~20s */
+uint32_t dcs_net_inet_silent_ms(void); /* ms since either target last replied */
 
-  /* dcs_telemetry.c */
-  void dcs_telemetry_start_sampler(void);
+/* dcs_telemetry.c */
+void dcs_telemetry_start_sampler(void);
 
-  /* Snapshot of the most-recent task-breakdown buffer (called by /state.json) */
-  typedef struct
-  {
-    char name[16];
-    uint32_t pct;
-  } dcs_task_share_t;
+/* Snapshot of the most-recent task-breakdown buffer (called by /state.json) */
+typedef struct
+{
+  char name[16];
+  uint32_t pct;
+} dcs_task_share_t;
 
 #define DCS_TOP_N 4
 
-  typedef struct
-  {
-    dcs_task_share_t tasks[DCS_TOP_N];
-    uint8_t n;
-    uint32_t other_pct;
-  } dcs_task_bucket_t;
+typedef struct
+{
+  dcs_task_share_t tasks[DCS_TOP_N];
+  uint8_t n;
+  uint32_t other_pct;
+} dcs_task_bucket_t;
 
-  typedef struct
-  {
-    dcs_task_bucket_t b[3]; /* core0, core1, shared */
-  } dcs_task_breakdown_t;
+typedef struct
+{
+  dcs_task_bucket_t b[3]; /* core0, core1, shared */
+} dcs_task_breakdown_t;
 
-  void dcs_telemetry_snapshot(dcs_task_breakdown_t * out);
+void dcs_telemetry_snapshot(dcs_task_breakdown_t * out);
 
-  /* dcs_admin_pages.c */
-  void dcs_admin_pages_register(ml_app_t * app);
+/* dcs_admin_pages.c */
+void dcs_admin_pages_register(ml_app_t * app);
 
 #ifdef __cplusplus
 }
