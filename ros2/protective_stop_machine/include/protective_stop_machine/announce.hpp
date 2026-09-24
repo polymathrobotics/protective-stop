@@ -16,8 +16,7 @@
 // The payload builder (build_announce_payload) is header-inline and rclcpp-free
 // so it is unit-testable with no network and no ROS runtime, matching the
 // repo's operator_policy testable-logic pattern.
-#ifndef PROTECTIVE_STOP_MACHINE__ANNOUNCE_HPP_
-#define PROTECTIVE_STOP_MACHINE__ANNOUNCE_HPP_
+#pragma once
 
 #include <atomic>
 #include <cstdint>
@@ -31,122 +30,120 @@
 namespace protective_stop_machine
 {
 
-// Deployment values for the check-in. Prefer the environment for URL + key file
-// (PSTOP_ANNOUNCE_URL / PSTOP_ANNOUNCE_KEY_FILE) so secrets stay out of committed
-// config — mirrors the host runner's convention. Disabled when url is empty.
+/// @brief Deployment values for the check-in. Disabled when url is empty.
+/// PSTOP_ANNOUNCE_URL and PSTOP_ANNOUNCE_KEY_FILE override url and key_file.
 struct AnnounceConfig
 {
-  std::string url;  // http://host[:port]/path — empty = DISABLED
-  std::string key_file;  // path whose first line is the bearer token (chmod 600)
-  std::string name;  // display name on the console; empty = this host's hostname
-  int interval_s{60};  // seconds between check-ins
+  /// http://host[:port]/path. Empty disables the announcer.
+  std::string url;
+  /// Path whose first line is the bearer token, chmod 600.
+  std::string key_file;
+  /// Display name on the console. Empty uses this host's hostname.
+  std::string name;
+  int interval_s{60};
   double http_timeout_s{10.0};
 };
 
-// Escape a string for embedding in a JSON string literal. The console keys on
-// `name`, which is operator-supplied, so escape defensively rather than trust it
-// (the host runner trusted the hostname; we do not).
-inline std::string json_escape(const std::string & in)
+/// @brief Escapes a string for embedding in a JSON string literal.
+/// Control characters below 0x20 become \uXXXX.
+inline std::string json_escape(const std::string & text)
 {
-  std::string out;
-  out.reserve(in.size() + 8);
-  for (char ch : in) {
-    switch (ch) {
+  std::string escaped;
+  escaped.reserve(text.size() + 8);
+  for (char character : text) {
+    switch (character) {
       case '"':
-        out += "\\\"";
+        escaped += "\\\"";
         break;
       case '\\':
-        out += "\\\\";
+        escaped += "\\\\";
         break;
       case '\n':
-        out += "\\n";
+        escaped += "\\n";
         break;
       case '\r':
-        out += "\\r";
+        escaped += "\\r";
         break;
       case '\t':
-        out += "\\t";
+        escaped += "\\t";
         break;
       default:
-        if (static_cast<unsigned char>(ch) < 0x20) {
-          char buf[8];
-          std::snprintf(buf, sizeof(buf), "\\u%04x", ch);
-          out += buf;
+        if (static_cast<unsigned char>(character) < 0x20) {
+          char escape_sequence[8];
+          std::snprintf(escape_sequence, sizeof(escape_sequence), "\\u%04x", character);
+          escaped += escape_sequence;
         } else {
-          out += ch;
+          escaped += character;
         }
     }
   }
-  return out;
+  return escaped;
 }
 
-// Build the check-in JSON body. The core `{"name","port"}` pair is byte-for-byte
-// what the host runner sends (announce_post_once), so a minimal console treats
-// the software machine identically. The additional fields are ADDITIVE and
-// non-breaking (a console that ignores unknown keys still sees name+port):
-//   device_type : "machine" so the console distinguishes machines from remotes
-//                 (planned check-in field, docs/MACHINE_ESP32_DESIGN.md §Fleet).
-//   machine_id  : this machine's 32-bit pstop id, hex (identity aid).
-//   running     : robot cleared to move (armed, no stop).
-//   active_remotes + remotes[] : the bonded-remote summary the console's
-//                 machines/overview renders per-remote.
+/// @brief Builds the check-in JSON body.
+/// The core {"name","port"} pair is byte-for-byte what the host runner's
+/// announce_post_once sends; the rest are additive fields:
+///   device_type    "machine", distinguishing machines from remotes.
+///   machine_id     this machine's 32-bit pstop id, 8 hex digits.
+///   running        robot cleared to move (armed, no stop).
+///   active_remotes + remotes[]  the per-remote bonded summary.
 inline std::string build_announce_payload(
-  const std::string & name, int port, uint32_t machine_id, const MachineSnapshot & snap)
+  const std::string & name, int port, uint32_t machine_id, const MachineSnapshot & snapshot)
 {
-  char idbuf[16];
-  std::snprintf(idbuf, sizeof(idbuf), "%08x", machine_id);
+  char machine_id_text[16];
+  std::snprintf(machine_id_text, sizeof(machine_id_text), "%08x", machine_id);
 
-  std::string out = "{\"name\":\"";
-  out += json_escape(name);
-  out += "\",\"port\":";
-  out += std::to_string(port);
-  out += ",\"machine_id\":\"";
-  out += idbuf;
-  out += "\",\"device_type\":\"machine\",\"running\":";
-  out += snap.running ? "true" : "false";
-  out += ",\"active_remotes\":";
-  out += std::to_string(snap.active_remotes);
-  out += ",\"remotes\":[";
+  std::string payload = "{\"name\":\"";
+  payload += json_escape(name);
+  payload += "\",\"port\":";
+  payload += std::to_string(port);
+  payload += ",\"machine_id\":\"";
+  payload += machine_id_text;
+  payload += "\",\"device_type\":\"machine\",\"running\":";
+  payload += snapshot.running ? "true" : "false";
+  payload += ",\"active_remotes\":";
+  payload += std::to_string(snapshot.active_remotes);
+  payload += ",\"remotes\":[";
   bool first = true;
-  for (const auto & remote : snap.remotes) {
+  for (const auto & remote : snapshot.remotes) {
     if (!first) {
-      out += ',';
+      payload += ',';
     }
     first = false;
-    out += "{\"id\":\"";
-    out += json_escape(remote.device_id);
-    out += "\",\"bond_state\":";
-    out += std::to_string(static_cast<int>(remote.bond_state));
-    out += ",\"stop_only\":";
-    out += remote.stop_only ? "true" : "false";
-    out += ",\"in_use\":";
-    out += remote.in_use ? "true" : "false";
-    out += '}';
+    payload += "{\"id\":\"";
+    payload += json_escape(remote.device_id);
+    payload += "\",\"bond_state\":";
+    payload += std::to_string(static_cast<int>(remote.bond_state));
+    payload += ",\"stop_only\":";
+    payload += remote.stop_only ? "true" : "false";
+    payload += ",\"in_use\":";
+    payload += remote.in_use ? "true" : "false";
+    payload += '}';
   }
-  out += "]}";
-  return out;
+  payload += "]}";
+  return payload;
 }
 
-// Owns a background thread that POSTs the check-in every interval_s while the
-// node is ACTIVE. Construct with the machine identity + a snapshot getter, then
-// start()/stop() from the node's activate/deactivate transitions. Idempotent.
+/// @brief Owns a background thread that POSTs the check-in every interval_s.
+/// Driven from the node's activate/deactivate transitions, so it runs only
+/// while the node is ACTIVE. start() and stop() are idempotent.
 class MachineAnnouncer
 {
 public:
   MachineAnnouncer(
-    AnnounceConfig cfg, int port, uint32_t machine_id,
+    AnnounceConfig config, int port, uint32_t machine_id,
     std::function<MachineSnapshot()> snapshot_fn);
   ~MachineAnnouncer();
 
   MachineAnnouncer(const MachineAnnouncer &) = delete;
   MachineAnnouncer & operator=(const MachineAnnouncer &) = delete;
 
-  // Launch the check-in thread. Returns true if it started; false (non-fatal —
-  // the caller only logs) when disabled (empty url) or the key file is
-  // unreadable. Never fails node activation: announce is not on the safety path.
+  /// @brief Launches the check-in thread.
+  /// @return False when disabled (empty url) or the key file is unreadable.
+  /// Non-fatal: announce is off the safety path and never fails activation.
   bool start();
 
-  // Stop the thread and join. Idempotent.
+  /// @brief Stops the thread and joins. Idempotent.
   void stop();
 
   bool enabled() const
@@ -158,7 +155,7 @@ private:
   void run();
   bool post_once(const std::string & payload, const std::string & bearer_key);
 
-  AnnounceConfig cfg_;
+  AnnounceConfig config_;
   int port_;
   uint32_t machine_id_;
   std::function<MachineSnapshot()> snapshot_fn_;
@@ -170,4 +167,3 @@ private:
 
 }  // namespace protective_stop_machine
 
-#endif  // PROTECTIVE_STOP_MACHINE__ANNOUNCE_HPP_

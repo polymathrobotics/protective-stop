@@ -25,8 +25,7 @@
 // The payload builder (build_checkin_payload) and state mapping (checkin_state)
 // are header-inline and rclcpp-free so they are unit-testable with no network
 // and no ROS runtime, matching the repo's announce / operator_policy pattern.
-#ifndef PROTECTIVE_STOP_MACHINE__FLEET_CHECKIN_HPP_
-#define PROTECTIVE_STOP_MACHINE__FLEET_CHECKIN_HPP_
+#pragma once
 
 #include <atomic>
 #include <chrono>
@@ -36,66 +35,67 @@
 #include <string>
 #include <thread>
 
-#include "protective_stop_machine/announce.hpp"  // json_escape + MachineSnapshot
+// json_escape + MachineSnapshot
+#include "protective_stop_machine/announce.hpp"
 #include "protective_stop_machine/backend.hpp"
 
 namespace protective_stop_machine
 {
 
-// Deployment values for the fleet check-in. Prefer the environment for the base
-// URL + key file (PSTOP_CHECKIN_URL / PSTOP_CHECKIN_API_KEY_FILE) so the
-// proprietary fleet URL/key stay out of committed config. Disabled when the base
-// URL is empty. `base_url` is a BASE (e.g. http://fleet.example:8000); the client
-// appends `/api/v1/checkin` itself, exactly as the ESP32 hardcodes that path.
+/// @brief Deployment values for the fleet check-in. Disabled when base_url is
+/// empty. PSTOP_CHECKIN_URL and PSTOP_CHECKIN_API_KEY_FILE override base_url
+/// and key_file.
+/// base_url is a base such as http://fleet.example:8000; the client appends
+/// /api/v1/checkin itself.
 struct FleetCheckinConfig
 {
-  std::string base_url;  // http://host[:port] — empty = DISABLED (opt-in)
-  std::string key_file;  // path whose first line is the bearer token (chmod 600)
-  std::string app_version;  // ament package version of protective_stop_machine
-  std::string idf_version;  // runtime tag, e.g. "ros2-jazzy" (no IDF on a host)
-  int interval_s{300};  // seconds between check-ins (ESP32 default 300)
-  double http_timeout_s{15.0};  // match the ESP32's 15s check-in timeout
+  /// http://host[:port]. Empty disables the check-in.
+  std::string base_url;
+  /// Path whose first line is the bearer token, chmod 600.
+  std::string key_file;
+  /// ament package version of protective_stop_machine.
+  std::string app_version;
+  /// Runtime tag, e.g. "ros2-jazzy".
+  std::string idf_version;
+  /// Seconds between check-ins. The ESP32 default is 300.
+  int interval_s{300};
+  /// Matches the ESP32's 15s check-in timeout.
+  double http_timeout_s{15.0};
 };
 
-// Map the machine snapshot onto the ESP32 check-in `state` enum. The chip sends
-// CONNECTED once its uplink is up, CONNECTING while bringing it up, IDLE before.
-// The software machine has no VPN uplink of its own, so we report link *to a
-// remote* instead: bonded/running -> CONNECTED, backend up but no bond yet ->
-// CONNECTING, backend not reachable -> IDLE.
-inline const char * checkin_state(const MachineSnapshot & snap)
+/// @brief Maps a snapshot onto the ESP32 check-in state enum.
+/// A software machine has no VPN uplink, so the link reported is the one to a
+/// remote: bonded or running is CONNECTED, backend up without a bond is
+/// CONNECTING, an unreachable backend is IDLE.
+inline const char * checkin_state(const MachineSnapshot & snapshot)
 {
-  if (snap.running || snap.active_remotes > 0) {
+  if (snapshot.running || snapshot.active_remotes > 0) {
     return "CONNECTED";
   }
-  if (snap.reachable) {
+  if (snapshot.reachable) {
     return "CONNECTING";
   }
   return "IDLE";
 }
 
-// Build the check-in JSON body, matching the ESP32 fleet_ota_checkin() schema so
-// the fleet parses a software machine identically to a chip. Field mapping:
-//   device_id         : this machine's 32-bit pstop id as 8 hex digits. NOTE the
-//                       namespace differs from the ESP32's device_id, which is a
-//                       12-hex WiFi MAC — a pstop id and a MAC never collide, and
-//                       the fleet keys on the string, so mixing widths is safe.
-//   app_version       : ament package version of protective_stop_machine.
-//   idf_version       : "ros2-<ROS_DISTRO>" — there is no IDF; this tags the
-//                       runtime the same slot the chip uses for its IDF version.
-//   uptime_s          : process uptime in seconds.
-//   device_type       : "machine" (same class token the chip machn sends).
-//   check_interval_s  : our own cadence, so the fleet can judge staleness.
-//   tailscale_ip      : sent EMPTY — a software host may be on Tailscale but the
-//                       node has no handle to resolve its VPN IP; the key is kept
-//                       present (not omitted) so the schema stays byte-identical.
-//   local_ip          : first non-loopback IPv4 of this host (resolved by run()).
-//   state             : checkin_state(snap) (see above).
-//   rollback_occurred : always false — a software machine has no ESP-OTA image
-//                       and therefore no rollback partition to have reverted.
-// free_heap is deliberately OMITTED: it is an ESP heap metric with no meaningful
-// analogue for a Linux process (gigabytes of virtual heap); 0 or any value would
-// mislead an operator, and the fleet treats absent optional fields as unknown.
-// `running` + `active_remotes` are ADDITIVE (mirroring the announce extras).
+/// @brief Builds the check-in JSON body in the ESP32 fleet_ota_checkin() schema.
+/// Field mapping:
+///   device_id         this machine's 32-bit pstop id, 8 hex digits, where the
+///                     chip sends a 12-hex WiFi MAC. The fleet keys on the
+///                     string, so the widths may differ.
+///   app_version       ament package version of protective_stop_machine.
+///   idf_version       "ros2-<ROS_DISTRO>", tagging the runtime in the slot the
+///                     chip uses for its IDF version.
+///   uptime_s          process uptime in seconds.
+///   device_type       "machine", the class token the chip machn sends.
+///   check_interval_s  this client's cadence, for judging staleness.
+///   tailscale_ip      sent empty; the key stays present so the schema is
+///                     byte-identical to the chip's.
+///   local_ip          first non-loopback IPv4 of this host.
+///   state             checkin_state(snapshot).
+///   rollback_occurred always false; there is no ESP-OTA partition.
+///   running, active_remotes  additive, mirroring the announce extras.
+/// free_heap is omitted: the fleet treats an absent optional field as unknown.
 inline std::string build_checkin_payload(
   uint32_t machine_id,
   const std::string & app_version,
@@ -104,67 +104,66 @@ inline std::string build_checkin_payload(
   int check_interval_s,
   const std::string & local_ip,
   const std::string & tailscale_ip,
-  const MachineSnapshot & snap)
+  const MachineSnapshot & snapshot)
 {
-  char idbuf[16];
-  std::snprintf(idbuf, sizeof(idbuf), "%08x", machine_id);
+  char device_id_text[16];
+  std::snprintf(device_id_text, sizeof(device_id_text), "%08x", machine_id);
 
-  std::string out = "{\"device_id\":\"";
-  out += idbuf;
-  out += "\",\"app_version\":\"";
-  out += json_escape(app_version);
-  out += "\",\"idf_version\":\"";
-  out += json_escape(idf_version);
-  out += "\",\"uptime_s\":";
-  out += std::to_string(uptime_s);
-  out += ",\"device_type\":\"machine\",\"check_interval_s\":";
-  out += std::to_string(check_interval_s);
-  out += ",\"tailscale_ip\":\"";
-  out += json_escape(tailscale_ip);
-  out += "\",\"local_ip\":\"";
-  out += json_escape(local_ip);
-  out += "\",\"state\":\"";
-  out += checkin_state(snap);
-  out += "\",\"rollback_occurred\":false,\"running\":";
-  out += snap.running ? "true" : "false";
-  out += ",\"active_remotes\":";
-  out += std::to_string(snap.active_remotes);
-  out += "}";
-  return out;
+  std::string payload = "{\"device_id\":\"";
+  payload += device_id_text;
+  payload += "\",\"app_version\":\"";
+  payload += json_escape(app_version);
+  payload += "\",\"idf_version\":\"";
+  payload += json_escape(idf_version);
+  payload += "\",\"uptime_s\":";
+  payload += std::to_string(uptime_s);
+  payload += ",\"device_type\":\"machine\",\"check_interval_s\":";
+  payload += std::to_string(check_interval_s);
+  payload += ",\"tailscale_ip\":\"";
+  payload += json_escape(tailscale_ip);
+  payload += "\",\"local_ip\":\"";
+  payload += json_escape(local_ip);
+  payload += "\",\"state\":\"";
+  payload += checkin_state(snapshot);
+  payload += "\",\"rollback_occurred\":false,\"running\":";
+  payload += snapshot.running ? "true" : "false";
+  payload += ",\"active_remotes\":";
+  payload += std::to_string(snapshot.active_remotes);
+  payload += "}";
+  return payload;
 }
 
-// Join a base URL and the fixed check-in path without doubling the slash. The
-// ESP32 does `snprintf("%s/api/v1/checkin", backend)`; we mirror that but tolerate
-// an operator-supplied trailing slash on the base.
+/// @brief Joins a base URL and the fixed check-in path.
+/// Trailing slashes on the base are trimmed.
 inline std::string checkin_endpoint(const std::string & base_url)
 {
-  std::string base = base_url;
-  while (!base.empty() && base.back() == '/') {
-    base.pop_back();
+  std::string trimmed_base = base_url;
+  while (!trimmed_base.empty() && trimmed_base.back() == '/') {
+    trimmed_base.pop_back();
   }
-  return base + "/api/v1/checkin";
+  return trimmed_base + "/api/v1/checkin";
 }
 
-// Owns a background thread that POSTs the check-in every interval_s while the
-// node is ACTIVE. Construct with the machine identity + a snapshot getter, then
-// start()/stop() from the node's activate/deactivate transitions. Idempotent.
+/// @brief Owns a background thread that POSTs the check-in every interval_s.
+/// Driven from the node's activate/deactivate transitions, so it runs only
+/// while the node is ACTIVE. start() and stop() are idempotent.
 class FleetCheckin
 {
 public:
   FleetCheckin(
-    FleetCheckinConfig cfg, uint32_t machine_id,
+    FleetCheckinConfig config, uint32_t machine_id,
     std::function<MachineSnapshot()> snapshot_fn);
   ~FleetCheckin();
 
   FleetCheckin(const FleetCheckin &) = delete;
   FleetCheckin & operator=(const FleetCheckin &) = delete;
 
-  // Launch the check-in thread. Returns true if it started; false (non-fatal —
-  // the caller only logs) when disabled (empty base URL) or the key file is
-  // unreadable. Never fails node activation: check-in is not on the safety path.
+  /// @brief Launches the check-in thread.
+  /// @return False when disabled (empty base_url) or the key file is unreadable.
+  /// Non-fatal: check-in is off the safety path and never fails activation.
   bool start();
 
-  // Stop the thread and join. Idempotent.
+  /// @brief Stops the thread and joins. Idempotent.
   void stop();
 
   bool enabled() const
@@ -174,13 +173,14 @@ public:
 
 private:
   void run();
-  // POST the payload; on a 2xx, parse the response for OTA directives (log-only).
+  /// @brief POSTs the payload and, on a 2xx, reads the response for OTA
+  /// directives. A directive is logged only.
   bool post_once(
     const std::string & endpoint, const std::string & payload,
     const std::string & bearer_key);
   void handle_response(const std::string & body);
 
-  FleetCheckinConfig cfg_;
+  FleetCheckinConfig config_;
   uint32_t machine_id_;
   std::function<MachineSnapshot()> snapshot_fn_;
   std::chrono::steady_clock::time_point start_time_{std::chrono::steady_clock::now()};
@@ -192,4 +192,3 @@ private:
 
 }  // namespace protective_stop_machine
 
-#endif  // PROTECTIVE_STOP_MACHINE__FLEET_CHECKIN_HPP_

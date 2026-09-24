@@ -1,7 +1,6 @@
 // SPDX-FileCopyrightText: 2026 Polymath Robotics, Inc.
 // SPDX-License-Identifier: Apache-2.0
-#ifndef PROTECTIVE_STOP_MACHINE__HARDWARE_BACKEND_HPP_
-#define PROTECTIVE_STOP_MACHINE__HARDWARE_BACKEND_HPP_
+#pragma once
 
 #include <atomic>
 #include <memory>
@@ -14,24 +13,26 @@
 namespace protective_stop_machine
 {
 
+/// @brief Deployment values for the hardware backend.
 struct HardwareConfig
 {
-  std::string device_url{"http://127.0.0.1"};  // ESP32 machn admin/state URL
+  /// ESP32 machn admin/state URL.
+  std::string device_url{"http://127.0.0.1"};
   std::string admin_user{"admin"};
-  std::string admin_pass;  // from env, never a param file
+  /// Read from PSTOP_MACHINE_ADMIN_PASS, never a param file.
+  std::string admin_pass;
   double poll_hz{5.0};
   double http_timeout_s{2.0};
 };
 
-// The ESP32 machn is the machine; this backend is an HTTP client. It polls
-// /state.json to publish state, and proxies runtime config to the device admin
-// API (control proxy). The ESP32 keeps enforcing STOP independently of ROS 2 —
-// if polling stops or the device is unreachable, motion authority is unaffected
-// (we only go blind: state() -> UNSTABLE).
+/// @brief HTTP client to the ESP32 machn, which is itself the machine.
+/// Polls /state.json for state and proxies runtime config to the device admin
+/// API. The ESP32 enforces STOP independently of ROS 2, so an unreachable
+/// device costs visibility only: state() reports UNSTABLE.
 class HardwareMachineBackend : public IMachineBackend
 {
 public:
-  explicit HardwareMachineBackend(const HardwareConfig & cfg);
+  explicit HardwareMachineBackend(const HardwareConfig & config);
   ~HardwareMachineBackend() override;
 
   bool start() override;
@@ -44,30 +45,24 @@ public:
     return "hardware";
   }
 
-  // Pure /state.json -> MachineSnapshot mapping (no HTTP, no threading),
-  // extracted so the safety-relevant parse (relay_stop -> run/stop, mismatch,
-  // bonded-remote enumeration) is unit-testable. Sets out.reachable=false on a
-  // parse error (fail-safe: an unparseable device reads as blind, not "run").
-  // Ref: SR-M-03 / FMEA DU-9.
-  static void parse_state(const std::string & body, MachineSnapshot & out);
+  /// @brief Maps a /state.json body onto a snapshot. No HTTP, no threading.
+  /// A parse error sets reachable=false. Ref: SR-M-03 / FMEA DU-9.
+  static void parse_state(const std::string & body, MachineSnapshot & out_snapshot);
 
 private:
   void poll_loop();
-  // HTTP helpers (libcurl). Return true + body on 2xx.
-  // NOLINTNEXTLINE(runtime/int)
+  /// @brief libcurl helpers. True with @p body filled on a 2xx.
   bool http_get(const std::string & path, std::string & body, long & status);
-  // NOLINTNEXTLINE(runtime/int)
   bool http_post(
     const std::string & path, const std::string & json, std::string & body,
     long & status);
 
-  HardwareConfig cfg_;
-  std::thread th_;
+  HardwareConfig config_;
+  std::thread poll_thread_;
   std::atomic<bool> running_{false};
-  mutable std::mutex mtx_;
-  MachineSnapshot snap_;
+  mutable std::mutex snapshot_mutex_;
+  MachineSnapshot latest_snapshot_;
 };
 
 }  // namespace protective_stop_machine
 
-#endif  // PROTECTIVE_STOP_MACHINE__HARDWARE_BACKEND_HPP_

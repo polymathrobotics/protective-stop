@@ -6,7 +6,7 @@
 // allowlist admits only listed ids; the denylist always refuses and wins.
 // Admission is deliberately separate from re-arm authority, which is the
 // remote's own announced role (common/pstop_aux_channel.h) and is not decided
-// here. This is the exact decision cb_remote_details feeds into pstop_c's
+// here. This is the exact decision resolve_remote_details feeds into pstop_c's
 // remote_details_t.allowed (a refused id gets an UNBOND reply).
 #include <gtest/gtest.h>
 
@@ -30,7 +30,8 @@ TEST(AdmissionPolicy, NonEmptyAllowlistAdmitsOnlyListed)
   cfg.allowlist = {0x01d7791cU, 0x01aabbccU};
   EXPECT_TRUE(software_remote_admitted(cfg, 0x01d7791cU));
   EXPECT_TRUE(software_remote_admitted(cfg, 0x01aabbccU));
-  EXPECT_FALSE(software_remote_admitted(cfg, 0x01d7791dU));  // off-by-one id
+  // off-by-one id
+  EXPECT_FALSE(software_remote_admitted(cfg, 0x01d7791dU));
   EXPECT_FALSE(software_remote_admitted(cfg, 0x02000000U));
 }
 
@@ -39,9 +40,11 @@ TEST(AdmissionPolicy, DenylistRefusesAndWinsOverAllowlist)
   SoftwareConfig cfg;
   cfg.denylist = {0x01d7791cU};
   EXPECT_FALSE(software_remote_admitted(cfg, 0x01d7791cU));
-  EXPECT_TRUE(software_remote_admitted(cfg, 0x01aabbccU));  // open otherwise
+  // open otherwise
+  EXPECT_TRUE(software_remote_admitted(cfg, 0x01aabbccU));
 
-  cfg.allowlist = {0x01d7791cU, 0x01aabbccU};  // listed on both: deny wins
+  // listed on both: deny wins
+  cfg.allowlist = {0x01d7791cU, 0x01aabbccU};
   EXPECT_FALSE(software_remote_admitted(cfg, 0x01d7791cU));
   EXPECT_TRUE(software_remote_admitted(cfg, 0x01aabbccU));
 }

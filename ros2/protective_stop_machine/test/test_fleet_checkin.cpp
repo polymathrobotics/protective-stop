@@ -30,9 +30,9 @@ static bool has(const std::string & hay, const std::string & needle)
 // machine identically to a chip: device_type="machine" plus the required fields.
 TEST(FleetCheckinPayload, MatchesEsp32MachineSchema)
 {
-  MachineSnapshot snap;
+  MachineSnapshot snapshot;
   const std::string body = build_checkin_payload(0x01020304U, "0.1.0", "ros2-jazzy", 42U, 300,
-    "192.168.1.5", "", snap);
+    "192.168.1.5", "", snapshot);
 
   EXPECT_TRUE(has(body, "\"device_type\":\"machine\""));
   EXPECT_TRUE(has(body, "\"device_id\":\"01020304\""));
@@ -52,9 +52,9 @@ TEST(FleetCheckinPayload, MatchesEsp32MachineSchema)
 // the ESP32's 12-hex MAC, but the fleet keys on the string).
 TEST(FleetCheckinPayload, DeviceIdIsHexMachineId)
 {
-  MachineSnapshot snap;
+  MachineSnapshot snapshot;
   const std::string body = build_checkin_payload(0x0102abcdU, "1.2.3", "ros2-humble", 0U, 60, "",
-    "", snap);
+    "", snapshot);
   EXPECT_TRUE(has(body, "\"device_id\":\"0102abcd\""));
 }
 
@@ -62,9 +62,9 @@ TEST(FleetCheckinPayload, DeviceIdIsHexMachineId)
 // free_heap is deliberately absent (no meaningful analogue for a Linux process).
 TEST(FleetCheckinPayload, TailscaleEmptyPresentAndFreeHeapOmitted)
 {
-  MachineSnapshot snap;
+  MachineSnapshot snapshot;
   const std::string body = build_checkin_payload(1U, "0.1.0", "ros2-jazzy", 1U, 120, "10.0.0.2", "",
-    snap);
+    snapshot);
   EXPECT_TRUE(has(body, "\"tailscale_ip\":\"\""));
   EXPECT_FALSE(has(body, "free_heap"));
 }
@@ -73,23 +73,27 @@ TEST(FleetCheckinPayload, TailscaleEmptyPresentAndFreeHeapOmitted)
 // onto the software machine's bond/backend state.
 TEST(FleetCheckinState, DerivesFromSnapshot)
 {
-  MachineSnapshot idle;  // defaults: not reachable, not running
+  // defaults: not reachable, not running
+  MachineSnapshot idle;
   idle.reachable = false;
   EXPECT_STREQ(checkin_state(idle), "IDLE");
 
-  MachineSnapshot connecting;  // backend up, no bond yet
+  // backend up, no bond yet
+  MachineSnapshot connecting;
   connecting.reachable = true;
   connecting.running = false;
   connecting.active_remotes = 0;
   EXPECT_STREQ(checkin_state(connecting), "CONNECTING");
 
-  MachineSnapshot bonded;  // a remote is bonded
+  // a remote is bonded
+  MachineSnapshot bonded;
   bonded.reachable = true;
   bonded.running = false;
   bonded.active_remotes = 1;
   EXPECT_STREQ(checkin_state(bonded), "CONNECTED");
 
-  MachineSnapshot running;  // armed / cleared to move
+  // armed / cleared to move
+  MachineSnapshot running;
   running.reachable = true;
   running.running = true;
   EXPECT_STREQ(checkin_state(running), "CONNECTED");
@@ -103,10 +107,11 @@ TEST(FleetCheckinState, DerivesFromSnapshot)
 // running + active_remotes reflect the snapshot.
 TEST(FleetCheckinPayload, RunningAndRemoteCountFromSnapshot)
 {
-  MachineSnapshot snap;
-  snap.running = true;
-  snap.active_remotes = 3;
-  const std::string body = build_checkin_payload(1U, "0.1.0", "ros2-jazzy", 0U, 300, "", "", snap);
+  MachineSnapshot snapshot;
+  snapshot.running = true;
+  snapshot.active_remotes = 3;
+  const std::string body =
+    build_checkin_payload(1U, "0.1.0", "ros2-jazzy", 0U, 300, "", "", snapshot);
   EXPECT_TRUE(has(body, "\"running\":true"));
   EXPECT_TRUE(has(body, "\"active_remotes\":3"));
 }
@@ -126,9 +131,9 @@ TEST(FleetCheckinEndpoint, AppendsFixedPath)
 // A version/tag with JSON metacharacters is escaped so the body stays valid JSON.
 TEST(FleetCheckinPayload, VersionFieldsAreJsonEscaped)
 {
-  MachineSnapshot snap;
+  MachineSnapshot snapshot;
   const std::string body = build_checkin_payload(1U, "0.1\"x", "ros2-\\weird", 0U, 300, "", "",
-    snap);
+    snapshot);
   EXPECT_TRUE(has(body, "\"app_version\":\"0.1\\\"x\""));
   EXPECT_TRUE(has(body, "\"idf_version\":\"ros2-\\\\weird\""));
 }
@@ -138,7 +143,8 @@ TEST(FleetCheckinPayload, VersionFieldsAreJsonEscaped)
 // disabled-opt-in path.
 TEST(FleetCheckinLifecycle, DisabledWhenBaseUrlEmpty)
 {
-  FleetCheckinConfig cfg;  // base_url empty by default
+  // base_url empty by default
+  FleetCheckinConfig cfg;
   FleetCheckin checkin(cfg, 0x01020304U, []() {return MachineSnapshot{};});
   EXPECT_FALSE(checkin.start());
   EXPECT_FALSE(checkin.enabled());

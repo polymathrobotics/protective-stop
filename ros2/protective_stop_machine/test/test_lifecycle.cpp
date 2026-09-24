@@ -32,9 +32,9 @@ static rclcpp::NodeOptions with(std::vector<rclcpp::Parameter> overrides)
   // so any explicit per-test override still wins.
   std::vector<rclcpp::Parameter> params{rclcpp::Parameter("autostart", false)};
   params.insert(params.end(), overrides.begin(), overrides.end());
-  rclcpp::NodeOptions o;
-  o.parameter_overrides(std::move(params));
-  return o;
+  rclcpp::NodeOptions options;
+  options.parameter_overrides(std::move(params));
+  return options;
 }
 
 class Lifecycle : public ::testing::Test
@@ -50,8 +50,8 @@ protected:
 
 TEST_F(Lifecycle, ConfiguresValidSoftware)
 {
-  auto n = std::make_shared<MachineBridgeNode>(with({rclcpp::Parameter("backend", "software")}));
-  EXPECT_EQ(n->configure().id(), State::PRIMARY_STATE_INACTIVE);
+  auto node = std::make_shared<MachineBridgeNode>(with({rclcpp::Parameter("backend", "software")}));
+  EXPECT_EQ(node->configure().id(), State::PRIMARY_STATE_INACTIVE);
 }
 
 // min_stop_ms=0 defeats the arming gesture (SF-3). The SR-M-01 floors are
@@ -79,28 +79,28 @@ TEST_F(Lifecycle, RejectsOversizeHeartbeat)
 
 TEST_F(Lifecycle, RejectsUnknownBackend)
 {
-  auto n = std::make_shared<MachineBridgeNode>(with({rclcpp::Parameter("backend", "bogus")}));
-  n->configure();
-  EXPECT_EQ(n->get_current_state().id(), State::PRIMARY_STATE_UNCONFIGURED);
+  auto node = std::make_shared<MachineBridgeNode>(with({rclcpp::Parameter("backend", "bogus")}));
+  node->configure();
+  EXPECT_EQ(node->get_current_state().id(), State::PRIMARY_STATE_UNCONFIGURED);
 }
 
 // Full happy path on the software backend (binds a private test port).
 TEST_F(Lifecycle, FullSoftwareLifecycle)
 {
-  auto n = std::make_shared<MachineBridgeNode>(
+  auto node = std::make_shared<MachineBridgeNode>(
     with({rclcpp::Parameter("backend", "software"), rclcpp::Parameter("software.port", 18899)}));
-  EXPECT_EQ(n->configure().id(), State::PRIMARY_STATE_INACTIVE);
-  EXPECT_EQ(n->activate().id(), State::PRIMARY_STATE_ACTIVE);
-  EXPECT_EQ(n->deactivate().id(), State::PRIMARY_STATE_INACTIVE);
-  EXPECT_EQ(n->cleanup().id(), State::PRIMARY_STATE_UNCONFIGURED);
+  EXPECT_EQ(node->configure().id(), State::PRIMARY_STATE_INACTIVE);
+  EXPECT_EQ(node->activate().id(), State::PRIMARY_STATE_ACTIVE);
+  EXPECT_EQ(node->deactivate().id(), State::PRIMARY_STATE_INACTIVE);
+  EXPECT_EQ(node->cleanup().id(), State::PRIMARY_STATE_UNCONFIGURED);
 }
 
 int main(int argc, char ** argv)
 {
   ::testing::InitGoogleTest(&argc, argv);
-  const int rc = RUN_ALL_TESTS();
+  const int test_result = RUN_ALL_TESTS();
   if (rclcpp::ok()) {
     rclcpp::shutdown();
   }
-  return rc;
+  return test_result;
 }
