@@ -1,7 +1,6 @@
 // SPDX-FileCopyrightText: 2026 Polymath Robotics, Inc.
 // SPDX-License-Identifier: Apache-2.0
-#ifndef PROTECTIVE_STOP_MACHINE__MACHINE_BRIDGE_NODE_HPP_
-#define PROTECTIVE_STOP_MACHINE__MACHINE_BRIDGE_NODE_HPP_
+#pragma once
 
 #include <memory>
 #include <string>
@@ -23,6 +22,9 @@
 namespace protective_stop_machine
 {
 
+/// @brief Managed node presenting one ROS 2 surface over either machine
+/// backend. ROS glue only; machine logic lives behind IMachineBackend.
+/// See docs/MACHINE_ROS2_NODE_DESIGN.md.
 class MachineBridgeNode : public rclcpp_lifecycle::LifecycleNode
 {
 public:
@@ -42,13 +44,12 @@ private:
   void publish_tick();
   void publish_heartbeat(bool stop, const rclcpp::Time & stamp);
   void diagnostics(diagnostic_updater::DiagnosticStatusWrapper & stat);
-  // Live timing.* sets: floors are enforced declaratively by the generated
-  // ParamListener; this handler only pushes an accepted change to the backend
-  // and rejects it if the backend refuses (which the ParamListener can't do).
+  /// @brief Applies a live timing.* set by pushing it to the backend.
+  /// The SR-M-01 floors are enforced by the generated ParamListener before this
+  /// runs; a backend refusal is the only rejection made here.
   rcl_interfaces::msg::SetParametersResult on_set_parameters(
     const std::vector<rclcpp::Parameter> & params);
 
-  // Typed, validated parameters (see protective_stop_machine_params.yaml).
   ParamListener param_listener_;
   Params params_;
 
@@ -58,16 +59,15 @@ private:
   MachineTiming timing_;
   MachineSnapshot last_snapshot_;
 
-  // Fleet check-in (optional, opt-in, software backend only). Resolved at
-  // configure time; the announcer thread runs only while the node is ACTIVE.
-  AnnounceConfig announce_cfg_;
+  /// Fleet announce, software backend only. Resolved at configure time; the
+  /// thread runs only while ACTIVE.
+  AnnounceConfig announce_config_;
   int announce_port_{0};
   uint32_t machine_id_{0};
 
-  // Fleet DEVICE check-in (optional, opt-in, software backend only). Registers
-  // the software machine with the management backend like an ESP32 machn; resolved at
-  // configure time, the thread runs only while ACTIVE. Additive to the announcer.
-  FleetCheckinConfig fleet_cfg_;
+  /// Fleet device check-in, software backend only, additive to the announcer.
+  /// Resolved at configure time; the thread runs only while ACTIVE.
+  FleetCheckinConfig fleet_config_;
 
   std::unique_ptr<IMachineBackend> backend_;
   std::unique_ptr<MachineAnnouncer> announcer_;
@@ -82,10 +82,9 @@ private:
   rclcpp_lifecycle::LifecyclePublisher<
     protective_stop_msg::msg::ProtectiveStopHeartbeat>::SharedPtr heartbeat_pub_;
   rclcpp::TimerBase::SharedPtr pub_timer_;
-  std::shared_ptr<diagnostic_updater::Updater> diag_;
+  std::shared_ptr<diagnostic_updater::Updater> diagnostics_updater_;
   rclcpp::node_interfaces::OnSetParametersCallbackHandle::SharedPtr param_cb_handle_;
 };
 
 }  // namespace protective_stop_machine
 
-#endif  // PROTECTIVE_STOP_MACHINE__MACHINE_BRIDGE_NODE_HPP_

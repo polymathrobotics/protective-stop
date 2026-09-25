@@ -28,15 +28,17 @@ namespace protective_stop_machine
 
 // Accumulate the response body (capped) so we can read OTA directives. libcurl
 // hands data in chunks; append until the cap, then drop the rest.
-static size_t append_cb(char * ptr, size_t size, size_t nmemb, void * userdata)
+static size_t append_capped_response_body(char * ptr, size_t size, size_t nmemb, void * userdata)
 {
-  const size_t n = size * nmemb;
+  const size_t chunk_size = size * nmemb;
   auto * out = static_cast<std::string *>(userdata);
-  constexpr size_t kMaxResp = 4096;  // fleet check-in replies are small JSON
+  // fleet check-in replies are small JSON
+  constexpr size_t kMaxResp = 4096;
   if (out->size() < kMaxResp) {
-    out->append(ptr, out->size() + n > kMaxResp ? kMaxResp - out->size() : n);
+    out->append(ptr, out->size() + chunk_size > kMaxResp ? kMaxResp - out->size() : chunk_size);
   }
-  return n;  // always consume all, else libcurl aborts the transfer
+  // always consume all, else libcurl aborts the transfer
+  return chunk_size;
 }
 
 // First non-loopback IPv4 address of this host, dotted-quad, or "" if none.
@@ -44,34 +46,35 @@ static size_t append_cb(char * ptr, size_t size, size_t nmemb, void * userdata)
 // fleet, never load-bearing.
 static std::string resolve_local_ipv4()
 {
-  struct ifaddrs * ifaddr = nullptr;
-  if (getifaddrs(&ifaddr) != 0) {
+  struct ifaddrs * if_list = nullptr;
+  if (getifaddrs(&if_list) != 0) {
     return "";
   }
   std::string result;
-  for (struct ifaddrs * ifa = ifaddr; ifa != nullptr; ifa = ifa->ifa_next) {
-    if (ifa->ifa_addr == nullptr || ifa->ifa_addr->sa_family != AF_INET) {
+  for (struct ifaddrs * iface = if_list; iface != nullptr; iface = iface->ifa_next) {
+    if (iface->ifa_addr == nullptr || iface->ifa_addr->sa_family != AF_INET) {
       continue;
     }
-    auto * sin = reinterpret_cast<struct sockaddr_in *>(ifa->ifa_addr);
-    const uint32_t host_addr = ntohl(sin->sin_addr.s_addr);
+    auto * ipv4 = reinterpret_cast<struct sockaddr_in *>(iface->ifa_addr);
+    const uint32_t host_addr = ntohl(ipv4->sin_addr.s_addr);
     if ((host_addr >> 24) == 127) {
-      continue;  // skip 127.0.0.0/8 loopback
+      // skip 127.0.0.0/8 loopback
+      continue;
     }
-    char buf[INET_ADDRSTRLEN] = {0};
-    if (inet_ntop(AF_INET, &sin->sin_addr, buf, sizeof(buf))) {
-      result = buf;
+    char address_text[INET_ADDRSTRLEN] = {0};
+    if (inet_ntop(AF_INET, &ipv4->sin_addr, address_text, sizeof(address_text))) {
+      result = address_text;
       break;
     }
   }
-  freeifaddrs(ifaddr);
+  freeifaddrs(if_list);
   return result;
 }
 
 FleetCheckin::FleetCheckin(
-  FleetCheckinConfig cfg, uint32_t machine_id,
+  FleetCheckinConfig config, uint32_t machine_id,
   std::function<MachineSnapshot()> snapshot_fn)
-: cfg_(std::move(cfg))
+: config_(std::move(config))
   , machine_id_(machine_id)
   , snapshot_fn_(std::move(snapshot_fn))
 {}
@@ -86,8 +89,9 @@ bool FleetCheckin::start()
   if (running_.load()) {
     return true;
   }
-  if (cfg_.base_url.empty()) {
-    return false;  // disabled — non-fatal, caller only logs
+  if (config_.base_url.empty()) {
+    // disabled — non-fatal, the caller only logs
+    return false;
   }
   running_ = true;
   enabled_ = true;
@@ -120,28 +124,28 @@ bool FleetCheckin::post_once(
   const std::string auth = "Authorization: Bearer " + bearer_key;
   headers = curl_slist_append(headers, auth.c_str());
 
-  std::string resp;
+  std::string response_body;
   curl_easy_setopt(curl, CURLOPT_URL, endpoint.c_str());
   curl_easy_setopt(curl, CURLOPT_POST, 1L);
   curl_easy_setopt(curl, CURLOPT_COPYPOSTFIELDS, payload.c_str());
   curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
-  curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, append_cb);
-  curl_easy_setopt(curl, CURLOPT_WRITEDATA, &resp);
+  curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, append_capped_response_body);
+  curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response_body);
   // NOLINTNEXTLINE(runtime/int)
-  curl_easy_setopt(curl, CURLOPT_TIMEOUT_MS, static_cast<long>(cfg_.http_timeout_s * 1000.0));
+  curl_easy_setopt(curl, CURLOPT_TIMEOUT_MS, static_cast<long>(config_.http_timeout_s * 1000.0));
 
-  CURLcode rc = curl_easy_perform(curl);
+  CURLcode curl_result = curl_easy_perform(curl);
   // NOLINTNEXTLINE(runtime/int)
   long status = 0;
   curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &status);
   curl_slist_free_all(headers);
   curl_easy_cleanup(curl);
 
-  const bool ok = rc == CURLE_OK && status >= 200 && status < 300;
-  if (ok) {
-    handle_response(resp);
+  const bool posted = curl_result == CURLE_OK && status >= 200 && status < 300;
+  if (posted) {
+    handle_response(response_body);
   }
-  return ok;
+  return posted;
 }
 
 // Parse the 200 JSON for OTA directives. A software machine has NO ESP-OTA image,
@@ -172,8 +176,8 @@ void FleetCheckin::run()
   // the announcer. An empty/absent path yields an empty bearer; an unreadable
   // configured path disables the check-in (non-fatal — log only).
   std::string bearer_key;
-  if (!cfg_.key_file.empty()) {
-    FILE * file = std::fopen(cfg_.key_file.c_str(), "r");
+  if (!config_.key_file.empty()) {
+    FILE * file = std::fopen(config_.key_file.c_str(), "r");
     if (file) {
       char line[256];
       if (std::fgets(line, sizeof(line), file)) {
@@ -183,46 +187,47 @@ void FleetCheckin::run()
       std::fclose(file);
     } else {
       std::fprintf(stderr, "fleet-checkin: cannot read key file %s — check-in disabled\n",
-          cfg_.key_file.c_str());
+          config_.key_file.c_str());
       enabled_ = false;
       running_ = false;
       return;
     }
   }
 
-  const std::string endpoint = checkin_endpoint(cfg_.base_url);
+  const std::string endpoint = checkin_endpoint(config_.base_url);
   const std::string local_ip = resolve_local_ipv4();
   // tailscale_ip is intentionally empty (see build_checkin_payload note).
   const std::string tailscale_ip;
 
-  const int interval = cfg_.interval_s > 0 ? cfg_.interval_s : 300;
-  int last_ok = -1;  // -1 unknown, 0 fail, 1 ok — log only on change
+  const int interval = config_.interval_s > 0 ? config_.interval_s : 300;
+  // -1 unknown, 0 fail, 1 ok — logged only on change
+  int last_post_succeeded = -1;
   while (running_.load()) {
-    const MachineSnapshot snap = snapshot_fn_ ? snapshot_fn_() : MachineSnapshot{};
+    const MachineSnapshot snapshot = snapshot_fn_ ? snapshot_fn_() : MachineSnapshot{};
     const auto uptime =
       std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() -
         start_time_).count();
     const std::string payload = build_checkin_payload(
       machine_id_,
-      cfg_.app_version,
-      cfg_.idf_version,
+      config_.app_version,
+      config_.idf_version,
       static_cast<uint64_t>(uptime),
       interval,
       local_ip,
       tailscale_ip,
-      snap);
-    const bool ok = post_once(endpoint, payload, bearer_key);
-    const int now_ok = ok ? 1 : 0;
-    if (now_ok != last_ok) {
-      if (ok) {
+      snapshot);
+    const bool posted = post_once(endpoint, payload, bearer_key);
+    const int post_succeeded = posted ? 1 : 0;
+    if (post_succeeded != last_post_succeeded) {
+      if (posted) {
         std::fprintf(stderr, "fleet-checkin: OK -> %s\n", endpoint.c_str());
       } else {
         std::fprintf(stderr, "fleet-checkin: FAILED -> %s (will keep retrying)\n",
             endpoint.c_str());
       }
-      last_ok = now_ok;
+      last_post_succeeded = post_succeeded;
     }
-    for (int i = 0; i < interval && running_.load(); ++i) {
+    for (int second = 0; second < interval && running_.load(); ++second) {
       sleep(1);
     }
   }

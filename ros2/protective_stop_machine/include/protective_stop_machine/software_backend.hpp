@@ -1,7 +1,6 @@
 // SPDX-FileCopyrightText: 2026 Polymath Robotics, Inc.
 // SPDX-License-Identifier: Apache-2.0
-#ifndef PROTECTIVE_STOP_MACHINE__SOFTWARE_BACKEND_HPP_
-#define PROTECTIVE_STOP_MACHINE__SOFTWARE_BACKEND_HPP_
+#pragma once
 
 #include <cstdint>
 #include <memory>
@@ -13,53 +12,48 @@
 namespace protective_stop_machine
 {
 
+/// @brief Deployment values for the in-process software backend.
 struct SoftwareConfig
 {
   std::string bind_addr{"0.0.0.0"};
   int port{8890};
   uint32_t machine_id{0x01020304};
   MachineTiming timing;
-  // ADMISSION (optional): may a remote BOND at all? Two independent global
-  // lists, both empty by default ("open": every remote is admitted).
-  //   allowlist  non-empty => ONLY listed ids may bond ("paranoid" mode)
-  //   denylist   listed ids may never bond; wins over the allowlist
-  // A refused BOND is answered with UNBOND so the remote can show it.
-  // Admission is NOT authority: whether a bonded remote may re-arm is the
-  // REMOTE's own announced role (common/pstop_aux_channel.h), re-read on every
-  // frame by the machine thread.
   std::vector<uint32_t> allowlist{};
   std::vector<uint32_t> denylist{};
 };
 
-// Single source of truth for the admission decision. Header-inline +
-// pstop-free so it is directly unit-testable. Mirrors machn/main.c
-// (dcs_admission_allows) and host/machine_app_runner.c.
-inline bool software_remote_admitted(const SoftwareConfig & cfg, uint32_t remote_id)
+/// @brief Decides whether a remote may bond. Single source of truth, mirroring
+/// machn/main.c (dcs_admission_allows) and host/machine_app_runner.c.
+/// @return True when both lists are empty; the denylist wins over the allowlist.
+inline bool software_remote_admitted(const SoftwareConfig & config, uint32_t remote_id)
 {
-  for (uint32_t id : cfg.denylist) {
-    if (id == remote_id) {
-      return false;  // deny wins
+  for (uint32_t listed_id : config.denylist) {
+    if (listed_id == remote_id) {
+      // deny wins
+      return false;
     }
   }
-  if (cfg.allowlist.empty()) {
-    return true;  // open mode
+  if (config.allowlist.empty()) {
+    // open mode: no allowlist configured
+    return true;
   }
-  for (uint32_t id : cfg.allowlist) {
-    if (id == remote_id) {
+  for (uint32_t listed_id : config.allowlist) {
+    if (listed_id == remote_id) {
       return true;
     }
   }
   return false;
 }
 
-// The node itself IS the machine: this backend links pstop_c and runs a machine
-// instance on a dedicated thread, binding UDP so remotes bond directly to it.
-// If the node dies or stop() is called, the machine stops replying and remotes
-// fail-safe on their own heartbeat timeout (see design §8).
+/// @brief Hosts pstop_c in-process, making the node itself the machine.
+/// Runs a machine instance on a dedicated thread and binds UDP so remotes bond
+/// directly to it. On stop() or node death the machine stops replying and
+/// remotes fail-safe on their own heartbeat timeout (design §8).
 class SoftwareMachineBackend : public IMachineBackend
 {
 public:
-  explicit SoftwareMachineBackend(const SoftwareConfig & cfg);
+  explicit SoftwareMachineBackend(const SoftwareConfig & config);
   ~SoftwareMachineBackend() override;
 
   bool start() override;
@@ -72,8 +66,8 @@ public:
     return "software";
   }
 
-  // Opaque; fully defined in the .cpp (hides the pstop_c C types). Public so the
-  // file-scope C callbacks in the .cpp can reach it, but the instance is private.
+  /// @brief Opaque, defined in the .cpp, hiding the pstop_c C types.
+  /// Public so the file-scope C callbacks can name it; the instance is private.
   struct Impl;
 
 private:
@@ -82,4 +76,3 @@ private:
 
 }  // namespace protective_stop_machine
 
-#endif  // PROTECTIVE_STOP_MACHINE__SOFTWARE_BACKEND_HPP_

@@ -6,8 +6,7 @@
 // dependency on nlohmann/json so the package builds with only rclcpp + libcurl.
 // Not a general-purpose library: no unicode-escape expansion beyond passthrough,
 // tolerant number parsing. Adequate and tested for the device's flat schema.
-#ifndef PROTECTIVE_STOP_MACHINE__JSON_LITE_HPP_
-#define PROTECTIVE_STOP_MACHINE__JSON_LITE_HPP_
+#pragma once
 
 #include <cctype>
 #include <cstdlib>
@@ -113,7 +112,8 @@ public:
       return false;
     }
     skip_ws();
-    return true;  // trailing junk tolerated
+    // trailing junk tolerated
+    return true;
   }
 
 private:
@@ -165,7 +165,8 @@ private:
   bool object(Value & v, int depth)
   {
     v.type = Value::OBJ;
-    ++i_;  // {
+    // consume {
+    ++i_;
     skip_ws();
     if (peek() == '}') {
       ++i_;
@@ -207,7 +208,8 @@ private:
   bool array(Value & v, int depth)
   {
     v.type = Value::ARR;
-    ++i_;  // [
+    // consume [
+    ++i_;
     skip_ws();
     if (peek() == ']') {
       ++i_;
@@ -236,7 +238,8 @@ private:
   bool string_val(Value & v)
   {
     v.type = Value::STR;
-    ++i_;  // opening quote
+    // consume the opening quote
+    ++i_;
     std::string out;
     while (i_ < s_.size()) {
       char c = s_[i_++];
@@ -265,7 +268,8 @@ private:
           case '/':
             out.push_back('/');
             break;
-          case 'u':  // passthrough: keep the 4 hex digits literally
+          // passthrough: keep the 4 hex digits literally
+          case 'u':
             out.push_back('\\');
             out.push_back('u');
             for (int k = 0; k < 4 && i_ < s_.size(); ++k) {
@@ -280,7 +284,8 @@ private:
         out.push_back(c);
       }
     }
-    return false;  // unterminated
+    // unterminated
+    return false;
   }
 
   bool number(Value & v)
@@ -336,4 +341,3 @@ inline bool parse(const std::string & text, Value & out)
 
 }  // namespace jsonlite
 
-#endif  // PROTECTIVE_STOP_MACHINE__JSON_LITE_HPP_

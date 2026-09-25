@@ -53,38 +53,38 @@ bool MachineBridgeNode::build_backend(std::string & error)
   backend_kind_ = params_.backend;
 
   if (backend_kind_ == "software") {
-    SoftwareConfig sc;
-    sc.bind_addr = params_.software.bind_addr;
-    sc.port = static_cast<int>(params_.software.port);
-    sc.machine_id = static_cast<uint32_t>(params_.machine_id);
-    sc.timing = timing_;
+    SoftwareConfig software_config;
+    software_config.bind_addr = params_.software.bind_addr;
+    software_config.port = static_cast<int>(params_.software.port);
+    software_config.machine_id = static_cast<uint32_t>(params_.machine_id);
+    software_config.timing = timing_;
     // Admission (optional): who may BOND. Both lists empty (default) => every
     // remote is admitted. Re-arm authority is each remote's own announced role.
-    for (int64_t id : params_.software.allowlist) {
-      sc.allowlist.push_back(static_cast<uint32_t>(id));
+    for (int64_t listed_id : params_.software.allowlist) {
+      software_config.allowlist.push_back(static_cast<uint32_t>(listed_id));
     }
-    for (int64_t id : params_.software.denylist) {
-      sc.denylist.push_back(static_cast<uint32_t>(id));
+    for (int64_t listed_id : params_.software.denylist) {
+      software_config.denylist.push_back(static_cast<uint32_t>(listed_id));
     }
-    backend_ = std::make_unique<SoftwareMachineBackend>(sc);
+    backend_ = std::make_unique<SoftwareMachineBackend>(software_config);
 
     // Resolve the optional fleet check-in (software machine only — the ESP32
     // machn already checks in on its own). Env overrides the params so URL/key
     // stay out of committed config, mirroring the host runner.
-    announce_cfg_.url = params_.announce.url;
-    announce_cfg_.key_file = params_.announce.key_file;
-    announce_cfg_.name = params_.announce.name;
-    announce_cfg_.interval_s = static_cast<int>(params_.announce.interval_s);
+    announce_config_.url = params_.announce.url;
+    announce_config_.key_file = params_.announce.key_file;
+    announce_config_.name = params_.announce.name;
+    announce_config_.interval_s = static_cast<int>(params_.announce.interval_s);
     if (const char * env_url = std::getenv("PSTOP_ANNOUNCE_URL"); env_url && env_url[0] != '\0') {
-      announce_cfg_.url = env_url;
+      announce_config_.url = env_url;
     }
     if (const char * env_key = std::getenv("PSTOP_ANNOUNCE_KEY_FILE");
       env_key && env_key[0] != '\0')
     {
-      announce_cfg_.key_file = env_key;
+      announce_config_.key_file = env_key;
     }
-    announce_port_ = sc.port;
-    machine_id_ = sc.machine_id;
+    announce_port_ = software_config.port;
+    machine_id_ = software_config.machine_id;
 
     // Resolve the optional fleet DEVICE check-in (software machine only — the
     // ESP32 machn checks itself in). This registers the software machine with
@@ -92,38 +92,38 @@ bool MachineBridgeNode::build_backend(std::string & error)
     // fleet_ota_checkin(); it is additive to the lighter announce above. The
     // [60, 300] cadence is enforced declaratively by the params bounds<>. Env
     // overrides the params so the proprietary URL/key stay out of committed config.
-    fleet_cfg_.base_url = params_.fleet.checkin_url;
-    fleet_cfg_.key_file = params_.fleet.api_key_file;
-    fleet_cfg_.interval_s = static_cast<int>(params_.fleet.check_interval_s);
+    fleet_config_.base_url = params_.fleet.checkin_url;
+    fleet_config_.key_file = params_.fleet.api_key_file;
+    fleet_config_.interval_s = static_cast<int>(params_.fleet.check_interval_s);
     if (const char * env_url = std::getenv("PSTOP_CHECKIN_URL");
       env_url && env_url[0] != '\0')
     {
-      fleet_cfg_.base_url = env_url;
+      fleet_config_.base_url = env_url;
     }
     if (const char * env_key = std::getenv("PSTOP_CHECKIN_API_KEY_FILE");
       env_key && env_key[0] != '\0')
     {
-      fleet_cfg_.key_file = env_key;
+      fleet_config_.key_file = env_key;
     }
     // app_version is the ament package version (single source: package.xml,
     // injected by CMake). idf_version has no IDF analogue on a host, so it tags
     // the runtime distro instead, e.g. "ros2-jazzy".
 #ifdef PSTOP_MACHINE_APP_VERSION
-    fleet_cfg_.app_version = PSTOP_MACHINE_APP_VERSION;
+    fleet_config_.app_version = PSTOP_MACHINE_APP_VERSION;
 #endif
     const char * distro = std::getenv("ROS_DISTRO");
-    fleet_cfg_.idf_version = std::string("ros2-") + (distro &&
-      distro[0] != '\0' ? distro : "unknown");
+    fleet_config_.idf_version =
+      std::string("ros2-") + (distro && distro[0] != '\0' ? distro : "unknown");
     return true;
   } else if (backend_kind_ == "hardware") {
-    HardwareConfig hc;
-    hc.device_url = params_.hardware.device_url;
-    hc.admin_user = params_.hardware.admin_user;
-    hc.poll_hz = params_.rates.state_poll_hz;
+    HardwareConfig hardware_config;
+    hardware_config.device_url = params_.hardware.device_url;
+    hardware_config.admin_user = params_.hardware.admin_user;
+    hardware_config.poll_hz = params_.rates.state_poll_hz;
     // Admin password from the environment — never a parameter file.
-    const char * pw = std::getenv("PSTOP_MACHINE_ADMIN_PASS");
-    hc.admin_pass = pw ? pw : "";
-    backend_ = std::make_unique<HardwareMachineBackend>(hc);
+    const char * admin_pass = std::getenv("PSTOP_MACHINE_ADMIN_PASS");
+    hardware_config.admin_pass = admin_pass ? admin_pass : "";
+    backend_ = std::make_unique<HardwareMachineBackend>(hardware_config);
     return true;
   }
   error = "unknown backend '" + backend_kind_ + "' (want software|hardware)";
@@ -132,9 +132,9 @@ bool MachineBridgeNode::build_backend(std::string & error)
 
 MachineBridgeNode::CallbackReturn MachineBridgeNode::on_configure(const rclcpp_lifecycle::State &)
 {
-  std::string err;
-  if (!build_backend(err)) {
-    RCLCPP_ERROR(get_logger(), "configure failed to build backend: %s", err.c_str());
+  std::string error;
+  if (!build_backend(error)) {
+    RCLCPP_ERROR(get_logger(), "configure failed to build backend: %s", error.c_str());
     return CallbackReturn::FAILURE;
   }
 
@@ -164,33 +164,36 @@ MachineBridgeNode::CallbackReturn MachineBridgeNode::on_activate(
     return CallbackReturn::FAILURE;
   }
 
-  LifecycleNode::on_activate(state);  // activate managed publishers
+  // activate managed publishers
+  LifecycleNode::on_activate(state);
   state_pub_->on_activate();
   relay_pub_->on_activate();
   remotes_pub_->on_activate();
   heartbeat_pub_->on_activate();
 
-  const double hz = params_.rates.publish_rate_hz;  // floored at 1.0 by param validation
+  // floored at 1.0 by param validation
+  const double publish_hz = params_.rates.publish_rate_hz;
   pub_timer_ =
-    create_wall_timer(std::chrono::duration<double>(1.0 / hz),
+    create_wall_timer(std::chrono::duration<double>(1.0 / publish_hz),
       std::bind(&MachineBridgeNode::publish_tick, this));
 
-  const double dhz = params_.rates.diagnostics_rate_hz;  // floored at 0.1 by param validation
-  diag_ = std::make_shared<diagnostic_updater::Updater>(this, 1.0 / dhz);
-  diag_->setHardwareID(backend_kind_);
-  diag_->add("machine", this, &MachineBridgeNode::diagnostics);
+  // floored at 0.1 by param validation
+  const double diagnostics_hz = params_.rates.diagnostics_rate_hz;
+  diagnostics_updater_ = std::make_shared<diagnostic_updater::Updater>(this, 1.0 / diagnostics_hz);
+  diagnostics_updater_->setHardwareID(backend_kind_);
+  diagnostics_updater_->add("machine", this, &MachineBridgeNode::diagnostics);
 
   // Optional fleet check-in — starts only while ACTIVE, software backend only,
   // and only when a URL is configured. Off the safety path: a failure to start
   // (or a dead console) only logs and never fails activation.
-  if (backend_kind_ == "software" && !announce_cfg_.url.empty()) {
-    announcer_ = std::make_unique<MachineAnnouncer>(announce_cfg_, announce_port_, machine_id_,
+  if (backend_kind_ == "software" && !announce_config_.url.empty()) {
+    announcer_ = std::make_unique<MachineAnnouncer>(announce_config_, announce_port_, machine_id_,
         [this]() {
           return backend_ ? backend_->snapshot() : MachineSnapshot{};
     });
     if (announcer_->start()) {
-      RCLCPP_INFO(get_logger(), "announce: every %ds to %s", announce_cfg_.interval_s,
-          announce_cfg_.url.c_str());
+      RCLCPP_INFO(get_logger(), "announce: every %ds to %s", announce_config_.interval_s,
+          announce_config_.url.c_str());
     } else {
       RCLCPP_WARN(get_logger(), "announce: configured but did not start (see stderr)");
     }
@@ -199,20 +202,20 @@ MachineBridgeNode::CallbackReturn MachineBridgeNode::on_activate(
   // Optional fleet DEVICE check-in — same lifecycle/guards as the announcer:
   // ACTIVE only, software backend only, only when a base URL is configured. Off
   // the safety path: a failure to start (or a dead fleet) only logs.
-  if (backend_kind_ == "software" && !fleet_cfg_.base_url.empty()) {
-    fleet_checkin_ = std::make_unique<FleetCheckin>(fleet_cfg_, machine_id_, [this]() {
+  if (backend_kind_ == "software" && !fleet_config_.base_url.empty()) {
+    fleet_checkin_ = std::make_unique<FleetCheckin>(fleet_config_, machine_id_, [this]() {
           return backend_ ? backend_->snapshot() : MachineSnapshot{};
     });
     if (fleet_checkin_->start()) {
       RCLCPP_INFO(
-        get_logger(), "fleet-checkin: every %ds to %s/api/v1/checkin", fleet_cfg_.interval_s,
-        fleet_cfg_.base_url.c_str());
+        get_logger(), "fleet-checkin: every %ds to %s/api/v1/checkin", fleet_config_.interval_s,
+        fleet_config_.base_url.c_str());
     } else {
       RCLCPP_WARN(get_logger(), "fleet-checkin: configured but did not start (see stderr)");
     }
   }
 
-  RCLCPP_INFO(get_logger(), "activated: publishing at %.1f Hz", hz);
+  RCLCPP_INFO(get_logger(), "activated: publishing at %.1f Hz", publish_hz);
   return CallbackReturn::SUCCESS;
 }
 
@@ -223,7 +226,7 @@ MachineBridgeNode::CallbackReturn MachineBridgeNode::on_deactivate(
     pub_timer_->cancel();
     pub_timer_.reset();
   }
-  diag_.reset();
+  diagnostics_updater_.reset();
   // Stop the check-in BEFORE the backend so its snapshot getter never races a
   // backend teardown.
   if (announcer_) {
@@ -234,9 +237,10 @@ MachineBridgeNode::CallbackReturn MachineBridgeNode::on_deactivate(
     fleet_checkin_->stop();
     fleet_checkin_.reset();
   }
+  // stopping the backend leaves the machine safe; remotes fail-safe
   if (backend_) {
     backend_->stop();
-  }  // -> machine safe (remotes fail-safe)
+  }
   publish_heartbeat(true, this->now());
   state_pub_->on_deactivate();
   relay_pub_->on_deactivate();
@@ -293,7 +297,7 @@ MachineBridgeNode::CallbackReturn MachineBridgeNode::on_error(const rclcpp_lifec
     pub_timer_->cancel();
     pub_timer_.reset();
   }
-  diag_.reset();
+  diagnostics_updater_.reset();
   if (announcer_) {
     announcer_->stop();
     announcer_.reset();
@@ -302,16 +306,17 @@ MachineBridgeNode::CallbackReturn MachineBridgeNode::on_error(const rclcpp_lifec
     fleet_checkin_->stop();
     fleet_checkin_.reset();
   }
+  // stopping the backend leaves the machine safe; remotes fail-safe
   if (backend_) {
     backend_->stop();
-  }  // safe: machine stops -> remotes fail-safe
+  }
   // Emit one explicit UNSTABLE before tearing down the publishers (design §8).
   publish_heartbeat(true, this->now());
   if (state_pub_ && state_pub_->is_activated()) {
-    ProtectiveStopStatus st;
-    st.status = static_cast<uint8_t>(MachineState::UNSTABLE);
-    st.message = "error transition";
-    state_pub_->publish(st);
+    ProtectiveStopStatus status_msg;
+    status_msg.status = static_cast<uint8_t>(MachineState::UNSTABLE);
+    status_msg.message = "error transition";
+    state_pub_->publish(status_msg);
     state_pub_->on_deactivate();
     relay_pub_->on_deactivate();
     remotes_pub_->on_deactivate();
@@ -409,8 +414,8 @@ void MachineBridgeNode::diagnostics(diagnostic_updater::DiagnosticStatusWrapper 
 rcl_interfaces::msg::SetParametersResult MachineBridgeNode::on_set_parameters(
   const std::vector<rclcpp::Parameter> & params)
 {
-  rcl_interfaces::msg::SetParametersResult res;
-  res.successful = true;
+  rcl_interfaces::msg::SetParametersResult result;
+  result.successful = true;
   MachineTiming proposed = timing_;
   bool timing_changed = false;
   for (const auto & parameter : params) {
@@ -432,16 +437,16 @@ rcl_interfaces::msg::SetParametersResult MachineBridgeNode::on_set_parameters(
     // machine thread applies it), so this is non-blocking there. The hardware
     // backend does a bounded admin POST — acceptable for a rare operator set.
     if (backend_) {
-      std::string err;
-      if (!backend_->configure(proposed, err)) {
-        res.successful = false;
-        res.reason = "backend refused: " + err;
-        return res;
+      std::string error;
+      if (!backend_->configure(proposed, error)) {
+        result.successful = false;
+        result.reason = "backend refused: " + error;
+        return result;
       }
     }
     timing_ = proposed;
   }
-  return res;
+  return result;
 }
 
 }  // namespace protective_stop_machine

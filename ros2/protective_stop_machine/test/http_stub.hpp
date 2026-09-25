@@ -3,12 +3,11 @@
 //
 // LoopbackHttpStub — a minimal, single-purpose HTTP/1.1 server on 127.0.0.1 for
 // exercising the HardwareMachineBackend's libcurl client (http_get / http_post,
-// write_cb, the 2xx success path) WITHOUT a real ESP32 machn. It binds an
+// append_response_body, the 2xx success path) WITHOUT a real ESP32 machn. It binds an
 // ephemeral loopback port, answers every request with one canned status + body,
 // and records the last request body so a test can assert what the backend sent
 // (e.g. the configure() JSON). This is test scaffolding, not a general server.
-#ifndef PROTECTIVE_STOP_MACHINE__TEST__HTTP_STUB_HPP_
-#define PROTECTIVE_STOP_MACHINE__TEST__HTTP_STUB_HPP_
+#pragma once
 
 #include <arpa/inet.h>
 #include <netinet/in.h>
@@ -33,29 +32,31 @@ public:
   : body_(std::move(body))
     , status_(http_status)
   {
-    fd_ = ::socket(AF_INET, SOCK_STREAM, 0);
-    int one = 1;
-    ::setsockopt(fd_, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
+    listen_fd_ = ::socket(AF_INET, SOCK_STREAM, 0);
+    int reuse_addr = 1;
+    ::setsockopt(listen_fd_, SOL_SOCKET, SO_REUSEADDR, &reuse_addr, sizeof(reuse_addr));
     sockaddr_in addr{};
     addr.sin_family = AF_INET;
     addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-    addr.sin_port = 0;  // ephemeral — the OS picks a free port
-    ::bind(fd_, reinterpret_cast<sockaddr *>(&addr), sizeof(addr));
-    socklen_t len = sizeof(addr);
-    ::getsockname(fd_, reinterpret_cast<sockaddr *>(&addr), &len);
+    // ephemeral — the OS picks a free port
+    addr.sin_port = 0;
+    ::bind(listen_fd_, reinterpret_cast<sockaddr *>(&addr), sizeof(addr));
+    socklen_t addr_len = sizeof(addr);
+    ::getsockname(listen_fd_, reinterpret_cast<sockaddr *>(&addr), &addr_len);
     port_ = ntohs(addr.sin_port);
-    ::listen(fd_, 4);
+    ::listen(listen_fd_, 4);
     running_ = true;
-    th_ = std::thread([this] {serve();});
+    thread_ = std::thread([this] {serve();});
   }
 
   ~LoopbackHttpStub()
   {
     running_ = false;
-    ::shutdown(fd_, SHUT_RDWR);  // wake the blocking accept()
-    ::close(fd_);
-    if (th_.joinable()) {
-      th_.join();
+    // wake the blocking accept()
+    ::shutdown(listen_fd_, SHUT_RDWR);
+    ::close(listen_fd_);
+    if (thread_.joinable()) {
+      thread_.join();
     }
   }
 
@@ -76,43 +77,43 @@ public:
   // Body of the most recent request the backend sent (e.g. the configure POST).
   std::string last_request_body() const
   {
-    std::lock_guard<std::mutex> lk(mtx_);
+    std::lock_guard<std::mutex> lock(body_mutex_);
     return last_body_;
   }
 
   int request_count() const
   {
-    return count_.load();
+    return request_count_.load();
   }
 
 private:
   void serve()
   {
     while (running_.load()) {
-      int c = ::accept(fd_, nullptr, nullptr);
-      if (c < 0) {
+      int client_fd = ::accept(listen_fd_, nullptr, nullptr);
+      if (client_fd < 0) {
         if (!running_.load()) {
           break;
         }
         continue;
       }
-      handle(c);
-      ::close(c);
+      handle(client_fd);
+      ::close(client_fd);
     }
   }
 
-  void handle(int c)
+  void handle(int client_fd)
   {
-    std::string req;
-    char buf[2048];
+    std::string request;
+    char chunk[2048];
     size_t header_end = std::string::npos;
     while (running_.load()) {
-      ssize_t n = ::recv(c, buf, sizeof(buf), 0);
-      if (n <= 0) {
+      ssize_t transferred = ::recv(client_fd, chunk, sizeof(chunk), 0);
+      if (transferred <= 0) {
         break;
       }
-      req.append(buf, static_cast<size_t>(n));
-      header_end = req.find("\r\n\r\n");
+      request.append(chunk, static_cast<size_t>(transferred));
+      header_end = request.find("\r\n\r\n");
       if (header_end != std::string::npos) {
         break;
       }
@@ -120,55 +121,55 @@ private:
     // If there is a body (POST), drain Content-Length bytes so the captured
     // request is complete regardless of loopback segmentation.
     if (header_end != std::string::npos) {
-      size_t want = 0;
-      size_t lc = req.find("Content-Length:");
-      if (lc == std::string::npos) {
-        lc = req.find("content-length:");
+      size_t expected_body_bytes = 0;
+      size_t content_length_pos = request.find("Content-Length:");
+      if (content_length_pos == std::string::npos) {
+        content_length_pos = request.find("content-length:");
       }
-      if (lc != std::string::npos) {
-        want = static_cast<size_t>(std::strtoul(req.c_str() + lc + 15, nullptr, 10));
+      if (content_length_pos != std::string::npos) {
+        expected_body_bytes = static_cast<size_t>(
+          std::strtoul(request.c_str() + content_length_pos + 15, nullptr, 10));
       }
-      size_t have = req.size() - (header_end + 4);
-      while (have < want && running_.load()) {
-        ssize_t n = ::recv(c, buf, sizeof(buf), 0);
-        if (n <= 0) {
+      size_t received_body_bytes = request.size() - (header_end + 4);
+      while (received_body_bytes < expected_body_bytes && running_.load()) {
+        ssize_t transferred = ::recv(client_fd, chunk, sizeof(chunk), 0);
+        if (transferred <= 0) {
           break;
         }
-        req.append(buf, static_cast<size_t>(n));
-        have += static_cast<size_t>(n);
+        request.append(chunk, static_cast<size_t>(transferred));
+        received_body_bytes += static_cast<size_t>(transferred);
       }
     }
     {
-      std::lock_guard<std::mutex> lk(mtx_);
-      last_body_ = header_end == std::string::npos ? "" : req.substr(header_end + 4);
+      std::lock_guard<std::mutex> lock(body_mutex_);
+      last_body_ = header_end == std::string::npos ? "" : request.substr(header_end + 4);
     }
-    count_.fetch_add(1);
+    request_count_.fetch_add(1);
 
-    const std::string resp = "HTTP/1.1 " + std::to_string(status_) + " OK\r\n" +
+    const std::string response = "HTTP/1.1 " + std::to_string(status_) + " OK\r\n" +
       "Content-Type: application/json\r\n" +
       "Content-Length: " + std::to_string(body_.size()) + "\r\n" + "Connection: close\r\n\r\n" +
       body_;
     size_t sent = 0;
-    while (sent < resp.size()) {
-      ssize_t n = ::send(c, resp.data() + sent, resp.size() - sent, 0);
-      if (n <= 0) {
+    while (sent < response.size()) {
+      ssize_t transferred = ::send(client_fd, response.data() + sent, response.size() - sent, 0);
+      if (transferred <= 0) {
         break;
       }
-      sent += static_cast<size_t>(n);
+      sent += static_cast<size_t>(transferred);
     }
   }
 
-  int fd_{-1};
+  int listen_fd_{-1};
   int port_{0};
   std::string body_;
   int status_;
-  std::thread th_;
+  std::thread thread_;
   std::atomic<bool> running_{false};
-  std::atomic<int> count_{0};
-  mutable std::mutex mtx_;
+  std::atomic<int> request_count_{0};
+  mutable std::mutex body_mutex_;
   std::string last_body_;
 };
 
 }  // namespace pstop_test
 
-#endif  // PROTECTIVE_STOP_MACHINE__TEST__HTTP_STUB_HPP_

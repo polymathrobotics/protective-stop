@@ -51,9 +51,9 @@ static rclcpp::NodeOptions with(std::vector<rclcpp::Parameter> overrides)
   // so any explicit per-test override still wins.
   std::vector<rclcpp::Parameter> params{rclcpp::Parameter("autostart", false)};
   params.insert(params.end(), overrides.begin(), overrides.end());
-  rclcpp::NodeOptions o;
-  o.parameter_overrides(std::move(params));
-  return o;
+  rclcpp::NodeOptions options;
+  options.parameter_overrides(std::move(params));
+  return options;
 }
 
 // Spin the executor until pred() is true or the deadline passes.
@@ -107,14 +107,14 @@ TEST_F(NodeRuntime, SoftwarePublishesAndDiagnoses)
   bool got_diag = false;
   auto s1 = sub->create_subscription<ProtectiveStopStatus>(
     "/machine_bridge/machine_state", rclcpp::QoS(1).transient_local(),
-    [&](ProtectiveStopStatus::SharedPtr m) {
+    [&](ProtectiveStopStatus::SharedPtr msg) {
       got_state = true;
-      status = m->status;
+      status = msg->status;
     });
   auto s2 = sub->create_subscription<MachineRelayStatus>(
-    "/machine_bridge/relay_status", rclcpp::QoS(5), [&](MachineRelayStatus::SharedPtr m) {
+    "/machine_bridge/relay_status", rclcpp::QoS(5), [&](MachineRelayStatus::SharedPtr msg) {
       got_relay = true;
-      relay_applicable = m->applicable;
+      relay_applicable = msg->applicable;
     });
   auto s3 = sub->create_subscription<BondedRemoteArray>(
     "/machine_bridge/remotes", rclcpp::QoS(5), [&](BondedRemoteArray::SharedPtr) {
@@ -122,8 +122,8 @@ TEST_F(NodeRuntime, SoftwarePublishesAndDiagnoses)
                                                                                                      });
   auto s4 =
     sub->create_subscription<DiagnosticArray>("/diagnostics", rclcpp::QoS(5),
-      [&](DiagnosticArray::SharedPtr m) {
-        for (const auto & st : m->status) {
+      [&](DiagnosticArray::SharedPtr msg) {
+        for (const auto & st : msg->status) {
           if (st.name.find("machine") != std::string::npos) {
             got_diag = true;
           }
@@ -135,7 +135,8 @@ TEST_F(NodeRuntime, SoftwarePublishesAndDiagnoses)
   exec.add_node(sub);
   EXPECT_TRUE(spin_until(exec, [&] {return got_state && got_relay && got_remotes && got_diag;}));
   EXPECT_EQ(status, static_cast<uint8_t>(protective_stop_machine::MachineState::DEACTIVATED));
-  EXPECT_FALSE(relay_applicable);  // software backend has no physical relays
+  // the software backend has no physical relays
+  EXPECT_FALSE(relay_applicable);
 
   EXPECT_EQ(node->deactivate().id(), State::PRIMARY_STATE_INACTIVE);
   EXPECT_EQ(node->cleanup().id(), State::PRIMARY_STATE_UNCONFIGURED);
@@ -225,13 +226,13 @@ TEST_F(NodeRuntime, HardwareUnreachableDiagnosesError)
   bool err_diag = false;
   auto s1 = sub->create_subscription<ProtectiveStopStatus>(
     "/machine_bridge/machine_state", rclcpp::QoS(1).transient_local(),
-    [&](ProtectiveStopStatus::SharedPtr m) {
-      status = m->status;
+    [&](ProtectiveStopStatus::SharedPtr msg) {
+      status = msg->status;
     });
   auto s2 =
     sub->create_subscription<DiagnosticArray>("/diagnostics", rclcpp::QoS(5),
-      [&](DiagnosticArray::SharedPtr m) {
-        for (const auto & st : m->status) {
+      [&](DiagnosticArray::SharedPtr msg) {
+        for (const auto & st : msg->status) {
           if (st.level == DiagnosticStatus::ERROR &&
           st.message.find("unreachable") != std::string::npos)
           {
@@ -275,17 +276,17 @@ static void run_hardware_stub_case(
   size_t remote_count = 0;
   auto s1 = sub->create_subscription<ProtectiveStopStatus>(
     "/machine_bridge/machine_state", rclcpp::QoS(1).transient_local(),
-    [&](ProtectiveStopStatus::SharedPtr m) {
-      status = m->status;
+    [&](ProtectiveStopStatus::SharedPtr msg) {
+      status = msg->status;
     });
   auto s2 = sub->create_subscription<BondedRemoteArray>(
-    "/machine_bridge/remotes", rclcpp::QoS(5), [&](BondedRemoteArray::SharedPtr m) {
-      remote_count = m->remotes.size();
+    "/machine_bridge/remotes", rclcpp::QoS(5), [&](BondedRemoteArray::SharedPtr msg) {
+      remote_count = msg->remotes.size();
     });
   auto s3 =
     sub->create_subscription<DiagnosticArray>("/diagnostics", rclcpp::QoS(5),
-      [&](DiagnosticArray::SharedPtr m) {
-        for (const auto & st : m->status) {
+      [&](DiagnosticArray::SharedPtr msg) {
+        for (const auto & st : msg->status) {
           if (st.level == want_diag_level &&
           st.message.find(want_msg_substr) != std::string::npos)
           {
@@ -404,12 +405,14 @@ TEST_F(NodeRuntime, ActivateFailsWhenBackendRefusesStart)
   auto held = std::make_shared<MachineBridgeNode>(
     with({rclcpp::Parameter("backend", "software"), rclcpp::Parameter("software.port", 18924)}));
   ASSERT_EQ(held->configure().id(), State::PRIMARY_STATE_INACTIVE);
-  ASSERT_EQ(held->activate().id(), State::PRIMARY_STATE_ACTIVE);  // claims the singleton
+  // claims the singleton
+  ASSERT_EQ(held->activate().id(), State::PRIMARY_STATE_ACTIVE);
 
   auto second = std::make_shared<MachineBridgeNode>(
     with({rclcpp::Parameter("backend", "software"), rclcpp::Parameter("software.port", 18925)}));
   ASSERT_EQ(second->configure().id(), State::PRIMARY_STATE_INACTIVE);
-  second->activate();  // backend->start() -> false -> on_activate FAILURE
+  // backend->start() -> false -> on_activate FAILURE
+  second->activate();
   EXPECT_EQ(second->get_current_state().id(), State::PRIMARY_STATE_INACTIVE);
 
   EXPECT_EQ(second->cleanup().id(), State::PRIMARY_STATE_UNCONFIGURED);
@@ -457,10 +460,10 @@ int main(int argc, char ** argv)
 {
   ::testing::InitGoogleTest(&argc, argv);
   curl_global_init(CURL_GLOBAL_DEFAULT);
-  const int rc = RUN_ALL_TESTS();
+  const int test_result = RUN_ALL_TESTS();
   if (rclcpp::ok()) {
     rclcpp::shutdown();
   }
   curl_global_cleanup();
-  return rc;
+  return test_result;
 }
