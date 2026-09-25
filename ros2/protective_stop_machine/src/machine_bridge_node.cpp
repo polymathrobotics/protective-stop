@@ -16,6 +16,12 @@
 #include "protective_stop_machine/hardware_backend.hpp"
 #include "protective_stop_machine/software_backend.hpp"
 
+#ifdef ROS2_HUMBLE
+  #include "magic_enum.hpp"  // NOLINT(build/include_subdir)
+#else
+  #include "magic_enum/magic_enum.hpp"
+#endif
+
 namespace protective_stop_machine
 {
 
@@ -25,18 +31,11 @@ using MachineRelayStatus = protective_stop_msg::msg::MachineRelayStatus;
 using BondedRemoteArray = protective_stop_msg::msg::BondedRemoteArray;
 using BondedRemote = protective_stop_msg::msg::BondedRemote;
 
-// The timing.* safety floors (SR-M-01) are enforced declaratively by the
-// generated ParamListener — the bounds<>/gt_eq<> ranges in
-// protective_stop_machine_params.yaml. An out-of-floor override is rejected at
-// declare time (construction throws) and a loosening set is rejected before it
-// applies, so no node code re-checks the floor.
-
 MachineBridgeNode::MachineBridgeNode(const rclcpp::NodeOptions & options)
 : rclcpp_lifecycle::LifecycleNode("machine_bridge", options)
 , param_listener_(get_node_parameters_interface())
 , params_(param_listener_.get_params())
 {
-  // Optional self-managed bring-up
   if (params_.autostart && configure().id() == lifecycle_msgs::msg::State::PRIMARY_STATE_INACTIVE) {
     activate();
   }
@@ -328,6 +327,8 @@ void MachineBridgeNode::publish_tick()
   const auto & snapshot = last_snapshot_;
   const auto stamp = this->now();
 
+  log_runtime_transitions(snapshot);
+
   ProtectiveStopStatus status;
   status.status = static_cast<uint8_t>(snapshot.state());
   status.message = snapshot.status_reason;
@@ -360,6 +361,59 @@ void MachineBridgeNode::publish_tick()
     remote_array.remotes.push_back(std::move(bonded_remote));
   }
   remotes_pub_->publish(remote_array);
+}
+
+void MachineBridgeNode::log_runtime_transitions(const MachineSnapshot & snapshot)
+{
+  const MachineState state = snapshot.state();
+
+  if (!runtime_logged_) {
+    runtime_logged_ = true;
+    last_reachable_ = snapshot.reachable;
+    last_active_remotes_ = snapshot.active_remotes;
+    last_state_ = state;
+    RCLCPP_INFO(
+      get_logger(),
+      "initial state %s: backend %s, %u bonded remote(s) — %s",
+      std::string(magic_enum::enum_name(state)).c_str(),
+      snapshot.reachable ? "reachable" : "unreachable",
+      snapshot.active_remotes,
+      snapshot.status_reason.c_str());
+    return;
+  }
+
+  if (snapshot.reachable != last_reachable_) {
+    if (snapshot.reachable) {
+      RCLCPP_INFO(get_logger(), "connectivity: backend reachable");
+    } else {
+      RCLCPP_WARN(get_logger(), "connectivity: backend not reachable");
+    }
+    last_reachable_ = snapshot.reachable;
+  }
+
+  if (snapshot.active_remotes != last_active_remotes_) {
+    std::string remote_ids;
+    for (const auto & remote : snapshot.remotes) {
+      remote_ids += remote_ids.empty() ? "" : ", ";
+      remote_ids += remote.device_id;
+    }
+    RCLCPP_INFO(
+      get_logger(),
+      "connectivity: %u bonded remote(s) [%s]",
+      snapshot.active_remotes,
+      remote_ids.empty() ? "none" : remote_ids.c_str());
+    last_active_remotes_ = snapshot.active_remotes;
+  }
+
+  if (state != last_state_) {
+    RCLCPP_INFO(
+      get_logger(),
+      "state: %s -> %s (%s)",
+      std::string(magic_enum::enum_name(last_state_)).c_str(),
+      std::string(magic_enum::enum_name(state)).c_str(),
+      snapshot.status_reason.c_str());
+    last_state_ = state;
+  }
 }
 
 void MachineBridgeNode::publish_heartbeat(bool stop, const rclcpp::Time & stamp)
@@ -418,11 +472,6 @@ rcl_interfaces::msg::SetParametersResult MachineBridgeNode::on_set_parameters(
     }
   }
   if (timing_changed) {
-    // The floor is already enforced by the generated ParamListener's ranges,
-    // which run before this callback — anything reaching here is in-envelope.
-    // Apply. The software backend's configure() only stashes timing (the
-    // machine thread applies it), so this is non-blocking there. The hardware
-    // backend does a bounded admin POST — acceptable for a rare operator set.
     if (backend_) {
       std::string error;
       if (!backend_->configure(proposed, error)) {
