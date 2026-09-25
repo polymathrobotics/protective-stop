@@ -38,67 +38,67 @@ extern "C"
 {
 #endif
 
-  typedef enum
-  {
-    DCS_HEALTH_OK = 0,
-    DCS_HEALTH_WARN = 1,
-    DCS_HEALTH_CRIT = 2,
-  } dcs_health_level_t;
+typedef enum
+{
+  DCS_HEALTH_OK = 0,
+  DCS_HEALTH_WARN = 1,
+  DCS_HEALTH_CRIT = 2,
+} dcs_health_level_t;
 
 #define DCS_HEALTH_MAX_WARNINGS 8
 #define DCS_HEALTH_SRC_LEN 16 /* incl. NUL */
 #define DCS_HEALTH_MSG_LEN 64 /* incl. NUL */
 
-  typedef struct
-  {
-    char src[DCS_HEALTH_SRC_LEN];
-    char msg[DCS_HEALTH_MSG_LEN];
-    dcs_health_level_t level;
-    uint32_t count; /* publishes for this source since first raised */
-    uint64_t first_ms; /* esp_timer ms when first raised (this boot) */
-    uint64_t last_ms; /* esp_timer ms of the latest publish */
-  } dcs_health_warning_t;
+typedef struct
+{
+  char src[DCS_HEALTH_SRC_LEN];
+  char msg[DCS_HEALTH_MSG_LEN];
+  dcs_health_level_t level;
+  uint32_t count; /* publishes for this source since first raised */
+  uint64_t first_ms; /* esp_timer ms when first raised (this boot) */
+  uint64_t last_ms; /* esp_timer ms of the latest publish */
+} dcs_health_warning_t;
 
-  /* Snapshot for the HTTP layer. */
-  typedef struct
-  {
-    dcs_health_counters_t counters; /* live RAM values (may be ahead of NVS) */
-    dcs_health_level_t level; /* worst active warning */
-    uint32_t button_rated_ops;
-    uint32_t button_wear_pct;
-    uint32_t nvs_flushes; /* successful flushes this boot */
-    uint32_t nvs_flush_fails;
-    uint32_t last_flush_age_s;
-    uint32_t dropped; /* publishes refused: table full */
-    int n_warnings;
-    dcs_health_warning_t warnings[DCS_HEALTH_MAX_WARNINGS];
-  } dcs_health_snapshot_t;
+/* Snapshot for the HTTP layer. */
+typedef struct
+{
+  dcs_health_counters_t counters; /* live RAM values (may be ahead of NVS) */
+  dcs_health_level_t level; /* worst active warning */
+  uint32_t button_rated_ops;
+  uint32_t button_wear_pct;
+  uint32_t nvs_flushes; /* successful flushes this boot */
+  uint32_t nvs_flush_fails;
+  uint32_t last_flush_age_s;
+  uint32_t dropped; /* publishes refused: table full */
+  int n_warnings;
+  dcs_health_warning_t warnings[DCS_HEALTH_MAX_WARNINGS];
+} dcs_health_snapshot_t;
 
-  /* --- Publish API (task context only; not ISR-safe) ----------------------- */
+/* --- Publish API (task context only; not ISR-safe) ----------------------- */
 
-  /** Raise or update a warning. One entry per @p src (upsert); a repeated
+/** Raise or update a warning. One entry per @p src (upsert); a repeated
    * publish bumps count/last_ms and replaces level/msg. Level OK clears the
    * entry (same as dcs_health_clear). Returns ESP_ERR_NO_MEM when the table is
    * full (counted in `dropped`), ESP_ERR_INVALID_STATE before init. */
-  esp_err_t dcs_health_publish(const char * src, dcs_health_level_t level, const char * msg);
+esp_err_t dcs_health_publish(const char * src, dcs_health_level_t level, const char * msg);
 
-  /** Remove a source's warning, if present. */
-  void dcs_health_clear(const char * src);
+/** Remove a source's warning, if present. */
+void dcs_health_clear(const char * src);
 
-  /** Worst level currently on the board. Cheap (atomic read); safe from any
+/** Worst level currently on the board. Cheap (atomic read); safe from any
    * task. Mirrored into /state.json as `health`. */
-  dcs_health_level_t dcs_health_overall(void);
+dcs_health_level_t dcs_health_overall(void);
 
-  /* --- Snapshot / admin -------------------------------------------------- */
+/* --- Snapshot / admin -------------------------------------------------- */
 
-  void dcs_health_get_snapshot(dcs_health_snapshot_t * out);
+void dcs_health_get_snapshot(dcs_health_snapshot_t * out);
 
-  /** Zero the button counters (presses, mismatch_events) and bump
+/** Zero the button counters (presses, mismatch_events) and bump
    * button_swaps; flushes immediately. For a switch replacement. */
-  esp_err_t dcs_health_reset_button(void);
+esp_err_t dcs_health_reset_button(void);
 
-  /** Zero every counter (refurbished unit); flushes immediately. */
-  esp_err_t dcs_health_reset_all(void);
+/** Zero every counter (refurbished unit); flushes immediately. */
+esp_err_t dcs_health_reset_all(void);
 
 #ifdef __cplusplus
 }

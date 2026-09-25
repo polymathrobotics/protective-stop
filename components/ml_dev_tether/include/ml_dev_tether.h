@@ -36,7 +36,7 @@ extern "C"
 {
 #endif
 
-  /**
+/**
  * @brief Bring up USB-NCM and wait for DHCP lease from host.
  *
  * @param timeout_ms  How long to wait for a DHCP lease before giving up.
@@ -45,21 +45,21 @@ extern "C"
  *          ESP_ERR_NOT_FOUND USB host not present / not enumerating
  *          ESP_FAIL          init failure
  */
-  esp_err_t ml_dev_tether_try_start(uint32_t timeout_ms);
+esp_err_t ml_dev_tether_try_start(uint32_t timeout_ms);
 
-  /**
+/**
  * @brief Tear down the tether (closes netif, disables TinyUSB if owned).
  * Optional — for cleanup paths. Currently a no-op if not started.
  */
-  void ml_dev_tether_stop(void);
+void ml_dev_tether_stop(void);
 
-  /**
+/**
  * @brief Set the unit number for the "PSTOPxx" USB product string.
  * @param n  1..99 to force a specific number; 0 (default) derives it from the
  *           chip ID. Must be called before the first try_start — the USB
  *           descriptor is fixed at TinyUSB install.
  */
-  void ml_dev_tether_set_unit_number(uint8_t n);
+void ml_dev_tether_set_unit_number(uint8_t n);
 
 #ifdef __cplusplus
 }

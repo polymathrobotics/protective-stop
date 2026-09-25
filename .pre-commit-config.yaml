@@ -18,7 +18,7 @@ exclude: |
   )
 repos:
   - repo: https://github.com/polymathrobotics/polymath_code_standard
-    rev: v2.2.0
+    rev: v2.6.1
     hooks:
       # Everything
       - id: polymath-general
