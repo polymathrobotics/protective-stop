@@ -1,0 +1,6 @@
+---
+blank_issues_enabled: true
+contact_links:
+  - name: Private safety and security reports
+    url: https://github.com/polymathrobotics/protective-stop/security/policy
+    about: Read SECURITY.md and report suspected safety or security defects privately.
