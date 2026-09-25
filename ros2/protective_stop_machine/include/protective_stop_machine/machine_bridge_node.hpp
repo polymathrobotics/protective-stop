@@ -42,6 +42,7 @@ public:
 private:
   bool build_backend(std::string & error);
   void publish_tick();
+  void log_runtime_transitions(const MachineSnapshot & snapshot);
   void publish_heartbeat(bool stop, const rclcpp::Time & stamp);
   void diagnostics(diagnostic_updater::DiagnosticStatusWrapper & stat);
   /// @brief Applies a live timing.* set by pushing it to the backend.
@@ -57,6 +58,11 @@ private:
   std::string frame_id_;
   MachineTiming timing_;
   MachineSnapshot last_snapshot_;
+
+  bool runtime_logged_{false};
+  bool last_reachable_{false};
+  uint32_t last_active_remotes_{0};
+  MachineState last_state_{MachineState::UNSTABLE};
 
   /// Fleet announce, software backend only. Resolved at configure time; the
   /// thread runs only while ACTIVE.

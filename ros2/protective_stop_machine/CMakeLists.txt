@@ -72,6 +72,7 @@ target_link_libraries(${PROJECT_NAME}
   PRIVATE
     rclcpp_components::component
     CURL::libcurl
+    magic_enum::magic_enum
 )
 
 rclcpp_components_register_node(${PROJECT_NAME}
