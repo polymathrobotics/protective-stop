@@ -13,9 +13,14 @@
 #include <vector>
 
 #include "lifecycle_msgs/msg/state.hpp"
-#include "magic_enum/magic_enum.hpp"
 #include "protective_stop_machine/hardware_backend.hpp"
 #include "protective_stop_machine/software_backend.hpp"
+
+#ifdef ROS2_HUMBLE
+  #include "magic_enum.hpp"  // NOLINT(build/include_subdir)
+#else
+  #include "magic_enum/magic_enum.hpp"
+#endif
 
 namespace protective_stop_machine
 {

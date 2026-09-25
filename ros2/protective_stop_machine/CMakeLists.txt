@@ -50,6 +50,10 @@ add_library(${PROJECT_NAME} SHARED
 )
 target_compile_definitions(${PROJECT_NAME} PRIVATE
   PSTOP_MACHINE_APP_VERSION="${PSTOP_MACHINE_APP_VERSION}")
+# set ros2 distro humble for maintainance
+if("$ENV{ROS_DISTRO}" STREQUAL "humble")
+  target_compile_definitions(${PROJECT_NAME} PRIVATE ROS2_HUMBLE)
+endif()
 target_include_directories(${PROJECT_NAME} PUBLIC
   "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
   "$<INSTALL_INTERFACE:include>"
