@@ -80,6 +80,12 @@ Tailscale support uses
 [`microlink`](https://github.com/CamM2325/microlink), an embedded client from
 Malone Technologies.
 
+### ROS Support
+The protective stop machine node is compatible with the following ros2 Distros:
+1. Humble (until May 2027)
+2. Jazzy (until May 2029)
+3. Lyrical (not yet supported, but planned to be supported as soon as possible!)
+
 ## Build and run
 
 **[`docs/QUICKSTART.md`](docs/QUICKSTART.md)** walks a fresh laptop through
