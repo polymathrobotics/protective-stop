@@ -71,12 +71,10 @@ static std::string resolve_local_ipv4()
   return result;
 }
 
-FleetCheckin::FleetCheckin(
-  FleetCheckinConfig config, uint32_t machine_id,
-  std::function<MachineSnapshot()> snapshot_fn)
+FleetCheckin::FleetCheckin(FleetCheckinConfig config, uint32_t machine_id, std::function<MachineSnapshot()> snapshot_fn)
 : config_(std::move(config))
-  , machine_id_(machine_id)
-  , snapshot_fn_(std::move(snapshot_fn))
+, machine_id_(machine_id)
+, snapshot_fn_(std::move(snapshot_fn))
 {}
 
 FleetCheckin::~FleetCheckin()
@@ -95,7 +93,7 @@ bool FleetCheckin::start()
   }
   running_ = true;
   enabled_ = true;
-  thread_ = std::thread([this] {run();});
+  thread_ = std::thread([this] { run(); });
   return true;
 }
 
@@ -111,9 +109,7 @@ void FleetCheckin::stop()
 }
 
 // NOLINTNEXTLINE(runtime/int) — libcurl uses `long` for status
-bool FleetCheckin::post_once(
-  const std::string & endpoint, const std::string & payload,
-  const std::string & bearer_key)
+bool FleetCheckin::post_once(const std::string & endpoint, const std::string & payload, const std::string & bearer_key)
 {
   CURL * curl = curl_easy_init();
   if (!curl) {
@@ -186,8 +182,7 @@ void FleetCheckin::run()
       }
       std::fclose(file);
     } else {
-      std::fprintf(stderr, "fleet-checkin: cannot read key file %s — check-in disabled\n",
-          config_.key_file.c_str());
+      std::fprintf(stderr, "fleet-checkin: cannot read key file %s — check-in disabled\n", config_.key_file.c_str());
       enabled_ = false;
       running_ = false;
       return;
@@ -205,8 +200,7 @@ void FleetCheckin::run()
   while (running_.load()) {
     const MachineSnapshot snapshot = snapshot_fn_ ? snapshot_fn_() : MachineSnapshot{};
     const auto uptime =
-      std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() -
-        start_time_).count();
+      std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - start_time_).count();
     const std::string payload = build_checkin_payload(
       machine_id_,
       config_.app_version,
@@ -222,8 +216,7 @@ void FleetCheckin::run()
       if (posted) {
         std::fprintf(stderr, "fleet-checkin: OK -> %s\n", endpoint.c_str());
       } else {
-        std::fprintf(stderr, "fleet-checkin: FAILED -> %s (will keep retrying)\n",
-            endpoint.c_str());
+        std::fprintf(stderr, "fleet-checkin: FAILED -> %s (will keep retrying)\n", endpoint.c_str());
       }
       last_post_succeeded = post_succeeded;
     }

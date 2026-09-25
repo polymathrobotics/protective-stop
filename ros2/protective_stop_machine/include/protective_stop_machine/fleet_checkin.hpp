@@ -35,7 +35,6 @@
 #include <string>
 #include <thread>
 
-// json_escape + MachineSnapshot
 #include "protective_stop_machine/announce.hpp"
 #include "protective_stop_machine/backend.hpp"
 
@@ -150,9 +149,7 @@ inline std::string checkin_endpoint(const std::string & base_url)
 class FleetCheckin
 {
 public:
-  FleetCheckin(
-    FleetCheckinConfig config, uint32_t machine_id,
-    std::function<MachineSnapshot()> snapshot_fn);
+  FleetCheckin(FleetCheckinConfig config, uint32_t machine_id, std::function<MachineSnapshot()> snapshot_fn);
   ~FleetCheckin();
 
   FleetCheckin(const FleetCheckin &) = delete;
@@ -175,9 +172,7 @@ private:
   void run();
   /// @brief POSTs the payload and, on a 2xx, reads the response for OTA
   /// directives. A directive is logged only.
-  bool post_once(
-    const std::string & endpoint, const std::string & payload,
-    const std::string & bearer_key);
+  bool post_once(const std::string & endpoint, const std::string & payload, const std::string & bearer_key);
   void handle_response(const std::string & body);
 
   FleetCheckinConfig config_;
@@ -191,4 +186,3 @@ private:
 };
 
 }  // namespace protective_stop_machine
-

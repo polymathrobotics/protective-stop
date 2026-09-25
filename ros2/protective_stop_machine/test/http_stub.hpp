@@ -30,7 +30,7 @@ class LoopbackHttpStub
 public:
   explicit LoopbackHttpStub(std::string body, int http_status = 200)
   : body_(std::move(body))
-    , status_(http_status)
+  , status_(http_status)
   {
     listen_fd_ = ::socket(AF_INET, SOCK_STREAM, 0);
     int reuse_addr = 1;
@@ -46,7 +46,7 @@ public:
     port_ = ntohs(addr.sin_port);
     ::listen(listen_fd_, 4);
     running_ = true;
-    thread_ = std::thread([this] {serve();});
+    thread_ = std::thread([this] { serve(); });
   }
 
   ~LoopbackHttpStub()
@@ -127,8 +127,7 @@ private:
         content_length_pos = request.find("content-length:");
       }
       if (content_length_pos != std::string::npos) {
-        expected_body_bytes = static_cast<size_t>(
-          std::strtoul(request.c_str() + content_length_pos + 15, nullptr, 10));
+        expected_body_bytes = static_cast<size_t>(std::strtoul(request.c_str() + content_length_pos + 15, nullptr, 10));
       }
       size_t received_body_bytes = request.size() - (header_end + 4);
       while (received_body_bytes < expected_body_bytes && running_.load()) {
@@ -146,10 +145,9 @@ private:
     }
     request_count_.fetch_add(1);
 
-    const std::string response = "HTTP/1.1 " + std::to_string(status_) + " OK\r\n" +
-      "Content-Type: application/json\r\n" +
-      "Content-Length: " + std::to_string(body_.size()) + "\r\n" + "Connection: close\r\n\r\n" +
-      body_;
+    const std::string response =
+      "HTTP/1.1 " + std::to_string(status_) + " OK\r\n" + "Content-Type: application/json\r\n" +
+      "Content-Length: " + std::to_string(body_.size()) + "\r\n" + "Connection: close\r\n\r\n" + body_;
     size_t sent = 0;
     while (sent < response.size()) {
       ssize_t transferred = ::send(client_fd, response.data() + sent, response.size() - sent, 0);
@@ -172,4 +170,3 @@ private:
 };
 
 }  // namespace pstop_test
-

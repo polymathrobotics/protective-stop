@@ -52,10 +52,11 @@ public:
 private:
   void poll_loop();
   /// @brief libcurl helpers. True with @p body filled on a 2xx.
+  /// status is a libcurl CURLINFO_RESPONSE_CODE, which the API writes as a long.
+  // NOLINTNEXTLINE(runtime/int)
   bool http_get(const std::string & path, std::string & body, long & status);
-  bool http_post(
-    const std::string & path, const std::string & json, std::string & body,
-    long & status);
+  // NOLINTNEXTLINE(runtime/int)
+  bool http_post(const std::string & path, const std::string & json, std::string & body, long & status);
 
   HardwareConfig config_;
   std::thread poll_thread_;
@@ -65,4 +66,3 @@ private:
 };
 
 }  // namespace protective_stop_machine
-

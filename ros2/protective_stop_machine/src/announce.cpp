@@ -26,12 +26,11 @@ static size_t discard_response_body(char * /*ptr*/, size_t size, size_t nmemb, v
 }
 
 MachineAnnouncer::MachineAnnouncer(
-  AnnounceConfig config, int port, uint32_t machine_id,
-  std::function<MachineSnapshot()> snapshot_fn)
+  AnnounceConfig config, int port, uint32_t machine_id, std::function<MachineSnapshot()> snapshot_fn)
 : config_(std::move(config))
-  , port_(port)
-  , machine_id_(machine_id)
-  , snapshot_fn_(std::move(snapshot_fn))
+, port_(port)
+, machine_id_(machine_id)
+, snapshot_fn_(std::move(snapshot_fn))
 {}
 
 MachineAnnouncer::~MachineAnnouncer()
@@ -50,7 +49,7 @@ bool MachineAnnouncer::start()
   }
   running_ = true;
   enabled_ = true;
-  thread_ = std::thread([this] {run();});
+  thread_ = std::thread([this] { run(); });
   return true;
 }
 
@@ -110,8 +109,7 @@ void MachineAnnouncer::run()
       }
       std::fclose(file);
     } else {
-      std::fprintf(stderr, "announce: cannot read key file %s — announce disabled\n",
-          config_.key_file.c_str());
+      std::fprintf(stderr, "announce: cannot read key file %s — announce disabled\n", config_.key_file.c_str());
       enabled_ = false;
       running_ = false;
       return;

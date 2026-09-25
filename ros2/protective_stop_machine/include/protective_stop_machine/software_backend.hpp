@@ -75,4 +75,3 @@ private:
 };
 
 }  // namespace protective_stop_machine
-

@@ -45,9 +45,9 @@ bool HardwareMachineBackend::start()
   // the process with other curl users, so we leak it until exit rather than tear
   // it down underneath them.
   static std::once_flag curl_once;
-  std::call_once(curl_once, [] {curl_global_init(CURL_GLOBAL_DEFAULT);});
+  std::call_once(curl_once, [] { curl_global_init(CURL_GLOBAL_DEFAULT); });
   running_ = true;
-  poll_thread_ = std::thread([this] {poll_loop();});
+  poll_thread_ = std::thread([this] { poll_loop(); });
   return true;
 }
 
@@ -140,8 +140,7 @@ void HardwareMachineBackend::parse_state(const std::string & body, MachineSnapsh
     out_snapshot.relay.fault_a = root.bool_at("relay_fault_a", false);
     out_snapshot.relay.fault_b = root.bool_at("relay_fault_b", false);
     out_snapshot.relay.mismatch = static_cast<uint32_t>(root.num_at("pstop_mismatch", 0));
-    out_snapshot.status_reason =
-      out_snapshot.running ? "run (relay closed)" : "stop (relay open)";
+    out_snapshot.status_reason = out_snapshot.running ? "run (relay closed)" : "stop (relay open)";
 
     // The machn exposes its bonded remotes as the "bonded_remotes" array;
     // each item has a numeric id (format as hex), state, age_ms, rtt_ms and
@@ -229,7 +228,7 @@ bool HardwareMachineBackend::configure(const MachineTiming & timing, std::string
     return true;
   }
   error = "device did not accept timing config (http " + std::to_string(status) +
-    "); hardware timing is set via device config";
+          "); hardware timing is set via device config";
   return false;
 }
 

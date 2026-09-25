@@ -33,8 +33,8 @@ using BondedRemote = protective_stop_msg::msg::BondedRemote;
 
 MachineBridgeNode::MachineBridgeNode(const rclcpp::NodeOptions & options)
 : rclcpp_lifecycle::LifecycleNode("machine_bridge", options)
-  , param_listener_(get_node_parameters_interface())
-  , params_(param_listener_.get_params())
+, param_listener_(get_node_parameters_interface())
+, params_(param_listener_.get_params())
 {
   // Optional self-managed bring-up
   if (params_.autostart && configure().id() == lifecycle_msgs::msg::State::PRIMARY_STATE_INACTIVE) {
@@ -78,9 +78,7 @@ bool MachineBridgeNode::build_backend(std::string & error)
     if (const char * env_url = std::getenv("PSTOP_ANNOUNCE_URL"); env_url && env_url[0] != '\0') {
       announce_config_.url = env_url;
     }
-    if (const char * env_key = std::getenv("PSTOP_ANNOUNCE_KEY_FILE");
-      env_key && env_key[0] != '\0')
-    {
+    if (const char * env_key = std::getenv("PSTOP_ANNOUNCE_KEY_FILE"); env_key && env_key[0] != '\0') {
       announce_config_.key_file = env_key;
     }
     announce_port_ = software_config.port;
@@ -95,14 +93,10 @@ bool MachineBridgeNode::build_backend(std::string & error)
     fleet_config_.base_url = params_.fleet.checkin_url;
     fleet_config_.key_file = params_.fleet.api_key_file;
     fleet_config_.interval_s = static_cast<int>(params_.fleet.check_interval_s);
-    if (const char * env_url = std::getenv("PSTOP_CHECKIN_URL");
-      env_url && env_url[0] != '\0')
-    {
+    if (const char * env_url = std::getenv("PSTOP_CHECKIN_URL"); env_url && env_url[0] != '\0') {
       fleet_config_.base_url = env_url;
     }
-    if (const char * env_key = std::getenv("PSTOP_CHECKIN_API_KEY_FILE");
-      env_key && env_key[0] != '\0')
-    {
+    if (const char * env_key = std::getenv("PSTOP_CHECKIN_API_KEY_FILE"); env_key && env_key[0] != '\0') {
       fleet_config_.key_file = env_key;
     }
     // app_version is the ament package version (single source: package.xml,
@@ -112,8 +106,7 @@ bool MachineBridgeNode::build_backend(std::string & error)
     fleet_config_.app_version = PSTOP_MACHINE_APP_VERSION;
 #endif
     const char * distro = std::getenv("ROS_DISTRO");
-    fleet_config_.idf_version =
-      std::string("ros2-") + (distro && distro[0] != '\0' ? distro : "unknown");
+    fleet_config_.idf_version = std::string("ros2-") + (distro && distro[0] != '\0' ? distro : "unknown");
     return true;
   } else if (backend_kind_ == "hardware") {
     HardwareConfig hardware_config;
@@ -143,19 +136,16 @@ MachineBridgeNode::CallbackReturn MachineBridgeNode::on_configure(const rclcpp_l
   state_pub_ = create_publisher<ProtectiveStopStatus>("~/machine_state", latched);
   relay_pub_ = create_publisher<MachineRelayStatus>("~/relay_status", data);
   remotes_pub_ = create_publisher<BondedRemoteArray>("~/remotes", data);
-  heartbeat_pub_ =
-    create_publisher<ProtectiveStopHeartbeat>("/pstop_hb", rclcpp::QoS(1).reliable());
+  heartbeat_pub_ = create_publisher<ProtectiveStopHeartbeat>("/pstop_hb", rclcpp::QoS(1).reliable());
 
   param_cb_handle_ =
-    add_on_set_parameters_callback(std::bind(&MachineBridgeNode::on_set_parameters, this,
-      std::placeholders::_1));
+    add_on_set_parameters_callback(std::bind(&MachineBridgeNode::on_set_parameters, this, std::placeholders::_1));
 
   RCLCPP_INFO(get_logger(), "configured: backend=%s", backend_kind_.c_str());
   return CallbackReturn::SUCCESS;
 }
 
-MachineBridgeNode::CallbackReturn MachineBridgeNode::on_activate(
-  const rclcpp_lifecycle::State & state)
+MachineBridgeNode::CallbackReturn MachineBridgeNode::on_activate(const rclcpp_lifecycle::State & state)
 {
   // Start the backend FIRST so a failure needs no rollback (publishers/timer
   // not yet activated).
@@ -173,9 +163,8 @@ MachineBridgeNode::CallbackReturn MachineBridgeNode::on_activate(
 
   // floored at 1.0 by param validation
   const double publish_hz = params_.rates.publish_rate_hz;
-  pub_timer_ =
-    create_wall_timer(std::chrono::duration<double>(1.0 / publish_hz),
-      std::bind(&MachineBridgeNode::publish_tick, this));
+  pub_timer_ = create_wall_timer(
+    std::chrono::duration<double>(1.0 / publish_hz), std::bind(&MachineBridgeNode::publish_tick, this));
 
   // floored at 0.1 by param validation
   const double diagnostics_hz = params_.rates.diagnostics_rate_hz;
@@ -187,13 +176,11 @@ MachineBridgeNode::CallbackReturn MachineBridgeNode::on_activate(
   // and only when a URL is configured. Off the safety path: a failure to start
   // (or a dead console) only logs and never fails activation.
   if (backend_kind_ == "software" && !announce_config_.url.empty()) {
-    announcer_ = std::make_unique<MachineAnnouncer>(announce_config_, announce_port_, machine_id_,
-        [this]() {
-          return backend_ ? backend_->snapshot() : MachineSnapshot{};
+    announcer_ = std::make_unique<MachineAnnouncer>(announce_config_, announce_port_, machine_id_, [this]() {
+      return backend_ ? backend_->snapshot() : MachineSnapshot{};
     });
     if (announcer_->start()) {
-      RCLCPP_INFO(get_logger(), "announce: every %ds to %s", announce_config_.interval_s,
-          announce_config_.url.c_str());
+      RCLCPP_INFO(get_logger(), "announce: every %ds to %s", announce_config_.interval_s, announce_config_.url.c_str());
     } else {
       RCLCPP_WARN(get_logger(), "announce: configured but did not start (see stderr)");
     }
@@ -203,12 +190,13 @@ MachineBridgeNode::CallbackReturn MachineBridgeNode::on_activate(
   // ACTIVE only, software backend only, only when a base URL is configured. Off
   // the safety path: a failure to start (or a dead fleet) only logs.
   if (backend_kind_ == "software" && !fleet_config_.base_url.empty()) {
-    fleet_checkin_ = std::make_unique<FleetCheckin>(fleet_config_, machine_id_, [this]() {
-          return backend_ ? backend_->snapshot() : MachineSnapshot{};
-    });
+    fleet_checkin_ = std::make_unique<FleetCheckin>(
+      fleet_config_, machine_id_, [this]() { return backend_ ? backend_->snapshot() : MachineSnapshot{}; });
     if (fleet_checkin_->start()) {
       RCLCPP_INFO(
-        get_logger(), "fleet-checkin: every %ds to %s/api/v1/checkin", fleet_config_.interval_s,
+        get_logger(),
+        "fleet-checkin: every %ds to %s/api/v1/checkin",
+        fleet_config_.interval_s,
         fleet_config_.base_url.c_str());
     } else {
       RCLCPP_WARN(get_logger(), "fleet-checkin: configured but did not start (see stderr)");
@@ -219,8 +207,7 @@ MachineBridgeNode::CallbackReturn MachineBridgeNode::on_activate(
   return CallbackReturn::SUCCESS;
 }
 
-MachineBridgeNode::CallbackReturn MachineBridgeNode::on_deactivate(
-  const rclcpp_lifecycle::State & state)
+MachineBridgeNode::CallbackReturn MachineBridgeNode::on_deactivate(const rclcpp_lifecycle::State & state)
 {
   if (pub_timer_) {
     pub_timer_->cancel();

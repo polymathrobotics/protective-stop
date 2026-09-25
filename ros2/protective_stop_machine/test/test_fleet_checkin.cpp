@@ -31,8 +31,8 @@ static bool has(const std::string & hay, const std::string & needle)
 TEST(FleetCheckinPayload, MatchesEsp32MachineSchema)
 {
   MachineSnapshot snapshot;
-  const std::string body = build_checkin_payload(0x01020304U, "0.1.0", "ros2-jazzy", 42U, 300,
-    "192.168.1.5", "", snapshot);
+  const std::string body =
+    build_checkin_payload(0x01020304U, "0.1.0", "ros2-jazzy", 42U, 300, "192.168.1.5", "", snapshot);
 
   EXPECT_TRUE(has(body, "\"device_type\":\"machine\""));
   EXPECT_TRUE(has(body, "\"device_id\":\"01020304\""));
@@ -53,8 +53,7 @@ TEST(FleetCheckinPayload, MatchesEsp32MachineSchema)
 TEST(FleetCheckinPayload, DeviceIdIsHexMachineId)
 {
   MachineSnapshot snapshot;
-  const std::string body = build_checkin_payload(0x0102abcdU, "1.2.3", "ros2-humble", 0U, 60, "",
-    "", snapshot);
+  const std::string body = build_checkin_payload(0x0102abcdU, "1.2.3", "ros2-humble", 0U, 60, "", "", snapshot);
   EXPECT_TRUE(has(body, "\"device_id\":\"0102abcd\""));
 }
 
@@ -63,8 +62,7 @@ TEST(FleetCheckinPayload, DeviceIdIsHexMachineId)
 TEST(FleetCheckinPayload, TailscaleEmptyPresentAndFreeHeapOmitted)
 {
   MachineSnapshot snapshot;
-  const std::string body = build_checkin_payload(1U, "0.1.0", "ros2-jazzy", 1U, 120, "10.0.0.2", "",
-    snapshot);
+  const std::string body = build_checkin_payload(1U, "0.1.0", "ros2-jazzy", 1U, 120, "10.0.0.2", "", snapshot);
   EXPECT_TRUE(has(body, "\"tailscale_ip\":\"\""));
   EXPECT_FALSE(has(body, "free_heap"));
 }
@@ -99,8 +97,7 @@ TEST(FleetCheckinState, DerivesFromSnapshot)
   EXPECT_STREQ(checkin_state(running), "CONNECTED");
 
   // The derived state reaches the payload.
-  const std::string body = build_checkin_payload(1U, "0.1.0", "ros2-jazzy", 0U, 300, "", "",
-    running);
+  const std::string body = build_checkin_payload(1U, "0.1.0", "ros2-jazzy", 0U, 300, "", "", running);
   EXPECT_TRUE(has(body, "\"state\":\"CONNECTED\""));
 }
 
@@ -110,8 +107,7 @@ TEST(FleetCheckinPayload, RunningAndRemoteCountFromSnapshot)
   MachineSnapshot snapshot;
   snapshot.running = true;
   snapshot.active_remotes = 3;
-  const std::string body =
-    build_checkin_payload(1U, "0.1.0", "ros2-jazzy", 0U, 300, "", "", snapshot);
+  const std::string body = build_checkin_payload(1U, "0.1.0", "ros2-jazzy", 0U, 300, "", "", snapshot);
   EXPECT_TRUE(has(body, "\"running\":true"));
   EXPECT_TRUE(has(body, "\"active_remotes\":3"));
 }
@@ -120,20 +116,16 @@ TEST(FleetCheckinPayload, RunningAndRemoteCountFromSnapshot)
 // ESP32, and tolerates an operator-supplied trailing slash on the base.
 TEST(FleetCheckinEndpoint, AppendsFixedPath)
 {
-  EXPECT_EQ(checkin_endpoint("http://fleet.example:8000"),
-    "http://fleet.example:8000/api/v1/checkin");
-  EXPECT_EQ(checkin_endpoint("http://fleet.example:8000/"),
-    "http://fleet.example:8000/api/v1/checkin");
-  EXPECT_EQ(checkin_endpoint("http://fleet.example:8000///"),
-    "http://fleet.example:8000/api/v1/checkin");
+  EXPECT_EQ(checkin_endpoint("http://fleet.example:8000"), "http://fleet.example:8000/api/v1/checkin");
+  EXPECT_EQ(checkin_endpoint("http://fleet.example:8000/"), "http://fleet.example:8000/api/v1/checkin");
+  EXPECT_EQ(checkin_endpoint("http://fleet.example:8000///"), "http://fleet.example:8000/api/v1/checkin");
 }
 
 // A version/tag with JSON metacharacters is escaped so the body stays valid JSON.
 TEST(FleetCheckinPayload, VersionFieldsAreJsonEscaped)
 {
   MachineSnapshot snapshot;
-  const std::string body = build_checkin_payload(1U, "0.1\"x", "ros2-\\weird", 0U, 300, "", "",
-    snapshot);
+  const std::string body = build_checkin_payload(1U, "0.1\"x", "ros2-\\weird", 0U, 300, "", "", snapshot);
   EXPECT_TRUE(has(body, "\"app_version\":\"0.1\\\"x\""));
   EXPECT_TRUE(has(body, "\"idf_version\":\"ros2-\\\\weird\""));
 }
@@ -145,7 +137,7 @@ TEST(FleetCheckinLifecycle, DisabledWhenBaseUrlEmpty)
 {
   // base_url empty by default
   FleetCheckinConfig cfg;
-  FleetCheckin checkin(cfg, 0x01020304U, []() {return MachineSnapshot{};});
+  FleetCheckin checkin(cfg, 0x01020304U, []() { return MachineSnapshot{}; });
   EXPECT_FALSE(checkin.start());
   EXPECT_FALSE(checkin.enabled());
 }
