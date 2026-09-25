@@ -1,0 +1,35 @@
+---
+name: Coverage delta
+
+on:
+  pull_request:
+
+concurrency:
+  group: coverage-delta-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
+jobs:
+  coverage-delta:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Compare safety-linter citations
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CAN_COMMENT: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
+        run: |-
+          args=()
+          [ "$CAN_COMMENT" = 'true' ] || args+=(--no-comment)
+          python3 -m tools.change_control.coverage_delta \
+            --base '${{ github.event.pull_request.base.sha }}' \
+            --head '${{ github.event.pull_request.head.sha }}' \
+            --repository '${{ github.repository }}' \
+            --pr '${{ github.event.pull_request.number }}' \
+            "${args[@]}"
