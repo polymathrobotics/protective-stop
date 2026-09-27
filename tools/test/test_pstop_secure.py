@@ -205,6 +205,23 @@ def test_virtual_provision_secure_has_no_flash_encryption(tmp_path, env):
     assert_recovery_path_intact(s)
 
 
+def test_record_without_burned_keys_does_not_bind(tmp_path, env, monkeypatch):
+    build = make_build(tmp_path, fe=True)
+    signed = signed_bootloader(build)
+    real_burn = pstop_secure.Efuse.burn
+
+    def no_burn(self, *args):
+        raise pstop_secure.ProvisionError('simulated USB drop before the first burn')
+
+    monkeypatch.setattr(pstop_secure.Efuse, 'burn', no_burn)
+    assert provision(build, signed) == 1
+    monkeypatch.setattr(pstop_secure.Efuse, 'burn', real_burn)
+    other = tmp_path / 'other-master.txt'
+    other.write_bytes(MASTER[::-1])
+    monkeypatch.setenv(pstop_secure.ENV_FE_MASTER, str(other))
+    assert provision(build, signed) == 0  # nothing was burned, so the record does not bind the master
+
+
 def test_interrupted_provision_resumes(tmp_path, env, monkeypatch):
     build = make_build(tmp_path, fe=True)
     signed = signed_bootloader(build)

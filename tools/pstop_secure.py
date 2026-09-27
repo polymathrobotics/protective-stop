@@ -330,10 +330,11 @@ def cmd_provision(args):
         raise ProvisionError('unit is already provisioned (Secure Download Mode is on); use `flash`')
     record_path = udir / 'record.json'
     record = load_record(record_path)
-    resuming = record is not None and record.get('state') == 'in-progress'
-    for i in range(6):
-        if efuse_value(s, f'KEY_PURPOSE_{i}') != 'USER' and not resuming:
-            raise ProvisionError(f'KEY_PURPOSE_{i} is already set and there is no in-progress record for {mac}')
+    burned = any(efuse_value(s, f'KEY_PURPOSE_{i}') != 'USER' for i in range(6))
+    if burned and (record is None or record.get('state') != 'in-progress'):
+        raise ProvisionError(f'eFuse keys are already set and there is no in-progress record for {mac}')
+    if not burned:
+        record = None  # nothing irreversible happened yet: start over
 
     with secret_dir() as sd:
         primary = write_secret(sd / 'primary.pem', read_secret(ENV_SIGNING_KEY))
