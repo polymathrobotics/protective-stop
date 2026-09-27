@@ -72,6 +72,12 @@ image compiled while a credentials file was present is branded
 credentials file the checking machine has), any value of a local credentials
 file, or a secret-shaped string (`tskey-…`, PEM keys, literal auth tokens).
 
+Builds are reproducible: the same commit, ESP-IDF version, `dependencies.lock`
+and `-DPROJECT_VER` give byte-identical images and ELF from any checkout path,
+on any day (`scripts/check_reproducible.sh`, run in CI for both apps). Put the
+ESP-IDF version (`idf.py --version`) in the release notes so anyone can rebuild
+a tag and compare its hashes with the published files.
+
 ### Host runner (robot-side machine)
 
 No ESP-IDF needed, just a C compiler.
