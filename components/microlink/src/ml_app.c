@@ -109,7 +109,9 @@ static bool request_via_tailnet(httpd_req_t * req)
     addr_be = ((const struct sockaddr_in *)&local)->sin_addr.s_addr;
   } else if (local.ss_family == AF_INET6) {
     static const uint8_t v4_mapped_prefix[12] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff};
+    static const uint8_t tailscale_ula_prefix[6] = {0xfd, 0x7a, 0x11, 0x5c, 0xa1, 0xe0};
     const uint8_t * a6 = ((const struct sockaddr_in6 *)&local)->sin6_addr.s6_addr;
+    if (memcmp(a6, tailscale_ula_prefix, sizeof(tailscale_ula_prefix)) == 0) return true;
     if (memcmp(a6, v4_mapped_prefix, sizeof(v4_mapped_prefix)) != 0) return false;
     memcpy(&addr_be, &a6[12], sizeof(addr_be));
   } else {
