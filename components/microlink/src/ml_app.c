@@ -32,6 +32,7 @@
 #include "freertos/event_groups.h"
 #include "freertos/task.h"
 // clang-format on
+#include "lwip/sockets.h"
 #include "mbedtls/base64.h"
 #include "mbedtls/sha256.h"
 #include "microlink.h"
@@ -90,10 +91,47 @@ static ml_app_t * s_app = NULL;
  * ========================================================================== */
 
 #ifdef CONFIG_ML_ADMIN_PASSWORD
+/* Must match the Kconfig default of ML_ADMIN_PASSWORD. */
+  #define ML_ADMIN_PASSWORD_PUBLIC_DEFAULT "microlink"
+
+/* Fails closed: an unreadable socket address counts as Tailscale. */
+static bool request_via_tailnet(httpd_req_t * req)
+{
+  const uint32_t vpn_ip = (s_app != NULL && s_app->ml != NULL) ? s_app->ml->vpn_ip : 0u;
+  if (vpn_ip == 0u) return false;
+
+  struct sockaddr_storage local;
+  socklen_t len = sizeof(local);
+  if (getsockname(httpd_req_to_sockfd(req), (struct sockaddr *)&local, &len) != 0) return true;
+
+  uint32_t addr_be = 0;
+  if (local.ss_family == AF_INET) {
+    addr_be = ((const struct sockaddr_in *)&local)->sin_addr.s_addr;
+  } else if (local.ss_family == AF_INET6) {
+    static const uint8_t v4_mapped_prefix[12] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff};
+    const uint8_t * a6 = ((const struct sockaddr_in6 *)&local)->sin6_addr.s6_addr;
+    if (memcmp(a6, v4_mapped_prefix, sizeof(v4_mapped_prefix)) != 0) return false;
+    memcpy(&addr_be, &a6[12], sizeof(addr_be));
+  } else {
+    return true;
+  }
+  return ntohl(addr_be) == vpn_ip;
+}
+
 static bool admin_auth_check(httpd_req_t * req)
 {
   const char * password = CONFIG_ML_ADMIN_PASSWORD;
-  if (!password || password[0] == '\0') return true;
+  /* A public or empty password only works on local links, never from other tailnet peers. */
+  const bool public_password = (password[0] == '\0') || (strcmp(password, ML_ADMIN_PASSWORD_PUBLIC_DEFAULT) == 0);
+  if (public_password && request_via_tailnet(req)) {
+    static bool s_warned = false;
+    if (!s_warned) {
+      s_warned = true;
+      ESP_LOGW(TAG, "admin over Tailscale refused: this image uses the public default admin password");
+    }
+    return false;
+  }
+  if (password[0] == '\0') return true;
 
   char auth_hdr[256];
   if (httpd_req_get_hdr_value_str(req, "Authorization", auth_hdr, sizeof(auth_hdr)) != ESP_OK) {

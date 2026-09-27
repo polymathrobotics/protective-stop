@@ -171,12 +171,14 @@ Restricting which remotes may bond, or running without ROS: Appendix D.
 ## 6. Pair the remote to the laptop
 
 The remote initiates the bond; tell it where the machine is, then promote it
-from stop-only to operator (a new remote can stop the machine but not arm it):
+from stop-only to operator (a new remote can stop the machine but not arm it).
+The role change is an admin call: with the release image's public password it
+only works on `$DEV` (USB or LAN), not over Tailscale.
 
 ```sh
 curl -X POST "http://$REMOTE/api/pstop_peer?ip=$LAPTOP_TS&port=8890"
 # expect: {"ok":true,...}    ring: white -> blue within a few seconds
-curl -u "admin:$ADMIN_PW" -X POST "http://$REMOTE/api/role?role=operator"
+curl -u "admin:$ADMIN_PW" -X POST "http://$DEV/api/role?role=operator"
 # expect: {"ok":true,"role":"operator","message":"applied"}
 ```
 
@@ -217,7 +219,7 @@ else lives in the appendices.
 | No `pstop-` in `tailscale status` after 2 min | Key wrong, already used or expired: `curl -u "admin:$ADMIN_PW" http://$DEV/admin/api/status` → `state`. Device approval on and key not pre-approved → approve in the console. |
 | `ml_state` stuck below 4 | Same as above (no internet, or key not accepted). |
 | Ring stays white after `pstop_peer` | The POST failed; re-run and read the JSON. |
-| Ring blue, never green | Role still stop-only (`curl http://$REMOTE/api/role`), node not running, or ufw. `/machine_bridge/remotes` shows `stop_only: true` while the remote announces stop-only. |
+| Ring blue, never green | Role still stop-only (`curl -u "admin:$ADMIN_PW" http://$DEV/api/role`), node not running, or ufw. `/machine_bridge/remotes` shows `stop_only: true` while the remote announces stop-only. |
 | Ring red pulsing slowly | Peer configured but unreachable: node down, wrong `$LAPTOP_TS`, ufw. `tailscale ping $REMOTE` from the laptop. |
 | Ring purple | One switch loop open while the other is closed: wiring fault ([`hardware/README.md`](../hardware/README.md)). |
 
@@ -243,10 +245,10 @@ boot-time fallback only: a unit that loses its wired/USB link while running
 falls back to the configured WiFi but does not open the access point;
 power-cycle it to get there.
 
-The admin page listens on **every** network the remote joins (tether, LAN,
-tailnet, WiFi). Before putting a remote on a shared LAN or WiFi, build the
-image with your own password (Appendix E); the release image's `microlink` is
-public.
+The admin page listens on every network the remote joins (tether, LAN, WiFi,
+and the tailnet if the image has its own password). Before putting a remote on
+a shared LAN or WiFi, build the image with your own password (Appendix E); the
+release image's `microlink` is public, so the remote refuses it over Tailscale.
 
 Two remotes on one laptop by USB: only the first gets `esp-pstop0`; see
 [`USB_NCM_SETUP.md`](USB_NCM_SETUP.md), which also has Windows/macOS notes.
@@ -270,14 +272,14 @@ stays off the tailnet until it is given a new key.
 
 **Update a running unit** (keeps every setting): send the app image
 (`pstop_remote-<version>-public.bin`, downloaded in step 3 or from the new
-release) over the network; the remote reboots into it.
+release) over the USB or LAN link; the remote reboots into it.
 
 ```sh
-curl -u "admin:$ADMIN_PW" --data-binary @pstop_remote-<version>-public.bin -X POST "http://$REMOTE/admin/api/ota"
+curl -u "admin:$ADMIN_PW" --data-binary @pstop_remote-<version>-public.bin -X POST "http://$DEV/admin/api/ota"
 ```
 
 **Reflash by cable**: a running unit has no serial port. Hold BOOT, tap RESET
-(or `curl -u "admin:$ADMIN_PW" -X POST "http://$REMOTE/api/enter_download?confirm=1"`),
+(or `curl -u "admin:$ADMIN_PW" -X POST "http://$DEV/api/enter_download?confirm=1"`),
 then flash. The full-flash image is the factory image (step 3) and erases the
 settings; to keep them, use the OTA command above instead.
 
