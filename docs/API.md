@@ -35,7 +35,7 @@ Query parameters are shown where required. Unless noted, POST bodies are empty.
 | POST | `/api/pstop_num?n=N` | Set the USB "PSTOPxx" unit number (0 = auto) |
 | POST | `/api/ring_offset?n=N` | Set + persist the LED-ring rotation offset (0..15) — which physical pixel is "LED 1". Applies immediately, survives reboots and firmware updates (NVS `ring_off`) |
 | POST | `/api/ring_led1?on=0\|1` | Locate mode: light ONLY LED 1 solid white (overrides state colours) so the offset can be verified during install; auto-expires after 5 min |
-| POST | `/api/enter_download?confirm=1` | Enter USB download (flashing) mode (**admin auth**) |
+| POST | `/api/enter_download?confirm=1` | Prepare for USB flashing (**admin auth**). The unit drops off USB and re-enumerates as USB-Serial-JTAG (`303a:1001`) about a second later; esptool's default reset then puts it into download mode. If no flasher takes over within 60 s the unit restarts normally |
 | GET  | `/api/role` | Remote self-role (**admin auth**): `{"ok":true,"role":"stop_only"\|"operator"}`. Announced in every pstop frame; this alone decides whether the remote may re-arm a machine (the machine has no operator list). Default `stop_only`. Remote only |
 | POST | `/api/role?role=stop_only\|operator` | Persist the self-role to NVS and apply it **live** (**admin auth**, no reboot). An armed machine keeps running when its operator demotes itself, but refuses the next re-arm until a remote announcing `operator` performs STOP → OK. Remote only |
 | GET  | `/api/health` | Lifetime wear/health counters (see [Health](#health-lifetime-counters-and-warnings)) |

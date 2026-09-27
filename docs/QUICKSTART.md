@@ -279,8 +279,8 @@ curl -u "admin:$ADMIN_PW" --data-binary @pstop_remote-<version>-public.bin -X PO
 ```
 
 **Reflash by cable**: a running unit has no serial port. Hold BOOT, tap RESET
-(or `curl -u "admin:$ADMIN_PW" -X POST "http://$DEV/api/enter_download?confirm=1"`),
-then flash. The full-flash image is the factory image (step 3) and erases the
+(or `curl -u "admin:$ADMIN_PW" -X POST "http://$DEV/api/enter_download?confirm=1"`
+and start flashing within 60 s), then flash. The full-flash image is the factory image (step 3) and erases the
 settings; to keep them, use the OTA command above instead.
 
 **Start over**: flash the full-flash image, or
