@@ -63,9 +63,9 @@ Three secrets, however many units:
 | Flash-encryption master | Deriving each unit's key from its MAC (HKDF-SHA256) | `PSTOP_FE_MASTER` |
 
 Each variable holds a file path or a 1Password `op://` reference. Create them
-with `openssl genrsa -out primary.pem 3072` (the same for `backup.pem`) and
-`openssl rand -base64 48 > fe_master.txt`, and keep the backup key apart from the
-other two. Losing both signing keys means the units can never be updated again;
+outside the repository with `openssl genrsa -out primary.pem 3072` (the same for
+`backup.pem`) and `openssl rand -base64 48 > fe_master.txt`, and keep the backup
+key apart from the other two. Losing both signing keys means the units can never be updated again;
 losing the master leaves only OTA updates, no USB recovery.
 
 The bootloader carries both signatures and cannot be updated over the air, so it
