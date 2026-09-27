@@ -40,18 +40,13 @@ repos:
         exclude: ^(test/|tools/).*\.sh$
       - id: polymath-xml
       - id: polymath-yaml
-  # Credentials never go into commits: private keys, real Tailscale keys, secret sdkconfig values
-  # other than the example's placeholders, and credential files forced past .gitignore.
+  # Credentials never go into commits. The script searches the whole index itself, so the
+  # global exclude above (vendored and archived code) does not hide anything from it.
   - repo: local
     hooks:
       - id: no-credentials
-        name: No private keys, Tailscale keys or credential values
-        language: pygrep
-        types: [text]
-        entry: >-
-          -----BEGIN [A-Z ]*PRIVATE KEY-----|tskey-(auth|client|api)-(?!X{5})[A-Za-z0-9]{5,}-[A-Za-z0-9]{8,}|^CONFIG_ML_(ADMIN_PASSWORD|TAILSCALE_AUTH_KEY|WIFI_PASSWORD|OTA_API_KEY)="(?!(microlink|your-admin-password|tskey-auth-X{5}[X-]*)?")
-      - id: no-credential-files
-        name: No credential files
-        language: fail
-        entry: credential files stay out of git
-        files: (^|/)(sdkconfig|sdkconfig\.credentials|primary\.pem|backup\.pem|fe_master\.txt|\.?netrc)$
+        name: No credentials in the index
+        language: script
+        entry: scripts/check_no_credentials.sh
+        pass_filenames: false
+        always_run: true
