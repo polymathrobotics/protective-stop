@@ -32,6 +32,7 @@
 #include "freertos/event_groups.h"
 #include "freertos/task.h"
 // clang-format on
+#include "lwip/netif.h"
 #include "lwip/sockets.h"
 #include "mbedtls/base64.h"
 #include "mbedtls/sha256.h"
@@ -97,6 +98,9 @@ static ml_app_t * s_app = NULL;
 /* Fails closed: an unreadable socket address counts as Tailscale. */
 static bool request_via_tailnet(httpd_req_t * req)
 {
+  const struct netif * wg = (s_app != NULL && s_app->ml != NULL) ? (const struct netif *)s_app->ml->wg_netif : NULL;
+  if (wg == NULL) return false;
+
   struct sockaddr_storage local;
   socklen_t len = sizeof(local);
   if (getsockname(httpd_req_to_sockfd(req), (struct sockaddr *)&local, &len) != 0) return true;
@@ -114,8 +118,9 @@ static bool request_via_tailnet(httpd_req_t * req)
   } else {
     return true;
   }
-  /* Tailscale assigns 100.64.0.0/10; the range, unlike vpn_ip, holds if the node's address changes. */
-  return (ntohl(addr_be) & 0xFFC00000u) == 0x64400000u;
+  /* The address the WireGuard netif holds (ml->vpn_ip can move on without it). A LAN that uses
+   * 100.64.0.0/10 itself is not mistaken for the tailnet. */
+  return addr_be == ip4_addr_get_u32(netif_ip4_addr(wg));
 }
 
 static bool admin_auth_check(httpd_req_t * req)
