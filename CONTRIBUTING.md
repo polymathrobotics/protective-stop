@@ -35,13 +35,14 @@ process. It then flows back here as a version bump. PRs that edit
 
 ### Firmware (ESP32-S3 remote)
 
-Requires ESP-IDF v5.5.
+Requires ESP-IDF v5.5. The default [security profile](docs/SECURITY_PROFILES.md),
+`secure-fe`, is not flashed by `idf.py flash`; development boards use `dev`:
 
 ```sh
 cd firmware
 cp sdkconfig.credentials.example sdkconfig.credentials   # then edit with real values
-idf.py build            # produces build/pstop_remote.bin
-idf.py flash            # to a connected board
+idf.py -DPSTOP_PROFILE=dev build   # produces build/pstop_remote.bin
+idf.py flash                       # to a connected board
 ```
 
 `idf.py monitor` only shows the first seconds of boot: the USB port becomes the
@@ -58,9 +59,12 @@ release or shared outside the organisation.
 ### Publishing release binaries
 
 Only builds made **without** a credentials file go on a release. Build them in a
-clean checkout with `idf.py -DPROJECT_VER=<tag>-public build merge-bin` (the
-`-public` suffix keeps `fw_ver` distinguishable from private builds of the same
-commit), then run the guard on every artifact before `gh release upload`:
+clean checkout, once per profile a release ships: the `dev` images the
+quickstart flashes (`idf.py -DPSTOP_PROFILE=dev -DPROJECT_VER=<tag>-public build
+merge-bin`) and the unsigned `secure-fe` build directory owners provision from.
+Never publish a signed image: owners sign with their own keys. The `-public`
+suffix keeps `fw_ver` distinguishable from private builds of the same commit.
+Run the guard on every artifact before `gh release upload`:
 
 ```sh
 tools/release_guard.sh firmware/build/pstop_remote.bin firmware/build/pstop_remote.elf ...
