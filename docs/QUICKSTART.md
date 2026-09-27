@@ -15,6 +15,10 @@ one; each step says what differs. No firmware toolchain is needed: you flash a
 prebuilt image and configure it from a web page. Allow about 20 minutes plus
 the ROS 2 install.
 
+> **This guide uses the `dev` profile**, which has no protection: with the unit
+> and a USB cable anyone can copy its Tailscale identity. Once section 7 passes,
+> move every remote you keep to `secure-fe` ([`SECURITY_PROFILES.md`](SECURITY_PROFILES.md)).
+
 ## 0. What you need
 
 | Item | Notes |
@@ -207,6 +211,11 @@ ros2 topic echo /pstop_hb                     # expect: stop: true at ~10 Hz
 
 That is the whole setup. If a step did not match, see section 8; everything
 else lives in the appendices.
+
+**Now move to `secure-fe`.** Before this remote goes anywhere it could be lost,
+re-provision it with the default `secure-fe` profile
+([`SECURITY_PROFILES.md`](SECURITY_PROFILES.md)). It is one-way and gives the
+remote a new Tailscale identity, so repeat step 4 with a new key.
 
 ## 8. Troubleshooting
 

@@ -33,10 +33,15 @@ In scope: the firmware, the host runner, the shared ESP-IDF components,
 the test tooling, and the wire protocol / transport as used by this
 project.
 
+Physical attacks on units provisioned with `secure-fe` or `secure`
+([`docs/SECURITY_PROFILES.md`](docs/SECURITY_PROFILES.md)) are in scope. Fault
+injection and side channels on the ESP32-S3 itself are a known limit of the
+chip; report them if they defeat something this project relies on.
+
 Out of scope: third-party ESP-IDF and managed components, general Wi-Fi /
 Tailscale / network-stack issues not specific to this project, physical
-attacks requiring disassembly of a deployed unit, and the WIP hardware
-design files in `hardware/`.
+attacks on `dev`-profile units (they have no protection against them), and
+the WIP hardware design files in `hardware/`.
 
 ## Response expectations
 
