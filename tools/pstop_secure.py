@@ -319,7 +319,8 @@ def cmd_provision(args):
     mac = unit_mac(args)
     udir = records_dir() / ('virt' if args.virt else '') / mac.replace(':', '')
     udir.mkdir(parents=True, exist_ok=True, mode=0o700)
-    records_dir().chmod(0o700)
+    for d in {records_dir(), udir.parent}:
+        d.chmod(0o700)
     ef = Efuse(virt_file=udir / 'virt-efuse.json') if args.virt else Efuse(port=args.port)
 
     try:
@@ -452,7 +453,9 @@ def now():
 
 def save_record(path, record):
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    path.write_text(json.dumps(record, indent=1))
+    tmp = path.with_suffix('.tmp')
+    tmp.write_text(json.dumps(record, indent=1))
+    tmp.replace(path)  # atomic: an interrupted write never leaves a truncated record
 
 
 def main(argv=None):
