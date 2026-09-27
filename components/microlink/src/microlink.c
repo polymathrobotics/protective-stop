@@ -161,18 +161,24 @@ void ml_ident_persist_vpn_ip(microlink_t * ml)
   nvs_close(nvs);
 }
 
-void ml_ident_forget_vpn_ip(void)
+bool ml_ident_forget_vpn_ip(void)
 {
   s_vpn_ip_forgotten = true;
   nvs_handle_t nvs;
   if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs) != ESP_OK) {
-    return;
+    return false;
   }
-  if (nvs_erase_key(nvs, NVS_KEY_VPN_IP) == ESP_OK) {
-    (void)nvs_commit(nvs);
-    ESP_LOGI(TAG, "VPN IP forgotten: next boot enrolls with the saved auth key");
+  esp_err_t err = nvs_erase_key(nvs, NVS_KEY_VPN_IP);
+  if (err == ESP_OK) {
+    err = nvs_commit(nvs);
+  } else if (err == ESP_ERR_NVS_NOT_FOUND) {
+    err = ESP_OK;
   }
   nvs_close(nvs);
+  if (err == ESP_OK) {
+    ESP_LOGI(TAG, "VPN IP forgotten: next boot enrolls with the saved auth key");
+  }
+  return err == ESP_OK;
 }
 
 /* ============================================================================

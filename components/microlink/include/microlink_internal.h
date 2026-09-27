@@ -1271,7 +1271,7 @@ esp_err_t ml_peer_nvs_clear(void);
  * bring-up on the next boot. */
 void ml_ident_persist_vpn_ip(microlink_t * ml);
 /* A persisted VPN IP marks the node as enrolled; forgetting it re-enables the auth key. */
-void ml_ident_forget_vpn_ip(void);
+bool ml_ident_forget_vpn_ip(void);
 
 #ifdef CONFIG_ML_ZERO_COPY_WG
 /* ml_zerocopy.c */

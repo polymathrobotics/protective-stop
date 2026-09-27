@@ -657,9 +657,7 @@ static esp_err_t handler_post_settings(httpd_req_t * req)
   cJSON_Delete(json);
 
   /* Forget the VPN IP only once the new key is saved, so a failed save keeps the working enrollment. */
-  if (config_save_settings(ctx) && auth_key_changed) {
-    ml_ident_forget_vpn_ip();
-  }
+  const bool saved = config_save_settings(ctx) && (!auth_key_changed || ml_ident_forget_vpn_ip());
 
   if (derp_region_changed && ctx->ml != NULL) {
     ctx->ml->derp_region_override = ctx->settings.derp_region;
@@ -688,7 +686,7 @@ static esp_err_t handler_post_settings(httpd_req_t * req)
   }
 
   cJSON * resp = cJSON_CreateObject();
-  cJSON_AddBoolToObject(resp, "ok", true);
+  cJSON_AddBoolToObject(resp, "ok", saved);
   cJSON_AddBoolToObject(resp, "restart_required", true);
   return send_json(req, resp);
 }
