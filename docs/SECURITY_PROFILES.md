@@ -141,7 +141,8 @@ identity can reach is up to your tailnet policy; see
 The ESP32-S3 has no glitch detector. Voltage fault injection can recover keys
 from its AES engine
 ([AR2026-005](https://documentation.espressif.com/AR2026-005_Security_Advisory_Concerning_AES_Key_Recovery_Using_Voltage_Fault_Injection_on%20ESP32-S3_EN.html)),
-and side-channel plus fault attacks target XTS-AES flash encryption
+and combined side-channel and fault attacks defeated Secure Boot and flash
+encryption on the related ESP32-C3 and C6
 ([AR2023-007](https://documentation.espressif.com/AR2023-007%20Security%20Advisory%20Concerning%20Bypassing%20Secure%20Boot%20and%20Flash%20Encryption%20using%20CPA%20and%20FI%20attack%20on%20ESP32-C3%20and%20ESP32-C6%20EN.html)).
 A well-equipped lab can eventually extract one unit's secrets. `secure-fe` makes
 that a per-unit lab job instead of a USB cable and a few seconds, and what it

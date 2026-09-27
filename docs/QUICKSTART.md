@@ -214,8 +214,8 @@ else lives in the appendices.
 
 **Now move to `secure-fe`.** Before this remote goes anywhere it could be lost,
 re-provision it with the default `secure-fe` profile
-([`SECURITY_PROFILES.md`](SECURITY_PROFILES.md)). It is one-way and gives the
-remote a new Tailscale identity, so repeat step 4 with a new key.
+([`SECURITY_PROFILES.md`](SECURITY_PROFILES.md)). It is one-way and erases the
+remote, so repeat step 4 with a new key, then step 6.
 
 ## 8. Troubleshooting
 
