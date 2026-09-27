@@ -17,6 +17,10 @@ right: the E-stop button sits in the center, the LED ring lights the
 diffuser around its base, and the Ethernet and USB-C ports live in the
 side pod.
 
+The robot-side machine box (relay box) lives here too: enclosure source
+`machine-casing.FCStd` plus printable exports `machine-*.stl`. Its parts
+list and build steps are in the machine section of the assembly guide.
+
 Build steps with photos: [ASSEMBLY.md](ASSEMBLY.md).
 
 ## Pinout and wiring
@@ -136,7 +140,9 @@ fit-check references, with their origins listed below.
 | `casing.FCStd`, `base*.stl`, `lid*.stl`, `led.stl`, `print.3mf`, `print.gcode.3mf` | CERN-OHL-P-2.0 (original design) |
 | `esp32-S3.step` | CERN-OHL-P-2.0 (original board fit model) |
 | `LED.step` | CERN-OHL-P-2.0 (ring model commissioned by Polymath Robotics) |
-| `README.md`, `ASSEMBLY.md`, `enclosure-render.png`, `real.jpg`, `assembly/*.jpg` | CC-BY-4.0 (original documentation) |
+| `machine-casing.FCStd` (enclosure geometry), `machine-*.stl` | CERN-OHL-P-2.0 (original design) |
+| Phoenix Contact header and plug models inside `machine-casing.FCStd` | Phoenix Contact DFK-MSTB 2,5/2-GF-5,08 (0710170) and MSTB 2,5/2-STF-5,08 (1777989) CAD models, from the <a href="https://www.phoenixcontact.com" target="_blank" rel="noopener">Phoenix Contact</a> product pages; included only as fit references |
+| `README.md`, `ASSEMBLY.md`, `enclosure-render.png`, `real.jpg`, `assembly/*.jpg`, `assembly/machine-render-*.png` | CC-BY-4.0 (original documentation) |
 | `oshwa-certification-mark.svg` | Official OSHWA wide certification mark generated for UID `US002846`; use is governed by the [OSHWA certification agreement](https://certification.oshwa.org/license-agreement.html) |
 | `oshw-license-facts.svg` | Generated with the [Open Source Licenses Facts generator](https://oshwa.github.io/certification-mark-generator/facts) for this project's certified license combination |
 | `ESP32-S3-ETH-Schematic.pdf` | Waveshare, from the <a href="https://www.waveshare.com/wiki/ESP32-S3-ETH" target="_blank" rel="noopener">product wiki</a> (<a href="https://files.waveshare.com/wiki/ESP32-S3-ETH/ESP32-S3-ETH-Schematic.pdf" target="_blank" rel="noopener">direct PDF</a>) |
@@ -145,8 +151,9 @@ fit-check references, with their origins listed below.
 
 ## Design files
 
-The editable source for the custom parts is `casing.FCStd`; the STL/3MF files
-are its printable exports, and the STEP models are references used for fit.
+The editable source for the custom parts is `casing.FCStd` (remote) and
+`machine-casing.FCStd` (machine box); the STL/3MF files are their printable
+exports, and the STEP models are references used for fit.
 Build steps live in [ASSEMBLY.md](ASSEMBLY.md).
 
 OSHWA certification details and maintenance notes are in
