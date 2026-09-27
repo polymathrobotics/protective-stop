@@ -610,6 +610,8 @@ static esp_err_t handler_post_settings(httpd_req_t * req)
     }
   }
   bool auth_key_changed = false;
+  char prev_auth_key[sizeof(ctx->settings.auth_key)];
+  memcpy(prev_auth_key, ctx->settings.auth_key, sizeof(prev_auth_key));
   if ((item = cJSON_GetObjectItem(json, "auth_key")) && cJSON_IsString(item)) {
     const char * v = item->valuestring;
     if (v[0] != '\0' && strcmp(v, "********") != 0 && strcmp(v, ctx->settings.auth_key) != 0) {
@@ -656,8 +658,14 @@ static esp_err_t handler_post_settings(httpd_req_t * req)
   #undef COPY_STR_FIELD
   cJSON_Delete(json);
 
-  /* Forget the VPN IP only once the new key is saved, so a failed save keeps the working enrollment. */
-  const bool saved = config_save_settings(ctx) && (!auth_key_changed || ml_ident_forget_vpn_ip());
+  /* Forget the VPN IP only once the new key is saved, so a failed save keeps the working enrollment.
+   * If forgetting fails, put the old key back: key and enrollment stay consistent and a retry is a change. */
+  bool saved = config_save_settings(ctx);
+  if (saved && auth_key_changed && !ml_ident_forget_vpn_ip()) {
+    memcpy(ctx->settings.auth_key, prev_auth_key, sizeof(prev_auth_key));
+    (void)config_save_settings(ctx);
+    saved = false;
+  }
 
   if (derp_region_changed && ctx->ml != NULL) {
     ctx->ml->derp_region_override = ctx->settings.derp_region;
