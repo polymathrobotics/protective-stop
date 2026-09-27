@@ -808,15 +808,21 @@ static int do_register(microlink_t * ml, ml_noise_state_t * noise)
   cJSON_AddStringToObject(root, "NodeKey", key_str);
 
   /* Enrollment, or re-auth once the server reports the node key expired. An enrolled node must not
-   * re-enroll itself after being deleted from the tailnet. */
-  if ((ml->vpn_ip == 0 || ml->key_expired) && ml->config.auth_key && ml->config.auth_key[0] != '\0') {
+   * re-enroll itself after being deleted from the tailnet. While unenrolled, every other attempt goes
+   * without the key: if the server consumed a one-off key but its reply was lost, the key is now
+   * rejected while the node key it registered works on its own. */
+  static bool s_keyless_turn = false;
+  const bool enrolling = (ml->vpn_ip == 0);
+  const bool send_key = ml->key_expired || (enrolling && !s_keyless_turn);
+  if (enrolling) s_keyless_turn = !s_keyless_turn;
+  if (send_key && ml->config.auth_key && ml->config.auth_key[0] != '\0') {
     cJSON * auth = cJSON_CreateObject();
     cJSON_AddStringToObject(auth, "AuthKey", ml->config.auth_key);
     cJSON_AddItemToObject(root, "Auth", auth);
     s_diag_coord_authkey_regs++;
-    ESP_LOGI(TAG, "Registering with auth key (%s)", (ml->vpn_ip == 0) ? "enrollment" : "expired node key");
-  } else if (ml->vpn_ip != 0) {
-    ESP_LOGI(TAG, "Registering as an enrolled node (no auth key sent)");
+    ESP_LOGI(TAG, "Registering with auth key (%s)", enrolling ? "enrollment" : "expired node key");
+  } else {
+    ESP_LOGI(TAG, "Registering without the auth key (%s)", enrolling ? "unenrolled" : "enrolled node");
   }
 
   /* Hostinfo */

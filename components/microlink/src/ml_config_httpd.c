@@ -148,15 +148,18 @@ static void config_load_settings(ml_config_ctx_t * ctx)
     strlen(CONFIG_ML_PRIORITY_PEER_IP) > 0 ? CONFIG_ML_PRIORITY_PEER_IP : "(none)");
 }
 
-static void config_save_settings(ml_config_ctx_t * ctx)
+static bool config_save_settings(ml_config_ctx_t * ctx)
 {
   esp_err_t err = nvs_set_blob(ctx->nvs, NVS_KEY_SETTINGS, &ctx->settings, sizeof(ml_config_settings_t));
   if (err == ESP_OK) {
-    nvs_commit(ctx->nvs);
+    err = nvs_commit(ctx->nvs);
+  }
+  if (err == ESP_OK) {
     ESP_LOGI(TAG, "Settings saved to NVS");
   } else {
     ESP_LOGE(TAG, "Failed to save settings: %s", esp_err_to_name(err));
   }
+  return err == ESP_OK;
 }
 
 static void config_load_peers(ml_config_ctx_t * ctx)
@@ -606,11 +609,12 @@ static esp_err_t handler_post_settings(httpd_req_t * req)
       COPY_STR_FIELD(ctx->settings.wifi_pass, v);
     }
   }
+  bool auth_key_changed = false;
   if ((item = cJSON_GetObjectItem(json, "auth_key")) && cJSON_IsString(item)) {
     const char * v = item->valuestring;
     if (v[0] != '\0' && strcmp(v, "********") != 0 && strcmp(v, ctx->settings.auth_key) != 0) {
       COPY_STR_FIELD(ctx->settings.auth_key, v);
-      ml_ident_forget_vpn_ip();
+      auth_key_changed = true;
     }
   }
   if ((item = cJSON_GetObjectItem(json, "device_prefix")) && cJSON_IsString(item)) {
@@ -652,7 +656,10 @@ static esp_err_t handler_post_settings(httpd_req_t * req)
   #undef COPY_STR_FIELD
   cJSON_Delete(json);
 
-  config_save_settings(ctx);
+  /* Forget the VPN IP only once the new key is saved, so a failed save keeps the working enrollment. */
+  if (config_save_settings(ctx) && auth_key_changed) {
+    ml_ident_forget_vpn_ip();
+  }
 
   if (derp_region_changed && ctx->ml != NULL) {
     ctx->ml->derp_region_override = ctx->settings.derp_region;
@@ -1700,7 +1707,7 @@ static esp_err_t handler_post_wifi(httpd_req_t * req)
     memset(ctx->settings.wifi_pass, 0, sizeof(ctx->settings.wifi_pass));
     strlcpy(ctx->settings.wifi_ssid, ctx->wifi_list.entries[0].ssid, sizeof(ctx->settings.wifi_ssid));
     strlcpy(ctx->settings.wifi_pass, ctx->wifi_list.entries[0].pass, sizeof(ctx->settings.wifi_pass));
-    config_save_settings(ctx);
+    (void)config_save_settings(ctx);
   }
 
   config_save_wifi_list(ctx);
