@@ -7,7 +7,7 @@ groups on the same server:
 - **Diagnostic / config routes** — unauthenticated.
 - **Admin routes** (`/admin/...`) — HTTP Basic auth (`admin` : `CONFIG_ML_ADMIN_PASSWORD`).
   An image built with the public default password (`microlink`) or an empty one
-  refuses admin requests that arrive over Tailscale (401); they work on the USB
+  refuses admin requests that arrive on a Tailscale address (100.64.0.0/10; 401); they work on the USB
   tether, Ethernet and the SoftAP. Build with your own password to administer
   over Tailscale.
 

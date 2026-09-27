@@ -97,9 +97,6 @@ static ml_app_t * s_app = NULL;
 /* Fails closed: an unreadable socket address counts as Tailscale. */
 static bool request_via_tailnet(httpd_req_t * req)
 {
-  const uint32_t vpn_ip = (s_app != NULL && s_app->ml != NULL) ? s_app->ml->vpn_ip : 0u;
-  if (vpn_ip == 0u) return false;
-
   struct sockaddr_storage local;
   socklen_t len = sizeof(local);
   if (getsockname(httpd_req_to_sockfd(req), (struct sockaddr *)&local, &len) != 0) return true;
@@ -117,7 +114,8 @@ static bool request_via_tailnet(httpd_req_t * req)
   } else {
     return true;
   }
-  return ntohl(addr_be) == vpn_ip;
+  /* Tailscale assigns 100.64.0.0/10; the range, unlike vpn_ip, holds if the node's address changes. */
+  return (ntohl(addr_be) & 0xFFC00000u) == 0x64400000u;
 }
 
 static bool admin_auth_check(httpd_req_t * req)
