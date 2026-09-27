@@ -70,7 +70,10 @@ def read_secret(env):
     if not ref:
         raise ProvisionError(f'set {env} to a file path or an op:// reference')
     if ref.startswith('op://'):
-        r = subprocess.run(['op', 'read', '--no-newline', ref], capture_output=True)
+        try:
+            r = subprocess.run(['op', 'read', '--no-newline', ref], capture_output=True)
+        except OSError as e:
+            raise ProvisionError(f'op read for {env}: {e}') from e
         if r.returncode != 0:
             raise ProvisionError(f'op read for {env} failed: {r.stderr.decode(errors="replace").strip()[-300:]}')
         return r.stdout
@@ -82,7 +85,9 @@ def read_secret(env):
 
 @contextlib.contextmanager
 def secret_dir():
-    with tempfile.TemporaryDirectory(dir='/dev/shm' if os.path.isdir('/dev/shm') else None) as td:
+    if not os.path.isdir('/dev/shm'):
+        raise ProvisionError('no /dev/shm: refusing to write secrets to disk')
+    with tempfile.TemporaryDirectory(dir='/dev/shm') as td:
         os.chmod(td, 0o700)
         yield Path(td)
 
@@ -106,6 +111,20 @@ def derive_fe_key(master, mac):
 
 def records_dir():
     return Path(os.environ.get('PSTOP_RECORDS_DIR', Path.home() / '.pstop-records')).expanduser()
+
+
+def load_record(path):
+    return json.loads(path.read_text()) if path.exists() else None
+
+
+def check_record(record, profile, fe_key):
+    """Refuses a build or FE master other than the unit was provisioned with; returns the key's public id."""
+    kid = hashlib.sha256(b'pstop fe key id ' + fe_key).hexdigest()[:16] if fe_key else None
+    if record and record.get('profile', profile) != profile:
+        raise ProvisionError(f'the unit was provisioned as {record["profile"]}; this build is {profile}')
+    if record and record.get('fe_key_id', kid) != kid:
+        raise ProvisionError(f'{ENV_FE_MASTER} gives another flash-encryption key than the unit was provisioned with')
+    return kid
 
 
 def run(argv, capture=False):
@@ -197,6 +216,8 @@ def check_signed_bootloader(b, signed, primary, tmp):
         raise ProvisionError(f'{signed} must carry two signatures (primary and backup), found {len(digests)}')
     if digests[0] != key_digest(primary, tmp, 'primary'):
         raise ProvisionError(f'the first signature on {signed} is not from {ENV_SIGNING_KEY}')
+    if digests[0] == digests[1]:
+        raise ProvisionError(f'both signatures on {signed} are from the same key; the backup key must differ')
     return digests
 
 
@@ -223,14 +244,14 @@ def prepare_images(b, primary, fe_key, names, tmp, bootloader=None):
     return out
 
 
-def write_flash(port, images, flash_size, secure_download):
+def write_flash(port, images, flash_size, secure_download, force):
     # keep: rewriting the header of a signed or encrypted image corrupts it.
     after = 'hard-reset' if secure_download else 'no-reset'
     argv = py_tool('esptool') + ['--chip', CHIP, '-p', port, '--before', 'default-reset', '--after', after]
     if secure_download:
         argv.append('--no-stub')
     argv += ['write-flash', '--flash-mode', 'keep', '--flash-freq', 'keep', '--flash-size', flash_size]
-    if secure_download:
+    if force:
         # esptool cannot tell the images are already encrypted for this unit.
         argv.append('--force')
     for offset, img in images:
@@ -251,8 +272,10 @@ def efuse_raw(summary, name):
 def mac_from_usb(port):
     """USB-Serial-JTAG reports the MAC as its serial number."""
     try:
-        props = subprocess.run(['udevadm', 'info', '-q', 'property', '-n', port], capture_output=True, text=True)
-    except OSError:
+        props = subprocess.run(
+            ['udevadm', 'info', '-q', 'property', '-n', port], capture_output=True, text=True, timeout=10
+        )
+    except (OSError, subprocess.TimeoutExpired):
         return None
     m = re.search(r'^ID_SERIAL_SHORT=([0-9A-Fa-f:]{12,17})$', props.stdout, re.M)
     return normalize_mac(m.group(1)) if m else None
@@ -296,13 +319,17 @@ def cmd_provision(args):
     mac = unit_mac(args)
     udir = records_dir() / ('virt' if args.virt else '') / mac.replace(':', '')
     udir.mkdir(parents=True, exist_ok=True, mode=0o700)
+    records_dir().chmod(0o700)
     ef = Efuse(virt_file=udir / 'virt-efuse.json') if args.virt else Efuse(port=args.port)
 
-    s = ef.summary()
+    try:
+        s = ef.summary()
+    except ProvisionError as e:
+        raise ProvisionError(f'{e}\nA provisioned unit (Secure Download Mode) blocks espefuse: use `flash`.') from e
     if efuse_value(s, 'ENABLE_SECURITY_DOWNLOAD'):
         raise ProvisionError('unit is already provisioned (Secure Download Mode is on); use `flash`')
     record_path = udir / 'record.json'
-    record = json.loads(record_path.read_text()) if record_path.exists() else None
+    record = load_record(record_path)
     resuming = record is not None and record.get('state') == 'in-progress'
     for i in range(6):
         if efuse_value(s, f'KEY_PURPOSE_{i}') != 'USER' and not resuming:
@@ -311,7 +338,9 @@ def cmd_provision(args):
     with secret_dir() as sd:
         primary = write_secret(sd / 'primary.pem', read_secret(ENV_SIGNING_KEY))
         digests = check_signed_bootloader(b, args.bootloader, primary, sd)
-        fe_key = write_secret(sd / 'fe.bin', derive_fe_key(read_secret(ENV_FE_MASTER), mac)) if fe else None
+        fe_raw = derive_fe_key(read_secret(ENV_FE_MASTER), mac) if fe else None
+        fe_key_id = check_record(record, b['profile'], fe_raw)
+        fe_key = write_secret(sd / 'fe.bin', fe_raw) if fe else None
 
         print(f'\nProvisioning {mac} as {b["profile"]} burns eFuses permanently (docs/SECURITY_PROFILES.md).')
         print(f'Key digests: primary {digests[0].hex()}\n             backup  {digests[1].hex()}')
@@ -320,7 +349,7 @@ def cmd_provision(args):
                 raise ProvisionError('confirmation did not match; nothing was burned')
 
         record = record or {'mac': mac, 'profile': b['profile'], 'started': now()}
-        record.update(state='in-progress', key_digests=[d.hex() for d in digests])
+        record.update(state='in-progress', key_digests=[d.hex() for d in digests], fe_key_id=fe_key_id)
         save_record(record_path, record)
 
         if fe and efuse_value(s, 'KEY_PURPOSE_0') != 'XTS_AES_128_KEY':
@@ -331,8 +360,9 @@ def cmd_provision(args):
             (sd / 'hmac.bin').unlink()
 
         if efuse_value(s, 'KEY_PURPOSE_1') == 'SECURE_BOOT_DIGEST0':
-            if str(efuse_value(s, SB_DIGEST_BLOCKS[0])).replace(' ', '') != digests[0].hex():
-                raise ProvisionError(f'{SB_DIGEST_BLOCKS[0]} holds a different Secure Boot key than {ENV_SIGNING_KEY}')
+            for block, digest in zip(SB_DIGEST_BLOCKS, digests):
+                if str(efuse_value(s, block)).replace(' ', '') != digest.hex():
+                    raise ProvisionError(f'{block} holds another Secure Boot key digest than {args.bootloader}')
         else:
             d0, d1 = write_secret(sd / 'd0.bin', digests[0]), write_secret(sd / 'd1.bin', digests[1])
             ef.burn(
@@ -358,7 +388,7 @@ def cmd_provision(args):
                     py_tool('esptool')
                     + ['--chip', CHIP, '-p', args.port, '--after', 'no-reset', 'erase-flash', '--force']
                 )
-                write_flash(args.port, images, b['flash_size'], secure_download=False)
+                write_flash(args.port, images, b['flash_size'], secure_download=False, force=fe)
 
     s = ef.summary()
     todo = []
@@ -394,13 +424,16 @@ def cmd_flash(args):
     if args.full and not args.bootloader:
         raise ProvisionError('--full needs --bootloader (the output of sign-bootloader)')
     names = ('bootloader', 'partition-table', 'otadata', 'app') if args.full else ('otadata', 'app')
+    record = load_record(records_dir() / mac.replace(':', '') / 'record.json')
     with secret_dir() as sd:
         primary = write_secret(sd / 'primary.pem', read_secret(ENV_SIGNING_KEY))
         if args.full:
             check_signed_bootloader(b, args.bootloader, primary, sd)
-        fe_key = write_secret(sd / 'fe.bin', derive_fe_key(read_secret(ENV_FE_MASTER), mac)) if fe else None
+        fe_raw = derive_fe_key(read_secret(ENV_FE_MASTER), mac) if fe else None
+        check_record(record, b['profile'], fe_raw)
+        fe_key = write_secret(sd / 'fe.bin', fe_raw) if fe else None
         images = prepare_images(b, primary, fe_key, names, sd, bootloader=args.bootloader)
-        write_flash(args.port, images, b['flash_size'], secure_download=True)
+        write_flash(args.port, images, b['flash_size'], secure_download=True, force=True)
     print('\nDone. The unit reboots into the new image (ota_0).')
 
 

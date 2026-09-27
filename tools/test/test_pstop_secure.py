@@ -112,7 +112,7 @@ def test_fe_key_derivation_is_rfc5869_hkdf_and_per_unit():
 def test_secure_download_write_is_forced_and_stubless(monkeypatch):
     calls = []
     monkeypatch.setattr(pstop_secure, 'run', lambda argv, capture=False: calls.append([str(a) for a in argv]))
-    pstop_secure.write_flash('/dev/ttyACM0', [(0x30000, Path('app.bin'))], '8MB', secure_download=True)
+    pstop_secure.write_flash('/dev/ttyACM0', [(0x30000, Path('app.bin'))], '8MB', secure_download=True, force=True)
     assert '--no-stub' in calls[0] and '--force' in calls[0]
     assert calls[0][calls[0].index('--after') + 1] == 'hard-reset'
 
@@ -129,6 +129,12 @@ def test_dev_build_is_rejected(tmp_path):
     cfg.write_text(json.dumps({**json.loads(cfg.read_text()), 'SECURE_BOOT': False}))
     with pytest.raises(pstop_secure.ProvisionError, match='dev build'):
         pstop_secure.load_build(build)
+
+
+def test_backup_key_must_differ_from_primary(tmp_path, env, monkeypatch):
+    monkeypatch.setenv(pstop_secure.ENV_BACKUP_KEY, str(env / 'primary.pem'))
+    build = make_build(tmp_path, fe=True)
+    assert pstop_secure.main(['sign-bootloader', str(build), '-o', str(tmp_path / 'bl.bin')]) == 1
 
 
 def test_bootloader_from_another_build_is_rejected(tmp_path, env):
@@ -214,6 +220,11 @@ def test_interrupted_provision_resumes(tmp_path, env, monkeypatch):
     assert virt_summary(tmp_path)['SECURE_BOOT_EN']['value'] is False
 
     monkeypatch.setattr(pstop_secure.Efuse, 'burn', real_burn)
+    other = tmp_path / 'other-master.txt'
+    other.write_bytes(MASTER[::-1])
+    monkeypatch.setenv(pstop_secure.ENV_FE_MASTER, str(other))
+    assert provision(build, signed) == 1  # a different master would encrypt for a key the unit does not have
+    monkeypatch.setenv(pstop_secure.ENV_FE_MASTER, str(env / 'fe_master.txt'))
     assert provision(build, signed) == 0
     s = virt_summary(tmp_path)
     assert s['SECURE_BOOT_EN']['value'] is True and s['ENABLE_SECURITY_DOWNLOAD']['value'] is True

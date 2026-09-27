@@ -78,8 +78,10 @@ uv run python pstop_secure.py sign-bootloader ../firmware/build -o bootloader-si
 
 Each unit's NVS key is generated at provisioning, burned read-protected and never
 stored, so your secrets do not reveal a unit's Tailscale identity. Provisioning
-records (MAC, key digests, the last full eFuse summary; no secrets) go to
-`$PSTOP_RECORDS_DIR` (default `~/.pstop-records`).
+records (MAC, profile, key digests, a flash-encryption key id, the last full
+eFuse summary; no secrets) go to `$PSTOP_RECORDS_DIR` (default
+`~/.pstop-records`); with a record present, `flash` refuses another build profile
+or master.
 
 ## Provisioning
 
