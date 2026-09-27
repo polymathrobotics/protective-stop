@@ -136,7 +136,7 @@ as fit references.
 | 2 | M3 screws, length to suit | Mounting ears (4 mm thick, M3 slots with 3 mm of travel). |
 | 4 | M1.6 heat-set inserts + short M1.6 screws | ESP32 board, same as the remote. |
 | 1 set | Hookup wire | Signal wires as for the remote; the stop-circuit wires sized for the robot's stop circuit. |
-| 1 | DIYmall WS2812B ring, 16 pixels | Optional: the v1 machine firmware does not drive the ring yet. |
+| 1 | DIYmall WS2812B ring, 16 pixels | Same ring as the remote; shows the machine's state (see step 6). |
 
 ## Printing
 
@@ -199,11 +199,17 @@ the JD-VCC jumper fitted so the coils run from the board's 5 V.
 | white | IO39 | Relay module IN1 (core 0, relay 1) |
 | yellow | IO41 | Relay module IN2 (core 1, relay 2) |
 
+The LED ring is wired exactly as on the remote, through the lid:
+
+| Wire | Board pad | Goes to |
+|---|---|---|
+| red | VBUS | Ring PWR5V |
+| black | GND | Ring GND |
+| green | IO17 | Ring DI |
+
 IO40 and IO42 stay free: relay feedback is compiled out in the current
 firmware (`CONFIG_MACHN_RELAY_FEEDBACK`, see
-[RELAY_FEEDBACK_DESCOPE](../docs/RELAY_FEEDBACK_DESCOPE.md)). If you fit
-the optional ring, wire it as on the remote: VBUS to PWR5V, GND to GND,
-IO17 to DI.
+[RELAY_FEEDBACK_DESCOPE](../docs/RELAY_FEEDBACK_DESCOPE.md)).
 
 Drop the board into its cradle with the RJ45 and USB-C through the port
 wall, anchor it with the M1.6 screws, and fit the PoE module.
@@ -230,10 +236,19 @@ active-low or the wiring uses NC contacts.
 
 ## 6. Close and mount
 
-If the ring is fitted, seat it in the diffuser pocket in the lid, LEDs facing
-the diffuser. Fold the wires in, seat the lid and drive the four M3 x 8
-screws. Mount the box through the two ears with M3 screws; the slots give
-3 mm of adjustment.
+Seat the ring in the diffuser pocket in the lid, LEDs facing the diffuser.
+Fold the wires in, seat the lid and drive the four M3 x 8 screws. Mount the
+box through the two ears with M3 screws; the slots give 3 mm of adjustment.
+
+The ring shows the machine's state the same way the remote's ring does, so
+both agree: one segment per remote assigned to this machine (allowlisted or
+pinned remotes, plus any remote it has served since boot), coloured by the
+last reply the machine sent it. Dim white means no remote is assigned; amber
+blinks mean an assigned remote is not reachable (1 blink = the remote is
+silent, 2 = Tailscale is down, 3 = no Internet); blue is bonding, green is
+cleared to run and red is STOP. Purple across the whole ring means the two
+cores disagree. As on the remote, calibrate which pixel is LED 1 with
+`POST /api/ring_led1?on=1` and `POST /api/ring_offset?n=0..15`.
 
 ## 7. Connect the stop circuit
 

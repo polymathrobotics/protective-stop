@@ -240,6 +240,12 @@ extern "C"
   extern atomic_uint_fast32_t g_dcs_machn_r_rtt_ms[DCS_MACHN_MAX_REMOTES];
   extern atomic_uint_fast32_t g_dcs_machn_r_ip[DCS_MACHN_MAX_REMOTES]; /* UDP source = remote's tailnet IP */
   extern atomic_uint_fast32_t g_dcs_machn_r_stop_only[DCS_MACHN_MAX_REMOTES]; /* 1 = stop-only (no re-arm) */
+
+  /* Machine role: last reply sent to each remote served since boot (feeds the
+   * PSTOP ring; written by dcs_publish_machn_reply, read by the ring task). */
+  extern atomic_uint_fast32_t g_dcs_machn_rep_id[DCS_MACHN_MAX_REMOTES];
+  extern atomic_uint_fast32_t g_dcs_machn_rep_msg[DCS_MACHN_MAX_REMOTES];
+  extern atomic_uint_fast64_t g_dcs_machn_rep_ms[DCS_MACHN_MAX_REMOTES];
   extern atomic_uint_fast32_t g_dcs_pstop_rtt_ms;
   extern atomic_uint_fast64_t g_dcs_pstop_last_reply_ms;
   extern atomic_uint_fast32_t g_dcs_pstop_peer_ip;

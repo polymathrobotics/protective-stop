@@ -12,6 +12,7 @@ idf_component_register(
         "src/dcs_net_supervisor.c"
         "src/dcs_rgb.c"
         "src/dcs_pstop_ring.c"
+        "src/dcs_ring_logic.c"
         "src/dcs_net_liveness.c"
         "src/dcs_net_inet.c"
         "src/dcs_telemetry.c"

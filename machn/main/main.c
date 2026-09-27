@@ -40,6 +40,11 @@
  * = everyone). Re-arm authority is the REMOTE's own announced role, re-read on
  * every frame. Telemetry reuses the dcs comparator/core atomics (machn-specific
  * /state.json fields are a follow-up).
+ *
+ * LED ring: the same 16-LED ring as the remote (dcs_pstop_ring.c) shows the
+ * machine's state per assigned remote, from the last reply sent to it
+ * (dcs_publish_machn_reply), so the machine's ring matches each remote's.
+ * See "LED ring (machine box)" in docs/MACHINE_ESP32_DESIGN.md.
  */
 
 #include <stdatomic.h>
@@ -668,8 +673,16 @@ static void comparator_task(void * arg)
         /* OK: the library's reply. OPERATOR_NOT_ALLOWED: the UNBOND both cores
                  * filled identically — tells the refused remote to stop
                  * knocking (it parks until a manual rebond). */
-        (void)sendto(sock, g_core[0].resp_bytes, PSTOP_MESSAGE_SIZE, 0, (struct sockaddr *)&from, from_len);
+        const int sent = sendto(sock, g_core[0].resp_bytes, PSTOP_MESSAGE_SIZE, 0, (struct sockaddr *)&from, from_len);
         processed++;
+        /* PSTOP ring: remember what this remote was just told, so the
+                 * machine's ring shows the same state as that remote's ring.
+                 * Library replies only; an admission refusal never assigns a
+                 * remote to the ring. Telemetry only — nothing reads it back
+                 * into the safety path. */
+        if ((sent == PSTOP_MESSAGE_SIZE) && (g_core[0].err == PSTOP_OK)) {
+          dcs_publish_machn_reply(g_core[0].resp.receiver_id.data, g_core[0].resp.message, now_ms());
+        }
       } else if (!agree) {
         /* Cores diverged on the SAME input: withhold the reply (the
                  * remote sees silence and stops) and count it. Each core has

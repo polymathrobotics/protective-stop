@@ -98,6 +98,14 @@ starting at LED 1 (one machine = whole ring, matching the old display);
 each segment shows its machine's state with the usual colours. HIL
 validation: `tools/pstop_multi_machine_test.py`.
 
+On an ESP32 machine box (`machn`) the ring shows the same machine state from
+the other end: one segment per assigned remote (admission allowlist and pin
+list first, then remotes served since boot, minus the denylist), coloured by
+the last reply the machine sent that remote, so each remote's ring and the
+machine's ring agree. No assigned remote = dim white; an assigned remote with
+no fresh reply blinks amber with the same 1/2/3 layer count. Details:
+[MACHINE_ESP32_DESIGN.md](MACHINE_ESP32_DESIGN.md#led-ring-machine-box).
+
 ### LED-ring rotation (provisioning)
 
 The 16-LED ring can be installed in any of 16 orientations, so "LED 1" is a
