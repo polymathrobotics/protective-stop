@@ -10,7 +10,7 @@ restoring availability, never about masking a fault.)
 Implementation: `firmware/components/dcs_support/src/dcs_safety.c`,
 `dcs_net_liveness.c`, `dcs_nvs.c`, `panic_log.c`. Constants:
 `dcs_internal.h` (`DCS_SAFETY_MAX_RAPID_BOOTS = 3`,
-`DCS_SAFETY_CLEAR_AFTER_MS = 120000`).
+`DCS_SAFETY_CLEAR_AFTER_MS = 600000`, 10 min).
 
 ## Layer 1 — Task Watchdog Timer (TWDT)
 
@@ -75,10 +75,11 @@ observed on (NVS untouched):
 | 1 | **DERP-only** — DISCO/STUN suppressed (`derp_only=1` in `/state.json`) |
 | ≥ 2 | **Tailscale paused** — `ml_wg_mgr` suspended, DERP TX paused |
 
-Age-out: `bc_clear_task` clears the counter after **120 s** of healthy
-uptime; if the boot was DERP-only, it also triggers a clean
+Age-out: `bc_clear_task` clears the counter after **10 min** of healthy
+uptime (a shorter window let a build that crashed ~150 s after boot loop
+forever, #145); if the boot was DERP-only, it also triggers a clean
 `esp_restart()` to retry the direct-UDP fast path. So a single wedge
-costs ~2 min of relay-level latency, then full speed returns
+costs up to 10 min of relay-level latency, then full speed returns
 automatically.
 
 ## Layer 4 — Bootloader rollback (PENDING_VERIFY)
@@ -130,7 +131,7 @@ Layer-3 age-out.
    the abort path); verify the next boot logs "NOT counted toward
    rollback" and `boot_count` doesn't climb.
 4. **Counter age-out:** after a single crash boot, verify `boot_count`
-   returns to 0 after ~120 s healthy uptime (and a DERP-only boot
+   returns to 0 after ~10 min healthy uptime (and a DERP-only boot
    auto-restarts to full Tailscale).
 5. **NVS settings persist:** toggle USB enable via the admin UI,
    soft-reboot, verify the state survived (exercises the NVS paths the
