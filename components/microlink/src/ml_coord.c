@@ -44,6 +44,7 @@ static const char * TAG = "ml_coord";
 /* Periodic re-registrations executed (coord-task-owned; word-sized cross-task
  * read via ml_coord_get_reregisters for /admin/api/monitor). */
 static uint32_t s_diag_coord_reregisters;
+static uint32_t s_diag_coord_authkey_regs;
 /* One-shot: next long-poll MapRequest sends OmitPeers=false (full peer
  * redelivery). Set by the pin-absent heal when NVS synthesis has nothing to
  * work from — the default OmitPeers=true reconnect provably never re-delivers
@@ -79,6 +80,11 @@ static uint64_t s_last_rereg_ms;
 uint32_t ml_coord_get_reregisters(void)
 {
   return s_diag_coord_reregisters;
+}
+
+uint32_t ml_coord_get_authkey_regs(void)
+{
+  return s_diag_coord_authkey_regs;
 }
 
 /* Effective control plane host: NVS override or compiled default */
@@ -801,11 +807,15 @@ static int do_register(microlink_t * ml, ml_noise_state_t * noise)
   snprintf(key_str, sizeof(key_str), "nodekey:%s", key_hex);
   cJSON_AddStringToObject(root, "NodeKey", key_str);
 
-  /* Auth - only include if auth_key is valid (matching v1 behavior) */
-  if (ml->config.auth_key && strlen(ml->config.auth_key) > 0) {
+  /* Enrollment only: an enrolled node must not re-enroll itself after being deleted from the tailnet. */
+  if (ml->vpn_ip == 0 && ml->config.auth_key && ml->config.auth_key[0] != '\0') {
     cJSON * auth = cJSON_CreateObject();
     cJSON_AddStringToObject(auth, "AuthKey", ml->config.auth_key);
     cJSON_AddItemToObject(root, "Auth", auth);
+    s_diag_coord_authkey_regs++;
+    ESP_LOGI(TAG, "Registering with auth key (enrollment)");
+  } else if (ml->vpn_ip != 0) {
+    ESP_LOGI(TAG, "Registering as an enrolled node (no auth key sent)");
   }
 
   /* Hostinfo */

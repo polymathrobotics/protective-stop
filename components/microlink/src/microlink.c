@@ -159,6 +159,19 @@ void ml_ident_persist_vpn_ip(microlink_t * ml)
   nvs_close(nvs);
 }
 
+void ml_ident_forget_vpn_ip(void)
+{
+  nvs_handle_t nvs;
+  if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs) != ESP_OK) {
+    return;
+  }
+  if (nvs_erase_key(nvs, NVS_KEY_VPN_IP) == ESP_OK) {
+    (void)nvs_commit(nvs);
+    ESP_LOGI(TAG, "VPN IP forgotten: next boot enrolls with the saved auth key");
+  }
+  nvs_close(nvs);
+}
+
 /* ============================================================================
  * cJSON PSRAM Hooks
  * ========================================================================== */

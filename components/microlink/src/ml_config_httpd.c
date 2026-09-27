@@ -610,6 +610,7 @@ static esp_err_t handler_post_settings(httpd_req_t * req)
     const char * v = item->valuestring;
     if (v[0] != '\0' && strcmp(v, "********") != 0) {
       COPY_STR_FIELD(ctx->settings.auth_key, v);
+      ml_ident_forget_vpn_ip();
     }
   }
   if ((item = cJSON_GetObjectItem(json, "device_prefix")) && cJSON_IsString(item)) {
@@ -1179,6 +1180,8 @@ static esp_err_t handler_monitor(httpd_req_t * req)
       cJSON_AddNumberToObject(json, "derp_connect_steps", ml_derp_get_connect_steps());
       cJSON_AddNumberToObject(json, "derp_rx_stale_reaps", ml_derp_get_rx_stale_reaps());
       cJSON_AddNumberToObject(json, "coord_reregisters", ml_coord_get_reregisters());
+      cJSON_AddNumberToObject(json, "coord_authkey_regs", ml_coord_get_authkey_regs());
+      cJSON_AddBoolToObject(json, "ts_enrolled", ml->vpn_ip != 0u);
       {
         /* Stall-class closure telemetry (docs/STALL_EVENT_CLOSURE_DESIGN.md) */
         uint32_t hs[2] = {0};
