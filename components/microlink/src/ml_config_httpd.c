@@ -608,7 +608,7 @@ static esp_err_t handler_post_settings(httpd_req_t * req)
   }
   if ((item = cJSON_GetObjectItem(json, "auth_key")) && cJSON_IsString(item)) {
     const char * v = item->valuestring;
-    if (v[0] != '\0' && strcmp(v, "********") != 0) {
+    if (v[0] != '\0' && strcmp(v, "********") != 0 && strcmp(v, ctx->settings.auth_key) != 0) {
       COPY_STR_FIELD(ctx->settings.auth_key, v);
       ml_ident_forget_vpn_ip();
     }

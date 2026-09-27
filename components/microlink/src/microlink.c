@@ -139,9 +139,11 @@ static esp_err_t load_or_generate_keys(microlink_t * ml)
  * Called from the coord task whenever registration/map assigns the IP —
  * never from the safety tick. Write-on-change only: re-registrations with
  * the same address (the common case) cost zero flash wear. */
+static bool s_vpn_ip_forgotten; /* until reboot: re-registers must not re-persist the old IP */
+
 void ml_ident_persist_vpn_ip(microlink_t * ml)
 {
-  if (!ml || ml->vpn_ip == 0) {
+  if (!ml || ml->vpn_ip == 0 || s_vpn_ip_forgotten) {
     return;
   }
   nvs_handle_t nvs;
@@ -161,6 +163,7 @@ void ml_ident_persist_vpn_ip(microlink_t * ml)
 
 void ml_ident_forget_vpn_ip(void)
 {
+  s_vpn_ip_forgotten = true;
   nvs_handle_t nvs;
   if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs) != ESP_OK) {
     return;
