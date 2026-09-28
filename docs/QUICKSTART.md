@@ -354,14 +354,14 @@ cp firmware/sdkconfig.credentials.example firmware/sdkconfig.credentials
 $EDITOR firmware/sdkconfig.credentials       # set CONFIG_ML_TAILSCALE_AUTH_KEY and CONFIG_ML_ADMIN_PASSWORD, leave the rest
 cd firmware
 . ~/esp/esp-idf/export.sh                    # wherever you installed IDF 5.5
-idf.py build
+idf.py -DPSTOP_PROFILE=dev build             # the quickstart uses the dev profile
 grep CONFIG_ML_TAILSCALE_AUTH_KEY sdkconfig  # expect: your key, not the XXXXX placeholder
 idf.py -p /dev/ttyACM0 flash
 cd ..                                        # back to the repo root for step 5
 ```
 
 If the grep shows the placeholder, the build reused a stale `sdkconfig`:
-`rm sdkconfig && idf.py build`. Do not run `idf.py monitor`: the USB port
+`rm -rf sdkconfig build && idf.py -DPSTOP_PROFILE=dev build`. Do not run `idf.py monitor`: the USB port
 becomes the network tether a few seconds into boot and the serial console goes
 quiet by design. With the key baked in, skip the admin-page part of step 4 and
 set `ADMIN_PW` to your password. Never publish an image built with a

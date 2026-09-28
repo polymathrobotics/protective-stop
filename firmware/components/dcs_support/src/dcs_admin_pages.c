@@ -43,11 +43,11 @@
 #include "dcs_internal.h"
 #include "dcs_support.h"
 #include "esp_core_dump.h"
-#include "esp_flash.h"
 #include "esp_heap_caps.h"
 #include "esp_http_server.h"
 #include "esp_log.h"
 #include "esp_ota_ops.h"
+#include "esp_partition.h"
 #include "esp_system.h"
 #include "esp_timer.h"
 #include "esp_wifi.h"
@@ -919,7 +919,9 @@ static esp_err_t api_coredump(httpd_req_t * req)
 #if CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH
   size_t cd_addr = 0;
   size_t cd_size = 0;
-  if ((esp_core_dump_image_get(&cd_addr, &cd_size) != ESP_OK) || (cd_size == 0u)) {
+  const esp_partition_t * cd_part =
+    esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_COREDUMP, NULL);
+  if ((cd_part == NULL) || (esp_core_dump_image_get(&cd_addr, &cd_size) != ESP_OK) || (cd_size == 0u)) {
     (void)httpd_resp_set_status(req, "404 Not Found");
     return httpd_resp_sendstr(req, "no coredump in flash");
   }
@@ -932,7 +934,7 @@ static esp_err_t api_coredump(httpd_req_t * req)
   size_t off = 0;
   while (off < cd_size) {
     size_t n = ((cd_size - off) > 1024u) ? 1024u : (cd_size - off);
-    if (esp_flash_read(NULL, buf, cd_addr + off, n) != ESP_OK) break;
+    if (esp_partition_read(cd_part, (cd_addr - cd_part->address) + off, buf, n) != ESP_OK) break;
     if (httpd_resp_send_chunk(req, buf, (ssize_t)n) != ESP_OK) break;
     off += n;
   }

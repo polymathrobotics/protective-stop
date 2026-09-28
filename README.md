@@ -97,7 +97,7 @@ The short version (ESP-IDF 5.5 required):
 cp firmware/sdkconfig.credentials.example firmware/sdkconfig.credentials
 $EDITOR firmware/sdkconfig.credentials            # Tailscale auth key + admin password
 cd firmware && . /path/to/esp-idf-v5.5/export.sh
-idf.py build && idf.py -p /dev/ttyACM0 flash
+idf.py -DPSTOP_PROFILE=dev build && idf.py -p /dev/ttyACM0 flash   # dev profile: bench only
 
 cd ../ros2 && colcon build --packages-up-to protective_stop_machine
 ros2 run protective_stop_machine machine_bridge_node
