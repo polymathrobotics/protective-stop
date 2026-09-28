@@ -619,6 +619,10 @@ static uint32_t fleet_server_ip_cached(void)
  * bond to it (observed: EHOSTUNREACH on every BOND, bench 2026-07-31). */
 #define ML_EXTRA_PINS 16
 static uint32_t s_extra_pins[ML_EXTRA_PINS];
+/* Set for pins that only admit an app-wanted peer past the allowlist (machn admission):
+ * they pass every allowlist gate but keep the handshake-retry cap, since remotes
+ * initiate their own bonds. */
+static bool s_extra_pin_admit_only[ML_EXTRA_PINS];
 
 /* True path RTT to a peer from the disco layer (txid-matched ping->pong,
  * identical semantics from either end of a link — unlike the pstop loop
@@ -693,12 +697,14 @@ void microlink_notify_peer_health(microlink_t * ml, uint32_t vpn_ip, bool health
   }
 }
 
-void microlink_pin_peer_ip(microlink_t * ml, uint32_t vpn_ip, bool pin)
+static void pin_peer_ip(uint32_t vpn_ip, bool pin, bool admit_only)
 {
-  (void)ml;
   if (vpn_ip == 0) return;
   for (int i = 0; i < ML_EXTRA_PINS; i++) {
-    if (pin && s_extra_pins[i] == vpn_ip) return; /* already pinned */
+    if (pin && s_extra_pins[i] == vpn_ip) {
+      s_extra_pin_admit_only[i] = s_extra_pin_admit_only[i] && admit_only; /* an app pin upgrades it */
+      return;
+    }
     if (!pin && s_extra_pins[i] == vpn_ip) {
       s_extra_pins[i] = 0;
       return;
@@ -707,11 +713,26 @@ void microlink_pin_peer_ip(microlink_t * ml, uint32_t vpn_ip, bool pin)
   if (pin) {
     for (int i = 0; i < ML_EXTRA_PINS; i++) {
       if (s_extra_pins[i] == 0) {
+        s_extra_pin_admit_only[i] = admit_only;
         s_extra_pins[i] = vpn_ip;
         return;
       }
     }
   }
+}
+
+void microlink_pin_peer_ip(microlink_t * ml, uint32_t vpn_ip, bool pin)
+{
+  (void)ml;
+  pin_peer_ip(vpn_ip, pin, false);
+}
+
+static bool extra_pin_admit_only(uint32_t vpn_ip)
+{
+  for (int i = 0; i < ML_EXTRA_PINS; i++) {
+    if (s_extra_pins[i] != 0 && vpn_ip == s_extra_pins[i]) return s_extra_pin_admit_only[i];
+  }
+  return false;
 }
 
 /* Cached copy of ml->config.priority_peer_ip so ml_config_peer_is_allowed()
@@ -2064,7 +2085,7 @@ static int add_peer(microlink_t * ml, const ml_peer_update_t * update, bool * sk
      * every gate without a second entry in this allowlist. */
   if (!ml_config_peer_is_allowed(ml->config_httpd, update->vpn_ip)) {
     if (ml->peer_wanted_cb != NULL && ml->peer_wanted_cb(ml->peer_wanted_ctx, update->hostname, update->vpn_ip)) {
-      microlink_pin_peer_ip(ml, update->vpn_ip, true); /* no-op when the pin table is full */
+      pin_peer_ip(update->vpn_ip, true, true); /* admit only; no-op when the pin table is full */
     }
     if (!ml_config_peer_is_allowed(ml->config_httpd, update->vpn_ip)) {
       s_diag_allowlist_rejects++;
@@ -4457,7 +4478,9 @@ static void disco_periodic_probes(microlink_t * ml)
      * disco wakes — critical for a cross-region bond that only completes once an
      * aux DERP conn comes up. The ~120 non-pinned bulk peers still get the clear,
      * so the retry-storm armor (PEER_SCALING_DESIGN.md:39) is preserved. */
-    if (!is_priority && !is_pinned_peer(ml, p->vpn_ip) && (ml->wg_netif != NULL) && (p->wg_peer_index >= 0)) {
+    /* Admission-only pins (see s_extra_pin_admit_only) keep the cap: the remote initiates its bond. */
+    const bool retry_exempt = is_pinned_peer(ml, p->vpn_ip) && !extra_pin_admit_only(p->vpn_ip);
+    if (!is_priority && !retry_exempt && (ml->wg_netif != NULL) && (p->wg_peer_index >= 0)) {
       struct netif * nif = (struct netif *)ml->wg_netif;
       if (wireguardif_peer_is_up(nif, (u8_t)p->wg_peer_index, NULL, NULL) != ERR_OK) {
         struct wireguard_device * dev = (struct wireguard_device *)nif->state;

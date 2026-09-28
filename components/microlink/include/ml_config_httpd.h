@@ -196,6 +196,11 @@ bool ml_config_allowlist_active(const ml_config_ctx_t * ctx);
 esp_err_t ml_config_allowlist_add(ml_config_ctx_t * ctx, uint32_t vpn_ip, const char * label);
 
 /**
+ * @brief Remove an IP's entry only if it carries exactly @p label (see microlink_allowlist_remove_own()).
+ */
+esp_err_t ml_config_allowlist_remove_own(ml_config_ctx_t * ctx, uint32_t vpn_ip, const char * label);
+
+/**
  * @brief Whether a firmware OTA upload is currently being flashed.
  * Stays true on success until the device reboots. For product firmware
  * that wants to render an "updating" indicator.

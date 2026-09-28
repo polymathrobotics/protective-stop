@@ -439,6 +439,13 @@ void microlink_pin_peer_ip(microlink_t * ml, uint32_t vpn_ip, bool pin);
 esp_err_t microlink_allowlist_add(microlink_t * ml, uint32_t vpn_ip, const char * label);
 
 /**
+ * @brief Remove an IP from the peer allowlist only if its entry carries @p label, i.e.
+ * the caller added it with microlink_allowlist_add(). Entries the operator added keep
+ * their own label and stay; the last entry is never removed (an empty list admits all).
+ */
+esp_err_t microlink_allowlist_remove_own(microlink_t * ml, uint32_t vpn_ip, const char * label);
+
+/**
  * @brief Per-peer variant of microlink_notify_priority_health(): report the
  * application-level health of any pinned peer (e.g. each pstop machine
  * target). While false, that peer's session wake forces fresh handshakes,
