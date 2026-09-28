@@ -951,6 +951,12 @@ static esp_err_t api_coredump(httpd_req_t * req)
  * Fleet check for #158: a shared source (RMT) must appear on exactly one CPU. */
 static esp_err_t api_intr(httpd_req_t * req)
 {
+  /* Internal system state, like the coredump: admin only (review 🔴). */
+  if (!ml_app_check_admin_auth(req)) {
+    httpd_resp_set_status(req, "401 Unauthorized");
+    httpd_resp_set_hdr(req, "WWW-Authenticate", "Basic realm=\"pstop admin\"");
+    return httpd_resp_sendstr(req, "{\"ok\":false,\"error\":\"admin auth required\"}");
+  }
   (void)httpd_resp_set_type(req, "text/plain");
   const size_t cap = 8192u; /* ~60 lines x ~70 chars with both cores populated */
   char * buf = heap_caps_calloc(1, cap, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
