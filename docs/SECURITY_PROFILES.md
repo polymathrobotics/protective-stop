@@ -127,3 +127,33 @@ same command as soon as `303a:1001` appears. Secure Download Mode only writes
 state. Never enter download mode with a system reset: it re-arms the RTC
 watchdog's ~9 s flash-boot protection, which esptool cannot disable in Secure
 Download Mode.
+
+## Tailscale
+
+The firmware sends the auth key only to enroll, so one-off keys work and a unit
+deleted from the tailnet stays deleted. An image built with the public default
+admin password refuses admin requests over Tailscale. What a stolen unit's
+identity can reach is up to your tailnet policy; see
+[`TAILSCALE_ISOLATION.md`](TAILSCALE_ISOLATION.md).
+
+## Limits
+
+The ESP32-S3 has no glitch detector. Voltage fault injection can recover keys
+from its AES engine
+([AR2026-005](https://documentation.espressif.com/AR2026-005_Security_Advisory_Concerning_AES_Key_Recovery_Using_Voltage_Fault_Injection_on%20ESP32-S3_EN.html)),
+and combined side-channel and fault attacks defeated Secure Boot and flash
+encryption on the related ESP32-C3 and C6
+([AR2023-007](https://documentation.espressif.com/AR2023-007%20Security%20Advisory%20Concerning%20Bypassing%20Secure%20Boot%20and%20Flash%20Encryption%20using%20CPA%20and%20FI%20attack%20on%20ESP32-C3%20and%20ESP32-C6%20EN.html)).
+A well-equipped lab can eventually extract one unit's secrets. `secure-fe` makes
+that a per-unit lab job instead of a USB cable and a few seconds, and what it
+yields opens no other unit. Limit what a remote can reach in your tailnet policy
+and delete lost units promptly.
+
+Sources: ESP-IDF v5.5 [security overview](https://docs.espressif.com/projects/esp-idf/en/stable/esp32s3/security/security.html),
+[Secure Boot v2](https://docs.espressif.com/projects/esp-idf/en/stable/esp32s3/security/secure-boot-v2.html),
+[flash encryption](https://docs.espressif.com/projects/esp-idf/en/stable/esp32s3/security/flash-encryption.html),
+[NVS encryption](https://docs.espressif.com/projects/esp-idf/en/stable/esp32s3/api-reference/storage/nvs_encryption.html);
+esptool [Secure Download Mode](https://docs.espressif.com/projects/esptool/en/latest/esp32s3/esptool/basic-commands.html),
+[esptool#1173](https://github.com/espressif/esptool/issues/1173);
+[AR2022-004](https://documentation.espressif.com/AR2022-004%20Security%20Advisory%20for%20USB_OTG%20&%20USB_Serial_JTAG%20Download%20Functions%20of%20ESP32-S3%20Series%20Products%20EN.html),
+[esp-idf#13946](https://github.com/espressif/esp-idf/issues/13946).
