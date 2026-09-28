@@ -1,0 +1,30 @@
+# SPDX-FileCopyrightText: 2026 Polymath Robotics
+# SPDX-License-Identifier: Apache-2.0
+#
+# systemd-networkd equivalent of the NetworkManager "shared" bridge profile for
+# the pstop USB-NCM tethers: the HOST owns the segment (static address +
+# built-in DHCP server + NAT the chips' traffic out). Use this on hosts running
+# systemd-networkd (no NetworkManager). Install to /etc/systemd/network/
+# together with pstop-br.netdev (the bridge) and 80-esp-pstop.network (ports).
+#
+# Subnet note: 10.42.0.0/24 matches the chip's factory-default machine peer
+# (10.42.0.1:8890), so a machine_app_runner ON THIS HOST auto-bonds with every
+# unit with no config. When the host is only an uplink (the chips bond to a
+# *remote* machine over Tailscale, e.g. a HIL/fleet host), the subnet is
+# arbitrary — any /24 works because the segment is just NAT'd out.
+[Match]
+Name=pstop-br
+
+[Network]
+Address=10.42.0.1/24
+DHCPServer=yes
+IPMasquerade=ipv4
+# A bridge with no ports has no carrier: keep the address/DHCP up regardless so
+# the segment is ready the instant a chip (re-)appears (self-heal across the
+# chips' re-enumerations).
+ConfigureWithoutCarrier=yes
+
+[DHCPServer]
+PoolOffset=100
+PoolSize=50
+EmitDNS=yes
