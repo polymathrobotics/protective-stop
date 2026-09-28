@@ -15,6 +15,10 @@ one; each step says what differs. No firmware toolchain is needed: you flash a
 prebuilt image and configure it from a web page. Allow about 20 minutes plus
 the ROS 2 install.
 
+> **This guide uses the `dev` profile**, which has no protection: with the unit
+> and a USB cable anyone can copy its Tailscale identity. Once section 7 passes,
+> move every remote you keep to `secure-fe` ([`SECURITY_PROFILES.md`](SECURITY_PROFILES.md)).
+
 ## 0. What you need
 
 | Item | Notes |
@@ -42,9 +46,10 @@ Keep that address; it is `$LAPTOP_TS` below.
 
 Then create an auth key for the remote at
 <https://login.tailscale.com/admin/settings/keys> → **Generate auth key**:
-**Reusable on**, **Ephemeral off**, **Pre-approved on** if your tailnet uses
-device approval. Copy the `tskey-auth-…` value; you paste it into the remote in
-step 4. (Why these settings, and tags for a locked-down fleet: Appendix B.)
+**Reusable off** (one key per remote), **Ephemeral off**, **Pre-approved on** if
+your tailnet uses device approval. Copy the `tskey-auth-…` value; you paste it
+into the remote in step 4. (Why these settings, and tags for a locked-down
+setup: Appendix B.)
 
 ## 2. Clone the repo and prepare the laptop
 
@@ -174,12 +179,14 @@ Restricting which remotes may bond, or running without ROS: Appendix D.
 ## 6. Pair the remote to the laptop
 
 The remote initiates the bond; tell it where the machine is, then promote it
-from stop-only to operator (a new remote can stop the machine but not arm it):
+from stop-only to operator (a new remote can stop the machine but not arm it).
+The role change is an admin call: with the release image's public password it
+only works on `$DEV` (USB or LAN), not over Tailscale.
 
 ```sh
 curl -X POST "http://$REMOTE/api/pstop_peer?ip=$LAPTOP_TS&port=8890"
 # expect: {"ok":true,...}    ring: white -> blue within a few seconds
-curl -u "admin:$ADMIN_PW" -X POST "http://$REMOTE/api/role?role=operator"
+curl -u "admin:$ADMIN_PW" -X POST "http://$DEV/api/role?role=operator"
 # expect: {"ok":true,"role":"operator","message":"applied"}
 ```
 
@@ -209,6 +216,11 @@ ros2 topic echo /pstop_hb                     # expect: stop: true at ~10 Hz
 That is the whole setup. If a step did not match, see section 8; everything
 else lives in the appendices.
 
+**Now move to `secure-fe`.** Before this remote goes anywhere it could be lost,
+re-provision it with the default `secure-fe` profile
+([`SECURITY_PROFILES.md`](SECURITY_PROFILES.md)). It is one-way and erases the
+remote, so repeat step 4 with a new key, then step 6.
+
 ## 8. Troubleshooting
 
 | Symptom | Check |
@@ -217,10 +229,10 @@ else lives in the appendices.
 | LED does not blink an address | Ethernet: no DHCP lease — cable, switch port, DHCP server. USB: `lsusb \| grep 303a` shows `303a:4001`? `nmcli con show pstop-br` and `pstop-port` exist, and `bridge link` lists an `esp-pstop<N>`? Re-run `host/setup/install.sh`, replug. |
 | Admin page does not load on `$DEV` | Same LAN? A laptop on a different subnet or on WiFi with client isolation cannot reach it. USB: `ip addr show pstop-br` must show `10.42.0.1`. |
 | LED strobes red | Local link up but no internet: the remote cannot reach Tailscale. Ethernet: LAN has no internet. USB: laptop has no internet or sharing is off (`nmcli con show pstop-br \| grep ipv4.method` → `shared`). |
-| No `pstop-` in `tailscale status` after 2 min | Key wrong, single-use or expired: `curl -u "admin:$ADMIN_PW" http://$DEV/admin/api/status` → `state`. Device approval on and key not pre-approved → approve in the console. |
+| No `pstop-` in `tailscale status` after 2 min | Key wrong, already used or expired: `curl -u "admin:$ADMIN_PW" http://$DEV/admin/api/status` → `state`. Device approval on and key not pre-approved → approve in the console. |
 | `ml_state` stuck below 4 | Same as above (no internet, or key not accepted). |
 | Ring stays white after `pstop_peer` | The POST failed; re-run and read the JSON. |
-| Ring blue, never green | Role still stop-only (`curl http://$REMOTE/api/role`), node not running, or ufw. `/machine_bridge/remotes` shows `stop_only: true` while the remote announces stop-only. |
+| Ring blue, never green | Role still stop-only (`curl -u "admin:$ADMIN_PW" http://$DEV/api/role`), node not running, or ufw. `/machine_bridge/remotes` shows `stop_only: true` while the remote announces stop-only. |
 | Ring red pulsing slowly | Peer configured but unreachable: node down, wrong `$LAPTOP_TS`, ufw. `tailscale ping $REMOTE` from the laptop. |
 | Ring purple | One switch loop open while the other is closed: wiring fault ([`hardware/README.md`](../hardware/README.md)). |
 
@@ -246,10 +258,10 @@ boot-time fallback only: a unit that loses its wired/USB link while running
 falls back to the configured WiFi but does not open the access point;
 power-cycle it to get there.
 
-The admin page listens on **every** network the remote joins (tether, LAN,
-tailnet, WiFi). Before putting a remote on a shared LAN or WiFi, build the
-image with your own password (Appendix E); the release image's `microlink` is
-public.
+The admin page listens on every network the remote joins (tether, LAN, WiFi,
+and the tailnet if the image has its own password). Before putting a remote on
+a shared LAN or WiFi, build the image with your own password (Appendix E); the
+release image's `microlink` is public, so the remote refuses it over Tailscale.
 
 Several remotes on one laptop by USB work out of the box: each is an
 `esp-pstop<N>` port of `pstop-br`, all in `10.42.0.0/24`; see
@@ -259,28 +271,30 @@ Several remotes on one laptop by USB work out of the box: each is an
 
 | Setting | Value | Why |
 |---|---|---|
-| Reusable | on | The firmware re-sends the key on every re-registration. |
+| Reusable | off | The key is used once, to enroll; an enrolled remote re-registers without it. A reusable key would let anyone who copies it off one remote enroll more devices. Firmware v1.3.1 and older re-send the key on every re-registration and need **on**. |
 | Ephemeral | off | The remote keeps its node identity in flash; ephemeral nodes get deleted. |
 | Pre-approved | on, if device approval is enabled | The remote has no browser to approve itself with. |
 | Tags | optional | [`TAILSCALE_ISOLATION.md`](TAILSCALE_ISOLATION.md) has a locked-down fleet policy. Not needed for this guide. |
 
 The key is stored in the remote's settings area and survives OTA updates and
 app-image flashes (not the factory image, Appendix C). A key saved through the
-admin page takes priority over one baked into the image.
+admin page takes priority over one baked into the image, and makes the remote
+enroll again on its next boot. A remote deleted from the Tailscale console
+stays off the tailnet until it is given a new key.
 
 ## Appendix C: updating, reflashing, and what persists
 
 **Update a running unit** (keeps every setting): send the app image
 (`pstop_remote-<version>-public.bin`, downloaded in step 3 or from the new
-release) over the network; the remote reboots into it.
+release) over the USB or LAN link; the remote reboots into it.
 
 ```sh
-curl -u "admin:$ADMIN_PW" --data-binary @pstop_remote-<version>-public.bin -X POST "http://$REMOTE/admin/api/ota"
+curl -u "admin:$ADMIN_PW" --data-binary @pstop_remote-<version>-public.bin -X POST "http://$DEV/admin/api/ota"
 ```
 
 **Reflash by cable**: a running unit has no serial port. Hold BOOT, tap RESET
-(or `curl -u "admin:$ADMIN_PW" -X POST "http://$REMOTE/api/enter_download?confirm=1"`),
-then flash. The full-flash image is the factory image (step 3) and erases the
+(or `curl -u "admin:$ADMIN_PW" -X POST "http://$DEV/api/enter_download?confirm=1"`
+and start flashing within 60 s), then flash. The full-flash image is the factory image (step 3) and erases the
 settings; to keep them, use the OTA command above instead.
 
 **Start over**: flash the full-flash image, or
@@ -354,14 +368,14 @@ cp firmware/sdkconfig.credentials.example firmware/sdkconfig.credentials
 $EDITOR firmware/sdkconfig.credentials       # set CONFIG_ML_TAILSCALE_AUTH_KEY and CONFIG_ML_ADMIN_PASSWORD, leave the rest
 cd firmware
 . ~/esp/esp-idf/export.sh                    # wherever you installed IDF 5.5
-idf.py build
+idf.py -DPSTOP_PROFILE=dev build             # the quickstart uses the dev profile
 grep CONFIG_ML_TAILSCALE_AUTH_KEY sdkconfig  # expect: your key, not the XXXXX placeholder
 idf.py -p /dev/ttyACM0 flash
 cd ..                                        # back to the repo root for step 5
 ```
 
 If the grep shows the placeholder, the build reused a stale `sdkconfig`:
-`rm sdkconfig && idf.py build`. Do not run `idf.py monitor`: the USB port
+`rm -rf sdkconfig build && idf.py -DPSTOP_PROFILE=dev build`. Do not run `idf.py monitor`: the USB port
 becomes the network tether a few seconds into boot and the serial console goes
 quiet by design. With the key baked in, skip the admin-page part of step 4 and
 set `ADMIN_PW` to your password. Never publish an image built with a

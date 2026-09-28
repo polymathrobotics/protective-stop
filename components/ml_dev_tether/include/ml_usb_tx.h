@@ -27,30 +27,30 @@ extern "C"
 {
 #endif
 
-  typedef struct
-  {
-    uint32_t sent; /* frames handed to the NCM endpoint */
-    uint32_t busy_retries; /* head offers refused (endpoint busy) and retried */
-    uint32_t expired; /* frames dropped after the 100 ms lifetime */
-    uint32_t full_drops; /* frames dropped at submit: ring full */
-    uint32_t pending; /* frames in the ring right now */
-    uint32_t timeout_uncertain; /* offers that timed out in the TinyUSB hand-off: sent or withdrawn, not retried */
-  } ml_usb_tx_diag_t;
+typedef struct
+{
+  uint32_t sent; /* frames handed to the NCM endpoint */
+  uint32_t busy_retries; /* head offers refused (endpoint busy) and retried */
+  uint32_t expired; /* frames dropped after the 100 ms lifetime */
+  uint32_t full_drops; /* frames dropped at submit: ring full */
+  uint32_t pending; /* frames in the ring right now */
+  uint32_t timeout_uncertain; /* offers that timed out in the TinyUSB hand-off: sent or withdrawn, not retried */
+} ml_usb_tx_diag_t;
 
-  /* Allocate the ring (PSRAM) and start the drain task. Idempotent. */
-  esp_err_t ml_usb_tx_init(void);
+/* Allocate the ring (PSRAM) and start the drain task. Idempotent. */
+esp_err_t ml_usb_tx_init(void);
 
-  /* Enable/disable submission. Disabling starts a new session epoch: every
+/* Enable/disable submission. Disabling starts a new session epoch: every
    * frame still queued (or published concurrently) is discarded by the drain
    * task, counted as expired, and can never reach the next tether session. */
-  void ml_usb_tx_set_enabled(int enabled);
+void ml_usb_tx_set_enabled(int enabled);
 
-  /* Copy one Ethernet frame into the ring. Returns immediately; the caller may
+/* Copy one Ethernet frame into the ring. Returns immediately; the caller may
    * free its buffer. ESP_ERR_NO_MEM when the ring is full (frame dropped),
    * ESP_ERR_INVALID_STATE when disabled / USB not mounted. */
-  esp_err_t ml_usb_tx_send(const void * buffer, size_t len);
+esp_err_t ml_usb_tx_send(const void * buffer, size_t len);
 
-  void ml_usb_tx_get_diag(ml_usb_tx_diag_t * out);
+void ml_usb_tx_get_diag(ml_usb_tx_diag_t * out);
 
 #ifdef __cplusplus
 }

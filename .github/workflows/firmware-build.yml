@@ -10,17 +10,42 @@ on:
     branches: [main]
     paths:
       - firmware/**
+      - machn/**
       - components/**
       - pstop_c/**
+      - scripts/check_reproducible.sh
       - .github/workflows/firmware-build.yml
   pull_request:
     paths:
       - firmware/**
+      - machn/**
       - components/**
       - pstop_c/**
+      - scripts/check_reproducible.sh
       - .github/workflows/firmware-build.yml
 
 jobs:
+  # Same source must give byte-identical images from any checkout path; the
+  # release hashes and a future safety case depend on it.
+  reproducible:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        app: [firmware, machn]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          submodules: recursive
+
+      - name: Build twice from two paths and compare
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v5.5
+          target: esp32s3
+          path: ${{ matrix.app }}
+          command: bash ../scripts/check_reproducible.sh ${{ matrix.app }}
+
   build_firmware:
     runs-on: ubuntu-latest
     steps:
@@ -49,7 +74,9 @@ jobs:
           esp_idf_version: v5.5
           target: esp32s3
           path: firmware
-          command: idf.py build && bash ../scripts/check_estop_diversity.sh build/pstop_remote.elf
+          command: >-
+            idf.py build && bash ../scripts/check_estop_diversity.sh build/pstop_remote.elf &&
+            idf.py -B build-dev -DSDKCONFIG=build-dev/sdkconfig -DPSTOP_PROFILE=dev build
 
   build_machn:
     runs-on: ubuntu-latest
@@ -75,3 +102,6 @@ jobs:
           esp_idf_version: v5.5
           target: esp32s3
           path: machn
+          command: >-
+            idf.py build &&
+            idf.py -B build-dev -DSDKCONFIG=build-dev/sdkconfig -DPSTOP_PROFILE=dev build
