@@ -1528,7 +1528,8 @@ void ml_derp_tx_task(void * arg)
           if (xQueueReceive(txq, &item, 0) != pdTRUE) {
             break;
           }
-          derp_gauge_dequeue(&item, q == 0, (uint32_t)ml_get_time_ms());
+          /* Same floor-at-1 as the enqueue stamp, so the zero millisecond cannot underflow. */
+          derp_gauge_dequeue(&item, q == 0, ml_derp_enq_stamp());
           ml_derp_conn_t * c = derp_route_conn(ml, item.region_id, !item.leg2);
           if (item.leg2) {
             /* Path-diversity mirror: needs a conn DISTINCT from the primary
