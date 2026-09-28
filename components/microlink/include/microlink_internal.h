@@ -1059,6 +1059,7 @@ int ml_wg_get_stall_events(ml_wg_stall_event_t * out, int max);
 int ml_derp_get_stall_events(ml_derp_stall_event_t * out, int max);
 /* Periodic idempotent coord re-registrations executed. */
 uint32_t ml_coord_get_reregisters(void);
+uint32_t ml_coord_get_authkey_regs(void);
 /* Stage-0 gauges: out[0]=worst single DERP-task iteration ms, out[1]=worst
    * gap between consecutive rx-poll passes ms (both since boot). */
 void ml_derp_get_iter_diag(uint32_t out[2]);
@@ -1269,6 +1270,8 @@ esp_err_t ml_peer_nvs_clear(void);
  * context only, never the safety tick). Enables pre-registration WG
  * bring-up on the next boot. */
 void ml_ident_persist_vpn_ip(microlink_t * ml);
+/* A persisted VPN IP marks the node as enrolled; forgetting it re-enables the auth key. */
+bool ml_ident_forget_vpn_ip(void);
 
 #ifdef CONFIG_ML_ZERO_COPY_WG
 /* ml_zerocopy.c */

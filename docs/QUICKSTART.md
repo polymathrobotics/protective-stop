@@ -42,9 +42,10 @@ Keep that address; it is `$LAPTOP_TS` below.
 
 Then create an auth key for the remote at
 <https://login.tailscale.com/admin/settings/keys> → **Generate auth key**:
-**Reusable on**, **Ephemeral off**, **Pre-approved on** if your tailnet uses
-device approval. Copy the `tskey-auth-…` value; you paste it into the remote in
-step 4. (Why these settings, and tags for a locked-down fleet: Appendix B.)
+**Reusable off** (one key per remote), **Ephemeral off**, **Pre-approved on** if
+your tailnet uses device approval. Copy the `tskey-auth-…` value; you paste it
+into the remote in step 4. (Why these settings, and tags for a locked-down
+setup: Appendix B.)
 
 ## 2. Clone the repo and prepare the laptop
 
@@ -213,7 +214,7 @@ else lives in the appendices.
 | LED does not blink an address | Ethernet: no DHCP lease — cable, switch port, DHCP server. USB: `lsusb \| grep 303a` shows `303a:4001`? `nmcli con show esp-pstop` exists? Re-run `host/setup/install.sh`, replug. |
 | Admin page does not load on `$DEV` | Same LAN? A laptop on a different subnet or on WiFi with client isolation cannot reach it. USB: `ip addr show esp-pstop0` must show `10.42.0.1`. |
 | LED strobes red | Local link up but no internet: the remote cannot reach Tailscale. Ethernet: LAN has no internet. USB: laptop has no internet or sharing is off (`nmcli con show esp-pstop \| grep ipv4.method` → `shared`). |
-| No `pstop-` in `tailscale status` after 2 min | Key wrong, single-use or expired: `curl -u "admin:$ADMIN_PW" http://$DEV/admin/api/status` → `state`. Device approval on and key not pre-approved → approve in the console. |
+| No `pstop-` in `tailscale status` after 2 min | Key wrong, already used or expired: `curl -u "admin:$ADMIN_PW" http://$DEV/admin/api/status` → `state`. Device approval on and key not pre-approved → approve in the console. |
 | `ml_state` stuck below 4 | Same as above (no internet, or key not accepted). |
 | Ring stays white after `pstop_peer` | The POST failed; re-run and read the JSON. |
 | Ring blue, never green | Role still stop-only (`curl http://$REMOTE/api/role`), node not running, or ufw. `/machine_bridge/remotes` shows `stop_only: true` while the remote announces stop-only. |
@@ -254,14 +255,16 @@ Two remotes on one laptop by USB: only the first gets `esp-pstop0`; see
 
 | Setting | Value | Why |
 |---|---|---|
-| Reusable | on | The firmware re-sends the key on every re-registration. |
+| Reusable | off | The key is used once, to enroll; an enrolled remote re-registers without it. A reusable key would let anyone who copies it off one remote enroll more devices. Firmware v1.3.1 and older re-send the key on every re-registration and need **on**. |
 | Ephemeral | off | The remote keeps its node identity in flash; ephemeral nodes get deleted. |
 | Pre-approved | on, if device approval is enabled | The remote has no browser to approve itself with. |
 | Tags | optional | [`TAILSCALE_ISOLATION.md`](TAILSCALE_ISOLATION.md) has a locked-down fleet policy. Not needed for this guide. |
 
 The key is stored in the remote's settings area and survives OTA updates and
 app-image flashes (not the factory image, Appendix C). A key saved through the
-admin page takes priority over one baked into the image.
+admin page takes priority over one baked into the image, and makes the remote
+enroll again on its next boot. A remote deleted from the Tailscale console
+stays off the tailnet until it is given a new key.
 
 ## Appendix C: updating, reflashing, and what persists
 
