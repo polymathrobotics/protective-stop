@@ -171,10 +171,11 @@ menu "MicroLink V2 Configuration"
             default ""
             help
                 Tailscale authentication key from https://login.tailscale.com/admin/settings/keys
-                Generate it REUSABLE (the key is re-sent on every re-registration),
-                NOT ephemeral (the node identity is persisted in NVS), and
-                pre-approved if device approval is on. Disable key expiry on the
-                node afterwards, or use a tagged key. See docs/QUICKSTART.md.
+                Used once, to enroll the node; an enrolled node re-registers
+                without it. A one-off (not reusable) key is recommended; it
+                must NOT be ephemeral (the node identity is persisted in NVS)
+                and must be pre-approved if device approval is on. A tagged
+                key also disables node key expiry. See docs/QUICKSTART.md.
                 This is stored in sdkconfig which should be git-ignored.
 
         config ML_DEVICE_TYPE

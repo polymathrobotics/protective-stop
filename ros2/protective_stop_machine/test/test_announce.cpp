@@ -27,8 +27,9 @@ static bool has(const std::string & hay, const std::string & needle)
 // console keys on. Our payload must open with that same pair.
 TEST(AnnouncePayload, CoreNameAndPortMatchHostRunner)
 {
-  MachineSnapshot snap;  // defaults: not running, no remotes
-  const std::string body = build_announce_payload("bench-laptop", 8890, 0x01020304U, snap);
+  // defaults: not running, no remotes
+  MachineSnapshot snapshot;
+  const std::string body = build_announce_payload("bench-laptop", 8890, 0x01020304U, snapshot);
   EXPECT_TRUE(has(body, "\"name\":\"bench-laptop\""));
   EXPECT_TRUE(has(body, "\"port\":8890"));
   // The name/port pair opens the object, same layout as the host runner.
@@ -38,8 +39,8 @@ TEST(AnnouncePayload, CoreNameAndPortMatchHostRunner)
 // The machine identity + type let the console distinguish machines from remotes.
 TEST(AnnouncePayload, EmitsMachineIdentityAndType)
 {
-  MachineSnapshot snap;
-  const std::string body = build_announce_payload("m", 9000, 0x0102abcdU, snap);
+  MachineSnapshot snapshot;
+  const std::string body = build_announce_payload("m", 9000, 0x0102abcdU, snapshot);
   EXPECT_TRUE(has(body, "\"machine_id\":\"0102abcd\""));
   EXPECT_TRUE(has(body, "\"device_type\":\"machine\""));
 }
@@ -65,21 +66,21 @@ TEST(AnnouncePayload, RunningAndRemoteCountFromSnapshot)
 // Each bonded remote appears in the per-remote array the overview renders.
 TEST(AnnouncePayload, PerRemoteSummary)
 {
-  MachineSnapshot snap;
-  RemoteInfo one;
-  one.device_id = "01d7eed0";
-  one.bond_state = 2;
-  one.stop_only = true;
-  one.in_use = false;
-  RemoteInfo two;
-  two.device_id = "01aabbcc";
-  two.bond_state = 3;
-  two.stop_only = false;
-  two.in_use = true;
-  snap.remotes = {one, two};
-  snap.active_remotes = 2;
+  MachineSnapshot snapshot;
+  RemoteInfo first_remote;
+  first_remote.device_id = "01d7eed0";
+  first_remote.bond_state = 2;
+  first_remote.stop_only = true;
+  first_remote.in_use = false;
+  RemoteInfo second_remote;
+  second_remote.device_id = "01aabbcc";
+  second_remote.bond_state = 3;
+  second_remote.stop_only = false;
+  second_remote.in_use = true;
+  snapshot.remotes = {first_remote, second_remote};
+  snapshot.active_remotes = 2;
 
-  const std::string body = build_announce_payload("m", 8890, 1U, snap);
+  const std::string body = build_announce_payload("m", 8890, 1U, snapshot);
   EXPECT_TRUE(has(body, "\"id\":\"01d7eed0\""));
   EXPECT_TRUE(has(body, "\"bond_state\":2"));
   EXPECT_TRUE(has(body, "\"id\":\"01aabbcc\""));
@@ -92,8 +93,8 @@ TEST(AnnouncePayload, PerRemoteSummary)
 // Empty remote list -> an empty array, no trailing comma.
 TEST(AnnouncePayload, EmptyRemotesArray)
 {
-  MachineSnapshot snap;
-  const std::string body = build_announce_payload("m", 8890, 1U, snap);
+  MachineSnapshot snapshot;
+  const std::string body = build_announce_payload("m", 8890, 1U, snapshot);
   EXPECT_TRUE(has(body, "\"remotes\":[]"));
 }
 
@@ -103,7 +104,7 @@ TEST(AnnouncePayload, NameIsJsonEscaped)
   EXPECT_EQ(json_escape("a\"b\\c"), "a\\\"b\\\\c");
   EXPECT_EQ(json_escape("line\nbreak"), "line\\nbreak");
 
-  MachineSnapshot snap;
-  const std::string body = build_announce_payload("evil\"name", 8890, 1U, snap);
+  MachineSnapshot snapshot;
+  const std::string body = build_announce_payload("evil\"name", 8890, 1U, snapshot);
   EXPECT_TRUE(has(body, "\"name\":\"evil\\\"name\""));
 }

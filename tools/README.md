@@ -72,10 +72,14 @@ tools/flash_pstop.sh --remote
 
 `flash_pstop.sh` provisions one device over USB from a staged image directory;
 `flash_station.py` runs the unattended production loop.
-Both need a staged image in `tools/production_image/` (remote) or
-`tools/production_image_machn/` (machine), which carries per-fleet secrets and
-is git-ignored.
+Both flash `dev`-profile images and need a staged image in
+`tools/production_image/` (remote) or `tools/production_image_machn/`
+(machine), which carries secrets and is git-ignored.
 See the header comment in each script for the full argument list.
+
+`pstop_secure.py` signs, provisions and re-flashes units of the secure profiles
+(`secure-fe`, the default, and `secure`); see
+[`../docs/SECURITY_PROFILES.md`](../docs/SECURITY_PROFILES.md).
 
 ## HIL suite
 
@@ -131,7 +135,8 @@ and script-driven. See
 ### Flashing-tool regression tests
 
 `tools/test/` covers `flash_station.py` and `flash_pstop.sh` against
-`test/fake_esptool.py`, a shim that stands in for the real esptool.
+`test/fake_esptool.py`, a shim that stands in for the real esptool, and
+`pstop_secure.py` against espefuse's virtual eFuses.
 No hardware is needed; it never opens a port.
 
 ```sh

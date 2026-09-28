@@ -238,5 +238,4 @@ Every DU-1..9 discharged; SG-6 fully discharged, SG-1..5 partial. SIL3/PLe kept
 - [ ] Remaining DU rows: **DU-5/7** comparator/encode common-mode (β≈1 shared downstream), **DU-6/8** pull-down CCF + settle, **SR-R-15** NVS peer-slot integrity.
 - [ ] On-bench fault-injection of SR-R-09 pad-config corruption (bench-blocked, low value).
 - [ ] **Markdown normalization stays deferred (repo-wide).** Pre-commit *code* hooks (polymath-cpp clang-format + cpplint) were applied to this session's new C++ (`16649d1`). The *markdown* hook rewrites `-`→`+` list markers, but all ~30 committed docs use `-` and none use `+`, so applying it per-file creates inconsistency — it's a one-shot repo-wide reformat for a maintainer.
-- [ ] **ROS2 lint config mismatch (maintainer):** the package's `ament_lint_auto` runs `ament_uncrustify` in `colcon test` (14 failures across all files), but the repo standardizes on clang-format via `polymath_code_standard`. Align by skipping uncrustify or matching styles — pre-existing, not from this work.
 - [ ] Upstream `pstop_c` far-Hamming status-encoding memo (maintainers).

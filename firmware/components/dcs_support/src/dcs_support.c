@@ -11,12 +11,15 @@
 #include "dcs_support.h"
 
 #include <stdatomic.h>
+#include <stdbool.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "dcs_identity.h"
 #include "dcs_internal.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
+#include "esp_secure_boot.h"
 #include "esp_system.h"
 #include "esp_timer.h" /* primary-machine freshness clock (same domain as main.c) */
 #include "freertos/FreeRTOS.h"
@@ -452,10 +455,26 @@ static void dcs_primary_machine_info(void * ctx, microlink_primary_machine_info_
 
 /* === Public API ============================================================ */
 
+/* Must run before NVS init: a secure image on an unsecured chip would burn the
+ * NVS HMAC key. Aborting lets OTA rollback restore the previous image. */
+static void dcs_check_security_profile(void)
+{
+#if CONFIG_SECURE_BOOT
+  const bool image_secure = true;
+#else
+  const bool image_secure = false;
+#endif
+  if (esp_secure_boot_enabled() != image_secure) {
+    ESP_LOGE(TAG, "image and chip disagree on Secure Boot: refusing to run");
+    abort();
+  }
+}
+
 dcs_boot_state_t dcs_support_init(void)
 {
   /* RTC_NOINIT log capture: must be first so we don't miss early boot logs. */
   panic_log_init();
+  dcs_check_security_profile();
 
   /* Power-on sign of life: whole ring dim purple, before any network or
      * NVS work. Overwritten by the ring task once bring-up completes. */
