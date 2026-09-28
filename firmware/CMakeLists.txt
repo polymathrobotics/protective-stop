@@ -26,6 +26,11 @@ if(EXISTS "${CMAKE_CURRENT_LIST_DIR}/sdkconfig.credentials")
     idf_build_set_property(COMPILE_DEFINITIONS "-DML_BUILD_WITH_CREDENTIALS=1" APPEND)
 endif()
 
+# Reproducible builds: ESP-IDF maps paths only inside the project and component
+# dirs, not ../pstop_c, ../common or __FILE__ in ../components.
+get_filename_component(PSTOP_REPO_ROOT "${CMAKE_CURRENT_LIST_DIR}/.." ABSOLUTE)
+idf_build_set_property(COMPILE_OPTIONS "-ffile-prefix-map=${PSTOP_REPO_ROOT}=." APPEND)
+
 project(pstop_remote)
 
 # Override lwIP's pbuf pool. IDF 5.5 doesn't expose PBUF_POOL_SIZE via
