@@ -14,10 +14,8 @@ set(EXTRA_COMPONENT_DIRS
     "components"
 )
 
-# Merge git-ignored credentials on top of defaults if present.
-if(EXISTS "${CMAKE_CURRENT_LIST_DIR}/sdkconfig.credentials")
-    set(SDKCONFIG_DEFAULTS "sdkconfig.defaults;sdkconfig.credentials")
-endif()
+# -DPSTOP_PROFILE=secure-fe|secure|dev, plus sdkconfig.credentials if present.
+include(profiles/profile.cmake)
 
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 

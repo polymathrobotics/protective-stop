@@ -13,11 +13,9 @@ set(EXTRA_COMPONENT_DIRS
     "../firmware/components"
 )
 
-# Merge git-ignored credentials on top of defaults if present (same file
-# the remote uses — copy or symlink firmware/sdkconfig.credentials here).
-if(EXISTS "${CMAKE_CURRENT_LIST_DIR}/sdkconfig.credentials")
-    set(SDKCONFIG_DEFAULTS "sdkconfig.defaults;sdkconfig.credentials")
-endif()
+# -DPSTOP_PROFILE=secure-fe|secure|dev, plus sdkconfig.credentials if present
+# (same file the remote uses — copy or symlink firmware/sdkconfig.credentials here).
+include(../firmware/profiles/profile.cmake)
 
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 

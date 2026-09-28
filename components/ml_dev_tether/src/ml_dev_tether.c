@@ -32,6 +32,8 @@
 #include "esp_netif_defaults.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
+#include "freertos/task.h"
+#include "hal/usb_serial_jtag_ll.h"
 #include "lwip/esp_netif_net_stack.h"
 #include "ml_usb_tx.h"
 #include "tinyusb.h"
@@ -447,4 +449,15 @@ void ml_dev_tether_stop(void)
   }
   /* We intentionally leave tinyusb installed — uninstalling is brittle and
      * we may want to retry later without re-enumeration. */
+}
+
+void ml_dev_tether_handover_to_usb_serial_jtag(void)
+{
+  /* Without a visible disconnect the host keeps the stale TinyUSB device. */
+  if (s_tusb_installed) {
+    (void)tud_disconnect();
+    vTaskDelay(pdMS_TO_TICKS(300));
+  }
+  usb_serial_jtag_ll_phy_enable_external(false);
+  vTaskDelay(pdMS_TO_TICKS(300));
 }

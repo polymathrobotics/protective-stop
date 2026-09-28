@@ -28,6 +28,8 @@ idf_component_register(
     PRIV_INCLUDE_DIRS
         "src"
     REQUIRES espcoredump
+        bootloader_support
+        esp_partition
         spi_flash
         microlink
         ml_dev_tether

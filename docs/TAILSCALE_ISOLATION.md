@@ -125,5 +125,48 @@ are not a peer-isolation mechanism; don't conflate them with segmentation.
 - The `priority_peer_ip` (the machine) stays the latency-protected peer
   regardless of netmap size.
 
+## Suggestions: limiting what a stolen remote can reach
+
+This project cannot set your tailnet policy; these are suggestions. `secure-fe`
+([`SECURITY_PROFILES.md`](SECURITY_PROFILES.md)) makes copying a remote's
+identity a per-unit lab job, not impossible, and the policy decides what a copy
+can reach.
+
+- **Tags.** `tag:pstop-remote` on remotes, `tag:pstop-machine` on machine hosts,
+  owned only by admins (`tagOwners`).
+- **Enrollment keys.** One-off, tagged `tag:pstop-remote`, short expiry, one per
+  unit (pre-approved if you use device approval). An OAuth client with the
+  `auth_keys` scope limited to that tag can mint them per unit. Never put a
+  reusable key on a unit.
+- **Grants.** Remotes reach machines on the pstop port and nothing else; only the
+  people who administer remotes reach their webserver. There is no deny rule, and
+  `"src": ["*"]` also covers tagged remotes, so list real sources instead.
+
+  ```jsonc
+  "grants": [
+    { "src": ["tag:pstop-remote"],   "dst": ["tag:pstop-machine"], "ip": ["udp:8890"] },
+    { "src": ["group:pstop-admins"], "dst": ["tag:pstop-remote"],  "ip": ["tcp:80"] }
+  ],
+  "tests": [
+    { "src": "tag:pstop-remote", "proto": "udp", "accept": ["tag:pstop-machine:8890"] },
+    { "src": "tag:pstop-remote", "deny": ["tag:pstop-machine:22", "tag:pstop-remote:80"] }
+  ]
+  ```
+
+  List your most important hosts under `deny`, so a later edit that opens them
+  to remotes fails to save. Remotes do not enforce Tailscale's packet filter
+  themselves, so keep the set of nodes allowed to reach them small.
+- **A lost unit.** Delete it in the Machines page; it cannot re-enroll itself.
+  Remove it from machine allowlists.
+- **Tailnet Lock** guards against the control plane itself, but microlink does
+  not sign node keys, so each remote must be signed by hand
+  (`tailscale lock sign nodekey:…`). Worth it only if your threat model
+  includes Tailscale.
+
 Sources: Tailscale device-visibility / netmap trimming, grants-vs-acls,
-tags & key-expiry, connection-types docs (URLs in the research record).
+tags & key-expiry, connection-types docs (URLs in the research record); auth
+keys, OAuth clients, policy tests and Tailnet Lock:
+<https://tailscale.com/kb/1085/auth-keys>,
+<https://tailscale.com/kb/1215/oauth-clients>,
+<https://tailscale.com/docs/reference/syntax/policy-file>,
+<https://tailscale.com/kb/1226/tailnet-lock>.

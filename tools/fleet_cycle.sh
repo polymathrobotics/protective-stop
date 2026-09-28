@@ -52,7 +52,7 @@ for role in firmware machn; do
   # (incl. sdkconfig.credentials) only when sdkconfig is absent — a stale
   # sdkconfig would pass the non-empty credential check below with the WRONG
   # value (review red: the exact worktree trap this script exists to catch).
-  (cd "$REPO/$role" && rm -f sdkconfig sdkconfig.old && idf.py fullclean >/dev/null && idf.py build >/dev/null)
+  (cd "$REPO/$role" && rm -f sdkconfig sdkconfig.old && idf.py fullclean >/dev/null && idf.py -DPSTOP_PROFILE=dev build >/dev/null)
 done
 
 echo "== verify version string + credentials"
