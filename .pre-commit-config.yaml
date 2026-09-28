@@ -40,3 +40,13 @@ repos:
         exclude: ^(test/|tools/).*\.sh$
       - id: polymath-xml
       - id: polymath-yaml
+  # Credentials never go into commits. The script searches the whole index itself, so the
+  # global exclude above (vendored and archived code) does not hide anything from it.
+  - repo: local
+    hooks:
+      - id: no-credentials
+        name: No credentials in the index
+        language: script
+        entry: scripts/check_no_credentials.sh
+        pass_filenames: false
+        always_run: true
