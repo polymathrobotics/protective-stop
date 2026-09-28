@@ -80,6 +80,12 @@ Tailscale support uses
 [`microlink`](https://github.com/CamM2325/microlink), an embedded client from
 Malone Technologies.
 
+### ROS Support
+The protective stop machine node is compatible with the following ros2 Distros:
+1. Humble (until May 2027)
+2. Jazzy (until May 2029)
+3. Lyrical (not yet supported, but planned to be supported as soon as possible!)
+
 ## Build and run
 
 **[`docs/QUICKSTART.md`](docs/QUICKSTART.md)** walks a fresh laptop through
@@ -91,7 +97,7 @@ The short version (ESP-IDF 5.5 required):
 cp firmware/sdkconfig.credentials.example firmware/sdkconfig.credentials
 $EDITOR firmware/sdkconfig.credentials            # Tailscale auth key + admin password
 cd firmware && . /path/to/esp-idf-v5.5/export.sh
-idf.py build && idf.py -p /dev/ttyACM0 flash
+idf.py -DPSTOP_PROFILE=dev build && idf.py -p /dev/ttyACM0 flash   # dev profile: bench only
 
 cd ../ros2 && colcon build --packages-up-to protective_stop_machine
 ros2 run protective_stop_machine machine_bridge_node

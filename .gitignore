@@ -9,9 +9,15 @@ node_modules
 
 # ESP-IDF firmware build artifacts
 firmware/build/
+firmware/build-*/
+machn/build-*/
 firmware/sdkconfig
 firmware/sdkconfig.old
 firmware/sdkconfig.credentials
+# Secure Boot keys and the flash-encryption master belong outside the repository
+primary.pem
+backup.pem
+fe_master.txt
 # host runner binary
 host/machine_app_runner
 # host unit-test binaries
