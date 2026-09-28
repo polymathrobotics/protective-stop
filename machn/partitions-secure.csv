@@ -1,0 +1,10 @@
+# Partition table of the secure profiles (8 MB flash). The secure bootloader does
+# not fit below 0x8000, so the table sits at 0x10000; ota_0 gives up 64 KB so
+# ota_1 and coredump keep the offsets of partitions.csv.
+# Name,    Type, SubType, Offset,   Size,     Flags
+nvs,       data, nvs,     ,         0x10000,
+otadata,   data, ota,     ,         0x2000,
+phy_init,  data, phy,     ,         0x1000,
+ota_0,     app,  ota_0,   ,         0x3E0000,
+ota_1,     app,  ota_1,   ,         0x3D0000,
+coredump,  data, coredump,,         0x20000,  encrypted

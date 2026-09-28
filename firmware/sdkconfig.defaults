@@ -245,6 +245,8 @@ CONFIG_COMPILER_OPTIMIZATION_PERF=y
 # Keep runtime assertions ON — this is a safety device; catching a bad
 # state is worth the cycles.
 CONFIG_COMPILER_OPTIMIZATION_ASSERTIONS_ENABLE=y
+# Same source, IDF and toolchain give byte-identical images (scripts/check_reproducible.sh).
+CONFIG_APP_REPRODUCIBLE_BUILD=y
 # Flash Quad-I/O: ~2x read throughput -> faster bootloader app-load and
 # faster XIP (cache-miss) code execution.
 # Trim bootloader chatter (was INFO).

@@ -13,11 +13,9 @@ set(EXTRA_COMPONENT_DIRS
     "../firmware/components"
 )
 
-# Merge git-ignored credentials on top of defaults if present (same file
-# the remote uses — copy or symlink firmware/sdkconfig.credentials here).
-if(EXISTS "${CMAKE_CURRENT_LIST_DIR}/sdkconfig.credentials")
-    set(SDKCONFIG_DEFAULTS "sdkconfig.defaults;sdkconfig.credentials")
-endif()
+# -DPSTOP_PROFILE=secure-fe|secure|dev, plus sdkconfig.credentials if present
+# (same file the remote uses — copy or symlink firmware/sdkconfig.credentials here).
+include(../firmware/profiles/profile.cmake)
 
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 
@@ -27,6 +25,11 @@ include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 if(EXISTS "${CMAKE_CURRENT_LIST_DIR}/sdkconfig.credentials")
     idf_build_set_property(COMPILE_DEFINITIONS "-DML_BUILD_WITH_CREDENTIALS=1" APPEND)
 endif()
+
+# Reproducible builds: ESP-IDF maps paths only inside the project and component
+# dirs, not ../pstop_c, ../common or __FILE__ in ../components.
+get_filename_component(PSTOP_REPO_ROOT "${CMAKE_CURRENT_LIST_DIR}/.." ABSOLUTE)
+idf_build_set_property(COMPILE_OPTIONS "-ffile-prefix-map=${PSTOP_REPO_ROOT}=." APPEND)
 
 project(machn_machine)
 

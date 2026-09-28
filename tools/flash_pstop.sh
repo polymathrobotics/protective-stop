@@ -99,7 +99,8 @@ else
 fi
 
 # --- find a chip in DOWNLOAD mode. Match Espressif VID 303a in any
-#     download/JTAG variant (S3 reports 0009, others 1001/0002) but skip the
+#     download/JTAG variant (USB-Serial-JTAG 1001; 0009 from firmware before
+#     the enter_download handover; others 0002) but skip the
 #     RUNNING app, which enumerates as 303a:4001 (TinyUSB) and cannot be
 #     flashed without a reset into download mode. ---------------------------
 detect_port() {
