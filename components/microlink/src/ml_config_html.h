@@ -480,7 +480,7 @@ static const char CONFIG_PAGE_HTML[] =
   "fetch(API_BASE+'/api/settings',{method:'POST',headers:{'Content-Type':'application/"
   "json'},body:JSON.stringify(body)});"
   "const d=await r.json();"
-  "showMsg('settingsMsg','Saved',true);"
+  "showMsg('settingsMsg',d.ok?'Saved':'Save failed',d.ok);"
   "loadVerbose();"
   "}catch(e){showMsg('settingsMsg','Save failed: '+e,false);}"
   "}"

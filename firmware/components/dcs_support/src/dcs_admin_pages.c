@@ -43,12 +43,11 @@
 #include "dcs_internal.h"
 #include "dcs_support.h"
 #include "esp_core_dump.h"
-#include "esp_flash.h"
 #include "esp_heap_caps.h"
 #include "esp_http_server.h"
 #include "esp_log.h"
 #include "esp_ota_ops.h"
-#include "esp_rom_sys.h"
+#include "esp_partition.h"
 #include "esp_system.h"
 #include "esp_timer.h"
 #include "esp_wifi.h"
@@ -56,10 +55,10 @@
 #include "freertos/task.h"
 #include "microlink.h"
 #include "ml_app.h"
+#include "ml_dev_tether.h"
 #include "ml_usb_tx.h"
 #include "panic_log.h"
 #include "pstop_aux_channel.h"
-#include "soc/rtc_cntl_reg.h"
 #include "wireguardif.h"
 
 #include "wireguard-platform.h" /* wireguard_tai64n_epoch() */
@@ -920,7 +919,9 @@ static esp_err_t api_coredump(httpd_req_t * req)
 #if CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH
   size_t cd_addr = 0;
   size_t cd_size = 0;
-  if ((esp_core_dump_image_get(&cd_addr, &cd_size) != ESP_OK) || (cd_size == 0u)) {
+  const esp_partition_t * cd_part =
+    esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_COREDUMP, NULL);
+  if ((cd_part == NULL) || (esp_core_dump_image_get(&cd_addr, &cd_size) != ESP_OK) || (cd_size == 0u)) {
     (void)httpd_resp_set_status(req, "404 Not Found");
     return httpd_resp_sendstr(req, "no coredump in flash");
   }
@@ -933,7 +934,7 @@ static esp_err_t api_coredump(httpd_req_t * req)
   size_t off = 0;
   while (off < cd_size) {
     size_t n = ((cd_size - off) > 1024u) ? 1024u : (cd_size - off);
-    if (esp_flash_read(NULL, buf, cd_addr + off, n) != ESP_OK) break;
+    if (esp_partition_read(cd_part, (cd_addr - cd_part->address) + off, buf, n) != ESP_OK) break;
     if (httpd_resp_send_chunk(req, buf, (ssize_t)n) != ESP_OK) break;
     off += n;
   }
@@ -1020,14 +1021,10 @@ static esp_err_t api_iface_usb(httpd_req_t * req)
  * Persisted in NVS; takes effect on the next reboot / USB re-enumerate, since
  * the USB descriptor is fixed at TinyUSB install. */
 /* === POST /api/enter_download?confirm=1 ==================================
- * Headless recovery: force the ROM into USB download mode on the next boot,
- * then reset. Lets a field/bench unit be fully reflashed (bootloader +
- * partition table + app — e.g. a partition-layout change, which OTA cannot
- * deliver) WITHOUT physical BOOT+RST access. The forced-download flag is
- * one-shot in the RTC domain; a subsequent full flash clears it, and even
- * if left alone the unit simply waits in download mode (recoverable), so
- * this can strand the device offline until reflashed — hence admin auth
- * AND the required ?confirm=1 and the loud log. */
+ * Headless recovery: hand the USB port to USB-Serial-JTAG so a host can reset
+ * the chip into download mode and reflash it (bootloader, partition table,
+ * app) without BOOT+RST access. The unit is offline until flashed, or until it
+ * restarts itself after 60 s — hence admin auth and ?confirm=1. */
 static esp_err_t api_enter_download(httpd_req_t * req)
 {
   if (!ml_app_check_admin_auth(req)) {
@@ -1044,18 +1041,21 @@ static esp_err_t api_enter_download(httpd_req_t * req)
     httpd_resp_set_type(req, "application/json");
     return httpd_resp_sendstr(
       req,
-      "{\"ok\":false,\"error\":\"needs ?confirm=1 — forces download mode, "
-      "device offline until reflashed\"}");
+      "{\"ok\":false,\"error\":\"needs ?confirm=1 — hands USB to a flasher, "
+      "device offline until flashed or 60 s pass\"}");
   }
-  ESP_LOGW(
-    TAG,
-    "ENTER DOWNLOAD MODE requested — device will wait for a full "
-    "flash after reset (headless recovery)");
+  ESP_LOGW(TAG, "ENTER DOWNLOAD MODE requested — USB handed to USB-Serial-JTAG for 60 s");
   httpd_resp_set_type(req, "application/json");
-  (void)httpd_resp_sendstr(req, "{\"ok\":true,\"message\":\"Entering download mode. Full-flash to recover.\"}");
+  (void)httpd_resp_sendstr(
+    req, "{\"ok\":true,\"message\":\"USB handed to USB-Serial-JTAG; reset into download mode within 60 s.\"}");
   vTaskDelay(pdMS_TO_TICKS(200)); /* let the response flush */
-  REG_WRITE(RTC_CNTL_OPTION1_REG, RTC_CNTL_FORCE_DOWNLOAD_BOOT);
-  esp_rom_software_reset_system();
+  /* The host resets into download mode (esptool --before default-reset). That core reset keeps
+   * the RTC WDT disabled; a system reset would re-arm its ~9 s flash-boot timeout, which Secure
+   * Download Mode stops esptool from disabling. */
+  ml_dev_tether_handover_to_usb_serial_jtag();
+  vTaskDelay(pdMS_TO_TICKS(60000));
+  ESP_LOGW(TAG, "no host took over USB-Serial-JTAG; restarting");
+  esp_restart();
   return ESP_OK; /* not reached */
 }
 

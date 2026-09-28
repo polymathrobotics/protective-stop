@@ -61,6 +61,12 @@ void ml_dev_tether_stop(void);
  */
 void ml_dev_tether_set_unit_number(uint8_t n);
 
+/**
+ * @brief Detach from the host and hand the USB PHY to USB-Serial-JTAG (303a:1001).
+ * Blocks ~600 ms and ends the tether; call only before a reset into download mode.
+ */
+void ml_dev_tether_handover_to_usb_serial_jtag(void);
+
 #ifdef __cplusplus
 }
 #endif

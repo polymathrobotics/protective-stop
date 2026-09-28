@@ -10,12 +10,14 @@ on:
     branches: [main]
     paths:
       - firmware/**
+      - machn/**
       - components/**
       - pstop_c/**
       - .github/workflows/firmware-build.yml
   pull_request:
     paths:
       - firmware/**
+      - machn/**
       - components/**
       - pstop_c/**
       - .github/workflows/firmware-build.yml
@@ -49,7 +51,9 @@ jobs:
           esp_idf_version: v5.5
           target: esp32s3
           path: firmware
-          command: idf.py build && bash ../scripts/check_estop_diversity.sh build/pstop_remote.elf
+          command: >-
+            idf.py build && bash ../scripts/check_estop_diversity.sh build/pstop_remote.elf &&
+            idf.py -B build-dev -DSDKCONFIG=build-dev/sdkconfig -DPSTOP_PROFILE=dev build
 
   build_machn:
     runs-on: ubuntu-latest
@@ -75,3 +79,6 @@ jobs:
           esp_idf_version: v5.5
           target: esp32s3
           path: machn
+          command: >-
+            idf.py build &&
+            idf.py -B build-dev -DSDKCONFIG=build-dev/sdkconfig -DPSTOP_PROFILE=dev build

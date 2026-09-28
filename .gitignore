@@ -9,6 +9,8 @@ node_modules
 
 # ESP-IDF firmware build artifacts
 firmware/build/
+firmware/build-*/
+machn/build-*/
 firmware/sdkconfig
 firmware/sdkconfig.old
 firmware/sdkconfig.credentials
