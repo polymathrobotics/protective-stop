@@ -9,7 +9,7 @@
 set -uo pipefail
 
 status=0
-git --no-pager grep --cached -n -I -P \
+git --no-pager grep --cached -l -I -P \
   -e '-----BEGIN [A-Z ]*PRIVATE KEY-----' \
   -e 'tskey-(auth|client|api)-(?!X{5})[A-Za-z0-9]{5,}-[A-Za-z0-9]{8,}' \
   -e '^CONFIG_ML_ADMIN_PASSWORD="(?!(your-admin-password)?")' \
