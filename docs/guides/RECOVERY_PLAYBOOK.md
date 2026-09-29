@@ -133,7 +133,7 @@ Shouldn't happen — the never-brick guard refuses a rollback that would
 leave no bootable image — but if it does:
 
 1. Hold BOOT, tap RESET — chip enters ROM download mode.
-2. `cd firmware && idf.py -p /dev/ttyACM0 flash` (or esptool directly).
+2. `cd firmware && idf.py -p /dev/ttyACM0 flash` (or `cd tools && uv run esptool`).
    For production/bulk provisioning from a pre-built image, use
    `tools/flash_pstop.sh` (auto-detects a download-mode chip; `--from-ip`
    forces a running unit into download mode). See the [overview](../index.md).
