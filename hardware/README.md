@@ -118,15 +118,6 @@ signal wire or a STOP all open the circuit. Build steps are in the
 | IO39 | Relay module IN1 (core 0, relay 1) | white |
 | IO41 | Relay module IN2 (core 1, relay 2) | yellow |
 
-The stop circuit runs through the relay contacts and the Phoenix header in the
-port wall, in wire sized for the robot's loop:
-
-| From | To |
-|---|---|
-| Header pin 1 | Relay 1 COM |
-| Relay 1 NO | Relay 2 COM |
-| Relay 2 NO | Header pin 2 |
-
 ```mermaid
 flowchart LR
     subgraph BOARD["ESP32-S3-ETH"]
@@ -138,6 +129,14 @@ flowchart LR
         G41["IO41 core 1"]
     end
 
+    subgraph RELAY["2-channel relay module, active-high"]
+        direction TB
+        RVCC["VCC"]
+        RGND["GND"]
+        IN1["IN1, relay 1"]
+        IN2["IN2, relay 2"]
+    end
+
     subgraph RING["WS2812 ring, 16 LEDs"]
         direction TB
         RV["5V"]
@@ -145,43 +144,35 @@ flowchart LR
         RD["DIN"]
     end
 
-    subgraph RELAY["2-channel relay module, active-high"]
-        direction TB
-        RVCC["VCC"]
-        RGND["GND"]
-        IN1["IN1"]
-        IN2["IN2"]
-        K1["relay 1 COM / NO"]
-        K2["relay 2 COM / NO"]
-    end
-
-    subgraph HDR["Phoenix header"]
-        direction TB
-        H1["pin 1"]
-        H2["pin 2"]
-    end
-
-    ROBOT["robot stop circuit"]
-
-    P5V --- |red| RV
-    GND --- |black| RG
-    G17 --- |green| RD
     P5V --- |red| RVCC
     GND --- |black| RGND
     G39 --- |white| IN1
     G41 --- |yellow| IN2
-    H1 --- |COM| K1
-    K1 --- |NO to COM| K2
-    K2 --- |NO| H2
-    H1 --- ROBOT
-    H2 --- ROBOT
+    P5V --- |red| RV
+    GND --- |black| RG
+    G17 --- |green| RD
 
-    linkStyle 0,3 stroke:#d33,stroke-width:2px
-    linkStyle 1,4 stroke:#333,stroke-width:2px
-    linkStyle 2 stroke:#2a2,stroke-width:2px
-    linkStyle 5 stroke:#aaa,stroke-width:2px
-    linkStyle 6 stroke:#cc2,stroke-width:2px
-    linkStyle 7,8,9,10,11 stroke:#36c,stroke-width:3px
+    linkStyle 0,4 stroke:#d33,stroke-width:2px
+    linkStyle 1,5 stroke:#333,stroke-width:2px
+    linkStyle 2 stroke:#aaa,stroke-width:2px
+    linkStyle 3 stroke:#cc2,stroke-width:2px
+    linkStyle 6 stroke:#2a2,stroke-width:2px
+```
+
+The stop circuit runs through the relay contacts and the Phoenix header in the
+port wall, in wire sized for the robot's loop:
+
+| From | To |
+|---|---|
+| Header pin 1 | Relay 1 COM |
+| Relay 1 NO | Relay 2 COM |
+| Relay 2 NO | Header pin 2 |
+
+```mermaid
+flowchart LR
+    A["robot stop circuit"] --- H1["header pin 1"] --- K1["relay 1<br/>COM to NO"] --- K2["relay 2<br/>COM to NO"] --- H2["header pin 2"] --- B["robot stop circuit"]
+
+    linkStyle 0,1,2,3,4 stroke:#36c,stroke-width:3px
 ```
 
 Notes:
