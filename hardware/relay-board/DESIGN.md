@@ -171,7 +171,66 @@ Do not trust part matching by value in the MCP's `lib_search_components`: it mat
 | 9 | Optional: sense loop voltage at J2 | Not done: needs the loop's supply and polarity, and any input must never bridge the contacts |
 | 10 | **FMEDA recompute** and safety-owner sign-off | The existing safety documents mark this as stale for the machine channel |
 
-## 9. Tooling notes
+## 9. Next steps
+
+Roughly in order; items in the same phase can run in parallel. "Blocked by" is what
+has to happen first.
+
+**Phase 1: data and parts (start now, long lead times)**
+
+1. Ask TE for the SR4D4005 **B10d and failure-rate data** (24 V DC inductive, 0.5 A)
+   and the DC13 rating curve. Blocks the FMEDA (phase 4).
+2. Buy 4 to 6 SR4D4005 from DigiKey, Mouser or TE (LCSC is out of stock). Confirm with
+   JLCPCB that they will assemble **consigned through-hole** relays; if not, plan to
+   hand-solder K1 and K2.
+3. Check the **footprint against a physical relay** before any board is ordered.
+4. Confirm the loop spec with the integrator: 24 V DC max, 500 mA max, the load really
+   is inductive, and a flyback diode or TVS is fitted **at the load**.
+
+**Phase 2: PCB layout** (needs the KiCad GUI with the IPC API enabled: Preferences,
+Plugins; blocked by nothing)
+
+1. Import the schematic, set the outline to 50 x 38 mm with the four M3 holes from
+   section 5, and place K1 and K2 first (40 x 13 mm each, 5 mm clear between them if the
+   screw-head keep-outs allow).
+2. Keep-outs: 5.5 mm screw-head circles at the corners, the Phoenix pin zone
+   (X <= 7, Y about -23, tall parts only above 8 mm), 16.5 mm height limit.
+3. Net classes: LOOP nets 0.5 mm minimum clearance from logic and coil copper (the
+   relay itself gives 3 to 10 mm), wider tracks for LOOP and +5V, GND pour on the logic side.
+4. Run DRC, then export STEP and check it against `machine-casing.FCStd` in FreeCAD.
+5. JLCPCB DFM check and a BOM/CPL export with the LCSC numbers from section 6.
+
+**Phase 3: firmware** (blocked by nothing; can start before the board exists)
+
+1. Set `CONFIG_MACHN_RELAY_FEEDBACK=y` and change `expected[ch]` to the channel's own
+   command (section 2 and risk 5). The existing sense pin setup in `relay_gpio_init()`
+   (input, internal pull-down, IO40 and IO42) works unchanged: the pull-down is a
+   negligible divider against the 330 ohm pull-up, and it makes a broken sense wire
+   read 0, which is a fault whenever the relay is commanded on.
+2. Require both SNS = 0 before a re-arm; treat commanded-0 with SNS = 1 as a weld fault.
+3. Add HIL tests for each row of the state table in section 2, and update
+    `docs/RELAY_FEEDBACK_DESCOPE.md` to say feedback is restored and how.
+
+**Phase 4: safety case** (blocked by 1 and 11)
+
+1. Recompute the FMEDA for the machine channel with real B10d, restore the feedback
+   diagnostic credit (MC-2, MC-3), update `SR-SYS-05` and `docs/safety/OPEN_ITEMS.md`.
+2. Define the proof-test interval and demand rate; safety-owner sign-off.
+
+**Phase 5: bring-up** (blocked by 2, 3 and boards in hand)
+
+1. Fail-safe continuity check from `../ASSEMBLY.md` step 5, then a weld simulation
+   (bridge one NO contact on a bench sample) to confirm the mirror reads it.
+2. Measure release time with the clamp fitted, coil temperature and box temperature in a
+    soak, and USB versus PoE supply margin. Decide PLA versus PETG or ASA, or an economizer.
+
+**Phase 6: documentation**
+
+1. Update `../README.md` (BOM, wiring) and `../ASSEMBLY.md` for the new board: J1, J2 and J3
+   wiring, relay mounting, consigned part sourcing.
+2. Cosmetic: the layout of this schematic is fine but has not been reviewed by a second person.
+
+## 10. Tooling notes
 
 - KiCad 10.0.0 AppImage; `kicad-mcp-pro` 3.35.2 (MIT) drives schematic capture and checks.
 - Project libraries are self-contained (`relay-board.kicad_sym`, `power.kicad_sym`,
@@ -181,8 +240,10 @@ Do not trust part matching by value in the MCP's `lib_search_components`: it mat
 - PCB placement and routing need the KiCad GUI with its IPC API enabled; the MCP
   cannot do them headless.
 - Regenerate checks with: `python3 tools/check_netlist.py --kicad-cli <path>`.
+- Full tool list, MCP install and vetting notes, and how to set this up on another
+  computer: [TOOLING.md](TOOLING.md).
 
-## 10. Datasheets
+## 11. Datasheets
 
 - TE SCHRACK SR4: https://www.te.com/en/product-CAT-SCH691-SR1A.html (drawing S0413-BC / S0413-BB)
 - Panasonic safety relay B10d note (for comparison): https://industry.panasonic.eu/storage/imported/industrial.panasonic.com/ac/cdn/e/control/catalog/unconfirm/mech_eng_machinesafety.pdf

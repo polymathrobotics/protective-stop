@@ -3535,12 +3535,12 @@
 		(uuid "6fb8c496-3f90-57aa-a3a7-da27454fc983")
 		(property "Reference" "J1"
 			(at 58.42 34.29 0)
-			
+
 			(effects (font (size 1.4 1.4)) (justify left))
 		)
 		(property "Value" "ESP32-S3-ETH"
 			(at 58.42 62.23 0)
-			
+
 			(effects (font (size 1.4 1.4)) (justify left))
 		)
 		(property "Footprint" "Connector_PinHeader_2.54mm:PinHeader_1x07_P2.54mm_Vertical"
@@ -3585,7 +3585,7 @@
 		)
 		(property "Value" "+5V"
 			(at 66.04 24.44 0)
-			
+
 			(effects (font (size 1.4 1.4)))
 		)
 		(property "Footprint" ""
@@ -3665,7 +3665,7 @@
 		)
 		(property "Value" "+3V3"
 			(at 73.66 24.44 0)
-			
+
 			(effects (font (size 1.4 1.4)))
 		)
 		(property "Footprint" ""
@@ -3745,7 +3745,7 @@
 		)
 		(property "Value" "GND"
 			(at 66.04 69.54 0)
-			
+
 			(effects (font (size 1.4 1.4)))
 		)
 		(property "Footprint" ""
@@ -3820,12 +3820,12 @@
 		(uuid "3ff15726-e736-5f67-808e-400c15c0fa32")
 		(property "Reference" "C1"
 			(at 41.275 120.015 0)
-			
+
 			(effects (font (size 1.4 1.4)) (justify left))
 		)
 		(property "Value" "22uF"
 			(at 41.275 123.825 0)
-			
+
 			(effects (font (size 1.4 1.4)) (justify left))
 		)
 		(property "Footprint" "Capacitor_SMD:C_0805_2012Metric"
@@ -3880,7 +3880,7 @@
 		)
 		(property "Value" "+5V"
 			(at 38.1 108.26 0)
-			
+
 			(effects (font (size 1.4 1.4)))
 		)
 		(property "Footprint" ""
@@ -3920,7 +3920,7 @@
 		)
 		(property "Value" "GND"
 			(at 38.1 139.39 0)
-			
+
 			(effects (font (size 1.4 1.4)))
 		)
 		(property "Footprint" ""
@@ -3960,7 +3960,7 @@
 		)
 		(property "Value" "+5V"
 			(at 50.8 95.56 0)
-			
+
 			(effects (font (size 1.4 1.4)))
 		)
 		(property "Footprint" ""
@@ -3995,7 +3995,7 @@
 		(uuid "3bd127df-901a-5161-90a4-8c1dda91675b")
 		(property "Reference" "TP1"
 			(at 50.8 111.76 0)
-			
+
 			(effects (font (size 1.4 1.4)))
 		)
 		(property "Value" "+5V"
@@ -4040,7 +4040,7 @@
 		)
 		(property "Value" "+3V3"
 			(at 60.96 95.56 0)
-			
+
 			(effects (font (size 1.4 1.4)))
 		)
 		(property "Footprint" ""
@@ -4075,7 +4075,7 @@
 		(uuid "8a571c5b-4fba-5c18-93d1-39500db5d8ba")
 		(property "Reference" "TP2"
 			(at 60.96 111.76 0)
-			
+
 			(effects (font (size 1.4 1.4)))
 		)
 		(property "Value" "+3V3"
@@ -4115,7 +4115,7 @@
 		(uuid "65072a90-ac5e-58d9-aa91-86ecd944b8e5")
 		(property "Reference" "TP3"
 			(at 71.12 97.79 0)
-			
+
 			(effects (font (size 1.4 1.4)))
 		)
 		(property "Value" "GND"
@@ -4160,7 +4160,7 @@
 		)
 		(property "Value" "GND"
 			(at 71.12 112.72 0)
-			
+
 			(effects (font (size 1.4 1.4)))
 		)
 		(property "Footprint" ""
@@ -4195,12 +4195,12 @@
 		(uuid "d78fcb1d-36bd-59a9-90f2-62eff4717544")
 		(property "Reference" "R1"
 			(at 104.14 64.77 0)
-			
+
 			(effects (font (size 1.4 1.4)))
 		)
 		(property "Value" "100"
 			(at 104.14 72.898 0)
-			
+
 			(effects (font (size 1.4 1.4)))
 		)
 		(property "Footprint" "Resistor_SMD:R_0603_1608Metric"
@@ -4250,12 +4250,12 @@
 		(uuid "c00b1c35-962c-542a-a195-5092757cfa0a")
 		(property "Reference" "Q1"
 			(at 130.81 73.025 0)
-			
+
 			(effects (font (size 1.4 1.4)) (justify left))
 		)
 		(property "Value" "AO3400A"
 			(at 130.81 76.2 0)
-			
+
 			(effects (font (size 1.4 1.4)) (justify left))
 		)
 		(property "Footprint" "Package_TO_SOT_SMD:SOT-23"
@@ -4305,12 +4305,12 @@
 		(uuid "cf564e0a-ac04-5c8a-8ec0-0291170fb21a")
 		(property "Reference" "R3"
 			(at 118.11 77.216 0)
-			
+
 			(effects (font (size 1.4 1.4)) (justify left))
 		)
 		(property "Value" "10k"
 			(at 118.11 80.518 0)
-			
+
 			(effects (font (size 1.4 1.4)) (justify left))
 		)
 		(property "Footprint" "Resistor_SMD:R_0603_1608Metric"
@@ -4365,7 +4365,7 @@
 		)
 		(property "Value" "GND"
 			(at 115.57 93.67 0)
-			
+
 			(effects (font (size 1.4 1.4)))
 		)
 		(property "Footprint" ""
@@ -4400,7 +4400,7 @@
 		(uuid "7758339a-2eb2-5a2d-9b34-8aef836ab593")
 		(property "Reference" "TP4"
 			(at 110.49 55.245 0)
-			
+
 			(effects (font (size 1.4 1.4)) (justify right))
 		)
 		(property "Value" "GATE"
@@ -4440,7 +4440,7 @@
 		(uuid "91fb9962-9100-5ea1-b3b8-5ce9d5ae95e4")
 		(property "Reference" "K1"
 			(at 133.35 46.736 0)
-			
+
 			(effects (font (size 1.4 1.4)) (justify left))
 		)
 		(property "Value" "SR4D4005"
@@ -4485,7 +4485,7 @@
 		)
 		(property "Value" "+5V"
 			(at 128.27 30.79 0)
-			
+
 			(effects (font (size 1.4 1.4)))
 		)
 		(property "Footprint" ""
@@ -4525,7 +4525,7 @@
 		)
 		(property "Value" "GND"
 			(at 128.27 84.78 0)
-			
+
 			(effects (font (size 1.4 1.4)))
 		)
 		(property "Footprint" ""
@@ -4560,12 +4560,12 @@
 		(uuid "27a0c746-c9fb-570a-993e-f0edfe75a12d")
 		(property "Reference" "D1"
 			(at 149.86 61.722 90)
-			
+
 			(effects (font (size 1.4 1.4)) (justify left))
 		)
 		(property "Value" "SMAJ12A"
 			(at 149.86 65.278 90)
-			
+
 			(effects (font (size 1.4 1.4)) (justify left))
 		)
 		(property "Footprint" "Diode_SMD:D_SMA"
@@ -4625,7 +4625,7 @@
 		)
 		(property "Value" "GND"
 			(at 147.32 77.16 0)
-			
+
 			(effects (font (size 1.4 1.4)))
 		)
 		(property "Footprint" ""
@@ -4660,7 +4660,7 @@
 		(uuid "4073b216-6bd0-5436-8311-25836702500b")
 		(property "Reference" "TP6"
 			(at 139.7 67.945 0)
-			
+
 			(effects (font (size 1.4 1.4)) (justify left))
 		)
 		(property "Value" "COIL"
@@ -4700,12 +4700,12 @@
 		(uuid "d7eca32a-8edc-577d-803a-15d6c0f05f14")
 		(property "Reference" "R5"
 			(at 205.74 44.196 0)
-			
+
 			(effects (font (size 1.4 1.4)) (justify left))
 		)
 		(property "Value" "330"
 			(at 205.74 47.498 0)
-			
+
 			(effects (font (size 1.4 1.4)) (justify left))
 		)
 		(property "Footprint" "Resistor_SMD:R_0603_1608Metric"
@@ -4760,7 +4760,7 @@
 		)
 		(property "Value" "+3V3"
 			(at 203.2 33.33 0)
-			
+
 			(effects (font (size 1.4 1.4)))
 		)
 		(property "Footprint" ""
@@ -4795,7 +4795,7 @@
 		(uuid "aeb2c7d9-1cb9-561a-9ffd-dca178bae44c")
 		(property "Reference" "K1"
 			(at 196.85 72.39 0)
-			
+
 			(effects (font (size 1.4 1.4)) (justify right))
 		)
 		(property "Value" "SR4D4005"
@@ -4835,7 +4835,7 @@
 		(uuid "159923aa-f2a1-5760-9bf1-f935bad2a55d")
 		(property "Reference" "K1"
 			(at 196.85 93.98 0)
-			
+
 			(effects (font (size 1.4 1.4)) (justify right))
 		)
 		(property "Value" "SR4D4005"
@@ -4880,7 +4880,7 @@
 		)
 		(property "Value" "GND"
 			(at 203.2 111.45 0)
-			
+
 			(effects (font (size 1.4 1.4)))
 		)
 		(property "Footprint" ""
@@ -4915,12 +4915,12 @@
 		(uuid "b62e9e20-e88c-5341-9a98-805ae903eeea")
 		(property "Reference" "R7"
 			(at 217.17 53.34 0)
-			
+
 			(effects (font (size 1.4 1.4)))
 		)
 		(property "Value" "100"
 			(at 217.17 61.468 0)
-			
+
 			(effects (font (size 1.4 1.4)))
 		)
 		(property "Footprint" "Resistor_SMD:R_0603_1608Metric"
@@ -4970,7 +4970,7 @@
 		(uuid "d575ba93-1bf1-5646-9724-bdc8bbf5565d")
 		(property "Reference" "TP8"
 			(at 214.63 48.895 0)
-			
+
 			(effects (font (size 1.4 1.4)) (justify left))
 		)
 		(property "Value" "MIRROR"
@@ -5010,12 +5010,12 @@
 		(uuid "07a4ce33-c5fb-52dc-ac15-7dfaf1df52c8")
 		(property "Reference" "R2"
 			(at 104.14 167.64 0)
-			
+
 			(effects (font (size 1.4 1.4)))
 		)
 		(property "Value" "100"
 			(at 104.14 175.768 0)
-			
+
 			(effects (font (size 1.4 1.4)))
 		)
 		(property "Footprint" "Resistor_SMD:R_0603_1608Metric"
@@ -5065,12 +5065,12 @@
 		(uuid "afde711c-a2a1-57a9-b79b-272d84e4f070")
 		(property "Reference" "Q2"
 			(at 130.81 175.895 0)
-			
+
 			(effects (font (size 1.4 1.4)) (justify left))
 		)
 		(property "Value" "AO3400A"
 			(at 130.81 179.07 0)
-			
+
 			(effects (font (size 1.4 1.4)) (justify left))
 		)
 		(property "Footprint" "Package_TO_SOT_SMD:SOT-23"
@@ -5120,12 +5120,12 @@
 		(uuid "388b989d-528c-5d00-b23b-4997ff82a544")
 		(property "Reference" "R4"
 			(at 118.11 180.086 0)
-			
+
 			(effects (font (size 1.4 1.4)) (justify left))
 		)
 		(property "Value" "10k"
 			(at 118.11 183.388 0)
-			
+
 			(effects (font (size 1.4 1.4)) (justify left))
 		)
 		(property "Footprint" "Resistor_SMD:R_0603_1608Metric"
@@ -5180,7 +5180,7 @@
 		)
 		(property "Value" "GND"
 			(at 115.57 196.54 0)
-			
+
 			(effects (font (size 1.4 1.4)))
 		)
 		(property "Footprint" ""
@@ -5215,7 +5215,7 @@
 		(uuid "4ac2adc3-a76a-5fd9-a1bb-c63b76c6fb30")
 		(property "Reference" "TP5"
 			(at 110.49 158.115 0)
-			
+
 			(effects (font (size 1.4 1.4)) (justify right))
 		)
 		(property "Value" "GATE"
@@ -5255,7 +5255,7 @@
 		(uuid "7b95f47f-9983-5446-899d-2b2333bbc364")
 		(property "Reference" "K2"
 			(at 133.35 149.606 0)
-			
+
 			(effects (font (size 1.4 1.4)) (justify left))
 		)
 		(property "Value" "SR4D4005"
@@ -5300,7 +5300,7 @@
 		)
 		(property "Value" "+5V"
 			(at 128.27 133.66 0)
-			
+
 			(effects (font (size 1.4 1.4)))
 		)
 		(property "Footprint" ""
@@ -5340,7 +5340,7 @@
 		)
 		(property "Value" "GND"
 			(at 128.27 187.65 0)
-			
+
 			(effects (font (size 1.4 1.4)))
 		)
 		(property "Footprint" ""
@@ -5375,12 +5375,12 @@
 		(uuid "ebe67974-cb49-5b05-a4f7-fdfd3265fc41")
 		(property "Reference" "D2"
 			(at 149.86 164.592 90)
-			
+
 			(effects (font (size 1.4 1.4)) (justify left))
 		)
 		(property "Value" "SMAJ12A"
 			(at 149.86 168.148 90)
-			
+
 			(effects (font (size 1.4 1.4)) (justify left))
 		)
 		(property "Footprint" "Diode_SMD:D_SMA"
@@ -5440,7 +5440,7 @@
 		)
 		(property "Value" "GND"
 			(at 147.32 180.03 0)
-			
+
 			(effects (font (size 1.4 1.4)))
 		)
 		(property "Footprint" ""
@@ -5475,7 +5475,7 @@
 		(uuid "a42e8b10-9889-507a-87bf-9a76aed48ae5")
 		(property "Reference" "TP7"
 			(at 139.7 170.815 0)
-			
+
 			(effects (font (size 1.4 1.4)) (justify left))
 		)
 		(property "Value" "COIL"
@@ -5515,12 +5515,12 @@
 		(uuid "018644db-0fb8-5e3b-8536-ad8d4efaeb1c")
 		(property "Reference" "R6"
 			(at 205.74 147.066 0)
-			
+
 			(effects (font (size 1.4 1.4)) (justify left))
 		)
 		(property "Value" "330"
 			(at 205.74 150.368 0)
-			
+
 			(effects (font (size 1.4 1.4)) (justify left))
 		)
 		(property "Footprint" "Resistor_SMD:R_0603_1608Metric"
@@ -5575,7 +5575,7 @@
 		)
 		(property "Value" "+3V3"
 			(at 203.2 136.2 0)
-			
+
 			(effects (font (size 1.4 1.4)))
 		)
 		(property "Footprint" ""
@@ -5610,7 +5610,7 @@
 		(uuid "93150a2f-22c2-5ee3-b1e7-b9169c07c881")
 		(property "Reference" "K2"
 			(at 196.85 175.26 0)
-			
+
 			(effects (font (size 1.4 1.4)) (justify right))
 		)
 		(property "Value" "SR4D4005"
@@ -5650,7 +5650,7 @@
 		(uuid "d9e323c1-3710-5072-ae4b-f2328e312833")
 		(property "Reference" "K2"
 			(at 196.85 196.85 0)
-			
+
 			(effects (font (size 1.4 1.4)) (justify right))
 		)
 		(property "Value" "SR4D4005"
@@ -5695,7 +5695,7 @@
 		)
 		(property "Value" "GND"
 			(at 203.2 214.32 0)
-			
+
 			(effects (font (size 1.4 1.4)))
 		)
 		(property "Footprint" ""
@@ -5730,12 +5730,12 @@
 		(uuid "cbde2fd0-e15c-5355-a836-ecf81528a3d4")
 		(property "Reference" "R8"
 			(at 217.17 156.21 0)
-			
+
 			(effects (font (size 1.4 1.4)))
 		)
 		(property "Value" "100"
 			(at 217.17 164.338 0)
-			
+
 			(effects (font (size 1.4 1.4)))
 		)
 		(property "Footprint" "Resistor_SMD:R_0603_1608Metric"
@@ -5785,7 +5785,7 @@
 		(uuid "0f605d0d-a2c1-58a9-b307-71bcca0f195b")
 		(property "Reference" "TP9"
 			(at 214.63 151.765 0)
-			
+
 			(effects (font (size 1.4 1.4)) (justify left))
 		)
 		(property "Value" "MIRROR"
@@ -5826,12 +5826,12 @@
 		(uuid "37d708b9-c8ee-5a19-b584-777db34c0ae1")
 		(property "Reference" "J2"
 			(at 25.4 246.38 0)
-			
+
 			(effects (font (size 1.4 1.4)))
 		)
 		(property "Value" "LOOP IN"
 			(at 25.4 256.54 0)
-			
+
 			(effects (font (size 1.4 1.4)))
 		)
 		(property "Footprint" "Connector_PinHeader_2.54mm:PinHeader_1x01_P2.54mm_Vertical"
@@ -5871,7 +5871,7 @@
 		(uuid "b4164035-2b6d-5363-94b9-4656af4dac46")
 		(property "Reference" "K1"
 			(at 55.88 245.11 90)
-			
+
 			(effects (font (size 1.4 1.4)))
 		)
 		(property "Value" "SR4D4005"
@@ -5911,7 +5911,7 @@
 		(uuid "351830e7-b79d-5eb2-83b2-0dbf53d6d9de")
 		(property "Reference" "K1"
 			(at 99.06 245.11 90)
-			
+
 			(effects (font (size 1.4 1.4)))
 		)
 		(property "Value" "SR4D4005"
@@ -5951,7 +5951,7 @@
 		(uuid "b45609e0-8808-521a-bd1e-9be6a376f26d")
 		(property "Reference" "K2"
 			(at 152.4 245.11 90)
-			
+
 			(effects (font (size 1.4 1.4)))
 		)
 		(property "Value" "SR4D4005"
@@ -5991,7 +5991,7 @@
 		(uuid "fbdf4f6d-f95b-5e16-8630-710bedec02a1")
 		(property "Reference" "K2"
 			(at 195.58 245.11 90)
-			
+
 			(effects (font (size 1.4 1.4)))
 		)
 		(property "Value" "SR4D4005"
@@ -6031,7 +6031,7 @@
 		(uuid "e25b26f8-a8d5-55a7-a309-d421e25ecd9c")
 		(property "Reference" "TP10"
 			(at 130.81 239.395 0)
-			
+
 			(effects (font (size 1.4 1.4)) (justify left))
 		)
 		(property "Value" "LOOP_MID"
@@ -6071,12 +6071,12 @@
 		(uuid "76cf2e93-83df-5682-940a-b0283e18909b")
 		(property "Reference" "J3"
 			(at 241.3 246.38 0)
-			
+
 			(effects (font (size 1.4 1.4)))
 		)
 		(property "Value" "LOOP OUT"
 			(at 241.3 256.54 0)
-			
+
 			(effects (font (size 1.4 1.4)))
 		)
 		(property "Footprint" "Connector_PinHeader_2.54mm:PinHeader_1x01_P2.54mm_Vertical"
@@ -6116,12 +6116,12 @@
 		(uuid "4f32748a-4156-5830-b18c-09aa42efff52")
 		(property "Reference" "H1"
 			(at 304.8 137.16 0)
-			
+
 			(effects (font (size 1.4 1.4)))
 		)
 		(property "Value" "M3"
 			(at 304.8 149.86 0)
-			
+
 			(effects (font (size 1.4 1.4)))
 		)
 		(property "Footprint" "MountingHole:MountingHole_3.2mm_M3"
@@ -6156,12 +6156,12 @@
 		(uuid "eab78873-4ea0-5946-ad73-e84773f012c9")
 		(property "Reference" "H2"
 			(at 327.66 137.16 0)
-			
+
 			(effects (font (size 1.4 1.4)))
 		)
 		(property "Value" "M3"
 			(at 327.66 149.86 0)
-			
+
 			(effects (font (size 1.4 1.4)))
 		)
 		(property "Footprint" "MountingHole:MountingHole_3.2mm_M3"
@@ -6196,12 +6196,12 @@
 		(uuid "9eefc926-563c-50c2-b8f2-4d829d59cf59")
 		(property "Reference" "H3"
 			(at 350.52 137.16 0)
-			
+
 			(effects (font (size 1.4 1.4)))
 		)
 		(property "Value" "M3"
 			(at 350.52 149.86 0)
-			
+
 			(effects (font (size 1.4 1.4)))
 		)
 		(property "Footprint" "MountingHole:MountingHole_3.2mm_M3"
@@ -6236,12 +6236,12 @@
 		(uuid "30be707e-7115-5e92-a683-74a19f1ac710")
 		(property "Reference" "H4"
 			(at 373.38 137.16 0)
-			
+
 			(effects (font (size 1.4 1.4)))
 		)
 		(property "Value" "M3"
 			(at 373.38 149.86 0)
-			
+
 			(effects (font (size 1.4 1.4)))
 		)
 		(property "Footprint" "MountingHole:MountingHole_3.2mm_M3"

@@ -1,0 +1,24 @@
+// Example OpenCode config entry for the KiCad MCP used on the relay board.
+// Merge the "kicad" block into the "mcp" section of ~/.config/opencode/opencode.jsonc,
+// replacing the /path/to placeholders, then restart OpenCode.
+// See ../TOOLING.md for how to install and verify kicad-mcp-pro 3.35.2.
+{
+  "mcp": {
+    "kicad": {
+      "type": "local",
+      "command": ["/home/YOU/.local/bin/kicad-mcp-pro"],
+      "environment": {
+        // kicad-cli from the KiCad 10 AppImage (wrapper script, see TOOLING.md)
+        "KICAD_MCP_KICAD_CLI": "/home/YOU/.local/bin/kicad-cli",
+        // 191-tool authoring profile; "pcb_layout" is inspection-only without a live KiCad
+        "KICAD_MCP_PROFILE": "schematic_authoring",
+        "KICAD_MCP_OPERATING_MODE": "write",
+        "KICAD_MCP_TELEMETRY_ENABLED": "false",
+        // Confine writes to this checkout
+        "KICAD_MCP_WORKSPACE_ROOT": "/path/to/protective-stop",
+        "KICAD_MCP_PROJECT_DIR": "/path/to/protective-stop/hardware/relay-board"
+      },
+      "enabled": true
+    }
+  }
+}
