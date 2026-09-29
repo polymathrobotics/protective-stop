@@ -14,6 +14,8 @@ sdkconfig.credentials
 # Secure Boot keys and the flash-encryption master belong outside the repository
 *.pem
 fe_master*.txt
+# any built / signed bootloaders
+*.bin
 # host runner binary
 host/machine_app_runner
 # host unit-test binaries

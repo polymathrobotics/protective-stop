@@ -79,7 +79,7 @@ Serial options:
 Decode backtraces:
 
 ```sh
-source ~/esp-idf-5.5/export.sh
+source ~/esp/esp-idf/export.sh
 xtensa-esp32s3-elf-addr2line -e firmware/build/pstop_remote.elf 0x4037.... 0x4037....
 ```
 
