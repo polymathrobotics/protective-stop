@@ -143,7 +143,7 @@ blank board is already there, a `dev` unit gets there with
 
 ```sh
 # enter download mode (or see below for a full reset)
-curl -u "admin:$PASSWORD" -X POST "$DEV_IP/api/enter_download?confirm=1"
+curl -u "admin:$ADMIN_PW" -X POST "$DEV/api/enter_download?confirm=1"
 uv run python pstop_secure.py provision -p /dev/ttyACM0 --bootloader bootloader-signed.bin ../firmware/build
 ```
 

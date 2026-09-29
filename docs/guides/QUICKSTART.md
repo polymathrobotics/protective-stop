@@ -81,7 +81,7 @@ Ethernet path: nothing to prepare; the remote gets its address from your LAN.
 
 ## 3. Flash the remote
 
-Into an empty folder, download three files from the
+Into an empty folder, say its path is $FW_PATH, download three files from the
 [latest release](https://github.com/polymathrobotics/protective-stop/releases/latest):
 `pstop_remote-<version>-public-fullflash.bin` (factory image, used now),
 `pstop_remote-<version>-public.bin` (app image, for updates later) and
@@ -90,9 +90,9 @@ mode) and, using the exact filename you downloaded:
 
 ```sh
 cd tools                                   # the uv environment from step 2
-sha256sum -c SHA256SUMS --ignore-missing   # expect: two lines ending in OK
+sha256sum -c $FW_PATH/SHA256SUMS --ignore-missing   # expect: two lines ending in OK
 ls /dev/ttyACM*                            # expect: /dev/ttyACM0
-uv run esptool --chip esp32s3 -p /dev/ttyACM0 -b 460800 write_flash 0x0 pstop_remote-<version>-public-fullflash.bin
+uv run esptool --chip esp32s3 -p /dev/ttyACM0 -b 460800 write_flash 0x0 $FW_PATH/pstop_remote-<version>-public-fullflash.bin
 # expect: … Hash of data verified. … Hard resetting via RTS pin…
 ```
 
