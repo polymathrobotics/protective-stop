@@ -1,0 +1,4 @@
+(fp_lib_table
+	(version 7)
+	(lib (name "relay-board")(type "KiCad")(uri "${KIPRJMOD}/relay-board.pretty")(options "")(descr "relay-board project footprints"))
+)
