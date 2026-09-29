@@ -67,22 +67,46 @@ is found on the next transition. **Every re-arm should first require both SNS = 
 | J1 pad | Net | ESP32-S3-ETH pin |
 |---|---|---|
 | 1 | +5V | VBUS (left header, pin 40) |
-| 2 | GND | GND (right header, pin 8 or 13) |
+| 2 | +3V3 | 3V3 (left header, pin 36) |
 | 3 | DRV_A | IO39 (right header pin 12) |
 | 4 | SNS_A | IO40 (pin 11) |
 | 5 | DRV_B | IO41 (pin 10) |
 | 6 | SNS_B | IO42 (pin 9) |
-| 7 | +3V3 | 3V3 (left header, pin 36) |
+| 7 | GND | GND (right header pin 8 or 13) |
 
-J2 (2 pads) goes to Phoenix header pins 1 and 2 with wire sized for the loop.
-Pads only, no headers fitted. Channel A is core 0, channel B is core 1.
+The pad order on J1 is chosen for the schematic (power pins at the ends), not to
+match the ESP32 header; the wires cross over freely.
+
+J2 (LOOP IN) and J3 (LOOP OUT) are single solder pads for wires to Phoenix header
+pins 1 and 2, sized for the loop. Pads only, no headers fitted. Channel A is
+core 0, channel B is core 1.
+
+## 3a. Reading the schematic
+
+One A3 sheet, laid out to the usual conventions: signal flow left to right, positive
+rails at the top pointing up, GND at the bottom pointing down, one dashed frame per
+function, wires for local connections, and labels only where a signal crosses a
+frame (DRV_x, SNS_x, and the three loop-net names).
+
+- **J1** (left): the wire pads to the ESP32-S3-ETH, rail test points, bulk capacitor.
+- **CHANNEL A / B** (middle): coil drive on the left of each frame, contact mirror on
+  the right. The two channels are drawn identically.
+- **STOP LOOP** (bottom): the four loop contacts drawn as a left-to-right series
+  chain, in the released state.
+- **HOW IT WORKS / MECHANICAL** (right): fail-safe summary, the SNS meaning table,
+  and the mounting-hole pattern.
+
+The relay is a five-unit symbol in the IEC split-symbol style, each unit drawn
+where it acts: **A** coil, **B** NC 11-12 and **C** NC 21-22 (mirror), **D** NO
+33-34 and **E** NO 43-44 (loop). So `K1A`..`K1E` are one physical part, and the
+reference on each unit says which contact it is.
 
 ## 4. Safety design rules (enforced by `tools/check_netlist.py`)
 
 1. **Nothing bridges the loop contacts.** No TVS, capacitor, snubber, resistor or
    LED from LOOP_IN, LOOP_MID or LOOP_OUT to anything else. Such parts fail
    short in their dominant failure mode and would bypass the relays. Only the
-   relay contacts, the J2 wire pads and one open test pad touch these nets.
+   relay contacts, the J2 and J3 wire pads and one open test pad touch these nets.
    Inductive kick belongs at the **load**: the integrator fits a flyback diode
    or TVS across the contactor or relay coil being switched.
 2. Only NO contacts (33-34, 43-44) carry the loop.
@@ -122,9 +146,12 @@ Do not trust part matching by value in the MCP's `lib_search_components`: it mat
 ## 7. Verification done
 
 - ERC: clean, 0 findings (KiCad 10.0.0 via kicad-mcp-pro).
+- Readability: kicad-mcp-pro `sch_cosmetic_score` 100 / 100, no findings (the first,
+  label-only version of this sheet scored 32 and was unreadable).
 - `tools/check_netlist.py`: KiCad's own netlist export matches the intended 20 nets
-  and rules 1-5 hold. Mutation-tested against 8 injected faults (bridged loop, NC
-  on the loop, removed pull-down, shorted coil and others): all caught.
+  by pin membership, labelled nets keep their names, and rules 1-5 hold.
+  `--selftest` injects 9 faults (bridged loop, NC on the loop, removed pull-down,
+  shorted coil, renamed label and others): all caught.
 - SR4D4005 symbol and footprint parse in KiCad 10. Footprint geometry re-derived
   from TE drawing S0413-BC (bottom view, mirrored to top view). **Not yet checked
   against a physical relay.**
@@ -149,6 +176,8 @@ Do not trust part matching by value in the MCP's `lib_search_components`: it mat
 - KiCad 10.0.0 AppImage; `kicad-mcp-pro` 3.35.2 (MIT) drives schematic capture and checks.
 - Project libraries are self-contained (`relay-board.kicad_sym`, `power.kicad_sym`,
   `relay-board.pretty`), copied from KiCad's stock libraries plus the SR4D4005.
+- The sheet was laid out by a script and then hand-checked; from here the `.kicad_sch`
+  is the source of truth, so edit it in KiCad. Re-run `tools/check_netlist.py` after any change.
 - PCB placement and routing need the KiCad GUI with its IPC API enabled; the MCP
   cannot do them headless.
 - Regenerate checks with: `python3 tools/check_netlist.py --kicad-cli <path>`.
