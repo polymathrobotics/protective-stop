@@ -27,7 +27,7 @@ tailnet as the remote. The build profile decides how hard that is:
 ## Building
 
 ```sh
-. ~/esp/esp-idf/export.sh          # ESP-IDF v5.5; wherever you installed it
+. ~/esp/esp-idf/export.sh          # ESP-IDF v5.5, installed as in the quickstart's Appendix E
 cd firmware                        # or machn
 idf.py build                       # secure-fe
 idf.py -DPSTOP_PROFILE=dev build
@@ -39,6 +39,24 @@ For `dev`, or to keep a second profile beside the first, use its own build direc
 ```sh
 idf.py -B build-dev -DSDKCONFIG=build-dev/sdkconfig -DPSTOP_PROFILE=dev build
 ```
+
+### Admin password and Tailscale key
+
+The admin password is compiled into the image, and the admin page cannot change it.
+The release image uses the public password `microlink`, which the remote refuses over Tailscale.
+To set your own, and optionally the Tailscale key, build with a credentials file:
+
+```sh
+cd firmware
+cp sdkconfig.credentials.example sdkconfig.credentials
+$EDITOR sdkconfig.credentials            # CONFIG_ML_ADMIN_PASSWORD
+rm -rf sdkconfig build                   # a stale sdkconfig keeps the old values
+idf.py build
+```
+
+Provision or update the unit from that build as described below.
+Every value in the credentials file is compiled into the image as plain text, so keep the image private;
+`tools/release_guard.sh` refuses to release one.
 
 The secure overlays in [`firmware/profiles/`](../../firmware/profiles/):
 
@@ -67,7 +85,7 @@ Three secrets, however many units:
 | Backup signing key (RSA-3072) | Co-signing each bootloader; replaces a lost or leaked primary | `PSTOP_BACKUP_KEY` |
 | Flash-encryption master | Deriving each unit's key from its MAC (HKDF-SHA256) | `PSTOP_FE_MASTER` |
 
-Each variable holds a file path or a 1Password `op://` reference. Create them
+Each variable holds a file path or a 1Password `op://` reference (assuming op cli is installed). Create them
 outside the repository with `openssl genrsa -out primary.pem 3072` (the same for
 `backup.pem`) and `openssl rand -base64 48 > fe_master.txt`, and keep the backup
 key apart from the other two. Losing both signing keys means the units can never be updated again;
@@ -116,7 +134,7 @@ eFuse summary; no secrets) go to `$PSTOP_RECORDS_DIR` (default
 `~/.pstop-records`); with a record present, `flash` refuses another build profile
 or master.
 
-## Provisioning
+## Provisioning and Flashing
 
 Provisioning is one-way: afterwards the unit only runs firmware signed with your
 key. Put it in download mode on USB-Serial-JTAG (`lsusb` shows `303a:1001`): a
@@ -124,6 +142,8 @@ blank board is already there, a `dev` unit gets there with
 `/api/enter_download` or by holding BOOT at power-on. Then:
 
 ```sh
+# enter download mode (or see below for a full reset)
+curl -u "admin:$PASSWORD" -X POST "$DEV_IP/api/enter_download?confirm=1"
 uv run python pstop_secure.py provision -p /dev/ttyACM0 --bootloader bootloader-signed.bin ../firmware/build
 ```
 
@@ -134,10 +154,12 @@ eFuses, a write-lock that keeps the USB recovery eFuses at 0, Secure Boot, and
 Secure Download Mode last. It refuses to burn any eFuse that would end USB
 recovery, resumes an interrupted run when repeated, and `--virt --mac MAC`
 rehearses it on virtual eFuses. Then power-cycle the unit and enroll it with a
-one-off Tailscale key. An existing unit moves to `secure-fe` the same way: its
+one-off Tailscale key: create the key as in
+[Enrollment keys](TAILSCALE_ISOLATION.md) and enter it as in
+[QUICKSTART §4](QUICKSTART.md#4-first-boot-find-the-remote-and-give-it-the-key). An existing unit moves to `secure-fe` the same way: its
 flash is erased and it enrolls as a new node.
 
-## Updating
+## Updating or Resetting a Flashed Device
 
 Over the network:
 
@@ -151,12 +173,19 @@ Over USB, for recovery: `/api/enter_download` hands the port to USB-Serial-JTAG
 for 60 s; within that time run
 
 ```sh
-uv run python pstop_secure.py flash -p /dev/ttyACM0 ../firmware/build
+uv run python pstop_secure.py flash -p /dev/ttyACM0 --full --bootloader bootloader-signed.bin ../firmware/build
 ```
 
-(`--full --bootloader bootloader-signed.bin` also rewrites the bootloader and
-partition table). If the app does not run, power-cycle the unit and start the
-same command as soon as `303a:1001` appears. Secure Download Mode only writes
+`--full` also rewrites the bootloader and partition table, so the unit ends up on exactly this build.
+Drop `--full --bootloader …` to write only the app.
+If the app does not run, power-cycle the unit and start the flash as soon as `303a:1001` appears:
+
+```sh
+until lsusb | grep -q 303a:1001 && [ -e /dev/ttyACM0 ]; do sleep 0.05; done; \
+  uv run python pstop_secure.py flash -p /dev/ttyACM0 --full --bootloader bootloader-signed.bin ../firmware/build
+```
+
+Secure Download Mode only writes
 (esptool 5.3.1 or newer); `uv run esptool --no-stub get-security-info` shows a unit's
 state. Never enter download mode with a system reset: it re-arms the RTC
 watchdog's ~9 s flash-boot protection, which esptool cannot disable in Secure

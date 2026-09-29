@@ -133,7 +133,7 @@ Ethernet, **green** on USB. Find the full address:
 DEV=<that address>
 ```
 
-Open **`http://$DEV/admin`** (user `admin`, password `microlink`) → **Settings**
+Open **`http://$DEV/admin/`** (user `admin`, password `microlink`) → **Settings**
 → paste the auth key into **Tailscale Auth Key** → **Save** → **Restart**. Or do
 the same from the shell:
 
@@ -363,15 +363,24 @@ is a software remote that runs the same arming sequence against the node
 
 Needed only to bake your own credentials into the image (a different admin
 password, WiFi, a Tailscale key without the admin-page step) or to change the
-firmware. Install ESP-IDF **v5.5**
-([guide](https://docs.espressif.com/projects/esp-idf/en/v5.5/esp32s3/get-started/linux-macos-setup.html);
-older IDF will not build, the USB tether needs a 5.5 fix), then:
+firmware. Install ESP-IDF **v5.5.4** or a later 5.5.x once
+(older IDF will not build, the USB tether needs a 5.5 fix; on Ubuntu first
+`sudo apt install git wget flex bison gperf python3-venv cmake ninja-build ccache libffi-dev libssl-dev dfu-util libusb-1.0-0`,
+[full prerequisites](https://docs.espressif.com/projects/esp-idf/en/v5.5/esp32s3/get-started/linux-macos-setup.html)):
+
+```sh
+git clone -b v5.5.4 --recursive https://github.com/espressif/esp-idf ~/esp/esp-idf
+~/esp/esp-idf/install.sh esp32s3
+```
+
+ESP-IDF keeps its own Python environment, separate from the uv one in `tools/`.
+Source it in each new shell before `idf.py`. Then build:
 
 ```sh
 cp firmware/sdkconfig.credentials.example firmware/sdkconfig.credentials
 $EDITOR firmware/sdkconfig.credentials       # set CONFIG_ML_TAILSCALE_AUTH_KEY and CONFIG_ML_ADMIN_PASSWORD, leave the rest
 cd firmware
-. ~/esp/esp-idf/export.sh                    # wherever you installed IDF 5.5
+. ~/esp/esp-idf/export.sh                    # in every new shell
 idf.py -DPSTOP_PROFILE=dev build             # the quickstart uses the dev profile
 grep CONFIG_ML_TAILSCALE_AUTH_KEY sdkconfig  # expect: your key, not the XXXXX placeholder
 idf.py -p /dev/ttyACM0 flash
