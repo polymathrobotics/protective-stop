@@ -84,6 +84,13 @@ hold each other's key. Therefore:
   them, so a brand-new remote that has never sent a packet is still kept and can
   bond. ✅ (Implemented via a microlink peer-wanted hook; the machine matches the
   incoming netmap FQDN `pstop-01<mac24>.<tailnet>` against its allowlist.)
+- Pins also pass the microlink **Peer Allowlist** (`/admin/` panel) on both
+  sides, so neither list needs a second entry: a machine slot on the remote and
+  an admission entry on the machine are each sufficient. When the remote's Peer
+  Allowlist is active, adding a machine slot also lists the machine there
+  (label `machine slot N`) so the panel shows it. Moving or clearing the slot
+  removes that entry again; an entry the operator added keeps its own label and
+  stays, and the last entry is never removed (an empty list admits everyone).
 
 **Consequence you must design around:**
 

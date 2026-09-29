@@ -1077,3 +1077,15 @@ uint32_t microlink_resolve(const microlink_t * ml, const char * hostname)
 
   return 0; /* Not found */
 }
+
+esp_err_t microlink_allowlist_add(microlink_t * ml, uint32_t vpn_ip, const char * label)
+{
+  if (!ml || !ml->config_httpd) return ESP_ERR_INVALID_STATE;
+  return ml_config_allowlist_add(ml->config_httpd, vpn_ip, label);
+}
+
+esp_err_t microlink_allowlist_remove_own(microlink_t * ml, uint32_t vpn_ip, const char * label_prefix)
+{
+  if (!ml || !ml->config_httpd) return ESP_ERR_INVALID_STATE;
+  return ml_config_allowlist_remove_own(ml->config_httpd, vpn_ip, label_prefix);
+}
