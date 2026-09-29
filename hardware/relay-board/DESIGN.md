@@ -5,6 +5,9 @@ Nothing here is a functional-safety certification. SIL 3 is the design target;
 it is a property of the whole safety function and is **not claimed** until the
 FMEDA is recomputed with manufacturer data (section 8, item 10).
 
+**Read the schematic first: [relay-board-schematic.pdf](relay-board-schematic.pdf)**
+(one A3 page; regenerate with `tools/export_pdf.sh` whenever the `.kicad_sch` changes).
+
 This board replaces the off-the-shelf 2-channel relay module in the machine box
 (`../machine-casing.FCStd`, `../ASSEMBLY.md` "Machine side"). It keeps the same
 footprint and the same firmware pins, and adds what the module could not:
@@ -83,7 +86,7 @@ core 0, channel B is core 1.
 
 ## 3a. Reading the schematic
 
-One A3 sheet, laid out to the usual conventions: signal flow left to right, positive
+One A3 sheet ([PDF copy](relay-board-schematic.pdf) for reviewers), laid out to the usual conventions: signal flow left to right, positive
 rails at the top pointing up, GND at the bottom pointing down, one dashed frame per
 function, wires for local connections, and labels only where a signal crosses a
 frame (DRV_x, SNS_x, and the three loop-net names).
@@ -239,6 +242,8 @@ Plugins; blocked by nothing)
   is the source of truth, so edit it in KiCad. Re-run `tools/check_netlist.py` after any change.
 - PCB placement and routing need the KiCad GUI with its IPC API enabled; the MCP
   cannot do them headless.
+- `relay-board-schematic.pdf` is a committed export of the schematic for human review; it
+  goes stale silently, so run `tools/export_pdf.sh` and commit it with any schematic change.
 - Regenerate checks with: `python3 tools/check_netlist.py --kicad-cli <path>`.
 - Full tool list, MCP install and vetting notes, and how to set this up on another
   computer: [TOOLING.md](TOOLING.md).

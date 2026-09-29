@@ -248,7 +248,8 @@ Build steps live in [ASSEMBLY.md](ASSEMBLY.md).
 
 The machine box will move from an off-the-shelf relay module to a custom board
 with force-guided relays whose contact state the microcontroller reads back.
-Work in progress (schematic done, layout not started): see
+Work in progress (schematic done, layout not started): read the
+[schematic PDF](relay-board/relay-board-schematic.pdf), then
 [relay-board/DESIGN.md](relay-board/DESIGN.md), and
 [relay-board/TOOLING.md](relay-board/TOOLING.md) for the tools used and how to
 reproduce the environment.

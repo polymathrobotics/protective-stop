@@ -103,8 +103,11 @@ To confirm the environment matches, from the repo root:
 ```sh
 kicad-cli sch erc hardware/relay-board/relay-board.kicad_sch          # 0 violations
 python3 hardware/relay-board/tools/check_netlist.py --selftest         # PASS, all faults caught
-kicad-cli sch export pdf -o /tmp/relay-board.pdf hardware/relay-board/relay-board.kicad_sch
+hardware/relay-board/tools/export_pdf.sh                               # refreshes the committed PDF
 ```
+
+The committed `relay-board-schematic.pdf` should be unchanged after that export (apart from
+PDF metadata); if the text differs, the PDF is stale.
 
 In an OpenCode session with the MCP running, `run_erc` should report PASS and
 `sch_cosmetic_score` should report 100.
