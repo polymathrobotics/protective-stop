@@ -1,0 +1,18 @@
+[
+  {"name": "change-request", "color": "0052cc", "description": "Modification-procedure change request"},
+  {"name": "class-a", "color": "0e8a16", "description": "Safety class A: no safety impact"},
+  {"name": "class-b", "color": "fbca04", "description": "Safety class B: indirect safety impact"},
+  {"name": "class-c", "color": "b60205", "description": "Safety class C: direct safety impact"},
+  {"name": "emergency", "color": "d93f0b", "description": "Compressed modification timeline"},
+  {"name": "safety-defect", "color": "b60205", "description": "Released-baseline defect affecting safety"},
+  {"name": "wire-break", "color": "5319e7", "description": "Coordinated remote and machine wire-format break"},
+  {"name": "needs-change-request", "color": "c5def5", "description": "External contribution awaiting maintainer CR"},
+  {"name": "status:proposed", "color": "ededed", "description": "CR proposed"},
+  {"name": "status:under-analysis", "color": "d4c5f9", "description": "CR under analysis"},
+  {"name": "status:authorized", "color": "0e8a16", "description": "CR authorized"},
+  {"name": "status:rejected", "color": "b60205", "description": "CR rejected"},
+  {"name": "status:in-implementation", "color": "1d76db", "description": "CR in implementation"},
+  {"name": "status:in-verification", "color": "006b75", "description": "CR in verification"},
+  {"name": "status:merged", "color": "5319e7", "description": "CR merged"},
+  {"name": "status:released", "color": "0e8a16", "description": "CR released"}
+]

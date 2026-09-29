@@ -1,0 +1,130 @@
+---
+name: Change Request
+description: Request an assessed change to Protective Stop
+title: '[CR] '
+labels: [change-request, status:proposed]
+body:
+  - type: textarea
+    id: reason
+    attributes:
+      label: Reason for the change
+      description: Why this change is needed. A defect, a new requirement, a dependency update, a corrective action. Link to the source if there is one.
+      placeholder: State the reason and source.
+    validations:
+      required: true
+  - type: textarea
+    id: hazards
+    attributes:
+      label: Hazards that may be affected
+      description: Which identified hazards this change could bear on. Reference the HARA entries. "None identified, because…" is a valid answer; blank is not.
+      placeholder: None identified, because…
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: Description of the proposed change
+      description: What specifically is proposed, covering both hardware and software. Enough detail that someone other than the requester can assess it.
+    validations:
+      required: true
+  - type: textarea
+    id: baseline
+    attributes:
+      label: Baseline affected
+      description: Firmware, host and hardware versions.
+    validations:
+      required: true
+  - type: input
+    id: requester
+    attributes:
+      label: Requester
+      description: Name and date.
+    validations:
+      required: false
+  - type: textarea
+    id: impact-analysis
+    attributes:
+      label: Impact Analysis
+      description: Link to or paste the completed Impact Analysis. Required before authorization.
+    validations:
+      required: false
+  - type: dropdown
+    id: class
+    attributes:
+      label: Proposed class
+      description: The Impact Analyst proposes and the Authorizer confirms the class.
+      options:
+        - A
+        - B
+        - C
+      default: 2
+    validations:
+      required: true
+  - type: textarea
+    id: authorization
+    attributes:
+      label: Authorization
+      description: Authorizer, decision, date and basis. Class C requires two distinct Authorizers.
+    validations:
+      required: false
+  - type: textarea
+    id: implementation
+    attributes:
+      label: Implementation
+      description: Implementer; competency basis; pull requests covering software, hardware and tests; documentation updated; and upstream pstop_c change required - Yes / No, with link.
+    validations:
+      required: false
+  - type: textarea
+    id: gate-0
+    attributes:
+      label: Gate 0 - Build Acceptance Test
+      description: Version under test, CI run, date and result.
+    validations:
+      required: false
+  - type: textarea
+    id: gate-1
+    attributes:
+      label: Gate 1 - Merge qualification
+      description: Scope per the change class and Impact Analysis. Record test, version under test, Run by, date and result. For Class C record Forward - affected safety requirements to verification performed; Backward - verification performed to requirements
+        covered.
+    validations:
+      required: false
+  - type: textarea
+    id: review
+    attributes:
+      label: Review
+      description: Reviewer, who is not the Implementer; pull request review link; date; and outcome.
+    validations:
+      required: false
+  - type: textarea
+    id: deviations
+    attributes:
+      label: Deviations
+      description: Any deviation from this procedure, with justification. Includes the case where the Authorizer and Implementer are the same person.
+    validations:
+      required: false
+  - type: input
+    id: release
+    attributes:
+      label: Release Record
+      description: Release is handled separately in the Release Record. Record only the link here once this change ships.
+    validations:
+      required: false
+  - type: dropdown
+    id: status
+    attributes:
+      label: Status
+      description: Current Change Request lifecycle status.
+      options:
+        - Proposed
+        - Under Analysis
+        - Authorized
+        - Rejected
+        - In Implementation
+        - In Verification
+        - Merged
+        - Released
+        - Closed
+      default: 0
+    validations:
+      required: false
