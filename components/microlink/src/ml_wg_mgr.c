@@ -4165,6 +4165,15 @@ static void disco_periodic_probes(microlink_t * ml)
     ml_peer_t * p = &ml->peers[i];
     if (!p->active) continue;
 
+    /* An admission pin lasts only while the app still wants the peer: un-allowing it on
+     * machn drops the pin within a tick instead of at the next reboot. */
+    if (
+      extra_pin_admit_only(p->vpn_ip) &&
+      !(ml->peer_wanted_cb != NULL && ml->peer_wanted_cb(ml->peer_wanted_ctx, p->hostname, p->vpn_ip)))
+    {
+      pin_peer_ip(p->vpn_ip, false, true);
+    }
+
     /* Peer allowlist filter: check early so we can skip expensive work.
          * Inbound DISCO pings from any peer are still answered (don't break remote). */
     bool peer_allowed = ml_config_peer_is_allowed(ml->config_httpd, p->vpn_ip);

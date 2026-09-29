@@ -902,12 +902,11 @@ esp_err_t dcs_pstop_set_peer_slot(int slot, bool configured, uint32_t ip, uint16
       ESP_LOGW(TAG, "slot %d: allowlist add skipped (%s)", slot, esp_err_to_name(aerr));
     }
   }
-  /* Drop the entry this slot added for its old target (the operator's own entries stay).
-   * After the add, so a list holding only that entry is not stopped by the last-entry guard. */
+  /* Drop the slot entry for the old target, whichever slot's label it kept (the add dedupes
+   * by IP) — no other slot uses that IP. Operator entries stay. After the add, so a list
+   * holding only that entry is not stopped by the last-entry guard. */
   if ((unlist_ip != 0u) && (g_dcs.ml_handle != NULL)) {
-    char old_label[24];
-    (void)snprintf(old_label, sizeof(old_label), "machine slot %d", slot);
-    (void)microlink_allowlist_remove_own(g_dcs.ml_handle, unlist_ip, old_label);
+    (void)microlink_allowlist_remove_own(g_dcs.ml_handle, unlist_ip, "machine slot ");
   }
   return err;
 }

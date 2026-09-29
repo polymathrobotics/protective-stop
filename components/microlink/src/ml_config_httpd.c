@@ -315,16 +315,16 @@ esp_err_t ml_config_allowlist_add(ml_config_ctx_t * ctx, uint32_t vpn_ip, const 
   return ESP_OK;
 }
 
-esp_err_t ml_config_allowlist_remove_own(ml_config_ctx_t * ctx, uint32_t vpn_ip, const char * label)
+esp_err_t ml_config_allowlist_remove_own(ml_config_ctx_t * ctx, uint32_t vpn_ip, const char * label_prefix)
 {
   if (!ctx) return ESP_ERR_INVALID_STATE;
-  if (vpn_ip == 0 || !label) return ESP_OK;
+  if (vpn_ip == 0 || !label_prefix) return ESP_OK;
   if (xSemaphoreTake(ctx->peer_mutex, pdMS_TO_TICKS(100)) != pdTRUE) return ESP_ERR_TIMEOUT;
   bool removed = false;
   /* Never the last entry: an empty list switches the filter off and admits everyone. */
   for (int i = 0; i < ctx->peer_list.count && ctx->peer_list.count > 1; i++) {
     ml_config_peer_entry_t * e = &ctx->peer_list.entries[i];
-    if (e->vpn_ip == vpn_ip && strcmp(e->label, label) == 0) {
+    if (e->vpn_ip == vpn_ip && strncmp(e->label, label_prefix, strlen(label_prefix)) == 0) {
       memmove(e, e + 1, (size_t)(ctx->peer_list.count - i - 1) * sizeof(*e));
       ctx->peer_list.count--;
       removed = true;
@@ -334,7 +334,7 @@ esp_err_t ml_config_allowlist_remove_own(ml_config_ctx_t * ctx, uint32_t vpn_ip,
   xSemaphoreGive(ctx->peer_mutex);
   if (removed) {
     config_save_peers(ctx);
-    ESP_LOGI(TAG, "Allowlist -1 (%s): %d peers", label, ctx->peer_list.count);
+    ESP_LOGI(TAG, "Allowlist -1 (%s*): %d peers", label_prefix, ctx->peer_list.count);
   }
   return ESP_OK;
 }
