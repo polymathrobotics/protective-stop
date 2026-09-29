@@ -7,15 +7,22 @@
  *        the MACHINE's replies (NOT the network state; the onboard single LED
  *        on GPIO21, dcs_rgb.c, does network).
  *
- * The ring is divided evenly among the CONFIGURED machine slots (one machine
- * = the whole ring, two = halves, etc., in slot order starting at LED 1) and
- * each segment shows ITS machine's link state from the per-machine telemetry
- * the comparator publishes (g_dcs_pstop_m_state/_last_msg/_last_reply_ms).
- * Device-level conditions (lockstep MISMATCH, OTA, locate, no machines at
- * all) override the whole ring. Per segment / ring:
+ * The ring is divided evenly among the unit's pstop peers (one peer = the
+ * whole ring, two = halves, etc., starting at LED 1) and each segment shows
+ * that link's state. Both roles show the MACHINE's state, so a remote's ring
+ * and its machine's ring agree:
+ *   - remote (firmware/): one segment per CONFIGURED machine slot, from the
+ *     per-machine telemetry the comparator publishes
+ *     (g_dcs_pstop_m_state/_last_msg/_last_reply_ms);
+ *   - machine (machn/, built with DCS_PAGE_MACHINE): one segment per ASSIGNED
+ *     remote (allowlisted or pinned ids, then every remote served since boot),
+ *     from the last reply the machine sent it (dcs_publish_machn_reply).
+ * Device-level conditions (lockstep MISMATCH, OTA, locate, no peers at all)
+ * override the whole ring. Per segment / ring:
  *
- *     WHITE  = IDLE          no pstop peer (machine) configured — the remote has
- *                            nothing to connect to (fresh unit, or peer cleared).
+ *     WHITE  = IDLE          no pstop peer: no machine configured (remote) or
+ *                            no remote assigned (machine) — nothing to connect
+ *                            to (fresh unit, or peer cleared).
  *     AMBER  = UNREACHABLE   a peer IS configured but no fresh reply — AMBER
  *              (N blinks)     blinking, where the blink COUNT names the deepest
  *                            broken network layer (1 = bonded peer down / net OK;
@@ -63,6 +70,7 @@
 #include <string.h>
 
 #include "dcs_internal.h"
+#include "dcs_ring_logic.h" /* segment colour, blink count, machine assigned-remote set */
 #include "driver/rmt_encoder.h"
 #include "driver/rmt_tx.h"
 #include "esp_log.h"
@@ -70,7 +78,6 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "ml_config_httpd.h" /* ml_config_ota_in_progress() */
-#include "pstop/pstop_msg.h" /* PSTOP_MESSAGE_OK / _STOP / _BOND / _UNBOND */
 
 static const char * TAG = "dcs_ring";
 
@@ -302,6 +309,61 @@ static uint8_t amber_on(uint64_t now, int n)
   return ((ph % group) < AMBER_ON_MS) ? 1u : 0u;
 }
 
+/* Link segments for this role, in display order; returns the count (0 = no
+ * peers, ring shows white). At most RING_LEDS so every segment gets a pixel.
+ * Decision logic is in dcs_ring_logic.c (host-tested). */
+#ifdef DCS_PAGE_MACHINE
+/* Machine: one segment per assigned remote (allowlisted or pinned ids, then
+ * every remote served since boot), coloured by the last reply the machine
+ * sent it. That is exactly what the remote's own ring shows for this machine,
+ * so the two rings agree. */
+static int ring_collect_segments(uint64_t now, dcs_ring_seg_t seg[RING_LEDS])
+{
+  uint32_t allow[DCS_MAX_LIST_IDS];
+  uint32_t pin[DCS_MAX_LIST_IDS];
+  uint32_t deny[DCS_MAX_LIST_IDS];
+  int nallow = dcs_list_get(DCS_LIST_ALLOW, allow);
+  int npin = dcs_list_get(DCS_LIST_PIN, pin);
+  int ndeny = dcs_list_get(DCS_LIST_DENY, deny);
+
+  dcs_ring_reply_t rep[DCS_MACHN_MAX_REMOTES];
+  for (int i = 0; i < DCS_MACHN_MAX_REMOTES; i++) {
+    rep[i].id = (uint32_t)atomic_load(&g_dcs_machn_rep_id[i]);
+    rep[i].last_msg = (uint8_t)atomic_load(&g_dcs_machn_rep_msg[i]);
+    rep[i].last_ms = (uint64_t)atomic_load(&g_dcs_machn_rep_ms[i]);
+  }
+
+  dcs_ring_peer_t peers[RING_LEDS];
+  int n = dcs_ring_machine_peers(
+    allow, nallow, pin, npin, deny, ndeny, rep, DCS_MACHN_MAX_REMOTES, now, LINK_FRESH_MS, peers, RING_LEDS);
+  for (int i = 0; i < n; i++) {
+    seg[i] = dcs_ring_segment(peers[i].connected, peers[i].last_msg);
+  }
+  return n;
+}
+#else
+/* Remote: one segment per CONFIGURED machine slot, in slot order, coloured by
+ * that machine's last reply to this remote. */
+static int ring_collect_segments(uint64_t now, dcs_ring_seg_t seg[RING_LEDS])
+{
+  int n = 0;
+  for (int i = 0; i < DCS_PSTOP_MAX_MACHINES; i++) {
+    bool cfg = false;
+    dcs_get_pstop_peer_slot(i, &cfg, NULL, NULL, NULL);
+    if (!cfg) {
+      continue;
+    }
+    uint32_t st8 = (uint32_t)atomic_load(&g_dcs_pstop_m_state[i]);
+    uint64_t last = (uint64_t)atomic_load(&g_dcs_pstop_m_last_reply_ms[i]);
+    uint8_t lastmsg = (uint8_t)atomic_load(&g_dcs_pstop_m_last_msg[i]);
+    bool connected = (st8 == 2u) && dcs_ring_fresh(last, now, LINK_FRESH_MS);
+    seg[n] = dcs_ring_segment(connected, lastmsg);
+    n++;
+  }
+  return n;
+}
+#endif
+
 static void ring_task(void * arg)
 {
   (void)arg;
@@ -409,75 +471,65 @@ static void ring_task(void * arg)
       continue;
     }
 
-    /* Per-machine segments: the ring is divided evenly among the CONFIGURED
-         * peer slots, in slot order (one machine = the whole ring, matching the
-         * old single-machine display). Per segment, the classic colours apply:
-         *   yellow flash = configured but no fresh reply (bonding / unreachable)
-         *   blue      = bonded, machine's last reply was BOND/UNBOND
-         *   green     = machine's last reply was OK
-         *   red       = machine's last reply was STOP
-         * No machines configured at all = whole ring white (IDLE). */
-    int cfg_slots[DCS_PSTOP_MAX_MACHINES];
-    int ncfg = 0;
-    for (int i = 0; i < DCS_PSTOP_MAX_MACHINES; i++) {
-      bool cfg = false;
-      dcs_get_pstop_peer_slot(i, &cfg, NULL, NULL, NULL);
-      if (cfg) {
-        cfg_slots[ncfg] = i;
-        ncfg++;
-      }
-    }
+    /* Link segments, one per peer, in display order (one peer = the whole
+         * ring). Both roles show the MACHINE's state: the remote paints each
+         * configured machine from that machine's last reply, the machine paints
+         * each assigned remote from the last reply it sent (see
+         * ring_collect_segments). Per segment:
+         *   amber N-blink = no fresh reply (N = deepest broken network layer)
+         *   blue          = last reply BOND/UNBOND
+         *   green         = last reply OK
+         *   red           = last reply STOP
+         * No peers at all = whole ring white (IDLE). */
+    dcs_ring_seg_t seg[RING_LEDS];
+    int nseg = ring_collect_segments(now, seg);
 
     ring_state_t worst = RING_IDLE; /* for transition logging only */
-    if (ncfg == 0) {
+    if (nseg == 0) {
       ring_fill(
         RING_WHITE_BRIGHTNESS, RING_WHITE_BRIGHTNESS, RING_WHITE_BRIGHTNESS); /* white (50%): nothing to connect to */
     } else {
       /* Deepest broken network layer -> amber blink count, shared by every
              * unreachable segment (device-level probes). 3 = no Internet,
-             * 2 = no Tailscale, 1 = the machine is silent while the net is fine. */
-      int conn_blinks = 1;
-      if (dcs_net_inet_down()) {
-        conn_blinks = 3;
-      } else if ((g_dcs.ml_handle != NULL) && (microlink_get_state(g_dcs.ml_handle) != ML_STATE_CONNECTED)) {
-        conn_blinks = 2;
-      }
+             * 2 = no Tailscale, 1 = the peer is silent while the net is fine. */
+      int conn_blinks = dcs_ring_blinks(
+        dcs_net_inet_down(), (g_dcs.ml_handle != NULL) && (microlink_get_state(g_dcs.ml_handle) != ML_STATE_CONNECTED));
       uint8_t amber = amber_on(now, conn_blinks) ? B : 0u;
 
       (void)memset(s_grb, 0, sizeof(s_grb));
-      for (int j = 0; j < ncfg; j++) {
-        int slot = cfg_slots[j];
-        uint32_t st8 = (uint32_t)atomic_load(&g_dcs_pstop_m_state[slot]);
-        uint64_t last = (uint64_t)atomic_load(&g_dcs_pstop_m_last_reply_ms[slot]);
-        uint8_t lastmsg = (uint8_t)atomic_load(&g_dcs_pstop_m_last_msg[slot]);
-        bool connected = (st8 == 2u) && (last > 0u) && (now >= last) && ((now - last) < LINK_FRESH_MS);
-
+      for (int j = 0; j < nseg; j++) {
         uint8_t r = 0, g = 0, b = 0;
         bool wave = false; /* overlay the liveness comet on this segment */
         ring_state_t st;
-        if (!connected) {
-          st = RING_UNREACHABLE;
-          r = amber; /* amber = full red + low green (r>g): distinct from yellow (r==g) */
-          g = (uint8_t)(((uint32_t)amber * AMBER_G_PCT) / 100u);
-          frame_ms = PULSE_FRAME_MS;
-        } else if (lastmsg == PSTOP_MESSAGE_STOP) {
-          st = RING_STOP;
-          r = B;
-          wave = true;
-        } else if (lastmsg == PSTOP_MESSAGE_OK) {
-          st = RING_OK;
-          g = B;
-          wave = true;
-        } else {
-          st = RING_BOND;
-          b = B;
+        switch (seg[j]) {
+          case DCS_RING_SEG_STOP:
+            st = RING_STOP;
+            r = B;
+            wave = true;
+            break;
+          case DCS_RING_SEG_OK:
+            st = RING_OK;
+            g = B;
+            wave = true;
+            break;
+          case DCS_RING_SEG_BOND:
+            st = RING_BOND;
+            b = B;
+            break;
+          case DCS_RING_SEG_UNREACHABLE:
+          default:
+            st = RING_UNREACHABLE;
+            r = amber; /* amber = full red + low green (r>g): distinct from yellow (r==g) */
+            g = (uint8_t)(((uint32_t)amber * AMBER_G_PCT) / 100u);
+            frame_ms = PULSE_FRAME_MS;
+            break;
         }
         if ((int)st > (int)worst) {
           worst = st;
         }
 
-        int seg_start = (j * RING_LEDS) / ncfg;
-        int seg_end = ((j + 1) * RING_LEDS) / ncfg;
+        int seg_start = (j * RING_LEDS) / nseg;
+        int seg_end = ((j + 1) * RING_LEDS) / nseg;
         for (int p = seg_start; p < seg_end; p++) {
           uint8_t rr = r, gg = g, bb = b;
           if (wave) {
@@ -506,7 +558,7 @@ static void ring_task(void * arg)
 
     if ((int)worst != last_logged) {
       static const char * N[] = {"IDLE", "UNREACHABLE", "BOND/UNBOND", "OK", "STOP", "MISMATCH"};
-      ESP_LOGI(TAG, "ring -> %s (machines=%d mm=%lu)", N[worst], ncfg, (unsigned long)mm);
+      ESP_LOGI(TAG, "ring -> %s (peers=%d mm=%lu)", N[worst], nseg, (unsigned long)mm);
       last_logged = (int)worst;
     }
 

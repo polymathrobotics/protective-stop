@@ -301,6 +301,20 @@ void dcs_publish_machn_remote(
  */
 void dcs_publish_machn_arm(uint32_t remote_stop_id, uint32_t restart_state);
 
+/**
+ * @brief Record a reply the machine just sent to a remote (machine role; the
+ * comparator calls it once per reply that reached the wire from the library,
+ * never for an admission refusal). Feeds the machine's PSTOP ring, which
+ * paints one segment per assigned remote from the last reply sent to it, so
+ * the machine's ring matches what that remote's ring shows. Up to
+ * DCS_MACHN_MAX_REMOTES remotes are remembered since boot; when full, the one
+ * replied to longest ago is replaced. Single writer, lock-free.
+ * @param remote_id Wire id of the remote (0 is ignored).
+ * @param msg       Reply message type (PSTOP_MESSAGE_*).
+ * @param now_ms    esp_timer_get_time()/1000 when it was sent.
+ */
+void dcs_publish_machn_reply(uint32_t remote_id, uint8_t msg, uint64_t now_ms);
+
 /* ============================================================================
  * Admission lists (machine-role, OPTIONAL).
  *

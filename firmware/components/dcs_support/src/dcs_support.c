@@ -212,6 +212,9 @@ atomic_uint_fast32_t g_dcs_machn_r_age_ms[DCS_MACHN_MAX_REMOTES];
 atomic_uint_fast32_t g_dcs_machn_r_rtt_ms[DCS_MACHN_MAX_REMOTES];
 atomic_uint_fast32_t g_dcs_machn_r_ip[DCS_MACHN_MAX_REMOTES];
 atomic_uint_fast32_t g_dcs_machn_r_stop_only[DCS_MACHN_MAX_REMOTES];
+atomic_uint_fast32_t g_dcs_machn_rep_id[DCS_MACHN_MAX_REMOTES];
+atomic_uint_fast32_t g_dcs_machn_rep_msg[DCS_MACHN_MAX_REMOTES];
+atomic_uint_fast64_t g_dcs_machn_rep_ms[DCS_MACHN_MAX_REMOTES];
 
 /* Admission lists (allowlist + denylist) RAM caches. Lock-free for readers:
  * the safety cores scan these atomics from their remote_details callback,
@@ -772,6 +775,38 @@ void dcs_publish_machn_arm(uint32_t remote_stop_id, uint32_t restart_state)
 {
   atomic_store(&g_dcs_machn_arm_owner, remote_stop_id);
   atomic_store(&g_dcs_machn_restart_state, restart_state);
+}
+
+void dcs_publish_machn_reply(uint32_t remote_id, uint8_t msg, uint64_t now_ms)
+{
+  if (remote_id == 0u) {
+    return;
+  }
+  /* Same remote's entry, else an empty one, else the one replied to longest
+   * ago. Single writer (the comparator); the ring task may read an entry
+   * mid-update for one frame, which is cosmetic only. */
+  int slot = -1;
+  int free_slot = -1;
+  int oldest = 0;
+  for (int i = 0; i < DCS_MACHN_MAX_REMOTES; i++) {
+    uint32_t id = (uint32_t)atomic_load(&g_dcs_machn_rep_id[i]);
+    if (id == remote_id) {
+      slot = i;
+      break;
+    }
+    if ((free_slot < 0) && (id == 0u)) {
+      free_slot = i;
+    }
+    if (atomic_load(&g_dcs_machn_rep_ms[i]) < atomic_load(&g_dcs_machn_rep_ms[oldest])) {
+      oldest = i;
+    }
+  }
+  if (slot < 0) {
+    slot = (free_slot >= 0) ? free_slot : oldest;
+  }
+  atomic_store(&g_dcs_machn_rep_msg[slot], (uint32_t)msg);
+  atomic_store(&g_dcs_machn_rep_ms[slot], now_ms);
+  atomic_store(&g_dcs_machn_rep_id[slot], remote_id);
 }
 
 void dcs_publish_pstop_sf_causes(
