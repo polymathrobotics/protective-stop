@@ -100,6 +100,105 @@ Notes:
   assembly (`POST /api/ring_offset`, see `../docs/API.md`).
 - The board's onboard status LED (IO21) needs no wiring.
 
+## Machine box pinout and wiring
+
+The machine box uses the same board and ring. Instead of a button it drives a
+2-channel 5 V relay module, one relay per core, and the relays' normally open
+(NO) contacts sit in series in the robot's stop circuit: the robot can run only
+while both cores hold their relay closed. The firmware pulls both drive pins
+low from the first instructions of boot, so power loss, a reset, a broken
+signal wire or a STOP all open the circuit. Build steps are in the
+[machine section of the assembly guide](ASSEMBLY.md#machine-side-relay-box).
+
+| Board pin | Goes to | Wire color |
+|---|---|---|
+| VBUS | Relay module VCC and ring 5V | red |
+| GND | Relay module GND and ring GND | black |
+| IO17 | Ring DIN (data) | green |
+| IO39 | Relay module IN1 (core 0, relay 1) | white |
+| IO41 | Relay module IN2 (core 1, relay 2) | yellow |
+
+The stop circuit runs through the relay contacts and the Phoenix header in the
+port wall, in wire sized for the robot's loop:
+
+| From | To |
+|---|---|
+| Header pin 1 | Relay 1 COM |
+| Relay 1 NO | Relay 2 COM |
+| Relay 2 NO | Header pin 2 |
+
+```mermaid
+flowchart LR
+    subgraph BOARD["ESP32-S3-ETH"]
+        direction TB
+        P5V["VBUS"]
+        GND["GND"]
+        G17["IO17"]
+        G39["IO39 core 0"]
+        G41["IO41 core 1"]
+    end
+
+    subgraph RING["WS2812 ring, 16 LEDs"]
+        direction TB
+        RV["5V"]
+        RG["GND"]
+        RD["DIN"]
+    end
+
+    subgraph RELAY["2-channel relay module, active-high"]
+        direction TB
+        RVCC["VCC"]
+        RGND["GND"]
+        IN1["IN1"]
+        IN2["IN2"]
+        K1["relay 1 COM / NO"]
+        K2["relay 2 COM / NO"]
+    end
+
+    subgraph HDR["Phoenix header"]
+        direction TB
+        H1["pin 1"]
+        H2["pin 2"]
+    end
+
+    ROBOT["robot stop circuit"]
+
+    P5V --- |red| RV
+    GND --- |black| RG
+    G17 --- |green| RD
+    P5V --- |red| RVCC
+    GND --- |black| RGND
+    G39 --- |white| IN1
+    G41 --- |yellow| IN2
+    H1 --- |COM| K1
+    K1 --- |NO to COM| K2
+    K2 --- |NO| H2
+    H1 --- ROBOT
+    H2 --- ROBOT
+
+    linkStyle 0,3 stroke:#d33,stroke-width:2px
+    linkStyle 1,4 stroke:#333,stroke-width:2px
+    linkStyle 2 stroke:#2a2,stroke-width:2px
+    linkStyle 5 stroke:#aaa,stroke-width:2px
+    linkStyle 6 stroke:#cc2,stroke-width:2px
+    linkStyle 7,8,9,10,11 stroke:#36c,stroke-width:3px
+```
+
+Notes:
+
+- Use an **active-high** module (IN high = coil energized) and the **NO**
+  contacts only. An active-low module, or the NC contacts, would close the stop
+  circuit whenever the box loses power or a signal wire breaks. The fail-safe
+  check in the assembly guide (step 5) catches both; run it before the box is
+  connected to a robot.
+- Leave the module's JD-VCC jumper fitted, so the coils run from the board's
+  5 V.
+- IO40 and IO42 stay unconnected: relay feedback is compiled out
+  (`CONFIG_MACHN_RELAY_FEEDBACK`, see `../docs/RELAY_FEEDBACK_DESCOPE.md`).
+- The header is rated 12 A / 320 V; the relays and the robot's stop circuit
+  set the real limit.
+- The ring's LED 1 is calibrated over the network, as on the remote.
+
 ## Bill of materials
 
 Everything except the printed parts is ordered online. Listings are

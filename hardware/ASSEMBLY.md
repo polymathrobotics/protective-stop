@@ -119,7 +119,8 @@ series** in the robot's stop circuit: each core drives one relay, so either
 core alone can stop the robot. The stop circuit leaves the box through a
 pluggable Phoenix terminal block. The enclosure source is
 `machine-casing.FCStd`; it also contains the Phoenix header and plug models
-as fit references.
+as fit references. Wire colors and pin names follow the
+[machine wiring table](README.md#machine-box-pinout-and-wiring).
 
 ## Parts
 
