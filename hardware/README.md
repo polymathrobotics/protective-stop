@@ -246,5 +246,13 @@ The editable source for the custom parts is `casing.FCStd` (remote) and
 exports, and the STEP models are references used for fit.
 Build steps live in [ASSEMBLY.md](ASSEMBLY.md).
 
+The machine box will move from an off-the-shelf relay module to a custom board
+with force-guided relays whose contact state the microcontroller reads back.
+Work in progress (schematic done, layout not started): read the
+[schematic PDF](relay-board/relay-board-schematic.pdf), then
+[relay-board/DESIGN.md](relay-board/DESIGN.md), and
+[relay-board/TOOLING.md](relay-board/TOOLING.md) for the tools used and how to
+reproduce the environment.
+
 OSHWA certification details and maintenance notes are in
 [`../docs/OSHWA_COMPLIANCE.md`](../docs/OSHWA_COMPLIANCE.md).
