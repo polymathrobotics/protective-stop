@@ -44,7 +44,10 @@ static uint32_t s_diag_wg_rx_drops; /* wg_rx_queue full at THIS producer (edge s
  * dwell/TLS fields; readers take a torn-tolerant snapshot (diagnostics). */
 static uint32_t s_g_dwell_hist[5]; /* prio queue: <=50 <=200 <=400 <=1000 >1000 ms */
 static uint32_t s_g_dwell_prio_max, s_g_dwell_norm_max, s_g_dwell_leg2_max, s_g_leg2_hb_stale;
-static uint32_t s_g_tls_occ_max, s_g_tls_occ_slot, s_g_tls_want_read, s_g_tls_want_write, s_g_tls_timeout;
+static uint32_t s_g_tls_want_read, s_g_tls_want_write, s_g_tls_timeout;
+/* Worst TLS write occupancy as (ms << 8) | pool slot in one word: one store, one load,
+ * so the monitor never pairs a new max with the previous worst call's slot. */
+static uint32_t s_g_tls_occ_packed;
 static uint32_t s_g_tls_abandoned, s_g_tls_retried_calls;
 
 static uint16_t s_diag_last_dns_ms; /* most recent blocking DNS resolve duration */
@@ -202,9 +205,9 @@ static int derp_tls_write_all(microlink_t * ml, ml_derp_conn_t * c, const uint8_
   }
   if (retried) s_g_tls_retried_calls++;
   uint32_t occ = ml_get_time_ms() - t0_ms;
-  if (occ > s_g_tls_occ_max) {
-    s_g_tls_occ_max = occ;
-    s_g_tls_occ_slot = (uint32_t)(c - ml->derp); /* which pool connection stalled the pass */
+  if (occ > 0xFFFFFFu) occ = 0xFFFFFFu;
+  if (occ > (s_g_tls_occ_packed >> 8)) {
+    s_g_tls_occ_packed = (occ << 8) | ((uint32_t)(c - ml->derp) & 0xFFu); /* slot that stalled the pass */
   }
   return result;
 }
@@ -1226,13 +1229,14 @@ void ml_derp_get_gauges(uint32_t out[ML_DERP_GAUGES_N])
   out[6] = s_g_dwell_norm_max;
   out[7] = s_g_dwell_leg2_max;
   out[8] = s_g_leg2_hb_stale;
-  out[9] = s_g_tls_occ_max;
+  const uint32_t occ = s_g_tls_occ_packed;
+  out[9] = occ >> 8;
   out[10] = s_g_tls_want_read;
   out[11] = s_g_tls_want_write;
   out[12] = s_g_tls_timeout;
   out[13] = s_g_tls_abandoned;
   out[14] = s_g_tls_retried_calls;
-  out[15] = s_g_tls_occ_slot;
+  out[15] = occ & 0xFFu;
 }
 
 void ml_derp_get_iter_diag(uint32_t out[2])
