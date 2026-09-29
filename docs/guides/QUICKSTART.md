@@ -31,7 +31,7 @@ the ROS 2 install.
 | USB-C data cable | Power, and the network if you use USB. |
 | Ethernet cable and a DHCP LAN with internet | Only for the Ethernet path. A PoE switch port powers the remote too. |
 | Laptop | Ubuntu 24.04 with internet (22.04 works with ROS 2 Humble). |
-| Python 3 | Step 3 installs `esptool` with it. |
+| [uv](https://docs.astral.sh/uv/getting-started/installation/) | Runs every Python tool in this repo, `esptool` included, from one locked environment ([`tools/README.md`](../tools/README.md)). It fetches Python itself. |
 | ROS 2 Jazzy | [Install guide](https://docs.ros.org/en/jazzy/Installation/Ubuntu-Install-Debs.html); `ros-jazzy-ros-base` is enough. |
 | Tailscale account | Free tier is fine. |
 
@@ -62,6 +62,13 @@ git clone https://github.com/polymathrobotics/protective-stop.git
 cd protective-stop
 ```
 
+Set up the Python tooling once (install uv with
+`curl -LsSf https://astral.sh/uv/install.sh | sh` and open a new shell first):
+
+```sh
+(cd tools && uv sync)
+```
+
 **USB path only** — make the laptop own the USB link (address, DHCP for the
 remote, internet sharing), once per laptop:
 
@@ -82,10 +89,10 @@ Into an empty folder, download three files from the
 mode) and, using the exact filename you downloaded:
 
 ```sh
-python3 -m pip install --user esptool      # once; the repo's tools/ venv (uv) also has it, see docs/developing/testing/tools.md
+cd tools                                   # the uv environment from step 2
 sha256sum -c SHA256SUMS --ignore-missing   # expect: two lines ending in OK
 ls /dev/ttyACM*                            # expect: /dev/ttyACM0
-python3 -m esptool --chip esp32s3 -p /dev/ttyACM0 -b 460800 write_flash 0x0 pstop_remote-<version>-public-fullflash.bin
+uv run esptool --chip esp32s3 -p /dev/ttyACM0 -b 460800 write_flash 0x0 pstop_remote-<version>-public-fullflash.bin
 # expect: … Hash of data verified. … Hard resetting via RTS pin…
 ```
 
@@ -158,9 +165,7 @@ if device approval is on and you did not pre-approve the key, **approve** it.
 
 ```sh
 source /opt/ros/jazzy/setup.bash
-sudo apt install -y ros-jazzy-generate-parameter-library ros-jazzy-diagnostic-updater \
-                    ros-jazzy-rclcpp-lifecycle ros-jazzy-rclcpp-components libcurl4-openssl-dev
-cd ros2                              # from the repo root (step 2); build from ros2/, not the repo root
+rosdep update && rosdep install -iy --from-paths ros2/
 colcon build --packages-up-to protective_stop_machine
 source install/setup.bash
 ros2 run protective_stop_machine machine_bridge_node
@@ -284,7 +289,7 @@ stays off the tailnet until it is given a new key.
 ## Appendix C: updating, reflashing, and what persists
 
 **Update a running unit** (keeps every setting): send the app image
-(`pstop_remote-<version>-public.bin`, downloaded in step 3 or from the new
+(`pstop_remote-<version>-public.bin`, downloaded to `tools/` in step 3 or from the new
 release) over the USB or LAN link; the remote reboots into it.
 
 ```sh
@@ -297,7 +302,7 @@ and start flashing within 60 s), then flash. The full-flash image is the factory
 settings; to keep them, use the OTA command above instead.
 
 **Start over**: flash the full-flash image, or
-`python3 -m esptool --chip esp32s3 -p /dev/ttyACM0 erase_flash` (then flash the
+`cd tools && uv run esptool --chip esp32s3 -p /dev/ttyACM0 erase_flash` (then flash the
 full-flash image; an erased chip has no firmware). Either wipes the Tailscale
 identity, key, peer, role and health counters. The remote does not come back
 on the tailnet by itself: repeat step 4 (new key paste), then step 6; it

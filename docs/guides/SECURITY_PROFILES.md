@@ -27,13 +27,18 @@ tailnet as the remote. The build profile decides how hard that is:
 ## Building
 
 ```sh
+. ~/esp/esp-idf/export.sh          # ESP-IDF v5.5; wherever you installed it
 cd firmware                        # or machn
 idf.py build                       # secure-fe
 idf.py -DPSTOP_PROFILE=dev build
 ```
 
-The profile is fixed when `sdkconfig` is generated. Build another profile in its
-own directory: `idf.py -B build-dev -DSDKCONFIG=build-dev/sdkconfig -DPSTOP_PROFILE=dev build`.
+The profile is fixed when `sdkconfig` is generated, so pick one per directory.
+For `dev`, or to keep a second profile beside the first, use its own build directory:
+
+```sh
+idf.py -B build-dev -DSDKCONFIG=build-dev/sdkconfig -DPSTOP_PROFILE=dev build
+```
 
 The secure overlays in [`firmware/profiles/`](../../firmware/profiles/):
 
@@ -68,11 +73,39 @@ outside the repository with `openssl genrsa -out primary.pem 3072` (the same for
 key apart from the other two. Losing both signing keys means the units can never be updated again;
 losing the master leaves only OTA updates, no USB recovery.
 
+Export the variables in the shell that runs `pstop_secure.py`, either as file paths:
+
+```sh
+export PSTOP_SIGNING_KEY=~/pstop-keys/primary.pem
+export PSTOP_BACKUP_KEY=~/pstop-keys/backup.pem
+export PSTOP_FE_MASTER=~/pstop-keys/fe_master.txt
+```
+
+or as 1Password references, read with the [`op` CLI](https://developer.1password.com/docs/cli/get-started/) (signed in first, e.g. `op signin`):
+
+```sh
+export PSTOP_SIGNING_KEY='op://Vault/pstop primary key/private key'
+export PSTOP_BACKUP_KEY='op://Vault/pstop backup key/private key'
+export PSTOP_FE_MASTER='op://Vault/pstop fe master/password'
+```
+
+Each command reads only the secrets it needs:
+
+| Command | Variables |
+|---|---|
+| `sign-bootloader` | `PSTOP_SIGNING_KEY`, `PSTOP_BACKUP_KEY` |
+| `sign-ota` | `PSTOP_SIGNING_KEY` |
+| `provision`, `flash` | `PSTOP_SIGNING_KEY`, and `PSTOP_FE_MASTER` on `secure-fe` |
+
+Secrets are staged in `/dev/shm` for the duration of one command and never written to disk.
+`uv run` passes the environment through, so the variables need no other setup.
+
 The bootloader carries both signatures and cannot be updated over the air, so it
 is signed once per bootloader version, and provisioning needs only the primary:
 
 ```sh
 cd tools
+uv sync
 uv run python pstop_secure.py sign-bootloader ../firmware/build -o bootloader-signed.bin
 ```
 
@@ -109,6 +142,7 @@ flash is erased and it enrolls as a new node.
 Over the network:
 
 ```sh
+cd tools
 uv run python pstop_secure.py sign-ota ../firmware/build -o pstop_remote-signed.bin
 curl -u "admin:$ADMIN_PW" --data-binary @pstop_remote-signed.bin -X POST "http://$DEV/admin/api/ota"
 ```
@@ -123,7 +157,7 @@ uv run python pstop_secure.py flash -p /dev/ttyACM0 ../firmware/build
 (`--full --bootloader bootloader-signed.bin` also rewrites the bootloader and
 partition table). If the app does not run, power-cycle the unit and start the
 same command as soon as `303a:1001` appears. Secure Download Mode only writes
-(esptool 5.3.1 or newer); `esptool --no-stub get-security-info` shows a unit's
+(esptool 5.3.1 or newer); `uv run esptool --no-stub get-security-info` shows a unit's
 state. Never enter download mode with a system reset: it re-arms the RTC
 watchdog's ~9 s flash-boot protection, which esptool cannot disable in Secure
 Download Mode.

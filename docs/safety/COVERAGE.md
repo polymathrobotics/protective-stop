@@ -115,7 +115,7 @@ summary. `SKIP_ROS2=1` for a host+firmware-only run. Manual per-codebase steps:
 cd host && gcc -O0 -g --coverage -I../pstop_c/pstop/include -I../pstop_c/transport/include \
   -o machine_app_runner machine_app_runner.c ../pstop_c/pstop/src/pstop/*.c \
   ../pstop_c/transport/src/transport/udp/udp_transport.c
-python3 ../tools/pstop_multi_remote_test.py
+(cd ../tools && uv run python pstop_multi_remote_test.py)
 gcovr --filter 'host/machine_app_runner\.c' --print-summary
 ```
 
