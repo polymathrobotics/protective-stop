@@ -126,6 +126,8 @@ Note `pstop_c/` is intentionally excluded from the C/C++ hooks.
 
 ## Pull request expectations
 
+- **Code owner review.** At least one approval from a maintainer listed in
+  [`.github/CODEOWNERS`](.github/CODEOWNERS) is required to merge.
 - **CI green.** Firmware build, host build, `pstop_c` build + tests, and
   pre-commit must all pass.
 - **Pre-commit clean.** Run it locally before pushing; do not disable
