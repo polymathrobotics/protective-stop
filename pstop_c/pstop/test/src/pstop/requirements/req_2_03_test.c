@@ -58,6 +58,7 @@ req_2_03_1_test(void)
     pstop_msg_t resp;
     pstop_message_init(&resp);
 
+    set_time(100);
     // succesfull bond
     TEST_ASSERT_EQUAL(PSTOP_OK, machine_process_message(&machine, &req, &resp));
     TEST_ASSERT_EQUAL(PSTOP_MESSAGE_BOND, resp.message);
@@ -72,6 +73,7 @@ req_2_03_1_test(void)
     req.stamp = 110;
     req.received_counter = resp.counter;
     req.received_stamp = resp.stamp;
+    set_time(110);
     TEST_ASSERT_EQUAL(PSTOP_OK, machine_process_message(&machine, &req, &resp));
     remote = machine_get_protocol_data(&machine, &REMOTE);
     TEST_ASSERT_NOT_NULL(remote);
@@ -81,9 +83,10 @@ req_2_03_1_test(void)
     // now send message with a counter too far in the future
     req.message = PSTOP_MESSAGE_STOP;
     req.counter = 14;
-    req.stamp = 110;
+    req.stamp = 120;
     req.received_counter = resp.counter;
     req.received_stamp = resp.stamp;
+    set_time(120);
     TEST_ASSERT_EQUAL(PSTOP_MSG_LOST, machine_process_message(&machine, &req, &resp));
     remote = machine_get_protocol_data(&machine, &REMOTE);
     TEST_ASSERT_NOT_NULL(remote);
@@ -125,6 +128,7 @@ req_2_03_2_test(void)
     pstop_message_init(&resp);
 
     // succesfull bond
+    set_time(100);
     TEST_ASSERT_EQUAL(PSTOP_OK, machine_process_message(&machine, &req, &resp));
     TEST_ASSERT_EQUAL(PSTOP_MESSAGE_BOND, resp.message);
 
@@ -138,6 +142,7 @@ req_2_03_2_test(void)
     req.stamp = 110;
     req.received_counter = resp.counter;
     req.received_stamp = resp.stamp;
+    set_time(110);
     TEST_ASSERT_EQUAL(PSTOP_OK, machine_process_message(&machine, &req, &resp));
     remote = machine_get_protocol_data(&machine, &REMOTE);
     TEST_ASSERT_NOT_NULL(remote);
@@ -150,6 +155,7 @@ req_2_03_2_test(void)
     req.stamp = 1000;
     req.received_counter = resp.counter;
     req.received_stamp = resp.stamp;
+    set_time(1000);
     TEST_ASSERT_EQUAL(PSTOP_OK, machine_process_message(&machine, &req, &resp));
     remote = machine_get_protocol_data(&machine, &REMOTE);
     TEST_ASSERT_NOT_NULL(remote);
