@@ -99,9 +99,10 @@ The short version (ESP-IDF 5.5 required):
 ```sh
 cp firmware/sdkconfig.credentials.example firmware/sdkconfig.credentials
 $EDITOR firmware/sdkconfig.credentials            # Tailscale auth key + admin password
-cd firmware && . /path/to/esp-idf-v5.5/export.sh
+cd firmware && . ~/esp/esp-idf/export.sh
 idf.py -DPSTOP_PROFILE=dev build && idf.py -p /dev/ttyACM0 flash   # dev profile: bench only
 
+cd ../tools && uv sync                # once: the Python environment for flashing and tests, see developing/testing/tools.md
 cd ../ros2 && colcon build --packages-up-to protective_stop_machine
 ros2 run protective_stop_machine machine_bridge_node
 curl -X POST "http://<remote>/api/pstop_peer?ip=<laptop-tailscale-ip>&port=8890"

@@ -31,7 +31,7 @@ the ROS 2 install.
 | USB-C data cable | Power, and the network if you use USB. |
 | Ethernet cable and a DHCP LAN with internet | Only for the Ethernet path. A PoE switch port powers the remote too. |
 | Laptop | Ubuntu 24.04 with internet (22.04 works with ROS 2 Humble). |
-| [uv](https://docs.astral.sh/uv/getting-started/installation/) | Runs every Python tool in this repo, `esptool` included, from one locked environment ([`tools/README.md`](../tools/README.md)). It fetches Python itself. |
+| [uv](https://docs.astral.sh/uv/getting-started/installation/) | Runs every Python tool in this repo, `esptool` included, from one locked environment ([`tools/README.md`](../developing/testing/tools.md)). It fetches Python itself. |
 | ROS 2 Jazzy | [Install guide](https://docs.ros.org/en/jazzy/Installation/Ubuntu-Install-Debs.html); `ros-jazzy-ros-base` is enough. |
 | Tailscale account | Free tier is fine. |
 
