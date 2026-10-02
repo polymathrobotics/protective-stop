@@ -8,11 +8,8 @@ on:
       - docs/**
       - website/**
       - .github/workflows/docs.yml
+  # Unfiltered: docs link to files across the repo, and the build fails on a broken one.
   pull_request:
-    paths:
-      - docs/**
-      - website/**
-      - .github/workflows/docs.yml
   workflow_dispatch:
 
 concurrency:

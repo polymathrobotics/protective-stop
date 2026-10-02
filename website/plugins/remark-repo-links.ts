@@ -54,7 +54,7 @@ export default function remarkRepoLinks() {
       if (!isInside(REPO_ROOT, fsPath) || !fs.existsSync(fsPath)) {
         return;
       }
-      if (!pathPart.startsWith('/') && isInside(DOCS_ROOT, fsPath)) {
+      if (isInside(DOCS_ROOT, fsPath)) {
         return;
       }
       const repoPath = path.relative(REPO_ROOT, fsPath);

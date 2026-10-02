@@ -76,7 +76,7 @@ preferred, with USB-NCM and WiFi available as fallbacks.
 | [`host/`](guides/host.md) | Plain-C machine process and its documented configuration |
 | [`ros2/`](/ros2/) | ROS 2 machine node and messages |
 | [`components/`](/components/) | Embedded networking, USB tether, and `pstop_c` integration |
-| [`docs/`](/docs/) | API, recovery, testing, networking, and safety-case documentation |
+| [`docs/`](index.md) | API, recovery, testing, networking, and safety-case documentation |
 | [`tools/`](developing/testing/tools.md) and [`test/`](/test/) | Protocol, chaos, soak, flashing, and static-analysis tools (see the [tools guide](developing/testing/tools.md) for the uv setup) |
 
 Tailscale support uses
@@ -175,7 +175,7 @@ in [`LICENSE`](/LICENSE) and [`LICENSES/`](/LICENSES/).
 The design target for the on-demand stop function is SIL 3 under IEC 61508 and
 PL e under ISO 13849. These are engineering targets, not current
 functional-safety certifications. The safety case and remaining evidence gaps
-are tracked in [`docs/safety/`](/docs/safety/) and
+are tracked in [`docs/safety/`](safety/SYSTEM_DEFINITION.md) and
 [`OPEN_ITEMS.md`](safety/OPEN_ITEMS.md).
 
 ## Contributing
