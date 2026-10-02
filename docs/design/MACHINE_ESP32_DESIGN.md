@@ -52,7 +52,7 @@ transmit only on agreement. The machine inverts it:
 > new machine hardware revision whose wiring makes the divider voltages
 > unreadable. The relay **drive** (below) and the series de-energize-to-safe
 > stop are unchanged. Set the Kconfig to `y` to restore feedback. Full detail +
-> safety-case impact: docs/RELAY_FEEDBACK_DESCOPE.md.
+> safety-case impact: docs/design/RELAY_FEEDBACK_DESCOPE.md.
 
 Two opto-isolated relays, contacts **wired in series** in the robot's
 stop circuit — either core alone can break the circuit:

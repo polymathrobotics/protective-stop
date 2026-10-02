@@ -110,7 +110,7 @@ chip). Without it the host waits forever for DHCP that never comes,
 and the chip, seeing no usable USB uplink, falls back to its
 provisioned WiFi. Fix (two files, once per host): install
 `host/70-esp-pstop.link` and add the shared profile — full steps in
-`host/README.md` → "USB tether — one-time host setup". After replug
+[host guide](host.md) → "USB tether — one-time host setup". After replug
 the chip DHCPs to `10.42.0.x` and prefers the USB uplink. Point it at a
 machine node on the host with `POST /api/pstop_peer?ip=10.42.0.1&port=8890`
 (a fresh unit has no peer configured).
@@ -182,7 +182,7 @@ has been reading open while the other read closed, more than
 terminal pairs and the header, then watch `mismatch_events` for a week; if it
 keeps climbing the switch contacts are bouncing and it is due for
 replacement. The counters survive reflash and OTA; `erase-flash` zeroes them.
-Field semantics: `docs/MONITORING.md`.
+Field semantics: `docs/guides/MONITORING.md`.
 
 ### `pstop_mismatch` climbing / ring purple
 

@@ -23,16 +23,16 @@ certification and does not by itself establish SIL or PL performance.
 
 The certified source package is maintained in this public repository:
 
-- Editable enclosure source and exports: [`hardware/`](../hardware/)
-- Bill of materials and wiring: [`hardware/README.md`](../hardware/README.md)
-- Photographed build guide: [`hardware/ASSEMBLY.md`](../hardware/ASSEMBLY.md)
-- Firmware and host software: [`firmware/`](../firmware/) and [`host/`](../host/)
-- Design, API, testing, and safety documentation: [`docs/`](./)
-- License texts: [`LICENSE`](../LICENSE) and [`LICENSES/`](../LICENSES/)
+- Editable enclosure source and exports: [`hardware/`](../../hardware/)
+- Bill of materials and wiring: [hardware guide](index.md)
+- Photographed build guide: [assembly guide](assembly.md)
+- Firmware and host software: [`firmware/`](../../firmware/) and [`host/`](../../host/)
+- Design, API, testing, and safety documentation: [`docs/`](../)
+- License texts: [`LICENSE`](../../LICENSE) and [`LICENSES/`](../../LICENSES/)
 
 The design uses an off-the-shelf ESP32-S3 Ethernet carrier, LED ring, and DPST
 normally closed stop switch. Their source links and freely accessible
-datasheets are listed in [`hardware/README.md`](../hardware/README.md).
+datasheets are listed in [hardware guide](index.md).
 
 ## Certification mark
 

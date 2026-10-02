@@ -28,7 +28,7 @@
  *   GET/POST /api/role            Read or persist role; POST reboots to apply
  *
  * The admin routes (/admin/...) live in microlink (ml_config_httpd.c, ml_app.c).
- * Full reference for both servers: docs/API.md.
+ * Full reference for both servers: docs/guides/API.md.
  *
  * All handlers are pure HTTP plumbing — telemetry values come from the
  * dcs_internal.h atomics that main.c populates via dcs_publish_*.

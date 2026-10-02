@@ -72,3 +72,7 @@ tools/fleet.env
 
 # uv-managed environment (tools/, and any stale one left by an older run.sh)
 .venv/
+
+# Docusaurus site (website/); node_modules and build/ are covered above
+website/.docusaurus/
+website/.cache-loader/

@@ -31,10 +31,10 @@
  *     diagram is coming in which the divider feedback voltages cannot be read
  *     sanely; the read-back path is therefore gated OFF (relays are still
  *     DRIVEN exactly as before). Rationale, reversal steps, and safety-case
- *     impact: docs/RELAY_FEEDBACK_DESCOPE.md. Set the Kconfig to y to restore.
+ *     impact: docs/design/RELAY_FEEDBACK_DESCOPE.md. Set the Kconfig to y to restore.
  *
  * pstop_c (certification track) is UNMODIFIED — this file is the shell.
- * Design: docs/MACHINE_ESP32_DESIGN.md. Scaffold status: timing config is
+ * Design: docs/design/MACHINE_ESP32_DESIGN.md. Scaffold status: timing config is
  * compile-time constants. Admission (may a remote BOND at all) is the optional
  * NVS-backed allow/denylist (dcs_list_*, managed at /api/admission; both empty
  * = everyone). Re-arm authority is the REMOTE's own announced role, re-read on
@@ -117,7 +117,7 @@ static const char * TAG = "machn";
  *  re-verify the SENSE pin numbers / divider ratios for the new wiring). No  *
  *  other change needed.                                                      *
  *                                                                            *
- *  Full rationale + safety-case impact: docs/RELAY_FEEDBACK_DESCOPE.md       *
+ *  Full rationale + safety-case impact: docs/design/RELAY_FEEDBACK_DESCOPE.md       *
  * ========================================================================= */
 
 #define RELAY_FEEDBACK_MS 100u /* commanded->observed settle allowance (TBD by part) */
@@ -141,7 +141,7 @@ static const char * TAG = "machn";
  * on a frozen or backward esp_timer it forces STOP (opens both relays +
  * machine_stop_robot on both cores) and does a controlled reset for recovery —
  * the machine analogue of the remote's dual-core clock cross-check
- * (docs/WATCHDOG_CLOCK_PROTECTION.md). */
+ * (docs/safety/WATCHDOG_CLOCK_PROTECTION.md). */
 #define MACHN_CLK_STALL_TICKS pdMS_TO_TICKS(500) /* esp_timer no-advance tolerance */
 #define MACHN_CLK_RESET_GRACE_MS 500u /* STOP settle before the controlled reset */
 #define MACHN_TWDT_STARTUP_DELAY_MS 5000u /* match the remote: don't subscribe unfed */
@@ -444,7 +444,7 @@ static void relay_feedback_check(void)
    * half is reported false and flagged not-monitored by the comparator's
    * dcs_publish_relay_fault(monitored=false) call, so nothing mistakes it for
    * a live divider reading. See the gate comment and
-   * docs/RELAY_FEEDBACK_DESCOPE.md. */
+   * docs/design/RELAY_FEEDBACK_DESCOPE.md. */
   dcs_publish_estop(0, g_relay_cmd[0] != 0, false);
   dcs_publish_estop(1, g_relay_cmd[1] != 0, false);
 #else

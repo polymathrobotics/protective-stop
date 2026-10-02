@@ -30,7 +30,7 @@ it across the public internet — a realistic robot↔operator split, not a LAN 
 > DIRECT path** and homed on the same region. It does **NOT** cover the
 > sustained-DERP-only, **cross-region**, dumb-far-peer origination case — that was
 > a separate root cause (single DERP home region) fixed by the multi-region relay
-> on 2026-08-04. See `docs/OUTBOUND_COLD_BOND.md`. Read this result as
+> on 2026-08-04. See `docs/design/OUTBOUND_COLD_BOND.md`. Read this result as
 > "same-region cold connect works," not "all cold connects work."
 
 Result: chip cold-boots → bonds to framework16 with **no manual intervention**,
