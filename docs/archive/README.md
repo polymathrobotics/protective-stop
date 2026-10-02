@@ -8,6 +8,6 @@ failure modes that have since been root-caused and fixed (notably the
 task-stack overflows and an lwIP cross-thread bug, resolved in
 v15.20–v15.26), and they reference bench addresses, version numbers,
 endpoints, and file paths that no longer exist. The current, verified
-documentation lives one level up in `docs/` (start with the top-level
-`README.md`); superseded copies of promoted reports have been removed
+documentation lives one level up in `docs/` (start with the
+[overview](../index.md)); superseded copies of promoted reports have been removed
 from here to avoid duplicates.

@@ -16,8 +16,8 @@ remote is either an **operator** (may STOP *and* re-arm) or **stop-only** (may S
 and is heartbeat-monitored, but may never re-arm) — the remote declares which it
 is (`/api/role`), live. Machines may optionally restrict *who may bond* with an
 admission allow/denylist (`/api/admission`). See
-`docs/FAILOVER_AND_ARMING_DESIGN_2026-07-21.md` and the authorization model in
-`docs/API.md`.
+`docs/design/FAILOVER_AND_ARMING_DESIGN_2026-07-21.md` and the authorization model in
+`docs/guides/API.md`.
 
 ## 2. Topology
 
@@ -25,7 +25,7 @@ admission allow/denylist (`/api/admission`). See
   Only an operator remote can re-arm. First operator to STOP owns the re-arm cycle.
 - **One remote → many machines (≤4 slots):** the remote holds a peer slot per
   machine (ports 8891–8894), bonds each independently, and a STOP/silence on ANY
-  slot stops that machine. See `docs/API.md` "Multi-machine".
+  slot stops that machine. See `docs/guides/API.md` "Multi-machine".
 - Machines and remotes are ordinary Tailscale nodes; they reach each other by
   their tailnet (VPN) IP over WireGuard — **direct** when a path can be punched,
   else **DERP-relayed**. Cross-site (different LANs) is the normal production case.
@@ -137,7 +137,7 @@ sized.
   peers**, up to `ML_DERP_MAX_CONNS` (6). A DERP server only relays between peers
   connected to *it*, so before multi-region a machine on a different region than
   the chip's home was unreachable **outbound** (errno 128 — see
-  `docs/OUTBOUND_COLD_BOND.md`). Now the chip routes each peer's relayed frames to
+  `docs/design/OUTBOUND_COLD_BOND.md`). Now the chip routes each peer's relayed frames to
   that peer's region automatically, so cross-region remote↔machine bonds without a
   manual `tailscale ping`. If a link still only comes up after a ping, check
   `/admin/api/monitor` `derp_pool[]` — an aux conn for the peer's region should be
@@ -163,7 +163,7 @@ Check the tailnet size before doing anything:
    `derp_effective_home_region` and `derp_pool[]` vs the machine's region. With the
    multi-region relay (2026-08-04) the chip opens an aux DERP conn on the machine's
    region automatically; if it hasn't, the machine's region is unknown/unreachable.
-   Full details and the fix history: **`docs/OUTBOUND_COLD_BOND.md`**. This is the
+   Full details and the fix history: **`docs/design/OUTBOUND_COLD_BOND.md`**. This is the
    most-misdiagnosed case — it is not a peer count problem.
 1. **Is the tailnet > 128 nodes?** (`/admin/api/peers` length = 128 on both = at the
    cap.) If so → peer-cap trim. Fix: **allowlist the remote on the machine**
@@ -179,7 +179,7 @@ Check the tailnet size before doing anything:
 
 ## 8. Reference
 
-- Authorization / arming: `docs/FAILOVER_AND_ARMING_DESIGN_2026-07-21.md`, `docs/API.md`.
-- Machine node: `docs/MACHINE_ESP32_DESIGN.md`. Multi-machine API: `docs/API.md`.
+- Authorization / arming: `docs/design/FAILOVER_AND_ARMING_DESIGN_2026-07-21.md`, `docs/guides/API.md`.
+- Machine node: `docs/design/MACHINE_ESP32_DESIGN.md`. Multi-machine API: `docs/guides/API.md`.
 - Peer-cap fix: `components/microlink/src/ml_wg_mgr.c` (`s_extra_pins`, peer-wanted
   hook), `machn/main/main.c` (operator match). Safety case: HARA H-13 / SR-SYS-09.

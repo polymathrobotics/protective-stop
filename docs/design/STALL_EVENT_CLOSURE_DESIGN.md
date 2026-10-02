@@ -27,7 +27,7 @@ loop, 10 ms cadence):
   wg_mgr_drain_wg_rx, the post-disco tail drain, and the pre-registration
   drain) are "safety first" — but HANDSHAKE packets share that FIFO with
   the heartbeats, and an inbound INITIATION costs ~4 X25519 ≈ 45 ms
-  MEASURED (11.3 ms/op, docs/CRYPTO_SPEEDUP_REPORT.md; a response ≈ 2 ≈
+  MEASURED (11.3 ms/op, docs/design/CRYPTO_SPEEDUP_REPORT.md; a response ≈ 2 ≈
   23 ms). A wave of ~44-88 initiations stalls heartbeat processing 2-4 s.
   Every other burst source in this loop is already budgeted (disco opens,
   peer-adds with safety-decrypt interleave, CMM sends).

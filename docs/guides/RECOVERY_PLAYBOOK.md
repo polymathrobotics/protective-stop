@@ -136,7 +136,7 @@ leave no bootable image — but if it does:
 2. `cd firmware && idf.py -p /dev/ttyACM0 flash` (or esptool directly).
    For production/bulk provisioning from a pre-built image, use
    `tools/flash_pstop.sh` (auto-detects a download-mode chip; `--from-ip`
-   forces a running unit into download mode). See `README.md`.
+   forces a running unit into download mode). See the [overview](../index.md).
 3. The chip auto-reboots into normal mode. NVS (settings, pstop peer,
    reset history) survives — the partition table keeps stable offsets.
 
@@ -201,9 +201,9 @@ configured heartbeat rate, the build is healthy.
 ## Required tools on the bench host
 
 `curl`, `jq`, and [uv](https://docs.astral.sh/uv/) for the `tools/` scripts
-(`cd tools && uv sync`; see `tools/README.md`).
+(`cd tools && uv sync`; see the [tools guide](../developing/testing/tools.md)).
 A sourced ESP-IDF is not enough for them — the flashing tools need the
 `esptool` v5 pinned in `tools/pyproject.toml`, and IDF 5.5 constrains
 `esptool~=4.12`.
 ESP-IDF 5.5 (`source ~/esp-idf-5.5/export.sh`) is for builds and `idf.py flash`.
-The machine side needs only `cc` + `make` (see `host/README.md`).
+The machine side needs only `cc` + `make` (see the [host guide](host.md)).

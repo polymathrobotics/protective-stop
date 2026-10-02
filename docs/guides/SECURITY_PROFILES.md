@@ -35,18 +35,18 @@ idf.py -DPSTOP_PROFILE=dev build
 The profile is fixed when `sdkconfig` is generated. Build another profile in its
 own directory: `idf.py -B build-dev -DSDKCONFIG=build-dev/sdkconfig -DPSTOP_PROFILE=dev build`.
 
-The secure overlays in [`firmware/profiles/`](../firmware/profiles/):
+The secure overlays in [`firmware/profiles/`](../../firmware/profiles/):
 
 - build **unsigned** images, so CI, releases and adopters need no keys and each
   owner signs with their own;
 - set the bootloader's RTC watchdog to 60 s. Secure Download Mode stops esptool
   from disabling it, and a USB recovery after a power-cycle takes about 30 s for
   a 1.4 MB app (~20 s per MB). Raise it if the app grows past ~2.5 MB;
-- use [`partitions-secure.csv`](../firmware/partitions-secure.csv): the secure
+- use [`partitions-secure.csv`](../../firmware/partitions-secure.csv): the secure
   bootloader needs the partition table at 0x10000, so `ota_0` gives up 64 KB.
   Units change layout only when provisioned by cable, never by OTA.
 
-`idf.py flash` does not provision a secure build; [`tools/pstop_secure.py`](../tools/pstop_secure.py)
+`idf.py flash` does not provision a secure build; [`tools/pstop_secure.py`](../../tools/pstop_secure.py)
 does, as below.
 
 The image refuses to run on a chip whose Secure Boot state does not match it

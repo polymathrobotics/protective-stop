@@ -13,7 +13,7 @@
 > **ORIGINATING** a safety bond to a peer on a **different DERP region** (outbound
 > cold-bond, errno 128) — that was a *separate* root cause (single DERP home
 > region), fixed by the multi-region relay on 2026-08-04. See
-> **`docs/OUTBOUND_COLD_BOND.md`** for the full four-precondition chain. Do not
+> **`docs/design/OUTBOUND_COLD_BOND.md`** for the full four-precondition chain. Do not
 > read the "ROOT CAUSE FOUND + FIXED" banner as closing the outbound case.
 
 **Working assumption (deliberate bias): this is solvable in ESP32 firmware.**

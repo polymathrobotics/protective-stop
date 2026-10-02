@@ -278,7 +278,7 @@ enum
  * refused kick just lands next tick. */
 #define ML_DERP_CONNECT_SPACING_MS 1500
 #define ML_DERP_RX_STALE_TX_ACTIVE_MS 30000
-/* WG-rx handshake budget (docs/STALL_EVENT_CLOSURE_DESIGN.md): an inbound
+/* WG-rx handshake budget (docs/design/STALL_EVENT_CLOSURE_DESIGN.md): an inbound
  * WG INITIATION costs ~4 X25519 ≈ 45 ms measured and is processed holding
  * LOCK_TCPIP_CORE — an unbounded wave stalls heartbeat processing, the DERP
  * task's sockets and local egress at once. Handshakes consume a per-pass
@@ -740,7 +740,7 @@ typedef struct
  * DERP Connection State
  * ========================================================================== */
 
-/* Stage-2/3 async connect engine (docs/NONBLOCKING_DERP_TLS_PLAN.md §2): the
+/* Stage-2/3 async connect engine (docs/design/NONBLOCKING_DERP_TLS_PLAN.md §2): the
    * monolithic blocking connect is decomposed into a per-conn state machine
    * advanced ONE bounded step per DERP-task iteration, so a (re)connect can
    * never starve the rx poll of connected conns or the direct-path heartbeat.
@@ -1078,7 +1078,7 @@ uint32_t ml_derp_get_home_fallback_count(void);
    * task; word-sized cross-task reads (same contract as the diag getters). */
 void ml_derp_get_mbb_diag(uint32_t out[4]);
 
-/* Stage-1 pin->MBB telemetry (docs/STAGE1_PIN_MBB_DESIGN.md):
+/* Stage-1 pin->MBB telemetry (docs/design/STAGE1_PIN_MBB_DESIGN.md):
    * out[0]=pin MBB requests, out[1]=commits, out[2]=retries (failed proves,
    * retry-forever), out[3]=backoff currently pending (0/1), out[4]=coord
    * full-resyncs forced by a pinned-but-absent peer (f498 heal),

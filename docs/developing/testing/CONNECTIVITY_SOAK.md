@@ -83,7 +83,7 @@ shape (`pstop_machines[]`, `bonded_remotes[]`, the `pstop_sf_*` / `ml_reconnects
 ## Reading a disconnect event — which cause?
 
 The point of the multi-unit snapshot is to localize a disconnect. Cross-reference
-[`docs/MULTI_REMOTE_MULTI_MACHINE.md`](MULTI_REMOTE_MULTI_MACHINE.md) §7
+[`docs/guides/MULTI_REMOTE_MULTI_MACHINE.md`](../../guides/MULTI_REMOTE_MULTI_MACHINE.md) §7
 (*Troubleshooting: "remote won't bond to the machine"*):
 
 - **`pstop_sf_route` &ne; 0 / `sf_errno` 118 (ENETUNREACH)** &rarr; no route: the
@@ -97,7 +97,7 @@ The point of the multi-unit snapshot is to localize a disconnect. Cross-referenc
   handshake to a machine on a different DERP region). Check `/admin/api/monitor`
   `derp_effective_home_region` + `derp_pool[]` vs the machine's region; the
   multi-region relay (2026-08-04) should open an aux conn on the machine's region.
-  See **`docs/OUTBOUND_COLD_BOND.md`**. **(b) Large tailnet (≥ 128 nodes):** the
+  See **`docs/design/OUTBOUND_COLD_BOND.md`**. **(b) Large tailnet (≥ 128 nodes):** the
   **peer-cap trim** — the machine dropped the remote from its 128-entry netmap
   (its `bonded_remotes` line will *not* list this remote). Fix per §5 / §7: make
   the remote an operator (pins it), prune below 128, or co-locate on one LAN.

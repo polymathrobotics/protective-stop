@@ -100,7 +100,7 @@ CONFIG_ESP_WIFI_AMPDU_RX_ENABLED=y
 CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
 
 # === Watchdogs (SR-H-04b machine-side / FMEA DU-2: frozen-clock / frozen-task)
-# Mirrors the remote's watchdog stack (docs/WATCHDOG_CLOCK_PROTECTION.md) as the
+# Mirrors the remote's watchdog stack (docs/safety/WATCHDOG_CLOCK_PROTECTION.md) as the
 # last-resort backstop behind the comparator's esp_timer-vs-FreeRTOS-tick clock
 # sanity (machn/main/main.c). TWDT: the comparator subscribes explicitly and
 # feeds every 100 ms tick; a wedged comparator trips it (PANIC=y -> reset). The
@@ -202,7 +202,7 @@ CONFIG_ESP_COREDUMP_MAX_TASKS_NUM=64
 # alloc fixes it; prereq CONFIG_SPIRAM_USE_MALLOC is set. TLS runs in the
 # derp_tx/net_io tasks (not ISR/cache-disabled) and is NOT the WireGuard/pstop
 # datapath crypto, so the safety heartbeat path is unaffected.
-# See docs/INTERNAL_RAM_REDUCTION.md.
+# See docs/design/INTERNAL_RAM_REDUCTION.md.
 CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC=y
 
 # =============================================================================
@@ -238,7 +238,7 @@ CONFIG_LWIP_DHCP_RESTORE_LAST_IP=y
 # diagram makes the divider feedback voltages unreadable. Relays are still
 # DRIVEN; only the read-back/fault path is compiled out. Reversible: set y to
 # restore feedback on hardware that supports it (re-verify SENSE pins / divider
-# ratios / RELAY_FEEDBACK_MS first). See docs/RELAY_FEEDBACK_DESCOPE.md.
+# ratios / RELAY_FEEDBACK_MS first). See docs/design/RELAY_FEEDBACK_DESCOPE.md.
 CONFIG_MACHN_RELAY_FEEDBACK=n
 
 # INT_WDT visibility (2026-08-16): panic handler in IRAM (see firmware note).

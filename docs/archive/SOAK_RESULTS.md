@@ -1,7 +1,7 @@
 # dual_core_safety — chaos/soak stability results
 
 Board: Waveshare ESP32-S3-ETH (ESP32-S3R8, W5500 Ethernet, 8 MB octal PSRAM).
-Branch: `dcs-w5500-ethernet`. Harness: [`tools/chaos_soak.py`](../tools/chaos_soak.py).
+Branch: `dcs-w5500-ethernet`. Harness: [`tools/chaos_soak.py`](../../tools/chaos_soak.py).
 
 ## Run: 2026-06-22, 1 hour, 38 chaos events
 

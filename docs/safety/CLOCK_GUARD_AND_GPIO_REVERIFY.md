@@ -18,7 +18,7 @@ ranks #1 and #2 by PFH contribution:
 
 The remote-side **frozen-clock** DU-2 (the chip's own `esp_timer`) was already
 closed by the dual-core cross-check documented in
-`docs/WATCHDOG_CLOCK_PROTECTION.md`. This note adds the **machine-side** clock
+`docs/safety/WATCHDOG_CLOCK_PROTECTION.md`. This note adds the **machine-side** clock
 term (host runner + `machn`) — the FMEDA's *dominant* λ_DU (MC-4, β≈1) — and the
 remote **GPIO** term.
 
@@ -83,7 +83,7 @@ a frozen or backward `esp_timer` while the scheduler still ticks → **force STO
 `esp_restart()` after a 500 ms STOP-settle. The full watchdog stack
 (TWDT 5 s / IWDT 300 ms / bootloader-RTC) is enabled in `machn/sdkconfig.defaults`
 and the comparator subscribes+feeds the TWDT — mirroring the remote
-(`docs/WATCHDOG_CLOCK_PROTECTION.md`).
+(`docs/safety/WATCHDOG_CLOCK_PROTECTION.md`).
 
 This is the direct machine-side analogue of the remote's dual-core clock
 cross-check.
@@ -205,7 +205,7 @@ STOP *actuation* needs relay HIL feedback, and a throwaway `esp_timer`-freeze
 injection would induce a controlled-reset loop — not appropriate to flash onto a
 live node without a bench. The logic is the direct analogue of the remote
 dual-core cross-check that **is** fault-injection validated
-(`docs/WATCHDOG_CLOCK_PROTECTION.md` §4). **Follow-up:** validate on a bench machn
+(`docs/safety/WATCHDOG_CLOCK_PROTECTION.md` §4). **Follow-up:** validate on a bench machn
 with a 4-ch relay HIL (inject a frozen `esp_timer`, assert both relay drives go
 low and the node controlled-resets).
 
