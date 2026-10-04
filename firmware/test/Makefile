@@ -28,14 +28,21 @@ test_estop_verdict: $(SRCS)
 test_dcs_health_logic: $(HEALTH_SRCS)
 	$(CC) $(CFLAGS) $(HEALTH_INC) -o $@ $(HEALTH_SRCS)
 
+# PSTOP ring: segment colour, amber blink count, machine assigned-remote set.
+RING_SRCS := ../components/dcs_support/src/dcs_ring_logic.c test_dcs_ring_logic.c
+
+test_dcs_ring_logic: $(RING_SRCS)
+	$(CC) $(CFLAGS) $(HEALTH_INC) $(INC) -o $@ $(RING_SRCS)
+
 # Comparator shared publish window (lockstep_window.h): pure header-only logic.
 test_lockstep_window: test_lockstep_window.c ../main/lockstep_window.h
 	$(CC) $(CFLAGS) -I../main -o $@ test_lockstep_window.c
 
 .PHONY: run coverage clean
-run: test_estop_verdict test_dcs_health_logic test_lockstep_window
+run: test_estop_verdict test_dcs_health_logic test_dcs_ring_logic test_lockstep_window
 	./test_estop_verdict
 	./test_dcs_health_logic
+	./test_dcs_ring_logic
 	./test_lockstep_window
 
 coverage: run
@@ -45,4 +52,4 @@ coverage: run
 	  --json-summary-pretty -o coverage-summary.json
 
 clean:
-	rm -f test_estop_verdict test_dcs_health_logic test_lockstep_window *.gcda *.gcno *.gcov coverage-summary.json
+	rm -f test_estop_verdict test_dcs_health_logic test_dcs_ring_logic test_lockstep_window *.gcda *.gcno *.gcov coverage-summary.json

@@ -122,8 +122,35 @@ Persisted, live-applied where safe.
 
 Certification argumentation; multi-machine coordination (remote side
 already handles up to 4 machines — an ESP32 machine is just one of
-them); LED ring on the machine box (onboard RGB only for v1, TBD);
-console MACHINES-tab integration beyond the existing announce.
+them); console MACHINES-tab integration beyond the existing announce.
+
+## LED ring (machine box)
+
+The machine box carries the same 16-LED WS2812 ring as the remote (GPIO17,
+same driver, `dcs_pstop_ring.c`) and shows the same thing: the **machine's
+state as seen by each link**, so a remote's ring and its machine's ring
+agree. The ring is split into one segment per **assigned remote**: every id
+on the admission allowlist or the pin list (persistent config, the
+machine's analogue of the remote's configured peers), then every remote the
+machine has served since boot, minus the denylist. Each segment is coloured
+by the last reply the machine sent that remote:
+
+| Ring | Meaning |
+|---|---|
+| white (dim) | no assigned remote |
+| amber, N blinks | assigned remote with no fresh reply (2 s): 1 = remote silent, 2 = Tailscale down, 3 = no Internet |
+| blue | last reply BOND/UNBOND |
+| green (breathing) | last reply OK: robot cleared to run |
+| red (breathing) | last reply STOP |
+| purple (whole ring) | persistent lockstep mismatch between the two cores |
+
+A remote that unbonds and goes quiet drops off the ring unless it is
+allowlisted or pinned. Remotes learned since boot are forgotten on reboot,
+so after a reboot the ring stays white until a remote connects, unless the
+remotes are allowlisted or pinned. The comparator feeds the ring through
+`dcs_publish_machn_reply()`; the decision logic lives in
+`dcs_ring_logic.c` (host-tested in `firmware/test/`). The ring is
+telemetry only and feeds nothing back into the safety path.
 
 ## Resolved in review (2026-07-31)
 

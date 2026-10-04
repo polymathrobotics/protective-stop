@@ -63,6 +63,8 @@ ros2/install-cov/
 ros2/log/
 firmware/test/test_estop_verdict
 firmware/test/test_dcs_health_logic
+firmware/test/test_dcs_ring_logic
+firmware/test/test_lockstep_window
 firmware/test/coverage-summary.json
 
 build/
