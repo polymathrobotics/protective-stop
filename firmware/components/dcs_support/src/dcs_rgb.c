@@ -249,6 +249,11 @@ static void rgb_task(void * arg)
 
 void dcs_rgb_start(void)
 {
-  /* PSRAM stack: status LED is non-safety, does no flash/NVS. */
-  (void)dcs_task_spawn_psram(rgb_task, "rgb_blink", 4096, NULL, 2, tskNO_AFFINITY);
+  /* PSRAM stack: status LED is non-safety, does no flash/NVS.
+   * CPU0, not tskNO_AFFINITY: rgb_task allocates an RMT channel, and the S3's
+   * single RMT interrupt is shared with the ring channel (allocated on CPU0).
+   * esp_intr_alloc binds the vector to the calling core; split across cores,
+   * the non-owner storms during flash ops -> IWDT (#158). Any task that
+   * allocates an ISR must be pinned. */
+  (void)dcs_task_spawn_psram(rgb_task, "rgb_blink", 4096, NULL, 2, 0);
 }
