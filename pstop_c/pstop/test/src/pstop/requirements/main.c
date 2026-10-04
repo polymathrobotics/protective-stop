@@ -7,6 +7,7 @@
 extern void main_req_2_01_test(void);
 extern void main_req_2_02_test(void);
 extern void main_req_2_03_test(void);
+extern void main_req_2_04_test(void);
 
 extern void main_req_2_06_test(void);
 extern void main_req_2_07_test(void);
@@ -33,7 +34,6 @@ extern void main_req_3_18_test(void);
 extern void main_req_3_19_test(void);
 extern void main_req_3_20_test(void);
 extern void main_req_3_21_test(void);
-
 extern void main_req_3_22_test(void);
 extern void main_req_3_23_test(void);
 
@@ -49,6 +49,7 @@ main(void)
     main_req_2_01_test();
     main_req_2_02_test();
     main_req_2_03_test();
+    main_req_2_04_test();
 
     main_req_2_06_test();
     main_req_2_07_test();
@@ -75,7 +76,6 @@ main(void)
     main_req_3_19_test();
     main_req_3_20_test();
     main_req_3_21_test();
-
     main_req_3_22_test();
     main_req_3_23_test();
 
