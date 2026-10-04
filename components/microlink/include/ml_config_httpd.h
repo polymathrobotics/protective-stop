@@ -190,6 +190,17 @@ bool ml_config_peer_is_allowed(const ml_config_ctx_t * ctx, uint32_t vpn_ip);
 bool ml_config_allowlist_active(const ml_config_ctx_t * ctx);
 
 /**
+ * @brief Add one IP to an ACTIVE allowlist (no-op when the list is empty).
+ * See microlink_allowlist_add() for the contract; this is the ctx-level form.
+ */
+esp_err_t ml_config_allowlist_add(ml_config_ctx_t * ctx, uint32_t vpn_ip, const char * label);
+
+/**
+ * @brief Remove an IP's entry only if its label starts with @p label_prefix (see microlink_allowlist_remove_own()).
+ */
+esp_err_t ml_config_allowlist_remove_own(ml_config_ctx_t * ctx, uint32_t vpn_ip, const char * label_prefix);
+
+/**
  * @brief Whether a firmware OTA upload is currently being flashed.
  * Stays true on success until the device reboots. For product firmware
  * that wants to render an "updating" indicator.
@@ -327,6 +338,23 @@ static inline bool ml_config_allowlist_active(const ml_config_ctx_t * ctx)
 {
   (void)ctx;
   return false;
+}
+
+static inline esp_err_t ml_config_allowlist_add(ml_config_ctx_t * ctx, uint32_t vpn_ip, const char * label)
+{
+  (void)ctx;
+  (void)vpn_ip;
+  (void)label;
+  return ESP_OK; /* no allowlist without the config server: everything is allowed */
+}
+
+static inline esp_err_t ml_config_allowlist_remove_own(
+  ml_config_ctx_t * ctx, uint32_t vpn_ip, const char * label_prefix)
+{
+  (void)ctx;
+  (void)vpn_ip;
+  (void)label_prefix;
+  return ESP_OK;
 }
 
 static inline bool ml_config_ota_in_progress(void)

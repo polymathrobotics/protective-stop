@@ -842,6 +842,7 @@ esp_err_t dcs_pstop_set_peer_slot(int slot, bool configured, uint32_t ip, uint16
     return ESP_ERR_INVALID_ARG;
   }
   /* Unpin the OLD target if this slot had one and no other slot shares it. */
+  uint32_t unlist_ip = 0u;
   uint64_t old_ep = (uint64_t)atomic_load(&g_dcs_pstop_slot_ep[slot]);
   uint32_t old_ip = (uint32_t)((old_ep >> 16) & 0xFFFFFFFFULL);
   if (((old_ep & PSTOP_EP_CONFIGURED) != 0ULL) && (old_ip != 0u) && (g_dcs.ml_handle != NULL)) {
@@ -856,6 +857,7 @@ esp_err_t dcs_pstop_set_peer_slot(int slot, bool configured, uint32_t ip, uint16
     }
     if (!shared && !(configured && (ip == old_ip))) {
       microlink_pin_peer_ip(g_dcs.ml_handle, old_ip, false);
+      unlist_ip = old_ip;
     }
   }
   /* Live update first (comparator picks it up next tick)... */
@@ -887,7 +889,26 @@ esp_err_t dcs_pstop_set_peer_slot(int slot, bool configured, uint32_t ip, uint16
   peers[slot].ip = ip;
   peers[slot].port = port;
   peers[slot].machine_id = machine_id;
-  return dcs_nvs_write_pstop_peers(peers);
+  esp_err_t err = dcs_nvs_write_pstop_peers(peers);
+  /* The pin above already admits the machine at every allowlist gate; listing
+   * it too makes that visible in the Peer Allowlist and triggers the immediate
+   * re-register. Best-effort; the entry is removed again when the slot moves
+   * or is cleared (below). */
+  if ((err == ESP_OK) && configured && (g_dcs.ml_handle != NULL)) {
+    char label[24];
+    (void)snprintf(label, sizeof(label), "machine slot %d", slot);
+    esp_err_t aerr = microlink_allowlist_add(g_dcs.ml_handle, ip, label);
+    if (aerr != ESP_OK) {
+      ESP_LOGW(TAG, "slot %d: allowlist add skipped (%s)", slot, esp_err_to_name(aerr));
+    }
+  }
+  /* Drop the slot entry for the old target, whichever slot's label it kept (the add dedupes
+   * by IP) — no other slot uses that IP. Operator entries stay. After the add, so a list
+   * holding only that entry is not stopped by the last-entry guard. */
+  if ((unlist_ip != 0u) && (g_dcs.ml_handle != NULL)) {
+    (void)microlink_allowlist_remove_own(g_dcs.ml_handle, unlist_ip, "machine slot ");
+  }
+  return err;
 }
 
 void dcs_get_pstop_peer_slot(

@@ -288,6 +288,57 @@ bool ml_config_allowlist_active(const ml_config_ctx_t * ctx)
   return ctx && ctx->filter_enabled;
 }
 
+esp_err_t ml_config_allowlist_add(ml_config_ctx_t * ctx, uint32_t vpn_ip, const char * label)
+{
+  if (!ctx) return ESP_ERR_INVALID_STATE;
+  if (vpn_ip == 0 || !ctx->filter_enabled) return ESP_OK; /* empty list = allow all; leave it so */
+  if (xSemaphoreTake(ctx->peer_mutex, pdMS_TO_TICKS(100)) != pdTRUE) return ESP_ERR_TIMEOUT;
+  for (int i = 0; i < ctx->peer_list.count; i++) {
+    if (ctx->peer_list.entries[i].vpn_ip == vpn_ip) {
+      xSemaphoreGive(ctx->peer_mutex);
+      return ESP_OK;
+    }
+  }
+  if (ctx->peer_list.count >= ML_CONFIG_MAX_ALLOWED_PEERS) {
+    xSemaphoreGive(ctx->peer_mutex);
+    return ESP_ERR_NO_MEM;
+  }
+  ml_config_peer_entry_t * e = &ctx->peer_list.entries[ctx->peer_list.count++];
+  e->vpn_ip = vpn_ip;
+  strlcpy(e->label, label ? label : "", sizeof(e->label));
+  xSemaphoreGive(ctx->peer_mutex);
+  config_save_peers(ctx);
+  ESP_LOGI(TAG, "Allowlist +1 (%s): %d peers", label ? label : "", ctx->peer_list.count);
+  /* same recipe as handler_post_allowed(): make the new ip reachable now */
+  ml_coord_request_full_peers();
+  ml_coord_request_reregister();
+  return ESP_OK;
+}
+
+esp_err_t ml_config_allowlist_remove_own(ml_config_ctx_t * ctx, uint32_t vpn_ip, const char * label_prefix)
+{
+  if (!ctx) return ESP_ERR_INVALID_STATE;
+  if (vpn_ip == 0 || !label_prefix) return ESP_OK;
+  if (xSemaphoreTake(ctx->peer_mutex, pdMS_TO_TICKS(100)) != pdTRUE) return ESP_ERR_TIMEOUT;
+  bool removed = false;
+  /* Never the last entry: an empty list switches the filter off and admits everyone. */
+  for (int i = 0; i < ctx->peer_list.count && ctx->peer_list.count > 1; i++) {
+    ml_config_peer_entry_t * e = &ctx->peer_list.entries[i];
+    if (e->vpn_ip == vpn_ip && strncmp(e->label, label_prefix, strlen(label_prefix)) == 0) {
+      memmove(e, e + 1, (size_t)(ctx->peer_list.count - i - 1) * sizeof(*e));
+      ctx->peer_list.count--;
+      removed = true;
+      break;
+    }
+  }
+  xSemaphoreGive(ctx->peer_mutex);
+  if (removed) {
+    config_save_peers(ctx);
+    ESP_LOGI(TAG, "Allowlist -1 (%s*): %d peers", label_prefix, ctx->peer_list.count);
+  }
+  return ESP_OK;
+}
+
 /* Fleet coordination/OTA server VPN IP (CONFIG_ML_FLEET_SERVER_IP), parsed
  * once. This peer is PERMANENTLY allowed and cannot be removed from the
  * allowlist — it is the configured central management server for the devices,
