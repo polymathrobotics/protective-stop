@@ -1,0 +1,49 @@
+#!/bin/sh
+# SPDX-FileCopyrightText: 2026 Polymath Robotics
+# SPDX-License-Identifier: Apache-2.0
+#
+# udev PROGRAM helper for 79-esp-pstop.rules: print the interface name a pstop
+# USB-NCM tether should get -- the lowest free esp-pstop<N>.
+#
+# Why a helper and not NAME="esp-pstop%n": %n is the kernel's usb<N> index, and
+# the kernel hands out the lowest free usb<N>. Once the first unit has been
+# renamed esp-pstop0, "usb0" is free again, so the SECOND unit also enumerates
+# as usb0 -> %n = 0 -> rename to esp-pstop0 fails with EEXIST and the unit stays
+# "usb0" (no profile, no DHCP). Allocating against the names that actually
+# exist (/sys/class/net/esp-pstop*) is what makes N unique.
+#
+# Concurrency: several units enumerating at once (boot with a hub of pstops)
+# are processed by parallel udev workers, and the rename lands only after this
+# program returns -- so "exists in /sys" alone could hand two workers the same
+# N. A flock plus a short-lived reservation list (10 s, in /run, so it resets
+# at boot) closes that window.
+#
+# Idempotent: a synthetic re-add (udevadm trigger) of an already-named unit
+# keeps its name.
+set -u
+# Both files live in /run (root-only), not /run/lock: that directory is
+# world-writable, so an unprivileged user could pre-plant a symlink there for
+# this root helper to open and truncate.
+LOCK=/run/esp-pstop-name.lock
+RES=/run/esp-pstop-name.reserved     # lines: "<N> <epoch-seconds>"
+TTL=10
+
+case "${INTERFACE:-}" in
+  esp-pstop*) echo "$INTERFACE"; exit 0 ;;
+esac
+
+exec 9>"$LOCK" || exit 1
+flock 9 || exit 1   # a non-zero exit makes udev skip the rule: no name is better than a duplicate
+
+now=$(date +%s)
+if [ -f "$RES" ]; then
+  awk -v now="$now" -v ttl="$TTL" '(now - $2) < ttl' "$RES" > "$RES.tmp" 2>/dev/null \
+    && mv -f "$RES.tmp" "$RES"
+fi
+
+i=0
+while [ -e "/sys/class/net/esp-pstop$i" ] || grep -qs "^$i " "$RES"; do
+  i=$((i + 1))
+done
+echo "$i $now" >> "$RES"
+echo "esp-pstop$i"

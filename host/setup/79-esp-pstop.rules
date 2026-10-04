@@ -1,0 +1,24 @@
+# SPDX-FileCopyrightText: 2026 Polymath Robotics
+# SPDX-License-Identifier: Apache-2.0
+#
+# Name every pstop USB-NCM tether esp-pstop<N>, N = the lowest index not already
+# in use, so several units on one host get distinct, predictable names --
+# esp-pstop0, esp-pstop1, ... -- with no per-unit registration. The pstop-port
+# profile (match esp-pstop*) picks each one up and puts it on the pstop-br bridge.
+#
+# N is allocated by the esp-pstop-name helper (installed by install.sh), NOT by
+# the kernel's usb<N> index (%n): the kernel reuses the lowest free usb<N>, so
+# after the first unit is renamed away from usb0 the second unit ALSO comes up
+# as usb0 and a NAME="esp-pstop%n" rename collides (EEXIST) -- the unit keeps
+# the name usb0, matches no profile and gets no DHCP. Same symptom as the even
+# earlier 70-esp-pstop.link, which pinned one fixed name to the VID:PID.
+#
+# Matches the app-mode device by VID:PID (303a:4001) on the USB parent, so it
+# ignores download mode (303a:1001) and needs no ID_* imports. Sorted before
+# 80-net-setup-link.rules, whose .link handling (including Ubuntu's
+# 73-usb-net-by-mac.link -> enx<mac>) only applies while NAME is still empty.
+# Install: install.sh (rule + helper) ; or by hand:
+#   sudo cp 79-esp-pstop.rules /etc/udev/rules.d/
+#   sudo install -D -m 0755 esp-pstop-name /usr/local/lib/udev/esp-pstop-name
+#   sudo udevadm control --reload
+SUBSYSTEM=="net", ACTION=="add", ATTRS{idVendor}=="303a", ATTRS{idProduct}=="4001", PROGRAM="/usr/local/lib/udev/esp-pstop-name", NAME="%c"

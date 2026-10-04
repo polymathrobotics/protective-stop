@@ -3,9 +3,11 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # networkd-dispatcher port of 90-esp-pstop-flush (the NetworkManager version):
-# clear the stale ARP/neighbor cache when the pstop tether changes state, so the
+# clear the stale ARP/neighbor cache when a pstop tether changes state, so the
 # host doesn't sit on an INCOMPLETE neighbor from a previous boot (one half of
-# the "needs a power cycle" symptom).
+# the "needs a power cycle" symptom). The host's L3 end of every tether is the
+# pstop-br bridge, so that is the table flushed -- on the bridge itself and on
+# any esp-pstop<N> port. Only unresolved entries (see 90-esp-pstop-flush).
 #
 # networkd-dispatcher runs per-state hooks and passes the interface in $IFACE
 # (not $1/$2 like the NM dispatcher). Install this SAME script into BOTH
@@ -15,5 +17,7 @@
 # GOTCHA: the networkd-dispatcher package can be installed but its service
 # DISABLED — then a correctly-placed hook never fires. install.sh runs
 # `systemctl enable --now networkd-dispatcher`; verify it is active.
-[ "$IFACE" = "esp-pstop0" ] && ip neigh flush dev esp-pstop0
+case "$IFACE" in
+  pstop-br|esp-pstop*) ip neigh flush dev pstop-br nud incomplete nud failed 2>/dev/null ;;
+esac
 exit 0
