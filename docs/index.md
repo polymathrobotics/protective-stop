@@ -67,6 +67,17 @@ when a direct path is unavailable. Their sockets are pinned to the tunnel, so
 losing the VPN causes silence instead of a plaintext downgrade. Ethernet is
 preferred, with USB-NCM and WiFi available as fallbacks.
 
+### Complex scenarios
+
+One machine can bond several remotes, and the machine runs only while all of
+them report OK. Which remote may re-arm after a stop depends on roles, arming
+ownership, and heartbeat timeouts.
+[Multi-remote, single machine](design/MULTI_REMOTE_SINGLE_MACHINE.md) walks
+through two remotes under each combination of stop, drop, and unbond, and gives
+the number of remotes one machine can hold.
+[Single remote, multiple machines](design/SINGLE_REMOTE_MULTI_MACHINE.md)
+describes how one remote's button and heartbeats reach up to four machines.
+
 ## What's included
 
 | Path | Contents |
