@@ -176,6 +176,7 @@ Over USB, for recovery, put the unit in download mode (`lsusb` shows `303a:1001`
 ```sh
 cd tools
 uv run python pstop_secure.py flash -p /dev/ttyACM0 --full --bootloader bootloader-signed.bin ../firmware/build
+uv run python pstop_secure.py provision -p /dev/ttyACM0 --bootloader bootloader-signed.bin ../firmware/build
 ```
 
 `--full` also rewrites the bootloader and partition table, so the unit ends up on exactly this build.
