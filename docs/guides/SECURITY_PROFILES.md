@@ -26,11 +26,28 @@ tailnet as the remote. The build profile decides how hard that is:
 
 ## Building
 
+### 1. Set the admin password and Tailscale key
+
+The admin password is compiled into the image, and the admin page cannot change it.
+The release image uses the public password `microlink`, which the remote refuses over Tailscale.
+To set your own, and optionally the Tailscale key, create a credentials file before the first build:
+
+```sh
+cd firmware                              # or machn
+cp sdkconfig.credentials.example sdkconfig.credentials
+$EDITOR sdkconfig.credentials            # CONFIG_ML_ADMIN_PASSWORD
+rm -rf sdkconfig build                   # a stale sdkconfig keeps the old values
+```
+
+Every value in the credentials file is compiled into the image as plain text, so keep the image private;
+`tools/release_guard.sh` refuses to release one.
+
+### 2. Build
+
 ```sh
 . ~/esp/esp-idf/export.sh          # ESP-IDF v5.5, installed as in the quickstart's Appendix E
 cd firmware                        # or machn
 idf.py build                       # secure-fe
-idf.py -DPSTOP_PROFILE=dev build
 ```
 
 The profile is fixed when `sdkconfig` is generated, so pick one per directory.
@@ -40,23 +57,7 @@ For `dev`, or to keep a second profile beside the first, use its own build direc
 idf.py -B build-dev -DSDKCONFIG=build-dev/sdkconfig -DPSTOP_PROFILE=dev build
 ```
 
-### Admin password and Tailscale key
-
-The admin password is compiled into the image, and the admin page cannot change it.
-The release image uses the public password `microlink`, which the remote refuses over Tailscale.
-To set your own, and optionally the Tailscale key, build with a credentials file:
-
-```sh
-cd firmware
-cp sdkconfig.credentials.example sdkconfig.credentials
-$EDITOR sdkconfig.credentials            # CONFIG_ML_ADMIN_PASSWORD
-rm -rf sdkconfig build                   # a stale sdkconfig keeps the old values
-idf.py build
-```
-
-Provision or update the unit from that build as described below.
-Every value in the credentials file is compiled into the image as plain text, so keep the image private;
-`tools/release_guard.sh` refuses to release one.
+Provision or update the unit from this build as described below.
 
 The secure overlays in [`firmware/profiles/`](../../firmware/profiles/):
 
@@ -169,16 +170,18 @@ uv run python pstop_secure.py sign-ota ../firmware/build -o pstop_remote-signed.
 curl -u "admin:$ADMIN_PW" --data-binary @pstop_remote-signed.bin -X POST "http://$DEV/admin/api/ota"
 ```
 
-Over USB, for recovery: `/api/enter_download` hands the port to USB-Serial-JTAG
-for 60 s; within that time run
+Over USB, for recovery, put the unit in download mode (`lsusb` shows `303a:1001`):
+`/api/enter_download` hands the port to USB-Serial-JTAG for 60 s, so run the flash within that time.
 
 ```sh
+cd tools
 uv run python pstop_secure.py flash -p /dev/ttyACM0 --full --bootloader bootloader-signed.bin ../firmware/build
 ```
 
 `--full` also rewrites the bootloader and partition table, so the unit ends up on exactly this build.
 Drop `--full --bootloader …` to write only the app.
-If the app does not run, power-cycle the unit and start the flash as soon as `303a:1001` appears:
+
+If the unit does not boot afterwards, power-cycle it and start the flash as soon as `303a:1001` appears:
 
 ```sh
 until lsusb | grep -q 303a:1001 && [ -e /dev/ttyACM0 ]; do sleep 0.05; done; \
