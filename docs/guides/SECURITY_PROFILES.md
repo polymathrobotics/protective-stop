@@ -160,15 +160,27 @@ one-off Tailscale key: create the key as in
 [QUICKSTART §4](QUICKSTART.md#4-first-boot-find-the-remote-and-give-it-the-key). An existing unit moves to `secure-fe` the same way: its
 flash is erased and it enrolls as a new node.
 
-## Updating or Resetting a Flashed Device
+## Updating a Flashed Device
 
-Over the network:
+Two signed files come out of `pstop_secure.py`, and they go to different places:
+
+| File | Made by | Contents | Delivered by |
+|---|---|---|---|
+| `bootloader-signed.bin` | `sign-bootloader` | Bootloader, signed with both keys | USB only (`provision`, `flash --full`) |
+| `pstop_remote-signed.bin` | `sign-ota` | The app from `firmware/build`, signed with the primary key | Network (`/admin/api/ota`) or USB |
+
+An update that changes only the app needs `pstop_remote-signed.bin`.
+A change to the bootloader, partition table or profile needs a USB flash, as in [Resetting a Flashed Device](#resetting-a-flashed-device).
+
+After `idf.py build`, with `PSTOP_SIGNING_KEY` set to the key the unit was provisioned with:
 
 ```sh
 cd tools
 uv run python pstop_secure.py sign-ota ../firmware/build -o pstop_remote-signed.bin
 curl -u "admin:$ADMIN_PW" --data-binary @pstop_remote-signed.bin -X POST "http://$DEV/admin/api/ota"
 ```
+
+## Resetting a Flashed Device
 
 Over USB, for recovery, put the unit in download mode (`lsusb` shows `303a:1001`):
 `/api/enter_download` hands the port to USB-Serial-JTAG for 60 s, so run the flash within that time.
