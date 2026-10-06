@@ -33,11 +33,13 @@ The release image uses the public password `microlink`, which the remote refuses
 To set your own, and optionally the Tailscale key, create a credentials file before the first build:
 
 ```sh
-cd firmware                              # or machn
+cd firmware
 cp sdkconfig.credentials.example sdkconfig.credentials
 $EDITOR sdkconfig.credentials            # CONFIG_ML_ADMIN_PASSWORD
 rm -rf sdkconfig build                   # a stale sdkconfig keeps the old values
 ```
+
+The machn role reads the same file from its own directory: `ln -s ../firmware/sdkconfig.credentials machn/sdkconfig.credentials`.
 
 Every value in the credentials file is compiled into the image as plain text, so keep the image private;
 `tools/release_guard.sh` refuses to release one.
@@ -167,10 +169,11 @@ Two signed files come out of `pstop_secure.py`, and they go to different places:
 | File | Made by | Contents | Delivered by |
 |---|---|---|---|
 | `bootloader-signed.bin` | `sign-bootloader` | Bootloader, signed with both keys | USB only (`provision`, `flash --full`) |
-| `pstop_remote-signed.bin` | `sign-ota` | The app from `firmware/build`, signed with the primary key | Network (`/admin/api/ota`) or USB |
+| `pstop_remote-signed.bin` | `sign-ota` | The app from `firmware/build`, signed with the primary key | Network (`/admin/api/ota`) |
 
 An update that changes only the app needs `pstop_remote-signed.bin`.
-A change to the bootloader, partition table or profile needs a USB flash, as in [Resetting a Flashed Device](#resetting-a-flashed-device).
+A change to the bootloader or partition table needs a USB flash, as in [Resetting a Flashed Device](#resetting-a-flashed-device).
+A unit's profile is fixed by the eFuses burned at provisioning, so a flash cannot change it.
 
 After `idf.py build`, with `PSTOP_SIGNING_KEY` set to the key the unit was provisioned with:
 
