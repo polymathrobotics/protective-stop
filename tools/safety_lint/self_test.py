@@ -138,19 +138,19 @@ class ParserTests(FixtureRepo):
     def test_srs_parser_rejects_partial_range_in_real_row(self):
         """A malformed continuation in an SRS table row fails instead of retaining its valid prefix."""
         self.replace('docs/safety/safety_requirements_specification.md', '| F-R-01 | SIL 3 |', '| F-R-01.. | SIL 3 |')
-        with self.assertRaisesRegex(LintError, r'SAFETY_REQUIREMENTS\.md:14: malformed allocation'):
+        with self.assertRaisesRegex(LintError, r'safety_requirements_specification\.md:14: malformed allocation'):
             parse_srs(self.root / 'docs/safety/safety_requirements_specification.md')
 
     def test_trace_parser_reports_malformed_allocation_row_location(self):
         """A truncated trace allocation fails at the exact matrix row rather than yielding partial data."""
         self.replace('docs/safety/requirements_traceability.md', '| SR-R-01 | F-R-01 |', '| SR-R-01 | F-R-01/02/XX |')
-        with self.assertRaisesRegex(LintError, r'TRACEABILITY\.md:11: malformed allocation'):
+        with self.assertRaisesRegex(LintError, r'requirements_traceability\.md:11: malformed allocation'):
             parse_traceability(self.root)
 
     def test_trace_parser_rejects_malformed_numeric_member_in_real_row(self):
         """A malformed numeric member in a matrix row fails instead of retaining its valid prefix."""
         self.replace('docs/safety/requirements_traceability.md', '| SR-R-01 | F-R-01 |', '| SR-R-01 | F-R-01/2 |')
-        with self.assertRaisesRegex(LintError, r'TRACEABILITY\.md:11: malformed allocation'):
+        with self.assertRaisesRegex(LintError, r'requirements_traceability\.md:11: malformed allocation'):
             parse_traceability(self.root)
 
     def test_status_longest_match_wins(self):
