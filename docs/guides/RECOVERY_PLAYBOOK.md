@@ -133,7 +133,7 @@ Shouldn't happen — the never-brick guard refuses a rollback that would
 leave no bootable image — but if it does:
 
 1. Hold BOOT, tap RESET — chip enters ROM download mode.
-2. `cd firmware && idf.py -p /dev/ttyACM0 flash` (or esptool directly).
+2. `cd firmware && idf.py -p /dev/ttyACM0 flash` (or `cd tools && uv run esptool`).
    For production/bulk provisioning from a pre-built image, use
    `tools/flash_pstop.sh` (auto-detects a download-mode chip; `--from-ip`
    forces a running unit into download mode). See the [overview](../index.md).
@@ -178,7 +178,7 @@ curl -s http://$CHIP/api/last_log
 set -e
 CHIP="${CHIP:?set CHIP=<ip>}"
 cd firmware
-source ~/esp-idf-5.5/export.sh
+source ~/esp/esp-idf/export.sh
 idf.py build
 curl -m 300 -u admin:microlink \
      -H "Content-Type: application/octet-stream" \
@@ -205,5 +205,5 @@ configured heartbeat rate, the build is healthy.
 A sourced ESP-IDF is not enough for them — the flashing tools need the
 `esptool` v5 pinned in `tools/pyproject.toml`, and IDF 5.5 constrains
 `esptool~=4.12`.
-ESP-IDF 5.5 (`source ~/esp-idf-5.5/export.sh`) is for builds and `idf.py flash`.
+ESP-IDF 5.5 (`source ~/esp/esp-idf/export.sh`) is for builds and `idf.py flash`.
 The machine side needs only `cc` + `make` (see the [host guide](host.md)).

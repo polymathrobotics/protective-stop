@@ -58,7 +58,7 @@ device_id + counter handshake. Groups:
   arm through proxy, heavy loss -> STOP, recovery -> re-arm, churn never
   spuriously arms.
 
-Run: `python3 tools/pstop_multi_remote_test.py` (exit 0 = all invariants held).
+Run: `cd tools && uv run python pstop_multi_remote_test.py` (exit 0 = all invariants held).
 
 ## Part 2 — real two-chip end-to-end
 

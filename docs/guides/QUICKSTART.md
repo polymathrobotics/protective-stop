@@ -31,7 +31,7 @@ the ROS 2 install.
 | USB-C data cable | Power, and the network if you use USB. |
 | Ethernet cable and a DHCP LAN with internet | Only for the Ethernet path. A PoE switch port powers the remote too. |
 | Laptop | Ubuntu 24.04 with internet (22.04 works with ROS 2 Humble). |
-| Python 3 | Step 3 installs `esptool` with it. |
+| [uv](https://docs.astral.sh/uv/getting-started/installation/) | Runs every Python tool in this repo, `esptool` included, from one locked environment ([`tools/README.md`](../developing/testing/tools.md)). It fetches Python itself. |
 | ROS 2 Jazzy | [Install guide](https://docs.ros.org/en/jazzy/Installation/Ubuntu-Install-Debs.html); `ros-jazzy-ros-base` is enough. |
 | Tailscale account | Free tier is fine. |
 
@@ -62,6 +62,13 @@ git clone https://github.com/polymathrobotics/protective-stop.git
 cd protective-stop
 ```
 
+Set up the Python tooling once (install uv with
+`curl -LsSf https://astral.sh/uv/install.sh | sh` and open a new shell first):
+
+```sh
+(cd tools && uv sync)
+```
+
 **USB path only** — make the laptop own the USB link (address, DHCP for the
 remote, internet sharing), once per laptop:
 
@@ -74,7 +81,7 @@ Ethernet path: nothing to prepare; the remote gets its address from your LAN.
 
 ## 3. Flash the remote
 
-Into an empty folder, download three files from the
+Into an empty folder, whose path you set as `FW_PATH` below, download three files from the
 [latest release](https://github.com/polymathrobotics/protective-stop/releases/latest):
 `pstop_remote-<version>-public-fullflash.bin` (factory image, used now),
 `pstop_remote-<version>-public.bin` (app image, for updates later) and
@@ -82,10 +89,11 @@ Into an empty folder, download three files from the
 mode) and, using the exact filename you downloaded:
 
 ```sh
-python3 -m pip install --user esptool      # once; the repo's tools/ venv (uv) also has it, see docs/developing/testing/tools.md
-sha256sum -c SHA256SUMS --ignore-missing   # expect: two lines ending in OK
+FW_PATH=~/Downloads/pstop-firmware         # the folder you downloaded into
+(cd "$FW_PATH" && sha256sum -c SHA256SUMS --ignore-missing)   # expect: two lines ending in OK
+cd tools                                   # the uv environment from step 2
 ls /dev/ttyACM*                            # expect: /dev/ttyACM0
-python3 -m esptool --chip esp32s3 -p /dev/ttyACM0 -b 460800 write_flash 0x0 pstop_remote-<version>-public-fullflash.bin
+uv run esptool --chip esp32s3 -p /dev/ttyACM0 -b 460800 write_flash 0x0 "$FW_PATH"/pstop_remote-<version>-public-fullflash.bin
 # expect: … Hash of data verified. … Hard resetting via RTS pin…
 ```
 
@@ -126,7 +134,7 @@ Ethernet, **green** on USB. Find the full address:
 DEV=<that address>
 ```
 
-Open **`http://$DEV/admin`** (user `admin`, password `microlink`) → **Settings**
+Open **`http://$DEV/admin/`** (user `admin`, password `microlink`) → **Settings**
 → paste the auth key into **Tailscale Auth Key** → **Save** → **Restart**. Or do
 the same from the shell:
 
@@ -158,9 +166,7 @@ if device approval is on and you did not pre-approve the key, **approve** it.
 
 ```sh
 source /opt/ros/jazzy/setup.bash
-sudo apt install -y ros-jazzy-generate-parameter-library ros-jazzy-diagnostic-updater \
-                    ros-jazzy-rclcpp-lifecycle ros-jazzy-rclcpp-components libcurl4-openssl-dev
-cd ros2                              # from the repo root (step 2); build from ros2/, not the repo root
+rosdep update && rosdep install -iy --from-paths ros2/
 colcon build --packages-up-to protective_stop_machine
 source install/setup.bash
 ros2 run protective_stop_machine machine_bridge_node
@@ -284,7 +290,7 @@ stays off the tailnet until it is given a new key.
 ## Appendix C: updating, reflashing, and what persists
 
 **Update a running unit** (keeps every setting): send the app image
-(`pstop_remote-<version>-public.bin`, downloaded in step 3 or from the new
+(`pstop_remote-<version>-public.bin`, downloaded to `tools/` in step 3 or from the new
 release) over the USB or LAN link; the remote reboots into it.
 
 ```sh
@@ -297,7 +303,7 @@ and start flashing within 60 s), then flash. The full-flash image is the factory
 settings; to keep them, use the OTA command above instead.
 
 **Start over**: flash the full-flash image, or
-`python3 -m esptool --chip esp32s3 -p /dev/ttyACM0 erase_flash` (then flash the
+`cd tools && uv run esptool --chip esp32s3 -p /dev/ttyACM0 erase_flash` (then flash the
 full-flash image; an erased chip has no firmware). Either wipes the Tailscale
 identity, key, peer, role and health counters. The remote does not come back
 on the tailnet by itself: repeat step 4 (new key paste), then step 6; it
@@ -358,15 +364,24 @@ is a software remote that runs the same arming sequence against the node
 
 Needed only to bake your own credentials into the image (a different admin
 password, WiFi, a Tailscale key without the admin-page step) or to change the
-firmware. Install ESP-IDF **v5.5**
-([guide](https://docs.espressif.com/projects/esp-idf/en/v5.5/esp32s3/get-started/linux-macos-setup.html);
-older IDF will not build, the USB tether needs a 5.5 fix), then:
+firmware. Install ESP-IDF **v5.5.4** or a later 5.5.x once
+(older IDF will not build, the USB tether needs a 5.5 fix; on Ubuntu first
+`sudo apt install git wget flex bison gperf python3-venv cmake ninja-build ccache libffi-dev libssl-dev dfu-util libusb-1.0-0`,
+[full prerequisites](https://docs.espressif.com/projects/esp-idf/en/v5.5/esp32s3/get-started/linux-macos-setup.html)):
+
+```sh
+git clone -b v5.5.4 --recursive https://github.com/espressif/esp-idf ~/esp/esp-idf
+~/esp/esp-idf/install.sh esp32s3
+```
+
+ESP-IDF keeps its own Python environment, separate from the uv one in `tools/`.
+Source it in each new shell before `idf.py`. Then build:
 
 ```sh
 cp firmware/sdkconfig.credentials.example firmware/sdkconfig.credentials
 $EDITOR firmware/sdkconfig.credentials       # set CONFIG_ML_TAILSCALE_AUTH_KEY and CONFIG_ML_ADMIN_PASSWORD, leave the rest
 cd firmware
-. ~/esp/esp-idf/export.sh                    # wherever you installed IDF 5.5
+. ~/esp/esp-idf/export.sh                    # in every new shell
 idf.py -DPSTOP_PROFILE=dev build             # the quickstart uses the dev profile
 grep CONFIG_ML_TAILSCALE_AUTH_KEY sdkconfig  # expect: your key, not the XXXXX placeholder
 idf.py -p /dev/ttyACM0 flash
