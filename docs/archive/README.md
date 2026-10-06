@@ -1,4 +1,8 @@
-# Archive — point-in-time engineering records
+---
+title: Archive
+---
+
+# Archive
 
 Everything in this directory is a historical record kept for
 traceability, migrated verbatim from the original development tree — do

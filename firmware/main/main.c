@@ -223,7 +223,7 @@ static atomic_uint_fast64_t g_core_done_us[2]; /* esp_timer stamp of each core's
  * the verdict/debounce/priming logic now live in estop_verdict.{h,c} so the
  * SIL-critical decision core is host-unit-testable to branch + MC/DC (the
  * on-target Xtensa build can't be gcov'd — JTAG pins ARE the loop pins). See
- * firmware/test/ and docs/safety/COVERAGE.md. */
+ * firmware/test/ and docs/safety/coverage_report.md. */
 
 static const struct
 {
@@ -437,7 +437,7 @@ static uint32_t estop_padcfg_reverify(void)
  * so the cores stop running and this software check cannot execute — that case
  * is caught only by the hardware watchdogs (TWDT feed stops -> reset; the
  * RTC WDT on its independent slow clock is the ultimate backstop). See
- * docs/safety/WATCHDOG_CLOCK_PROTECTION.md.
+ * docs/safety/watchdog_and_clock_cross_check.md.
  * ========================================================================== */
 
 #define XCHECK_STALL_TICKS pdMS_TO_TICKS(500) /* 5 ticks of no-advance tolerance */

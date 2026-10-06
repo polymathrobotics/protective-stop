@@ -1,8 +1,8 @@
 # change-0001 — Safety traceability linter: machine-checked requirements coverage
 
 **Implements:** No ADR. Authority is the safety chain itself —
-`docs/safety/SAFETY_REQUIREMENTS.md`, `docs/safety/TRACEABILITY.md`,
-`docs/safety/SYSTEM_DEFINITION.md`.
+`docs/safety/safety_requirements_specification.md`, `docs/safety/requirements_traceability.md`,
+`docs/safety/system_definition.md`.
 **Branch:** `change-0001-safety-traceability-linter`
 **Base:** `main`
 **Status:** implementation complete; PR CI pending
@@ -11,15 +11,15 @@ interface, timing, state-machine, protocol, or requirement change.
 **Authorization:** one authorizer approved implementation with the exact instruction
 `proceed` on 2026-09-11.
 
-Read `docs/safety/TRACEABILITY.md` §1 (Method) and §3 (coverage summary) in full
-before starting, then `docs/safety/SAFETY_REQUIREMENTS.md` §1 (numbering and
+Read `docs/safety/requirements_traceability.md` §1 (Method) and §3 (coverage summary) in full
+before starting, then `docs/safety/safety_requirements_specification.md` §1 (numbering and
 conventions). Those documents are the authority; this document is the work
 breakdown. Where the two disagree, the safety documents win — stop and flag the
 conflict rather than choosing.
 
 The repository is the source of truth for the safety case. Where any Notion page
 disagrees with a file under `docs/safety/`, the file wins
-(`docs/safety/RECONCILIATION.md` establishes this).
+(`docs/safety/documentation_and_code_reconciliation.md` establishes this).
 
 The design decisions in §1 and §1a are settled and are not open for
 reinterpretation during implementation.
@@ -29,9 +29,9 @@ reinterpretation during implementation.
 ## 1. What this change delivers
 
 A checked-in linter that parses the existing safety markdown, asserts
-bidirectional traceability consistency across `SAFETY_REQUIREMENTS.md`,
-`TRACEABILITY.md` and `SYSTEM_DEFINITION.md`, computes the requirements-coverage
-numbers, regenerates the §3 summary block in `TRACEABILITY.md`, and fails CI when
+bidirectional traceability consistency across `safety_requirements_specification.md`,
+`requirements_traceability.md` and `system_definition.md`, computes the requirements-coverage
+numbers, regenerates the §3 summary block in `requirements_traceability.md`, and fails CI when
 a change breaks traceability or silently drops a requirement's verification.
 
 **Settled decision 1 — markdown is canonical; the linter parses it.** The SR
@@ -47,8 +47,8 @@ existing Python tools are standalone `python3` scripts. Baseline and output file
 are JSON, which the `polymath-json` pre-commit hook already covers.
 
 **Settled decision 3 — ratchet, not gate.** The tree does not pass these checks
-today: five functions carry no requirement, and `OPEN_ITEMS.md` and
-`TRACEABILITY.md` disagree on the requirement count. A baseline file records every
+today: five functions carry no requirement, and `open_items.md` and
+`requirements_traceability.md` disagree on the requirement count. A baseline file records every
 pre-existing violation with a reason. CI fails on new violations only, and fails
 when a baselined violation is fixed but not removed from the baseline.
 
@@ -64,7 +64,7 @@ when a baselined violation is fixed but not removed from the baseline.
    establishes that `test_timing_floors.cpp` was added by `1f226be` and deleted by
    `9a28d4a` during the ROS 2 convention restoration. Record those facts without
    deciding whether SR-M-01 remains Verified.
-4. Do not rearrange `TRACEABILITY.md`. Use multiple named generated marker pairs
+4. Do not rearrange `requirements_traceability.md`. Use multiple named generated marker pairs
    around purely numeric regions. A bullet mixing numbers with hand-authored prose
    remains outside markers and is checked rather than rewritten. If markers cannot
    meet that rule, stop and quote the resisting text.
@@ -89,7 +89,7 @@ when a baselined violation is fixed but not removed from the baseline.
 2. Nine consistency checks (§4c), each with an error/warning severity.
 3. Coverage computation reproducing the §3.1 and §3.2 numbers from the parsed
    data.
-4. Generated-block rendering into `TRACEABILITY.md` §3 between HTML markers, with
+4. Generated-block rendering into `requirements_traceability.md` §3 between HTML markers, with
    a `--check` mode that fails when the committed block is stale.
 5. `docs/safety/lint-baseline.json` — recorded pre-existing violations with
    reasons and owners.
@@ -104,17 +104,17 @@ when a baselined violation is fixed but not removed from the baseline.
   re-status a requirement. Do not change a Status cell to make a check pass. If a
   check fails on real content, baseline it and report it.
 - Any file under `docs/safety/` other than approved generated/check-only markers in
-  `TRACEABILITY.md` §3 and the new `lint-baseline.json`. In particular, do not edit
+  `requirements_traceability.md` §3 and the new `lint-baseline.json`. In particular, do not edit
   the SRS conventions section.
 - Anything under `pstop_c/` — certified library, separate upstream track,
   excluded from pre-commit for that reason.
 - Anything under `ros2/` — governed by ament linters.
 - Line-number verification of `file:line` code citations. Files are checked to
   exist; line numbers drift constantly and are explicitly documented as "±a few
-  lines as the tree evolves" (`SAFETY_REQUIREMENTS.md` §1). Do not assert on them.
-- Parsing `FMEA.md`, `HARA.md` or `FMEDA.md` beyond extracting bare ID sets for
+  lines as the tree evolves" (`safety_requirements_specification.md` §1). Do not assert on them.
+- Parsing `fmea.md`, `hazard_analysis_and_risk_assessment.md` or `fmeda.md` beyond extracting bare ID sets for
   check C7.
-- Structural-coverage integration. `COVERAGE.md` and `docs/safety/coverage/host-summary.json`
+- Structural-coverage integration. `coverage_report.md` and `docs/safety/coverage/host-summary.json`
   stay out; this change measures requirements coverage only.
 - The modification procedure migration from Notion. Separate change.
 - Any CI gate on `main` branch protection. The workflow is added; enabling it as a
@@ -126,14 +126,14 @@ when a baselined violation is fixed but not removed from the baseline.
 
 | Fact | Value |
 |---|---|
-| Requirements spec | `docs/safety/SAFETY_REQUIREMENTS.md` |
-| Traceability matrix | `docs/safety/TRACEABILITY.md` |
-| Function decomposition | `docs/safety/SYSTEM_DEFINITION.md` §4 (`## 4. Function / item decomposition`, line 95) |
-| FMEA (DU register) | `docs/safety/FMEA.md` §3 |
-| HARA (safety goals SG-1..6, hazards H-nn) | `docs/safety/HARA.md` §5 |
-| Reconciliation record ("code wins") | `docs/safety/RECONCILIATION.md` |
-| Open items register | `docs/safety/OPEN_ITEMS.md` |
-| SR ID grammar | `SR-<area>-<nn>`; areas `SYS`, `R`, `H`, `M`, `I` (`SAFETY_REQUIREMENTS.md` §1) |
+| Requirements spec | `docs/safety/safety_requirements_specification.md` |
+| Traceability matrix | `docs/safety/requirements_traceability.md` |
+| Function decomposition | `docs/safety/system_definition.md` §4 (`## 4. Function / item decomposition`, line 95) |
+| FMEA (DU register) | `docs/safety/fmea.md` §3 |
+| HARA (safety goals SG-1..6, hazards H-nn) | `docs/safety/hazard_analysis_and_risk_assessment.md` §5 |
+| Reconciliation record ("code wins") | `docs/safety/documentation_and_code_reconciliation.md` |
+| Open items register | `docs/safety/open_items.md` |
+| SR ID grammar | `SR-<area>-<nn>`; areas `SYS`, `R`, `H`, `M`, `I` (`safety_requirements_specification.md` §1) |
 | SR table columns | `ID · Requirement (shall) · Derived from · Allocated to · Integrity · Verify · Status` |
 | SR section headings | `## 2.` SR-SYS, `## 3.` SR-R (subsections `### 3.1`, `### 3.2`), `## 4.` SR-H, `## 5.` SR-M, `## 6.` SR-I |
 | SRS status vocabulary | `Satisfied`, `Partially satisfied`, `Gap`, `Residual-accepted` — bold-wrapped, often followed by parenthetical prose |
@@ -141,7 +141,7 @@ when a baselined violation is fixed but not removed from the baseline.
 | Traceability section headings | `## 2. Traceability matrix` with `### 2.1`–`### 2.5`; `## 3. Requirements coverage summary`; `## 4. Test-gap register`; `## 5. Function → SR reverse map` with `### 5.1`–`### 5.x` |
 | Traceability status vocabulary | `Verified`, `Partially-verified`, `Unverified-gap`, `Residual-accepted` (defined in a table under `## 1. Method`) |
 | No-test marker | The literal string `NO TEST`, bold-wrapped, in the Verifying test(s) cell |
-| Test-file shorthand legend | `TRACEABILITY.md` §2 preamble: `EV`, `MR`, `HIL10/20/30`, `JL`, `REQ n_nn` — each maps to a real path |
+| Test-file shorthand legend | `requirements_traceability.md` §2 preamble: `EV`, `MR`, `HIL10/20/30`, `JL`, `REQ n_nn` — each maps to a real path |
 | `EV` | `firmware/test/test_estop_verdict.c` |
 | `MR` | `tools/pstop_multi_remote_test.py` |
 | `HIL10/20/30` | `tools/hil/test_10_button.py`, `test_20_discordance.py`, `test_30_power_cycle.py` |
@@ -155,11 +155,11 @@ when a baselined violation is fixed but not removed from the baseline.
 | Pre-commit config | `.pre-commit-config.yaml`, `polymath_code_standard` v2.2.0; hooks include `polymath-python`, `polymath-json`, `polymath-markdown`, `polymath-copyright` |
 | Pre-commit exclusions | `pstop_c/`, `ros2/`, `archive/`, vendored wireguard/x25519, `hardware/` binaries. `tools/` and `docs/` are NOT excluded — new files must satisfy the hooks |
 | Required file header | SPDX two-line header, Apache-2.0, matching `tools/test_config_floor.py` and `scripts/check_estop_diversity.sh` |
-| Markdown hook caveat | `OPEN_ITEMS.md` §8 records that the markdown hook rewrites `-` list markers to `+` and that repo-wide normalization is deliberately deferred. Do not let the hook reformat `TRACEABILITY.md` wholesale — only the generated block changes |
+| Markdown hook caveat | `open_items.md` §8 records that the markdown hook rewrites `-` list markers to `+` and that repo-wide normalization is deliberately deferred. Do not let the hook reformat `requirements_traceability.md` wholesale — only the generated block changes |
 
 ### The requirement count disagreement
 
-`TRACEABILITY.md` §3.1 states 40 safety requirements. `OPEN_ITEMS.md` §5 states
+`requirements_traceability.md` §3.1 states 40 safety requirements. `open_items.md` §5 states
 39 with a different coverage fraction, dated earlier. **Do not resolve this by
 editing either document.** Piece 4 computes the count from the parsed SR tables.
 Report the computed number. If it is neither 39 nor 40, stop and raise before
@@ -194,12 +194,12 @@ class SafetyRequirement:
     verify_methods: tuple[str, ...] # ("Fault-injection", "Test")
     status: str                 # normalized token from the SRS vocabulary
     status_prose: str           # everything after the token
-    source_line: int            # 1-based line in SAFETY_REQUIREMENTS.md
+    source_line: int            # 1-based line in safety_requirements_specification.md
 ```
 
 **1b. Table discovery.** Walk the file line by line. A requirements table is a
 markdown pipe table whose header row's first cell is `ID` and which contains a
-cell `Derived from`. Do not hardcode section numbers — `SAFETY_REQUIREMENTS.md`
+cell `Derived from`. Do not hardcode section numbers — `safety_requirements_specification.md`
 has subsections (`### 3.1`, `### 3.2`) and more may be added. Ignore every other
 pipe table in the file, including the ID-grammar table in §1.
 
@@ -224,7 +224,7 @@ whose leading token is outside the vocabulary is an error naming the file, line
 and cell.
 
 **Tests** (`self_test.py`, stdlib `unittest`):
-- `test_parses_all_sr_areas` — parse the real `SAFETY_REQUIREMENTS.md`; assert at
+- `test_parses_all_sr_areas` — parse the real `safety_requirements_specification.md`; assert at
   least one SR in each of the five areas.
 - `test_sr_ids_unique` — no duplicate `sr_id`.
 - `test_allocated_to_range_expansion` — `"F-R-01..05, F-H-03"` yields six
@@ -251,7 +251,7 @@ and it contains a cell beginning `Verifying test`. Same subsection caveat as 1b.
 
 **2c. Code-reference extraction.** From the Code cell, extract tokens shaped
 `path:line` or `path:line-line` or a bare backticked filename. Resolve a bare
-filename against the paths named in `SYSTEM_DEFINITION.md` §4 where possible;
+filename against the paths named in `system_definition.md` §4 where possible;
 where not, record it as unresolved rather than failing.
 
 **2d. Test-reference extraction.** Expand the shorthand legend from §3 above into
@@ -269,7 +269,7 @@ tuple_of_sr_ids)}`. A cell whose SR list is an em-dash-led "none" phrase yields 
 empty tuple plus a `declared_non_safety` flag when the phrase contains
 `non-safety`.
 
-**2f. System-definition parser.** Parse `SYSTEM_DEFINITION.md` §4's tables into
+**2f. System-definition parser.** Parse `system_definition.md` §4's tables into
 the authoritative `F-xx` set with names. This is the spine both other documents
 are checked against.
 
@@ -294,7 +294,7 @@ are checked against.
 Each check returns zero or more `Finding(check_id, severity, subject, message,
 file, line)`. `severity` is `error` or `warning`.
 
-**C1 — SR set parity.** Every SR in `SAFETY_REQUIREMENTS.md` appears exactly once
+**C1 — SR set parity.** Every SR in `safety_requirements_specification.md` appears exactly once
 in the traceability matrix, and vice versa. Severity: error. Subject: the SR ID.
 
 **C2 — Status vocabulary closed.** Every SRS status normalizes to the SRS
@@ -316,10 +316,10 @@ error for a missing file. Line numbers are never checked — see §2 OUT of scop
 An unresolved bare filename is severity `warning`.
 
 **C6 — Function allocation is real.** Every `F-xx` in any `Allocated to` cell
-exists in the `SYSTEM_DEFINITION.md` §4 set. Severity: error.
+exists in the `system_definition.md` §4 set. Severity: error.
 
-**C7 — Upstream references resolve.** Every `SG-n` appears in `HARA.md`, every
-`H-nn` appears in `HARA.md`, every `DU-n` appears in `FMEA.md`. Extract bare ID
+**C7 — Upstream references resolve.** Every `SG-n` appears in `hazard_analysis_and_risk_assessment.md`, every
+`H-nn` appears in `hazard_analysis_and_risk_assessment.md`, every `DU-n` appears in `fmea.md`. Extract bare ID
 sets by regex from those files; do not parse their structure. Severity: warning —
 those documents restructure and a false positive here must not block a PR.
 
@@ -343,7 +343,7 @@ to` set in the SRS equals the `Alloc F-xx` set in the matrix. Severity: error.
       "check_id": "C8",
       "subject": "F-H-04",
       "finding": "function has no allocated safety requirement",
-      "reason": "Robot status output + logging carries no SR. Known requirements-coverage hole, TRACEABILITY.md §5.2.",
+      "reason": "Robot status output + logging carries no SR. Known requirements-coverage hole, requirements_traceability.md §5.2.",
       "owner": "raj"
     }
   ]
@@ -374,7 +374,7 @@ the ratchet.
 ### Piece 4 — Coverage computation and generated summary
 
 **Files:** `tools/safety_lint/coverage.py`, `tools/safety_lint/render.py`,
-`docs/safety/TRACEABILITY.md` (generated block only).
+`docs/safety/requirements_traceability.md` (generated block only).
 
 **4a. Counts.** From the parsed traceability rows, compute per area and in total:
 count, and counts of `Verified`, `Partially-verified`, `Unverified-gap`,
@@ -454,7 +454,7 @@ run the linter with `--check`.
 **5d. Do not add this to `.pre-commit-config.yaml`.** The linter reads several
 files and computes cross-document state; pre-commit's per-file model fits it
 badly and the markdown hook's list-marker rewrite is a known landmine
-(`OPEN_ITEMS.md` §8). CI only.
+(`open_items.md` §8). CI only.
 
 **Tests:**
 - `test_cli_exit_code_zero_on_clean_tree` — with the baseline in place, the real
@@ -504,7 +504,7 @@ Non-negotiable. A piece is not done until all of these are true and reported.
   tree. Every SR in the spec appears exactly once in the matrix and vice versa.
 - **AC-2 — count resolved.** The linter reports a single authoritative requirement
   count with a per-area breakdown, and the report states whether it agrees with
-  `TRACEABILITY.md` §3.1, `OPEN_ITEMS.md` §5, both, or neither.
+  `requirements_traceability.md` §3.1, `open_items.md` §5, both, or neither.
 - **AC-3 — coverage reproduces.** The computed headline fractions match the
   committed §3.1 numbers, or every difference is reported with both values and an
   explanation before any document is modified.
@@ -538,7 +538,7 @@ Non-negotiable. A piece is not done until all of these are true and reported.
   why before changing it.
 - Every change lands via this branch and a PR targeting `main`.
 - Note that `origin/pstop` → `main` may still be open for review
-  (`OPEN_ITEMS.md` §8). Confirm `docs/safety/` is present on `main` before
+  (`open_items.md` §8). Confirm `docs/safety/` is present on `main` before
   branching; if it is not, stop and raise.
 
 ---
@@ -565,21 +565,21 @@ Non-negotiable. A piece is not done until all of these are true and reported.
    `SR-SYS-01`, `SR-SYS-02`, `SR-SYS-05`, `SR-SYS-08`, `SR-SYS-09` and `SR-R-13`
    all name real tests and then state that a specific leg has none. Treating the
    marker as "this row has no tests" mis-scores six rows.
-6. **`OPEN_ITEMS.md` and `TRACEABILITY.md` disagree on the requirement count and
+6. **`open_items.md` and `requirements_traceability.md` disagree on the requirement count and
    the coverage fractions.** They were written at different dates. Neither is
    authoritative for this change; the parsed tables are.
 7. **The markdown pre-commit hook rewrites `-` list markers to `+`.**
-   `OPEN_ITEMS.md` §8 records that repo-wide normalization is deliberately
+   `open_items.md` §8 records that repo-wide normalization is deliberately
    deferred and that per-file application creates inconsistency. If the hook
-   rewrites list markers across `TRACEABILITY.md`, revert and report — the
+   rewrites list markers across `requirements_traceability.md`, revert and report — the
    generated block must not drag a repo-wide reformat in with it.
 8. **`pstop_c/` is excluded from pre-commit and is on a separate upstream track.**
    Test paths under it are checked for existence and never opened, never
    formatted, never modified.
 9. **The five functions with no SR are real, not parser bugs.** `F-R-08` and
    `F-R-10` are declared non-safety; `F-H-04`, `F-M-01` and `F-M-06` are genuine
-   holes recorded in `TRACEABILITY.md` §5. All five belong in the baseline with
+   holes recorded in `requirements_traceability.md` §5. All five belong in the baseline with
    that distinction preserved.
 10. **Line numbers in `file:line` citations drift by design.**
-    `SAFETY_REQUIREMENTS.md` §1 says so explicitly. A linter that asserts on them
+    `safety_requirements_specification.md` §1 says so explicitly. A linter that asserts on them
     fails on every unrelated commit and will be disabled within a week.

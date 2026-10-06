@@ -3,7 +3,7 @@ title: Machine Host Runner
 sidebar_position: 2
 ---
 
-# machine_app_runner — robot-side pstop machine
+# Machine Host Runner
 
 Companion to the remote firmware in `firmware/`. The remote runs as a
 **pstop client** (lockstep verdict from cores 0 + 1, byte-compared, sent
@@ -24,7 +24,7 @@ certification track) is linked unmodified. This wrapper adds:
   (`delay_between_stop_ms`, upstream #59) — the runner forwards the
   value and logs `ARMED` / `arming DEFERRED`. Defends against
   EMC-induced loop blips performing the arming gesture. See
-  `docs/design/FAILOVER_AND_ARMING_DESIGN_2026-07-21.md`;
+  `docs/design/failover_and_arming_design.md`;
 - a status latch: OK is only propagated after the policy approves the
   arming — **any real actuation must hang off the latched status, never
   the library's raw callback**;
@@ -78,7 +78,7 @@ what (and which one caused a stop or owns the arming cycle).
 
 > The canonical, cross-platform version of this setup — including Windows
 > and macOS notes and the subnet gotcha — is
-> [`USB_NCM_SETUP.md`](USB_NCM_SETUP.md). The Linux steps below
+> [`usb_ncm_tether_setup.md`](usb_ncm_tether_setup.md). The Linux steps below
 > are the same procedure kept here for convenience.
 
 Plugging a pstop into a Linux host does NOT give you a working network
@@ -166,7 +166,7 @@ diagnostics (`e_hi*/e_lo*`) in `/state.json`.
 
 `tools/pstop_test_remote.py` bonds over the real wire protocol and runs
 timed STOP/OK sequences against a dedicated runner instance — see
-`docs/developing/testing/TESTING.md`.
+`docs/developing/testing/testing.md`.
 
 ## Stopping
 

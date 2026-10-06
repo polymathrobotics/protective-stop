@@ -44,7 +44,7 @@ EXAMPLE
       --duration 43200 --out ./soak_run \
       --serial /dev/ttyACM1 --clean-target 28800
 
-See docs/developing/testing/CONNECTIVITY_SOAK.md for how to run an acceptance ("N-hours-clean") soak
+See docs/developing/testing/connectivity_soak.md for how to run an acceptance ("N-hours-clean") soak
 and how to read a disconnect event.
 """
 

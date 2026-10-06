@@ -5,7 +5,7 @@
 // main.c so the SIL-critical verdict logic is unit-testable to branch + MC/DC
 // on the host (the on-target Xtensa build cannot be gcov-instrumented: its JTAG
 // pins ARE the E-stop loop pins GPIO39-42, and USB-Serial-JTAG is displaced by
-// the USB-NCM tether). See firmware/test/ and docs/safety/COVERAGE.md.
+// the USB-NCM tether). See firmware/test/ and docs/safety/coverage_report.md.
 
 #ifndef ESTOP_VERDICT_H
 #define ESTOP_VERDICT_H

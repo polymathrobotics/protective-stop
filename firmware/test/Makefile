@@ -5,7 +5,7 @@
 # E-stop decision core firmware/main/estop_verdict.c. The on-target Xtensa build
 # cannot be gcov-instrumented (its JTAG pins are the E-stop loop pins GPIO39-42),
 # so the SIL-critical decision logic is covered here on the host with GCC-14
-# (-fcondition-coverage = MC/DC). See docs/safety/COVERAGE.md.
+# (-fcondition-coverage = MC/DC). See docs/safety/coverage_report.md.
 #
 #   make run        # build + run the tests
 #   make coverage   # + line/branch/condition summary (needs gcc-14 + gcovr)

@@ -72,7 +72,7 @@ def run_checks(analysis):
                     'error',
                     sr_id,
                     f'SRS count {srs_counts[sr_id]}, matrix count {trace_counts[sr_id]}',
-                    'docs/safety/TRACEABILITY.md',
+                    'docs/safety/requirements_traceability.md',
                 )
             )
 
@@ -84,7 +84,7 @@ def run_checks(analysis):
                 'info',
                 status,
                 'valid status is in actual use but absent from SRS conventions section 1',
-                'docs/safety/SAFETY_REQUIREMENTS.md',
+                'docs/safety/safety_requirements_specification.md',
             )
         )
     for row in analysis.srs:
@@ -95,7 +95,7 @@ def run_checks(analysis):
                     'error',
                     row.sr_id,
                     f'invalid SRS status {row.status}',
-                    'docs/safety/SAFETY_REQUIREMENTS.md',
+                    'docs/safety/safety_requirements_specification.md',
                     row.source_line,
                 )
             )
@@ -107,7 +107,7 @@ def run_checks(analysis):
                     'error',
                     row.sr_id,
                     f'invalid trace status {row.status}',
-                    'docs/safety/TRACEABILITY.md',
+                    'docs/safety/requirements_traceability.md',
                     row.source_line,
                 )
             )
@@ -120,7 +120,7 @@ def run_checks(analysis):
                     'error',
                     row.sr_id,
                     f'{row.status} has no resolvable test citation',
-                    'docs/safety/TRACEABILITY.md',
+                    'docs/safety/requirements_traceability.md',
                     row.source_line,
                 )
             )
@@ -131,7 +131,7 @@ def run_checks(analysis):
                     'error',
                     row.sr_id,
                     'Unverified-gap must carry NO TEST and no resolvable test citation',
-                    'docs/safety/TRACEABILITY.md',
+                    'docs/safety/requirements_traceability.md',
                     row.source_line,
                 )
             )
@@ -144,7 +144,7 @@ def run_checks(analysis):
                     'error',
                     issue.sr_id,
                     f'{issue.literal}: {issue.message}',
-                    'docs/safety/TRACEABILITY.md',
+                    'docs/safety/requirements_traceability.md',
                     issue.source_line,
                 )
             )
@@ -156,7 +156,7 @@ def run_checks(analysis):
                     severity,
                     issue.sr_id,
                     f'{issue.literal}: {issue.message}',
-                    'docs/safety/TRACEABILITY.md',
+                    'docs/safety/requirements_traceability.md',
                     issue.source_line,
                 )
             )
@@ -170,7 +170,7 @@ def run_checks(analysis):
                         'error',
                         f'SRS:{function_id}',
                         f'allocated by {row.sr_id} but absent from system definition',
-                        'docs/safety/SAFETY_REQUIREMENTS.md',
+                        'docs/safety/safety_requirements_specification.md',
                         row.source_line,
                     )
                 )
@@ -183,7 +183,7 @@ def run_checks(analysis):
                         'error',
                         f'TRACE:{function_id}',
                         f'allocated by {row.sr_id} but absent from system definition',
-                        'docs/safety/TRACEABILITY.md',
+                        'docs/safety/requirements_traceability.md',
                         row.source_line,
                     )
                 )
@@ -200,7 +200,7 @@ def run_checks(analysis):
                         'warning',
                         reference,
                         f'upstream reference from {row.sr_id} not found',
-                        'docs/safety/SAFETY_REQUIREMENTS.md',
+                        'docs/safety/safety_requirements_specification.md',
                         row.source_line,
                     )
                 )
@@ -214,7 +214,11 @@ def run_checks(analysis):
         if entry is None:
             findings.append(
                 _finding(
-                    'C8', 'error', function_id, 'system function absent from reverse map', 'docs/safety/TRACEABILITY.md'
+                    'C8',
+                    'error',
+                    function_id,
+                    'system function absent from reverse map',
+                    'docs/safety/requirements_traceability.md',
                 )
             )
             continue
@@ -227,7 +231,7 @@ def run_checks(analysis):
                     'error',
                     function_id,
                     f'reverse map {sorted(actual)} != allocated SRs {sorted(expected)}',
-                    'docs/safety/TRACEABILITY.md',
+                    'docs/safety/requirements_traceability.md',
                     entry.source_line,
                 )
             )
@@ -238,7 +242,7 @@ def run_checks(analysis):
                     'warning',
                     function_id,
                     'function has no allocated safety requirement',
-                    'docs/safety/TRACEABILITY.md',
+                    'docs/safety/requirements_traceability.md',
                     entry.source_line,
                 )
             )
@@ -252,7 +256,7 @@ def run_checks(analysis):
                     'error',
                     row.sr_id,
                     f'matrix allocation {sorted(row.allocated_to)} != SRS allocation {sorted(srs_by_id[row.sr_id].allocated_to)}',
-                    'docs/safety/TRACEABILITY.md',
+                    'docs/safety/requirements_traceability.md',
                     row.source_line,
                 )
             )
@@ -289,7 +293,7 @@ def check_numeric_coverage_claims(text):
             'error',
             'section 3 outside generated regions',
             f'numeric coverage claims outside generated regions: [{", ".join(claims)}]',
-            'docs/safety/TRACEABILITY.md',
+            'docs/safety/requirements_traceability.md',
             text.count('\n', 0, heading.start()) + 1,
         ),
     )
