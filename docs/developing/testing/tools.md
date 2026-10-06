@@ -8,7 +8,7 @@ SPDX-FileCopyrightText: 2026 Polymath Robotics
 SPDX-License-Identifier: Apache-2.0
 -->
 
-# pstop tools
+# Tools
 
 Flashing, fleet, chaos, soak, and HIL tooling for the remote and machine nodes.
 Every Python tool here runs from one environment, described by
@@ -84,7 +84,7 @@ See the header comment in each script for the full argument list.
 
 `pstop_secure.py` signs, provisions and re-flashes units of the secure profiles
 (`secure-fe`, the default, and `secure`); see
-[`SECURITY_PROFILES.md`](../../guides/SECURITY_PROFILES.md).
+[`secure_boot_guide.md`](../../guides/secure_boot_guide.md).
 
 ## HIL suite
 
@@ -103,7 +103,7 @@ cd tools/hil
 
 `safety_lint/` parses the safety documents, checks the requirement, function,
 and evidence mappings, and owns the generated coverage numbers in
-`docs/safety/TRACEABILITY.md`.
+`docs/safety/requirements_traceability.md`.
 It is stdlib-only but runs from this environment like everything else here.
 It resolves the safety documents against the repository root it is checked into,
 so the working directory does not matter:
@@ -135,7 +135,7 @@ The flat scripts are deliberately outside that: several take a positional
 integer or exit at import, so they are not collectible, and the repo-root
 [`test/`](/test/) ladders plus the `pstop_*_test.py` harnesses are bash-
 and script-driven. See
-[`TESTING.md`](TESTING.md) for those.
+[`testing.md`](testing.md) for those.
 
 ### Flashing-tool regression tests
 

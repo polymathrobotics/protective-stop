@@ -27,6 +27,6 @@ menu "machn (machine node) configuration"
             new wiring.
 
             Full rationale, reversal steps, and safety-case impact:
-            docs/design/RELAY_FEEDBACK_DESCOPE.md.
+            docs/design/relay_feedback_descope.md.
 
 endmenu

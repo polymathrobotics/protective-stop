@@ -4,7 +4,7 @@ name: Host build and MISRA check
 # Builds the robot-side machine_app_runner (plain C, no ESP-IDF) and runs
 # the free cppcheck MISRA C:2012 pre-check. The MISRA step is advisory:
 # residual findings are the documented deviation register
-# (docs/safety/MISRA_COMPLIANCE_2026-07-21.md), so it never fails the build.
+# (docs/safety/misra_c_compliance_review.md), so it never fails the build.
 
 on:
   push:

@@ -669,7 +669,7 @@ static esp_err_t handler_post_settings(httpd_req_t * req)
 
   if (derp_region_changed && ctx->ml != NULL) {
     ctx->ml->derp_region_override = ctx->settings.derp_region;
-    /* Pin->MBB (docs/design/STAGE1_PIN_MBB_DESIGN.md): do NOT fire
+    /* Pin->MBB (docs/design/gapless_forced_region_switch.md): do NOT fire
      * ML_EVT_DERP_RECONNECT here — tearing down the live home conn starves
      * inbound heartbeat processing past the 2 s machine timeout. The wg_mgr
      * negotiator's pin tick (3 s cadence) drives the pin: make-before-break
@@ -1196,7 +1196,7 @@ static esp_err_t handler_monitor(httpd_req_t * req)
       cJSON_AddNumberToObject(json, "coord_authkey_regs", ml_coord_get_authkey_regs());
       cJSON_AddBoolToObject(json, "ts_enrolled", ml->vpn_ip != 0u);
       {
-        /* Stall-class closure telemetry (docs/design/STALL_EVENT_CLOSURE_DESIGN.md) */
+        /* Stall-class closure telemetry (docs/design/all_path_stall_closure.md) */
         uint32_t hs[2] = {0};
         ml_wg_get_hs_budget_diag(hs);
         cJSON_AddNumberToObject(json, "wg_hs_deferred", hs[0]);

@@ -1,9 +1,9 @@
 ---
-title: Assembly
+title: Assembly Guide
 sidebar_position: 2
 ---
 
-# Assembly guide
+# Assembly Guide
 
 Building one Protective Stop remote takes about 15 minutes. Order the
 parts from the [BOM](index.md#bill-of-materials) and print the enclosure
@@ -104,8 +104,8 @@ Snug is enough; the inserts strip before the screws do.
 Connect USB and flash; a fresh board enters download mode on its own.
 (If automatic flashing does not work, hold BOOT and tap RST to force
 download mode.) Everything after the first flash goes over the network.
-See the [quickstart](../guides/QUICKSTART.md) for the flash and
+See the [quickstart](../guides/quickstart.md) for the flash and
 machine-pairing steps, then calibrate the ring rotation:
 `POST /api/ring_led1?on=1` lights the pixel the firmware currently calls
 LED 1, and `POST /api/ring_offset?n=0..15` moves it to where the bezel
-says LED 1 should be ([API reference](../guides/API.md)).
+says LED 1 should be ([API reference](../guides/http_api.md)).

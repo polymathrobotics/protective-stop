@@ -1,0 +1,174 @@
+---
+title: Testing
+---
+
+# Testing
+
+How to exercise the pstop link, the machine's arming policy, and the
+remote's robustness. Nothing here needs the chip's IDE. Bench IPs are
+environment-specific — every script takes them as environment variables or
+flags.
+
+Most tools here are stdlib-only and run under any Python 3.11+. The
+`tools/` uv environment covers all of them plus the ones with dependencies
+(`usb_relay4.py`, the HIL suite), so the commands below use `uv run`; see
+[tools guide](tools.md) for the one-time setup.
+
+## 1. Machine arming-policy suite — `tools/pstop_test_remote.py`
+
+A scripted pstop remote that speaks the real v2 wire protocol (48-byte
+messages, CRC16 poly 0x8D95, far-Hamming codewords, self-role in the aux
+channel) well enough to bond and run timed STOP/OK sequences — verifies the
+min-STOP-duration arming policy and the two-gate re-arm rule without a chip.
+It works against either machine implementation, since both host the same
+`pstop_c`. Use a **dedicated** port, never the one a real remote is bonded to.
+
+Plain-C runner (`host/machine.toml` admits every remote; the script announces
+OPERATOR, which is all that arming needs):
+
+```sh
+cd host && make
+./machine_app_runner machine.toml 8893 &
+cd ../tools && uv run python pstop_test_remote.py --port 8893
+```
+
+ROS 2 node (defaults admit every remote; only the port needs overriding):
+
+```sh
+printf '/machine_bridge:\n  ros__parameters:\n    software:\n      port: 8894\n' > /tmp/pstop_test.yaml
+ros2 run protective_stop_machine machine_bridge_node --ros-args --params-file /tmp/pstop_test.yaml &
+cd tools && uv run python pstop_test_remote.py --port 8894
+```
+
+Asserts (exit 0 = all pass):
+1. bond + OK stream → machine replies STOP (NEED_STOP, nothing armed yet)
+2. 200 ms STOP blip → immediate OK refused; a steady OK stream arms once the
+   library's min delay has elapsed
+3. 800 ms STOP press → ARMS on release (replies turn OK)
+4. blip while armed → robot stops; immediate OK refused; self-re-arms after
+   the delay
+5. press again → re-arms
+
+`--role stop_only` announces a stop-only remote instead and asserts the
+inverse: a full press-and-release must **not** arm. Run both after any change
+to `host/machine_app_runner.c`, `ros2/`, `common/pstop_aux_channel.h` or a
+`pstop_c` update (a CRC/wire break fails at step 1).
+
+## 1b. Many-remotes-to-one-machine matrix — `tools/pstop_multi_remote_test.py`
+
+Drives N scripted software remotes (each its own device_id + counter handshake)
+against a dedicated `machine_app_runner` to validate the many-to-one logic
+across the corner-case matrix: independent arming, the any-STOP OR, arming
+ownership, heartbeat loss, unbond, capacity overflow, admission allow/denylist
+(incl. the addressed `UNBOND` reply and deny-wins), remote-announced stop-only
+vs operator authority, the LIVE role flip (a demoted owner keeps the machine
+running but cannot re-arm it after the next STOP), a mixed operator/stop-only
+fleet, malformed/bad-CRC/invalid-type traffic, and network chaos (via §2).
+47 assertions covering the fail-safe invariants (I1–I7).
+
+```sh
+cd tools && uv run python pstop_multi_remote_test.py     # exit 0 = all invariants held
+```
+
+Full write-up + invariant list: `multi_remote_validation.md`.
+
+## 2. Protocol-level impairment — `tools/pstop_chaos_proxy.py`
+
+UDP proxy interposed in the pstop path
+(chip → proxy:8891 → machine:8890) that injects loss / delay / jitter
+(reordering) / duplication / corruption per direction, re-tunable at
+runtime via a UDP control port (8892) without re-bonding:
+
+```sh
+cd tools && uv run python pstop_chaos_proxy.py --listen 8891 --fwd 8890 --ctrl 8892
+curl -X POST "http://$CHIP/api/pstop_peer?ip=<proxy-host>&port=8891"
+echo 'loss=0.05 delay_ms=100 jitter_ms=50' > /dev/udp/127.0.0.1/8892
+echo 'clear=1'                             > /dev/udp/127.0.0.1/8892
+```
+
+Direction-specific overrides: `loss_up` (chip→machine), `loss_down`,
+same suffixes for `delay_ms`/`jitter_ms`/`dup`/`corrupt`. Stats print
+every 10 s.
+
+## 3. Chaos ladder — `test/chaos_ladder.sh`
+
+Sweeps the proxy through the standard impairment ladder (baseline,
+loss 1→30 %, delay 50→500 ms, jitter-reorder, dup, corrupt, combo, then
+0.5/1/2/5 s full outages) while sampling the chip's `/state.json` every
+10 s. Requires the proxy from §2 running and the machine ARMED (any
+unscheduled STOP in the logs = false trip).
+
+```sh
+CHIP=<chip-ip> [CTRL_HOST=127.0.0.1] [CTRL_PORT=8892] test/chaos_ladder.sh
+```
+
+Outputs (next to the script): `chaos.csv` (phase-stamped samples),
+`phases.log` (phase markers); machine transitions land in the runner's
+stderr, proxy stats in its stdout.
+
+Pass criteria (measured baseline, 2026-07-20): zero false STOPs, zero
+rebonds, zero crashes (`boot_count` stays 0) through the entire ladder
+up to 30 %/direction loss + 500 ms delay + 20 % dup + 2 % corruption;
+outages <1 s ride through; outages ≥1 s STOP on the heartbeat timeout
+and re-bond automatically, with arming requiring a fresh press.
+
+## 4. WG-underlay ladder — `test/netem_ladder.sh`
+
+tc/netem on the *encrypted* WireGuard flows (UDP 51820) of the bench
+interface — validates the tunnel layer itself: loss, delay, a 5-min
+direct-path blackhole (must fail over to DERP), restore (must return to
+the direct path). Self-installing and self-verifying: it logs netem
+qdisc packet counters per phase to PROVE impairment applied, because the
+tether interface silently loses all qdiscs on every chip reboot /
+USB re-enumeration.
+
+```sh
+IF=<bench-iface> CHIP=<chip-ip> CHIP_TS=<chip-tailscale-ip> test/netem_ladder.sh
+```
+
+Needs sudo (tc/ifb). NOTE: the script's `arm()` step uses the
+`/api/pstop_sim` pulse, which exists only in test builds — on production
+firmware (pstop_sim removed) it 404s harmlessly; arm with a physical
+press of the E-stop switch instead.
+
+Baselines (2026-07-20/21): 10 %/dir underlay loss → ~19 % reply loss, no
+false STOP; blackhole → STOP on timeout, heartbeats resume via DERP at
+~201 ms RTT; dark window ≤10 s with the priority-peer pong watchdog
+(measured 9.3 s; was 10–66 s); direct path back within one sample of
+restore.
+
+## 5. Soak methodology
+
+A transport claim needs, per transport (Ethernet / USB-NCM / WiFi):
+
+1. **30–40 min steady-state soak** at the commissioned heartbeat rate over
+   Tailscale, machine armed. Include the fastest supported rate as a stress
+   case. Watch `/state.json`: `pstop_sent`/`pstop_replies` ratio,
+   `pstop_rebonds`, `pstop_mismatch`, `boot_count`, `heap_min_int`.
+2. The §3 protocol ladder and §4 underlay ladder.
+3. A wire-level audit: tcpdump the underlay and confirm no plaintext
+   application ports (this is what caught the critical plaintext
+   downgrade — see `archive/tailscale_link_and_chaos_test_results.md`).
+
+Measured baselines to compare against
+(`archive/transport_test_campaign.md`):
+
+| Metric | USB-NCM | Ethernet (PoE) | WiFi (PS off) |
+|---|---|---|---|
+| Soak reply rate | 99.983 % | 100.000 % | 98.09 % |
+| Rebonds / false stops | 0 / 0 | 0 / 0 | ~1 burst per 10–15 min (fail-safe) |
+| Steady-state pstop RTT over tunnel | ~5 ms | ~5 ms | tens of ms, spiky |
+| Crashes over the whole campaign | 0 | 0 | 0 |
+
+Long-run harnesses in `tools/` (edit the IP constants at the top —
+they are bench snapshots): `tools/chaos_soak.py` (reachability +
+telemetry probe at 2 s with injected chaos events; reboot-gated so it
+never trips the rapid-boot ladder) and `tools/robust_test.py` (repeated
+reboot: Tailscale-up time, crash-free boots, admin-page latency).
+
+## 6. Legacy scripts
+
+`test/longsoak.sh`, `test/test_suite.sh`, `test/full_test_after_recovery.sh`,
+`test/aggressive_ota.sh`, `test/auto_recover.sh` are v15-era bench
+scripts kept for reference; they predate the current firmware and still
+assume old bench addresses/flows. Prefer the tools above.

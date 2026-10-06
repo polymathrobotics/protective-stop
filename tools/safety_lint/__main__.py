@@ -76,7 +76,7 @@ def main(argv=None):
         analysis = analyze(root)
         baseline = _load_baseline(root / 'docs/safety/lint-baseline.json')
         coverage = compute_coverage(analysis)
-        trace_path = root / 'docs/safety/TRACEABILITY.md'
+        trace_path = root / 'docs/safety/requirements_traceability.md'
         original = trace_path.read_text(encoding='utf-8')
         active, suppressed = apply_baseline(
             run_checks(analysis) + check_numeric_coverage_claims(original),
@@ -119,7 +119,7 @@ def main(argv=None):
                 print(f'  SR-{area}: {data["count"]} total, {data["cited"]} cited, {data["Verified"]} Verified')
             if args.check and stale:
                 print(
-                    'docs/safety/TRACEABILITY.md: generated regions are stale; run: cd tools && uv run python -m safety_lint --write'
+                    'docs/safety/requirements_traceability.md: generated regions are stale; run: cd tools && uv run python -m safety_lint --write'
                 )
         failed = bool(active_errors) or (args.check and stale)
         return 1 if failed else 0

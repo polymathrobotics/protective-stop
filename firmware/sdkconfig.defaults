@@ -108,7 +108,7 @@ CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
 # === Watchdogs (SR-H-04 / FMEA DU-2: frozen-clock / frozen-task) ============
 # Three built-in hardware/software watchdogs form the last-resort backstop
 # behind the software dual-core clock cross-check (main.c). Rationale for every
-# value is in docs/safety/WATCHDOG_CLOCK_PROTECTION.md.
+# value is in docs/safety/watchdog_and_clock_cross_check.md.
 #
 # Task Watchdog Timer (TWDT). Auto-inits at startup and subscribes both idle
 # tasks, so a safety task that spins (never yields) starves its core's idle
@@ -235,7 +235,7 @@ CONFIG_ESP_COREDUMP_MAX_TASKS_NUM=64
 # alloc fixes it; prereq CONFIG_SPIRAM_USE_MALLOC is set. TLS runs in the
 # derp_tx/net_io tasks (not ISR/cache-disabled) and is NOT the WireGuard/pstop
 # datapath crypto, so the safety heartbeat path is unaffected.
-# See docs/design/INTERNAL_RAM_REDUCTION.md.
+# See docs/design/internal_ram_reduction.md.
 CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC=y
 
 # === perf branch: performance tuning (A/B against -Og baseline) ===
