@@ -43,7 +43,7 @@ class FixtureRepo(unittest.TestCase):
         self.root = Path(self.temp.name)
         shutil.copytree(FIXTURE, self.root, dirs_exist_ok=True)
         self.replace(
-            'docs/safety/TRACEABILITY.md',
+            'docs/safety/requirements_traceability.md',
             '- **(a) SRs with ≥1 passing verifying test: 2 / 2 = 100 %**\n'
             '- **Strict, fully-verified only: 1 / 2 = 50.0 %.**\n'
             '- **(b) Safety functions F-xx traced to ≥1 SR: 1 / 1 = 100 %.**\n'
@@ -71,12 +71,12 @@ class FixtureRepo(unittest.TestCase):
 class ParserTests(FixtureRepo):
     def test_parses_all_sr_areas(self):
         """The canonical SRS exposes at least one requirement in every declared area."""
-        areas = {row.area for row in parse_srs(REPO / 'docs/safety/SAFETY_REQUIREMENTS.md')}
+        areas = {row.area for row in parse_srs(REPO / 'docs/safety/safety_requirements_specification.md')}
         self.assertEqual(areas, {'SYS', 'R', 'H', 'M', 'I'})
 
     def test_sr_ids_unique(self):
         """Every canonical requirement ID identifies exactly one SRS row."""
-        rows = parse_srs(REPO / 'docs/safety/SAFETY_REQUIREMENTS.md')
+        rows = parse_srs(REPO / 'docs/safety/safety_requirements_specification.md')
         self.assertEqual(len({row.sr_id for row in rows}), len(rows))
 
     def test_allocated_to_range_expansion(self):
@@ -129,33 +129,33 @@ class ParserTests(FixtureRepo):
 
     def test_srs_and_trace_rows_allow_allocation_punctuation(self):
         """Both authoritative allocation tables accept punctuation after complete function IDs."""
-        self.replace('docs/safety/SAFETY_REQUIREMENTS.md', '| F-R-01 | SIL 3 |', '| F-R-01) | SIL 3 |')
-        self.replace('docs/safety/TRACEABILITY.md', '| SR-R-01 | F-R-01 |', '| SR-R-01 | F-R-01. |')
-        srs = parse_srs(self.root / 'docs/safety/SAFETY_REQUIREMENTS.md')
+        self.replace('docs/safety/safety_requirements_specification.md', '| F-R-01 | SIL 3 |', '| F-R-01) | SIL 3 |')
+        self.replace('docs/safety/requirements_traceability.md', '| SR-R-01 | F-R-01 |', '| SR-R-01 | F-R-01. |')
+        srs = parse_srs(self.root / 'docs/safety/safety_requirements_specification.md')
         trace, _, _ = parse_traceability(self.root)
         self.assertEqual((srs[1].allocated_to, trace[1].allocated_to), (('F-R-01',), ('F-R-01',)))
 
     def test_srs_parser_rejects_partial_range_in_real_row(self):
         """A malformed continuation in an SRS table row fails instead of retaining its valid prefix."""
-        self.replace('docs/safety/SAFETY_REQUIREMENTS.md', '| F-R-01 | SIL 3 |', '| F-R-01.. | SIL 3 |')
+        self.replace('docs/safety/safety_requirements_specification.md', '| F-R-01 | SIL 3 |', '| F-R-01.. | SIL 3 |')
         with self.assertRaisesRegex(LintError, r'SAFETY_REQUIREMENTS\.md:14: malformed allocation'):
-            parse_srs(self.root / 'docs/safety/SAFETY_REQUIREMENTS.md')
+            parse_srs(self.root / 'docs/safety/safety_requirements_specification.md')
 
     def test_trace_parser_reports_malformed_allocation_row_location(self):
         """A truncated trace allocation fails at the exact matrix row rather than yielding partial data."""
-        self.replace('docs/safety/TRACEABILITY.md', '| SR-R-01 | F-R-01 |', '| SR-R-01 | F-R-01/02/XX |')
+        self.replace('docs/safety/requirements_traceability.md', '| SR-R-01 | F-R-01 |', '| SR-R-01 | F-R-01/02/XX |')
         with self.assertRaisesRegex(LintError, r'TRACEABILITY\.md:11: malformed allocation'):
             parse_traceability(self.root)
 
     def test_trace_parser_rejects_malformed_numeric_member_in_real_row(self):
         """A malformed numeric member in a matrix row fails instead of retaining its valid prefix."""
-        self.replace('docs/safety/TRACEABILITY.md', '| SR-R-01 | F-R-01 |', '| SR-R-01 | F-R-01/2 |')
+        self.replace('docs/safety/requirements_traceability.md', '| SR-R-01 | F-R-01 |', '| SR-R-01 | F-R-01/2 |')
         with self.assertRaisesRegex(LintError, r'TRACEABILITY\.md:11: malformed allocation'):
             parse_traceability(self.root)
 
     def test_status_longest_match_wins(self):
         """A partial SRS status is never inflated to a fully satisfied status."""
-        rows = parse_srs(self.root / 'docs/safety/SAFETY_REQUIREMENTS.md')
+        rows = parse_srs(self.root / 'docs/safety/safety_requirements_specification.md')
         self.assertEqual(rows[1].status, 'Partially satisfied')
 
     def test_status_vocabularies_are_defined_longest_match_first(self):
@@ -169,14 +169,14 @@ class ParserTests(FixtureRepo):
 
     def test_every_trace_row_has_sr_id(self):
         """Malformed matrix rows cannot silently disappear as non-requirement content."""
-        self.replace('docs/safety/TRACEABILITY.md', '| SR-R-01 |', '| BAD-ID |')
+        self.replace('docs/safety/requirements_traceability.md', '| SR-R-01 |', '| BAD-ID |')
         with self.assertRaises(LintError):
             parse_traceability(self.root)
 
     def test_test_shorthand_expands_to_existing_paths(self):
         """Every documented shorthand expands to its exact existing repository path."""
         self.replace(
-            'docs/safety/TRACEABILITY.md',
+            'docs/safety/requirements_traceability.md',
             'test_unique_probe.py',
             'EV, MR[B/D], HIL10, HIL20, HIL30, JL, REQ 2_02/2_03',
         )
@@ -198,7 +198,7 @@ class ParserTests(FixtureRepo):
 
     def test_compact_hil_slash_form_resolves_both_paths(self):
         """Compact HIL20/30 notation resolves both independently existing HIL sources."""
-        self.replace('docs/safety/TRACEABILITY.md', 'test_unique_probe.py', 'HIL20/30')
+        self.replace('docs/safety/requirements_traceability.md', 'test_unique_probe.py', 'HIL20/30')
         rows, _, _ = parse_traceability(self.root)
         self.assertEqual(
             rows[1].test_refs,
@@ -227,22 +227,22 @@ class ParserTests(FixtureRepo):
 
     def test_system_definition_function_set_nonempty(self):
         """The authoritative function decomposition yields a nonempty function set."""
-        self.assertTrue(parse_system_definition(REPO / 'docs/safety/SYSTEM_DEFINITION.md'))
+        self.assertTrue(parse_system_definition(REPO / 'docs/safety/system_definition.md'))
 
     def test_duplicate_system_function_ids_fail_with_both_lines(self):
         """A duplicate authoritative function ID fails and identifies both defining lines."""
         self.replace(
-            'docs/safety/SYSTEM_DEFINITION.md',
+            'docs/safety/system_definition.md',
             '| F-R-01 | Sense | code.c |',
             '| F-R-01 | Sense | code.c |\n| F-R-01 | Duplicate | code.c |',
         )
         with self.assertRaisesRegex(LintError, r'F-R-01.*lines 10 and 11'):
-            parse_system_definition(self.root / 'docs/safety/SYSTEM_DEFINITION.md')
+            parse_system_definition(self.root / 'docs/safety/system_definition.md')
 
     def test_duplicate_reverse_map_ids_fail_with_both_lines(self):
         """A duplicate reverse-map function ID fails and identifies both defining lines."""
         self.replace(
-            'docs/safety/TRACEABILITY.md',
+            'docs/safety/requirements_traceability.md',
             '| F-R-01 | Sense | SR-SYS-01, SR-R-01 |',
             '| F-R-01 | Sense | SR-SYS-01, SR-R-01 |\n| F-R-01 | Duplicate | SR-R-01 |',
         )
@@ -254,14 +254,14 @@ class ParserTests(FixtureRepo):
         decoy = self.root / 'tools/safety_lint/fixtures/repository/tests/test_unique_probe.py'
         decoy.parent.mkdir(parents=True)
         decoy.write_text('# synthetic fixture, not project evidence\n', encoding='utf-8')
-        self.replace('docs/safety/TRACEABILITY.md', 'test_unique_probe.py', 'test_unique_probe')
+        self.replace('docs/safety/requirements_traceability.md', 'test_unique_probe.py', 'test_unique_probe')
         rows, _, issues = parse_traceability(self.root)
         self.assertIn('tests/test_unique_probe.py', rows[1].test_refs)
         self.assertFalse([i for i in issues if i.literal == 'test_unique_probe'])
 
     def test_missing_bare_test_stem_is_not_resolved(self):
         """A missing bare test stem produces an issue but never a resolved evidence path."""
-        self.replace('docs/safety/TRACEABILITY.md', 'test_unique_probe.py', 'test_deleted_source')
+        self.replace('docs/safety/requirements_traceability.md', 'test_unique_probe.py', 'test_deleted_source')
         rows, _, issues = parse_traceability(self.root)
         self.assertFalse(rows[1].test_refs)
         self.assertTrue([issue for issue in issues if issue.literal == 'test_deleted_source'])
@@ -270,21 +270,21 @@ class ParserTests(FixtureRepo):
         """An ambiguous test stem is reported instead of selecting the nearest file."""
         (self.root / 'other').mkdir()
         (self.root / 'other/test_unique_probe.py').write_text('# duplicate\n', encoding='utf-8')
-        self.replace('docs/safety/TRACEABILITY.md', 'test_unique_probe.py', 'test_unique_probe')
+        self.replace('docs/safety/requirements_traceability.md', 'test_unique_probe.py', 'test_unique_probe')
         _, _, issues = parse_traceability(self.root)
         self.assertTrue([i for i in issues if i.kind == 'ambiguous' and i.literal == 'test_unique_probe'])
 
     def test_hil_report_must_name_sr(self):
         """An evidence report counts only when its content names the cited requirement."""
         (self.root / 'docs/evidence.md').write_text('# HIL evidence for another SR\n', encoding='utf-8')
-        self.replace('docs/safety/TRACEABILITY.md', 'test_unique_probe.py', 'docs/evidence.md')
+        self.replace('docs/safety/requirements_traceability.md', 'test_unique_probe.py', 'docs/evidence.md')
         _, _, issues = parse_traceability(self.root)
         self.assertTrue([i for i in issues if i.kind == 'report-does-not-name-sr'])
 
     def test_test_named_markdown_without_sr_is_rejected_as_report(self):
         """A Markdown file in tests must name the cited SR before test-like naming can matter."""
         (self.root / 'tests/test_report.md').write_text('# Report without requirement\n', encoding='utf-8')
-        self.replace('docs/safety/TRACEABILITY.md', 'test_unique_probe.py', 'tests/test_report.md')
+        self.replace('docs/safety/requirements_traceability.md', 'test_unique_probe.py', 'tests/test_report.md')
         rows, _, issues = parse_traceability(self.root)
         self.assertFalse(rows[1].test_refs)
         self.assertTrue([i for i in issues if i.literal == 'tests/test_report.md'])
@@ -292,7 +292,7 @@ class ParserTests(FixtureRepo):
     def test_test_named_markdown_with_sr_outside_docs_is_rejected(self):
         """A Markdown report naming its SR is still ineligible when it is outside docs."""
         (self.root / 'tests/test_report.md').write_text('# Evidence for SR-R-01\n', encoding='utf-8')
-        self.replace('docs/safety/TRACEABILITY.md', 'test_unique_probe.py', 'tests/test_report.md')
+        self.replace('docs/safety/requirements_traceability.md', 'test_unique_probe.py', 'tests/test_report.md')
         rows, _, issues = parse_traceability(self.root)
         self.assertFalse(rows[1].test_refs)
         self.assertTrue([i for i in issues if i.literal == 'tests/test_report.md'])
@@ -300,7 +300,7 @@ class ParserTests(FixtureRepo):
     def test_docs_markdown_report_naming_sr_is_evidence(self):
         """A non-README Markdown report under docs counts when its content names the cited SR."""
         (self.root / 'docs/evidence.md').write_text('# Evidence for SR-R-01\n', encoding='utf-8')
-        self.replace('docs/safety/TRACEABILITY.md', 'test_unique_probe.py', 'docs/evidence.md')
+        self.replace('docs/safety/requirements_traceability.md', 'test_unique_probe.py', 'docs/evidence.md')
         rows, _, issues = parse_traceability(self.root)
         self.assertEqual(rows[1].test_refs, ('docs/evidence.md',))
         self.assertFalse([issue for issue in issues if issue.literal == 'docs/evidence.md'])
@@ -308,7 +308,7 @@ class ParserTests(FixtureRepo):
     def test_sr_report_match_requires_complete_identifier_token(self):
         """A report must contain the exact cited SR token, not a prefixed or extended identifier."""
         path = self.root / 'docs/evidence.md'
-        self.replace('docs/safety/TRACEABILITY.md', 'test_unique_probe.py', 'docs/evidence.md')
+        self.replace('docs/safety/requirements_traceability.md', 'test_unique_probe.py', 'docs/evidence.md')
         for content in ('SR-R-010', 'XSR-R-01', 'xSR-R-01', 'SR-R-01bb', 'SR-R-01-extra', 'SR-R-01_extra'):
             with self.subTest(content=content):
                 path.write_text(f'# Evidence for {content}\n', encoding='utf-8')
@@ -324,7 +324,7 @@ class ParserTests(FixtureRepo):
         """A report naming one lowercase requirement decomposition suffix evidences its canonical parent."""
         path = self.root / 'docs/evidence.md'
         path.write_text('# Evidence for SR-R-01b\n', encoding='utf-8')
-        self.replace('docs/safety/TRACEABILITY.md', 'test_unique_probe.py', 'docs/evidence.md')
+        self.replace('docs/safety/requirements_traceability.md', 'test_unique_probe.py', 'docs/evidence.md')
         rows, _, issues = parse_traceability(self.root)
         self.assertEqual(rows[1].test_refs, ('docs/evidence.md',))
         self.assertFalse([i for i in issues if i.literal == 'docs/evidence.md'])
@@ -335,7 +335,7 @@ class ParserTests(FixtureRepo):
         outside.write_text('# SR-R-01 outside repository\n', encoding='utf-8')
         citation = f'../{outside.name}'
         try:
-            self.replace('docs/safety/TRACEABILITY.md', 'test_unique_probe.py', f'`{citation}`')
+            self.replace('docs/safety/requirements_traceability.md', 'test_unique_probe.py', f'`{citation}`')
             rows, _, issues = parse_traceability(self.root)
             self.assertFalse(rows[1].test_refs)
             self.assertTrue([i for i in issues if i.kind == 'missing' and i.literal == citation])
@@ -344,7 +344,7 @@ class ParserTests(FixtureRepo):
 
     def test_public_analysis_rejects_malformed_sr_before_coverage(self):
         """The public CLI analysis seam cannot pass a malformed trace SR to coverage computation."""
-        self.replace('docs/safety/TRACEABILITY.md', '| SR-R-01 |', '| SR-R-1 |')
+        self.replace('docs/safety/requirements_traceability.md', '| SR-R-01 |', '| SR-R-1 |')
         with mock.patch('tools.safety_lint.__main__.compute_coverage') as compute:
             self.assertEqual(main(['--root', str(self.root)]), 2)
         compute.assert_not_called()
@@ -354,7 +354,7 @@ class ParserTests(FixtureRepo):
         (self.root / 'tests/probe.c').write_text('/* test */\n', encoding='utf-8')
         (self.root / 'tools/probe_test.c').write_text('/* test */\n', encoding='utf-8')
         self.replace(
-            'docs/safety/TRACEABILITY.md',
+            'docs/safety/requirements_traceability.md',
             'test_unique_probe.py',
             'tests/probe.c, tools/probe_test.c',
         )
@@ -365,7 +365,7 @@ class ParserTests(FixtureRepo):
     def test_readme_never_counts_as_evidence_even_under_tests(self):
         """A README is never evidence even when its path contains a test-artifact segment."""
         (self.root / 'tests/README.md').write_text('SR-R-01\n', encoding='utf-8')
-        self.replace('docs/safety/TRACEABILITY.md', 'test_unique_probe.py', 'tests/README.md')
+        self.replace('docs/safety/requirements_traceability.md', 'test_unique_probe.py', 'tests/README.md')
         rows, _, issues = parse_traceability(self.root)
         self.assertFalse(rows[1].test_refs)
         self.assertTrue([issue for issue in issues if issue.literal == 'tests/README.md'])
@@ -375,7 +375,7 @@ class ParserTests(FixtureRepo):
         scripts = self.root / 'scripts'
         scripts.mkdir()
         (scripts / 'check_guard.sh').write_text('#!/bin/sh\n', encoding='utf-8')
-        self.replace('docs/safety/TRACEABILITY.md', 'test_unique_probe.py', 'scripts/check_guard.sh')
+        self.replace('docs/safety/requirements_traceability.md', 'test_unique_probe.py', 'scripts/check_guard.sh')
         rows, _, issues = parse_traceability(self.root)
         self.assertEqual(rows[1].test_refs, ('scripts/check_guard.sh',))
         self.assertFalse([issue for issue in issues if issue.literal == 'scripts/check_guard.sh'])
@@ -394,7 +394,7 @@ class ParserTests(FixtureRepo):
         (self.root / 'docs/README.md').write_text('SR-R-01\n', encoding='utf-8')
         for label, citation in candidates.items():
             with self.subTest(label=label):
-                copy = self.root / 'docs/safety/TRACEABILITY.md'
+                copy = self.root / 'docs/safety/requirements_traceability.md'
                 original = copy.read_text(encoding='utf-8')
                 try:
                     copy.write_text(original.replace('test_unique_probe.py', citation), encoding='utf-8')
@@ -417,7 +417,7 @@ class ParserTests(FixtureRepo):
         source = self.root / 'src'
         source.mkdir()
         (source / 'implementation.c').write_text('/* production */\n', encoding='utf-8')
-        self.replace('docs/safety/TRACEABILITY.md', 'test_unique_probe.py', 'src/implementation.c')
+        self.replace('docs/safety/requirements_traceability.md', 'test_unique_probe.py', 'src/implementation.c')
         findings = [finding for finding in self.findings() if finding.check_id == 'C4']
         self.assertTrue([
             finding
@@ -430,32 +430,34 @@ class ParserTests(FixtureRepo):
 
     def test_prose_does_not_infer_evidence(self):
         """Words describing a successful test never become a test-file citation."""
-        self.replace('docs/safety/TRACEABILITY.md', 'test_unique_probe.py', 'bench test passed 8/8')
+        self.replace('docs/safety/requirements_traceability.md', 'test_unique_probe.py', 'bench test passed 8/8')
         rows, _, _ = parse_traceability(self.root)
         self.assertFalse(rows[1].test_refs)
 
     def test_unique_production_source_basename_is_not_test_evidence(self):
         """A unique production source basename cannot satisfy a verifying-test citation."""
-        self.replace('docs/safety/TRACEABILITY.md', 'test_unique_probe.py', 'code.c')
+        self.replace('docs/safety/requirements_traceability.md', 'test_unique_probe.py', 'code.c')
         rows, _, _ = parse_traceability(self.root)
         self.assertFalse(rows[1].test_refs)
 
     def test_bare_test_filename_with_line_suffix_resolves_file(self):
         """A bare test filename citation may carry a line suffix without changing its target."""
-        self.replace('docs/safety/TRACEABILITY.md', 'test_unique_probe.py', 'test_unique_probe.py:10')
+        self.replace('docs/safety/requirements_traceability.md', 'test_unique_probe.py', 'test_unique_probe.py:10')
         rows, _, _ = parse_traceability(self.root)
         self.assertEqual(rows[1].test_refs, ('tests/test_unique_probe.py',))
 
     def test_explicit_test_path_with_line_range_resolves_file(self):
         """An explicit test path may carry a line range without changing its target."""
-        self.replace('docs/safety/TRACEABILITY.md', 'test_unique_probe.py', 'tests/test_unique_probe.py:10-20')
+        self.replace(
+            'docs/safety/requirements_traceability.md', 'test_unique_probe.py', 'tests/test_unique_probe.py:10-20'
+        )
         rows, _, _ = parse_traceability(self.root)
         self.assertEqual(rows[1].test_refs, ('tests/test_unique_probe.py',))
 
     def test_attached_test_symbol_uses_preceding_file_citation(self):
         """A parenthesized test symbol attached to file:line does not become a missing stem."""
         self.replace(
-            'docs/safety/TRACEABILITY.md',
+            'docs/safety/requirements_traceability.md',
             'test_unique_probe.py',
             '`test_unique_probe.py:10` (`test_named_case`)',
         )
@@ -479,8 +481,10 @@ class ParserTests(FixtureRepo):
 class ConsistencyTests(FixtureRepo):
     def test_reachable_findings_have_unique_baseline_discriminators(self):
         """Real and independently injected findings never compete for one exact baseline key."""
-        self.replace('docs/safety/TRACEABILITY.md', 'test_unique_probe.py', 'test_missing_one, test_missing_two')
-        self.replace('docs/safety/TRACEABILITY.md', '| SR-R-01 | F-R-01 |', '| SR-R-01 | F-X-99 |')
+        self.replace(
+            'docs/safety/requirements_traceability.md', 'test_unique_probe.py', 'test_missing_one, test_missing_two'
+        )
+        self.replace('docs/safety/requirements_traceability.md', '| SR-R-01 | F-R-01 |', '| SR-R-01 | F-X-99 |')
         findings = self.findings()
         keys = [(finding.check_id, finding.subject, finding.message) for finding in findings]
         self.assertEqual(len(keys), len(set(keys)))
@@ -488,7 +492,7 @@ class ConsistencyTests(FixtureRepo):
     def test_c1_flags_sr_set_mismatch(self):
         """C1 reports an SRS requirement omitted from the matrix."""
         self.replace(
-            'docs/safety/TRACEABILITY.md',
+            'docs/safety/requirements_traceability.md',
             '| SR-R-01 | F-R-01 | code.c:1 | test_unique_probe.py | Test | **Verified** |\n',
             '',
         )
@@ -496,13 +500,13 @@ class ConsistencyTests(FixtureRepo):
 
     def test_c2_flags_unknown_trace_status(self):
         """C2 rejects matrix statuses outside the documented closed vocabulary."""
-        self.replace('docs/safety/TRACEABILITY.md', '**Verified** |', '**Complete** |')
+        self.replace('docs/safety/requirements_traceability.md', '**Verified** |', '**Complete** |')
         with self.assertRaises(LintError):
             analyze(self.root)
 
     def test_c3_flags_verified_without_evidence(self):
         """C3 rejects a Verified row whose evidence cell resolves no test path."""
-        self.replace('docs/safety/TRACEABILITY.md', 'test_unique_probe.py', 'NO TEST')
+        self.replace('docs/safety/requirements_traceability.md', 'test_unique_probe.py', 'NO TEST')
         self.assert_check('C3', 'SR-R-01')
 
     def test_c4_flags_missing_cited_test(self):
@@ -512,7 +516,7 @@ class ConsistencyTests(FixtureRepo):
 
     def test_missing_shorthand_removes_ref_reduces_coverage_and_triggers_c3_c4(self):
         """Deleting sole shorthand evidence removes coverage and reports both evidence checks."""
-        self.replace('docs/safety/TRACEABILITY.md', 'test_unique_probe.py', 'HIL10')
+        self.replace('docs/safety/requirements_traceability.md', 'test_unique_probe.py', 'HIL10')
         before = compute_coverage(analyze(self.root)).cited_tests
         (self.root / 'tools/hil/test_10_button.py').unlink()
         analysis = analyze(self.root)
@@ -523,7 +527,7 @@ class ConsistencyTests(FixtureRepo):
 
     def test_missing_req_removes_ref_and_triggers_c3_c4(self):
         """Deleting sole REQ evidence leaves a Partial row unresolved and reports C3 plus C4."""
-        self.replace('docs/safety/TRACEABILITY.md', 'test_unique_probe.py', 'REQ 2_02')
+        self.replace('docs/safety/requirements_traceability.md', 'test_unique_probe.py', 'REQ 2_02')
         (self.root / 'pstop_c/pstop/test/src/pstop/requirements/req_2_02_test.c').unlink()
         analysis = analyze(self.root)
         row = next(row for row in analysis.trace if row.sr_id == 'SR-R-01')
@@ -533,13 +537,13 @@ class ConsistencyTests(FixtureRepo):
 
     def test_c5_flags_missing_code_file(self):
         """C5 rejects an explicit code citation whose repository file is absent."""
-        self.replace('docs/safety/TRACEABILITY.md', 'code.c:1', 'missing.c:1')
+        self.replace('docs/safety/requirements_traceability.md', 'code.c:1', 'missing.c:1')
         self.assert_check('C5', 'SR-SYS-01')
 
     def test_c6_flags_unknown_function(self):
         """C6 rejects allocations outside the authoritative function decomposition."""
         self.replace(
-            'docs/safety/SAFETY_REQUIREMENTS.md',
+            'docs/safety/safety_requirements_specification.md',
             '| **SR-R-01** | Remain fresh with `a|b`. | SG-1 | F-R-01 |',
             '| **SR-R-01** | Remain fresh with `a|b`. | SG-1 | F-X-99 |',
         )
@@ -548,11 +552,11 @@ class ConsistencyTests(FixtureRepo):
     def test_c6_document_findings_are_independently_baselineable(self):
         """SRS and trace allocation violations have distinct exact keys suppressible one at a time."""
         self.replace(
-            'docs/safety/SAFETY_REQUIREMENTS.md',
+            'docs/safety/safety_requirements_specification.md',
             '| **SR-R-01** | Remain fresh with `a|b`. | SG-1 | F-R-01 |',
             '| **SR-R-01** | Remain fresh with `a|b`. | SG-1 | F-X-99 |',
         )
-        self.replace('docs/safety/TRACEABILITY.md', '| SR-R-01 | F-R-01 |', '| SR-R-01 | F-X-99 |')
+        self.replace('docs/safety/requirements_traceability.md', '| SR-R-01 | F-R-01 |', '| SR-R-01 | F-X-99 |')
         findings = [finding for finding in self.findings() if finding.check_id == 'C6']
         self.assertEqual({finding.subject for finding in findings}, {'SRS:F-X-99', 'TRACE:F-X-99'})
         suppressed_key = next(finding for finding in findings if finding.subject == 'SRS:F-X-99')
@@ -570,24 +574,26 @@ class ConsistencyTests(FixtureRepo):
 
     def test_c7_flags_unknown_upstream_reference(self):
         """C7 warns when a requirement cites an absent hazard, goal, or DU identifier."""
-        self.replace('docs/safety/SAFETY_REQUIREMENTS.md', 'SG-1, H-01, DU-1', 'SG-9, H-99, DU-9')
+        self.replace('docs/safety/safety_requirements_specification.md', 'SG-1, H-01, DU-1', 'SG-9, H-99, DU-9')
         self.assert_check('C7', 'SG-9')
 
     def test_c8_flags_reverse_map_disagreement(self):
         """C8 rejects a reverse map that disagrees with forward requirement allocation."""
         self.replace(
-            'docs/safety/TRACEABILITY.md', '| F-R-01 | Sense | SR-SYS-01, SR-R-01 |', '| F-R-01 | Sense | SR-SYS-01 |'
+            'docs/safety/requirements_traceability.md',
+            '| F-R-01 | Sense | SR-SYS-01, SR-R-01 |',
+            '| F-R-01 | Sense | SR-SYS-01 |',
         )
         self.assert_check('C8', 'F-R-01')
 
     def test_c9_flags_srs_matrix_allocation_disagreement(self):
         """C9 rejects differing SRS and matrix allocations for the same requirement."""
-        self.replace('docs/safety/TRACEABILITY.md', '| SR-R-01 | F-R-01 |', '| SR-R-01 | F-R-02 |')
+        self.replace('docs/safety/requirements_traceability.md', '| SR-R-01 | F-R-01 |', '| SR-R-01 | F-R-02 |')
         self.assert_check('C9', 'SR-R-01')
 
     def test_baseline_suppresses_exact_matching_finding(self):
         """A justified baseline entry suppresses exactly one matching finding message."""
-        self.replace('docs/safety/TRACEABILITY.md', 'test_unique_probe.py', 'NO TEST')
+        self.replace('docs/safety/requirements_traceability.md', 'test_unique_probe.py', 'NO TEST')
         finding = next(finding for finding in self.findings() if finding.check_id == 'C3')
         active, suppressed = apply_baseline(
             self.findings(),
@@ -599,7 +605,7 @@ class ConsistencyTests(FixtureRepo):
     def test_same_subject_new_finding_is_not_suppressed(self):
         """A new message on an already-baselined subject remains an active violation."""
         self.replace(
-            'docs/safety/TRACEABILITY.md',
+            'docs/safety/requirements_traceability.md',
             'test_unique_probe.py',
             'test_missing_one, test_missing_two',
         )
@@ -688,7 +694,7 @@ class ConsistencyTests(FixtureRepo):
 class NumericCoverageOwnershipTests(unittest.TestCase):
     def test_reconciled_real_section_has_no_c10_finding(self):
         """The reconciled real summary keeps all numeric requirements coverage inside generated regions."""
-        text = (REPO / 'docs/safety/TRACEABILITY.md').read_text(encoding='utf-8')
+        text = (REPO / 'docs/safety/requirements_traceability.md').read_text(encoding='utf-8')
         self.assertEqual(check_numeric_coverage_claims(text), ())
 
     def test_marker_bounded_numeric_claims_are_ignored(self):
@@ -799,7 +805,7 @@ class CoverageRenderCliTests(FixtureRepo):
         )
         self.assertLessEqual(coverage.safety_functions_traced, coverage.safety_functions_total)
         rendered = render_traceability(
-            (self.root / 'docs/safety/TRACEABILITY.md').read_text(encoding='utf-8'),
+            (self.root / 'docs/safety/requirements_traceability.md').read_text(encoding='utf-8'),
             coverage,
         )
         self.assertIn('excluding declared non-safety functions: 1 / 1 = 100 %', rendered)
@@ -812,7 +818,7 @@ class CoverageRenderCliTests(FixtureRepo):
     def test_generated_block_is_idempotent(self):
         """Rendering an already rendered traceability document is byte-idempotent."""
         result = analyze(self.root)
-        original = (self.root / 'docs/safety/TRACEABILITY.md').read_text(encoding='utf-8')
+        original = (self.root / 'docs/safety/requirements_traceability.md').read_text(encoding='utf-8')
         once = render_traceability(original, compute_coverage(result))
         self.assertEqual(render_traceability(once, compute_coverage(result)), once)
 
@@ -820,7 +826,7 @@ class CoverageRenderCliTests(FixtureRepo):
         """Check mode returns one when a generated numeric region is stale."""
         self.assertEqual(self.run_cli('--write').returncode, 0)
         self.replace(
-            'docs/safety/TRACEABILITY.md',
+            'docs/safety/requirements_traceability.md',
             'SRs with at least one cited verifying test: 2 / 2',
             'SRs with at least one cited verifying test: 1 / 2',
         )
@@ -831,13 +837,13 @@ class CoverageRenderCliTests(FixtureRepo):
         """Stale check output gives the exact command that refreshes generated regions."""
         proc = self.run_cli('--check')
         self.assertIn(
-            'docs/safety/TRACEABILITY.md: generated regions are stale; run: cd tools && uv run python -m safety_lint --write',
+            'docs/safety/requirements_traceability.md: generated regions are stale; run: cd tools && uv run python -m safety_lint --write',
             proc.stdout,
         )
 
     def test_render_does_not_touch_prose_outside_markers(self):
         """Rendering preserves hand-authored Reading prose byte-for-byte."""
-        path = self.root / 'docs/safety/TRACEABILITY.md'
+        path = self.root / 'docs/safety/requirements_traceability.md'
         before = path.read_text(encoding='utf-8').split('**Reading:**', 1)[1]
         after = render_traceability(path.read_text(encoding='utf-8'), compute_coverage(analyze(self.root))).split(
             '**Reading:**', 1
@@ -846,7 +852,7 @@ class CoverageRenderCliTests(FixtureRepo):
 
     def test_renderer_uses_unicode_greater_than_or_equal(self):
         """The generated area heading preserves the document's Unicode comparison symbol."""
-        text = (self.root / 'docs/safety/TRACEABILITY.md').read_text(encoding='utf-8')
+        text = (self.root / 'docs/safety/requirements_traceability.md').read_text(encoding='utf-8')
         rendered = render_traceability(text, compute_coverage(analyze(self.root)))
         self.assertIn('≥1 cited test %', rendered)
         self.assertNotIn('>=', rendered)
@@ -854,7 +860,7 @@ class CoverageRenderCliTests(FixtureRepo):
     def test_generated_headline_reports_all_and_safety_function_totals(self):
         """The generated headline labels both function denominators and the non-safety exclusion."""
         rendered = render_traceability(
-            (self.root / 'docs/safety/TRACEABILITY.md').read_text(encoding='utf-8'),
+            (self.root / 'docs/safety/requirements_traceability.md').read_text(encoding='utf-8'),
             compute_coverage(analyze(self.root)),
         )
         self.assertIn('Functions traced to at least one SR: 1 / 1', rendered)
@@ -862,7 +868,7 @@ class CoverageRenderCliTests(FixtureRepo):
 
     def test_new_numeric_prose_outside_markers_is_a_c10_failure(self):
         """A newly introduced numeric claim outside generated markers remains a check failure."""
-        text = (REPO / 'docs/safety/TRACEABILITY.md').read_text(encoding='utf-8')
+        text = (REPO / 'docs/safety/requirements_traceability.md').read_text(encoding='utf-8')
         stale = text.replace('**Reading:**', 'Legacy claim: 21 / 27 = 77.8 %.\n\n**Reading:**')
         self.assertTrue(check_numeric_coverage_claims(stale))
 
@@ -874,7 +880,7 @@ class CoverageRenderCliTests(FixtureRepo):
     def test_cli_exit_code_one_on_injected_error(self):
         """A parseable traceability parity defect returns the check-failed exit code."""
         self.replace(
-            'docs/safety/TRACEABILITY.md',
+            'docs/safety/requirements_traceability.md',
             '| SR-R-01 | F-R-01 | code.c:1 | test_unique_probe.py | Test | **Verified** |\n',
             '',
         )
@@ -883,11 +889,11 @@ class CoverageRenderCliTests(FixtureRepo):
     def test_write_refuses_active_error_without_touching_traceability(self):
         """Write mode returns one and preserves bytes when consistency errors are active."""
         self.replace(
-            'docs/safety/TRACEABILITY.md',
+            'docs/safety/requirements_traceability.md',
             '| SR-R-01 | F-R-01 | code.c:1 | test_unique_probe.py | Test | **Verified** |\n',
             '',
         )
-        path = self.root / 'docs/safety/TRACEABILITY.md'
+        path = self.root / 'docs/safety/requirements_traceability.md'
         before = path.read_bytes()
         proc = self.run_cli('--write')
         self.assertEqual((proc.returncode, path.read_bytes()), (1, before))
@@ -899,7 +905,7 @@ class CoverageRenderCliTests(FixtureRepo):
 
     def test_cli_exit_code_two_on_missing_document(self):
         """A missing required safety document returns the cannot-run exit code."""
-        (self.root / 'docs/safety/SAFETY_REQUIREMENTS.md').unlink()
+        (self.root / 'docs/safety/safety_requirements_specification.md').unlink()
         self.assertEqual(self.run_cli().returncode, 2)
 
     def test_cli_exit_code_two_on_malformed_baseline_without_traceback(self):

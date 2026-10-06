@@ -24,7 +24,7 @@ namespace protective_stop_machine
 
 /// @brief Managed node presenting one ROS 2 surface over either machine
 /// backend. ROS glue only; machine logic lives behind IMachineBackend.
-/// See docs/design/MACHINE_ROS2_NODE_DESIGN.md.
+/// See docs/design/machine_ros_2_lifecycle_node.md.
 class MachineBridgeNode : public rclcpp_lifecycle::LifecycleNode
 {
 public:

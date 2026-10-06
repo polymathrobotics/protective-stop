@@ -203,7 +203,7 @@ def _code_refs(sr_id, cell, line, index):
 
 def parse_traceability(root):
     root = Path(root)
-    path = root / 'docs/safety/TRACEABILITY.md'
+    path = root / 'docs/safety/requirements_traceability.md'
     if not path.is_file():
         raise LintError(f'required document missing: {path}')
     lines = path.read_text(encoding='utf-8').splitlines()

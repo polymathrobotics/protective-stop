@@ -39,7 +39,7 @@ the test tooling, and the wire protocol / transport as used by this
 project.
 
 Physical attacks on units provisioned with `secure-fe` or `secure`
-([`SECURITY_PROFILES.md`](../guides/SECURITY_PROFILES.md)) are in scope. Fault
+([`secure_boot_guide.md`](../guides/secure_boot_guide.md)) are in scope. Fault
 injection and side channels on the ESP32-S3 itself are a known limit of the
 chip; report them if they defeat something this project relies on.
 

@@ -95,7 +95,7 @@ Notes:
   which also stops the machine.
 - The ring can be installed in any of its 16 rotations. Which pixel counts
   as LED 1 is a per-device setting, calibrated over the network after
-  assembly (`POST /api/ring_offset`, see [`API.md`](../guides/API.md)).
+  assembly (`POST /api/ring_offset`, see [`http_api.md`](../guides/http_api.md)).
 - The board's onboard status LED (IO21) needs no wiring.
 
 ## Bill of materials
@@ -152,4 +152,4 @@ are its printable exports, and the STEP models are references used for fit.
 Build steps live in the [assembly guide](assembly.md).
 
 OSHWA certification details and maintenance notes are in
-[`OSHWA_COMPLIANCE.md`](OSHWA_COMPLIANCE.md).
+[`oshwa_certification.md`](oshwa_certification.md).

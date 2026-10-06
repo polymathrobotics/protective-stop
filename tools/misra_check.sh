@@ -8,7 +8,7 @@
 #
 # This is the engineering pre-check; formal certification evidence needs a
 # licensed MISRA checker (rule texts + compliance report). See
-# docs/safety/MISRA_COMPLIANCE_2026-07-21.md for the deviation register.
+# docs/safety/misra_c_compliance_review.md for the deviation register.
 #
 # Install (Ubuntu):  sudo apt-get install -y cppcheck
 # Run:               ./tools/misra_check.sh [main|dcs|all]   (default: all)
@@ -43,4 +43,4 @@ echo
 echo "NOTE: cppcheck 2.7's misra addon crashes on dcs_net_liveness.c (its"
 echo "rule-7.4 checker has a NoneType bug); that file gets a manual pass."
 echo "Residual findings are the documented deviation register — see"
-echo "docs/safety/MISRA_COMPLIANCE_2026-07-21.md."
+echo "docs/safety/misra_c_compliance_review.md."

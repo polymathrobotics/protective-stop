@@ -3,7 +3,7 @@ title: Hardware-in-the-Loop Tests
 sidebar_position: 2
 ---
 
-# pstop hardware-in-the-loop test suite
+# Hardware-in-the-Loop Tests
 
 Drives a real pstop remote through its **actual E-stop loops and power
 feed** using a 4-channel USB relay board (`tools/usb_relay4.py`), and

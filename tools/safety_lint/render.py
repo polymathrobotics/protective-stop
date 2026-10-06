@@ -20,7 +20,7 @@ def _replace(text, name, content):
         re.DOTALL,
     )
     if len(pattern.findall(text)) != 1:
-        raise LintError(f'TRACEABILITY.md requires exactly one generated marker pair named {name}')
+        raise LintError(f'requirements_traceability.md requires exactly one generated marker pair named {name}')
     return pattern.sub(lambda match: match.group(1) + content + match.group(2), text)
 
 
