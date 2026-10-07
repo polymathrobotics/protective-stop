@@ -65,7 +65,7 @@ jobs:
 
       - name: Upload coverage summary
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v6
         with:
           name: coverage-summary
           path: docs/safety/coverage/SUMMARY.md
