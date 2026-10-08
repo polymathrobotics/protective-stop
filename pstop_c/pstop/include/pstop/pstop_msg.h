@@ -69,24 +69,30 @@ typedef struct {
      * The last counter we received from the client.
      * Or 0 if we are establishing a new bonding.
      */
+
     uint32_t received_counter;
+
+    /**
+     * Inverted bits of the message and the bottom 3 bytes of the id:
+     * ~((message << 24) | (id & 0xFFFFFF));
+     */
+    uint32_t inverted_value;
 
     /**
      * extra padding bytes
      */
     uint32_t padding1;
-    uint32_t padding2;
 
     /**
-     * a CRC-16 checksum of the above values.
+     * a CRC-32 checksum of the above values.
      */
-    uint16_t checksum;
+    uint32_t checksum;
 
     /**
      * The checksum that is calculated when a PSTOP message
      * is decoded from an array of bytes
      */
-    uint16_t calculated_checksum;
+    uint32_t calculated_checksum;
 
 } pstop_msg_t;
 
@@ -95,6 +101,7 @@ void pstop_message_init(pstop_msg_t *msg);
 uint8_t pstop_message_get_message(const pstop_msg_t *msg);
 uint64_t pstop_message_get_stamp(const pstop_msg_t *msg);
 uint32_t pstop_message_get_counter(const pstop_msg_t *msg);
+uint32_t pstop_message_calculate_inverted(const pstop_msg_t *msg);
 
 void pstop_create_generic_message(pstop_msg_t *msg,
     uint8_t message,

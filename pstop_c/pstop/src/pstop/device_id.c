@@ -6,7 +6,7 @@
 
 #include "pstop/device_id.h"
 
-#if PSTOP_VERSION == 0x02U
+#if PSTOP_VERSION == 0x03U
 void
 device_id_init(device_id_t *device_id)
 {

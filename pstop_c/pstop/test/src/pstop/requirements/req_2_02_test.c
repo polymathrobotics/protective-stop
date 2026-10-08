@@ -52,6 +52,7 @@ req_2_02_1_test(void)
     req.receiver_id.data = MACHINE_ID;
     req.received_counter = 0U;
     req.received_stamp = 0U;
+    req.inverted_value = pstop_message_calculate_inverted(&req);
 
     pstop_msg_t resp;
     pstop_message_init(&resp);
@@ -70,6 +71,7 @@ req_2_02_1_test(void)
     req.stamp = 110;
     req.received_counter = resp.counter;
     req.received_stamp = resp.stamp;
+    req.inverted_value = pstop_message_calculate_inverted(&req);
     TEST_ASSERT_EQUAL(PSTOP_MSG_OUT_OF_ORDER, machine_process_message(&machine, &req, &resp));
     remote = machine_get_protocol_data(&machine, &REMOTE);
     TEST_ASSERT_NOT_NULL(remote);
@@ -102,6 +104,7 @@ req_2_02_2_test(void)
     req.received_stamp = 0U;
     req.calculated_checksum = 0U;
     req.checksum = 0U;
+    req.inverted_value = pstop_message_calculate_inverted(&req);
 
     pstop_msg_t resp;
     pstop_message_init(&resp);
@@ -120,6 +123,7 @@ req_2_02_2_test(void)
     req.stamp = 1000;
     req.received_counter = resp.counter;
     req.received_stamp = resp.stamp;
+    req.inverted_value = pstop_message_calculate_inverted(&req);
     TEST_ASSERT_EQUAL(PSTOP_MSG_OUT_OF_ORDER, machine_process_message(&machine, &req, &resp));
     remote = machine_get_protocol_data(&machine, &REMOTE);
     TEST_ASSERT_NOT_NULL(remote);

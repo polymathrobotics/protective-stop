@@ -100,6 +100,7 @@ send_bond(pstop_machine_t *machine, pstop_msg_t *resp,
     req.received_stamp = 0U;
     req.checksum = 10U;
     req.calculated_checksum = 10U;
+    req.inverted_value = pstop_message_calculate_inverted(&req);
 
     set_time(timestamp);
     pstop_message_init(resp);
@@ -122,6 +123,7 @@ send_stop(pstop_machine_t *machine, pstop_msg_t *resp,
     req.received_stamp = resp->stamp;
     req.checksum = 10U;
     req.calculated_checksum = 10U;
+    req.inverted_value = pstop_message_calculate_inverted(&req);
 
     set_time(timestamp);
 
@@ -145,6 +147,7 @@ send_ok(pstop_machine_t *machine, pstop_msg_t *resp,
     req.received_stamp = resp->stamp;
     req.checksum = 10U;
     req.calculated_checksum = 10U;
+    req.inverted_value = pstop_message_calculate_inverted(&req);
 
     set_time(timestamp);
 
@@ -168,6 +171,7 @@ send_unbond(pstop_machine_t *machine, pstop_msg_t *resp,
     req.received_stamp = resp->stamp;
     req.checksum = 10U;
     req.calculated_checksum = 10U;
+    req.inverted_value = pstop_message_calculate_inverted(&req);
 
     set_time(timestamp);
 
