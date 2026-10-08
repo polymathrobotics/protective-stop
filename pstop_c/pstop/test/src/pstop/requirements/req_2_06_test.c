@@ -49,6 +49,7 @@ req_2_06_test(void)
     req.received_stamp = 0U;
     req.checksum = 10U;
     req.calculated_checksum = 10U;
+    req.inverted_value = pstop_message_calculate_inverted(&req);
 
     pstop_msg_t resp;
     pstop_message_init(&resp);
