@@ -31,8 +31,8 @@ static void test_role_roundtrip(void)
     pstop_msg_t m = {.version = PSTOP_VERSION};
     pstop_aux_encode_role(&m, roles[i]);
     CHECK(pstop_aux_decode_role(&m) == roles[i]);
-    // Encoding the role must not disturb the other padding field.
-    CHECK(m.padding2 == 0u);
+    // Encoding the role must not disturb the other protected fields.
+    CHECK(m.inverted_value == 0u);
   }
 }
 

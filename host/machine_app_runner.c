@@ -550,6 +550,10 @@ static const char * err_name(pstop_error_t e)
       return "NOT_BOND_MESSAGE";
     case PSTOP_INVALID_BOND_REQUEST:
       return "INVALID_BOND_REQUEST";
+    case PSTOP_INVALID_INVERTED_VALUE:
+      return "INVALID_INVERTED_VALUE";
+    case PSTOP_INVALID_VERSION:
+      return "INVALID_VERSION";
     case PSTOP_HEARTBEAT_INVALID:
       return "HEARTBEAT_INVALID";
     case PSTOP_MESSAGE_TYPE_INVALID:

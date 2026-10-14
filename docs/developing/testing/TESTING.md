@@ -12,9 +12,9 @@ Most tools here are stdlib-only and run under any Python 3.11+. The
 
 ## 1. Machine arming-policy suite — `tools/pstop_test_remote.py`
 
-A scripted pstop remote that speaks the real v2 wire protocol (48-byte
-messages, CRC16 poly 0x8D95, far-Hamming codewords, self-role in the aux
-channel) well enough to bond and run timed STOP/OK sequences — verifies the
+A scripted pstop remote that speaks the real v3 wire protocol (50-byte
+messages, CRC-32 poly 0x9D7F97D6, inverted-value check field, far-Hamming
+codewords, self-role in the aux channel) well enough to bond and run timed STOP/OK sequences — verifies the
 min-STOP-duration arming policy and the two-gate re-arm rule without a chip.
 It works against either machine implementation, since both host the same
 `pstop_c`. Use a **dedicated** port, never the one a real remote is bonded to.

@@ -5,7 +5,7 @@
 
 Spins up the host-side machine (`host/machine_app_runner`, which links the
 unmodified pstop_c safety library) and drives it with N scripted software
-remotes that speak the real 48-byte v2 wire protocol (CRC16 poly 0x8D95). Each
+remotes that speak the real 50-byte v3 wire protocol (CRC-32 poly 0x9D7F97D6). Each
 remote carries its own device_id and counter sequence, so this exercises the
 library's real multi-remote bookkeeping — not a mock.
 
@@ -47,11 +47,12 @@ import time
 # id independently).
 # ---------------------------------------------------------------------------
 # Wire protocol — MUST track pstop_c (config.h PSTOP_VERSION, pstop_msg.h codewords).
-# v2 retains the far-Hamming message codewords and adds two padding fields.
-PSTOP_VERSION = 0x02
+# v3 keeps the far-Hamming message codewords, switches to a CRC-32 and adds an
+# inverted-value field (catches stuck-at-0/1 bits) in place of padding2.
+PSTOP_VERSION = 0x03
 MSG_OK, MSG_STOP, MSG_BOND, MSG_UNBOND, MSG_UNKNOWN = 0x55, 0x92, 0xAD, 0x6A, 0x0F
 NAMES = {0x55: 'OK', 0x92: 'STOP', 0xAD: 'BOND', 0x6A: 'UNBOND', 0x0F: 'UNKNOWN'}
-SIZE = 48
+SIZE = 50
 MACHINE_ID = 0x01020304
 HEARTBEAT_MS = 1000
 AUX_VERSION = 0x01
@@ -61,14 +62,20 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 RUNNER = os.path.join(HERE, '..', 'host', 'machine_app_runner')
 
 
-def crc16(data: bytes) -> int:
-    crc = 0xFFFF
+def crc32(data: bytes) -> int:
+    # pstop_c checksum_crc32(): reflected, init 0xFFFFFFFF, custom poly, final
+    # invert. NOT zlib.crc32 (different polynomial).
+    crc = 0xFFFFFFFF
     for b in data:
-        crc ^= b << 8
+        crc ^= b
         for _ in range(8):
-            crc = ((crc << 1) ^ 0x8D95) if crc & 0x8000 else (crc << 1)
-            crc &= 0xFFFF
-    return crc
+            crc = (crc >> 1) ^ (0x9D7F97D6 if crc & 1 else 0)
+    return ~crc & 0xFFFFFFFF
+
+
+def inverted(message, sender_id):
+    # pstop_message_calculate_inverted()
+    return ~((message << 24) | (sender_id & 0x00FFFFFF)) & 0xFFFFFFFF
 
 
 def encode(
@@ -81,11 +88,16 @@ def encode(
     corrupt=False,
     role=ROLE_OPERATOR,
     receiver_id=MACHINE_ID,
+    bad_inverted=False,
+    version=PSTOP_VERSION,
 ):
     padding1 = AUX_VERSION | (role << 8)
+    inv = inverted(message, remote_id)
+    if bad_inverted:
+        inv ^= 0x00000001  # a single stuck bit
     body = struct.pack(
         '<BBQQIIIIIII',
-        PSTOP_VERSION,
+        version,
         message,
         stamp,
         received_stamp,
@@ -94,20 +106,20 @@ def encode(
         HEARTBEAT_MS,
         counter,
         received_counter,
+        inv,
         padding1,
-        0,
     )
-    crc = crc16(body)
+    crc = crc32(body)
     if corrupt:
-        crc ^= 0xFFFF  # deliberately wrong checksum
-    return body + struct.pack('<H', crc)
+        crc ^= 0xFFFFFFFF  # deliberately wrong checksum
+    return body + struct.pack('<I', crc)
 
 
 def decode(data):
-    (version, message, stamp, _rs, sender_id, receiver_id, _hb, counter, received_counter, padding1, padding2) = (
+    (version, message, stamp, _rs, sender_id, receiver_id, _hb, counter, received_counter, inverted_value, padding1) = (
         struct.unpack('<BBQQIIIIIII', data[:46])
     )
-    (checksum,) = struct.unpack('<H', data[46:48])
+    (checksum,) = struct.unpack('<I', data[46:50])
     return dict(
         version=version,
         message=message,
@@ -116,9 +128,9 @@ def decode(data):
         receiver_id=receiver_id,
         counter=counter,
         received_counter=received_counter,
+        inverted_value=inverted_value,
         padding1=padding1,
-        padding2=padding2,
-        crc_ok=(checksum == crc16(data[:46])),
+        crc_ok=(checksum == crc32(data[:46]) and inverted_value == inverted(message, sender_id)),
     )
 
 
@@ -199,7 +211,16 @@ class SoftRemote:
         finally:
             self.sock.settimeout(0.4)
 
-    def send_noreply(self, message, corrupt=False, bad_type=None, role=None, receiver_id=MACHINE_ID):
+    def send_noreply(
+        self,
+        message,
+        corrupt=False,
+        bad_type=None,
+        role=None,
+        receiver_id=MACHINE_ID,
+        bad_inverted=False,
+        version=PSTOP_VERSION,
+    ):
         """Fire a packet and do NOT wait for a reply (for flood/garbage tests)."""
         self.counter += 1
         msg = bad_type if bad_type is not None else message
@@ -213,6 +234,8 @@ class SoftRemote:
             corrupt=corrupt,
             role=self.role if role is None else role,
             receiver_id=receiver_id,
+            bad_inverted=bad_inverted,
+            version=version,
         )
         try:
             self.sock.send(pkt)
@@ -380,8 +403,7 @@ def group_a_single(verbose):
         assert a.bond(), 'bond failed'
         check(
             a.last_reply['version'] == PSTOP_VERSION
-            and a.last_reply['padding1'] == 0
-            and a.last_reply['padding2'] == 0,
+            and a.last_reply['padding1'] == 0,
             'A0 machine reply initializes version and aux padding',
         )
         s = Session([a])
@@ -659,8 +681,43 @@ def group_f_malformed(verbose):
             'STOP seen' if saw_stop else 'never stopped',
         )
         check('checksum' in m.stderr().lower(), 'F2b bad checksum rejected/logged by machine')
-        # Out-of-range message type (0x42) -> rejected; robot must not arm.
+        # Single stuck bit in the inverted-value field (valid CRC) -> rejected,
+        # same fail-safe path as a bad CRC.
         assert b.bond(), 'B re-bond after F2 failed'
+        arm(s, a, [b])
+        saw_stop = False
+        end = time.monotonic() + 3.0
+        while time.monotonic() < end:
+            a.send(MSG_OK)
+            b.send_noreply(MSG_OK, bad_inverted=True)
+            if a.last_reply and a.last_reply['message'] == MSG_STOP:
+                saw_stop = True
+            time.sleep(0.1)
+        check(
+            saw_stop,
+            'F2c sustained bad inverted value from B -> robot STOP (I2, no spurious OK)',
+            'STOP seen' if saw_stop else 'never stopped',
+        )
+        check('inverted_value' in m.stderr().lower(), 'F2d bad inverted value rejected/logged by machine')
+        # Wrong protocol version (valid CRC + inverted) -> rejected.
+        assert b.bond(), 'B re-bond after F2c failed'
+        arm(s, a, [b])
+        saw_stop = False
+        end = time.monotonic() + 3.0
+        while time.monotonic() < end:
+            a.send(MSG_OK)
+            b.send_noreply(MSG_OK, version=PSTOP_VERSION - 1)
+            if a.last_reply and a.last_reply['message'] == MSG_STOP:
+                saw_stop = True
+            time.sleep(0.1)
+        check(
+            saw_stop,
+            'F2e sustained wrong version from B -> robot STOP (I2, no spurious OK)',
+            'STOP seen' if saw_stop else 'never stopped',
+        )
+        check('invalid_version' in m.stderr().lower(), 'F2f wrong version rejected/logged by machine')
+        # Out-of-range message type (0x42) -> rejected; robot must not arm.
+        assert b.bond(), 'B re-bond after F2e failed'
         for _ in range(8):
             b.send_noreply(MSG_OK, bad_type=0x42)
             a.send(MSG_OK)

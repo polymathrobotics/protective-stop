@@ -5,16 +5,16 @@ SPDX-License-Identifier: Apache-2.0
 
 # Remote role announcement
 
-`pstop_c` v2 added two CRC-protected `uint32` padding fields to its 48-byte
-message. Wrapper code uses `padding1` to let a remote announce whether it is an
-operator or stop-only. The certified `pstop_c` library remains unchanged.
+`pstop_c` v2 added two CRC-protected `uint32` padding fields to its message.
+v3 (50 bytes, CRC-32) turned `padding2` into the library-owned `inverted_value`
+check field, leaving one padding field, `padding1`. Wrapper code uses `padding1`
+to let a remote announce whether it is an operator or stop-only. The certified
+`pstop_c` library remains unchanged.
 
-> **Forward-compatibility:** `padding1` is the remote-to-machine field and keeps
-> 16 bits reserved for future remote announcements. `padding2` is reserved in
-> full for a future machine-to-remote schema, such as machine state or stop
-> reason feedback. The planned convention for `padding2` is an 8-bit schema
-> version followed by 24 bits of direction-specific data. It remains zero and
-> uninterpreted in this version.
+> **Forward-compatibility:** `padding1` keeps 16 bits reserved for future
+> remote announcements. The `padding2` space that was set aside for a future
+> machine-to-remote schema (machine state, stop reason feedback) no longer
+> exists in v3; any such feedback needs a new field or a `padding1` convention.
 
 ## Wire layout
 
@@ -26,15 +26,14 @@ bits  8..15  role: 0 unspecified, 1 stop-only, 2 operator
 bits 16..31  reserved for future remote-to-machine additions (zero today)
 ```
 
-`padding2` is owned by machine replies but has no active schema yet:
+`inverted_value` (v3, formerly `padding2`) is computed by `pstop_c` on encode and
+checked on receive; wrappers never write it:
 
 ```text
-bits  0..7   reserved for a future machine-to-remote schema version (zero today)
-bits  8..31  reserved for future machine-to-remote data (zero today)
+~((message << 24) | (sender_id & 0x00FFFFFF))
 ```
 
-Senders must zero every reserved bit. Receivers must ignore `padding2` until a
-nonzero machine-to-remote schema version is defined and implemented.
+Senders must zero every reserved `padding1` bit.
 
 Unknown versions decode as unspecified. Unknown role values under version 1
 decode as stop-only. Only an explicit operator value can contribute operator
@@ -130,8 +129,10 @@ Machine-side, each bonded remote's effective `stop_only` is observable (ROS 2
 
 ## Rollout
 
-The v2 message size is a hard wire cutover from 40 to 48 bytes. Update remotes
-and machine implementations together. Existing remotes without the NVS role key
+The v3 message is a hard wire cutover from v2 (48 bytes, CRC-16) to 50 bytes
+with a CRC-32 and an inverted-value field. A v2 and a v3 endpoint cannot talk to
+each other: the length differs, so the packet is dropped without a reply. Update
+remotes and machine implementations together. Existing remotes without the NVS role key
 start as stop-only and must be explicitly promoted where re-arm authority is
 required. A machine that previously carried an operator list does **not**
 inherit it as an admission allowlist: the meanings differ ("may re-arm" vs

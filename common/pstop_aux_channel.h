@@ -4,9 +4,10 @@
 #ifndef PSTOP_AUX_CHANNEL_H
 #define PSTOP_AUX_CHANNEL_H
 
-/* Wrapper-only role schema over pstop_c v2 padding1. pstop_c remains
+/* Wrapper-only role schema over pstop_c v3 padding1. pstop_c remains
  * unmodified; every wrapper includes this header so the wire values stay in
- * sync. padding2 remains unused and zero-initialized by pstop_message_init(). */
+ * sync. padding1 is the only padding field left in v3 (padding2 became the
+ * library-owned inverted_value). */
 
 #include <stdbool.h>
 #include <stdint.h>
