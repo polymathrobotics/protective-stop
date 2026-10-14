@@ -1,0 +1,11 @@
+# SPDX-FileCopyrightText: 2026 Polymath Robotics, Inc.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Makes this repository consumable as a Zephyr module, so a Zephyr application
+# can add it to west.yml and select CONFIG_PSTOP rather than reaching into
+# pstop_c/ with hand-written CMake.
+
+name: pstop
+build:
+  cmake: zephyr
+  kconfig: zephyr/Kconfig
