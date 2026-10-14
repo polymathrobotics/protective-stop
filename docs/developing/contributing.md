@@ -40,7 +40,7 @@ process. It then flows back here as a version bump. PRs that edit
 
 ### Firmware (ESP32-S3 remote)
 
-Requires ESP-IDF v5.5. The default [security profile](../guides/SECURITY_PROFILES.md),
+Requires ESP-IDF v5.5 (install: [Quickstart](../guides/QUICKSTART.md) Appendix E). The default [security profile](../guides/SECURITY_PROFILES.md),
 `secure-fe`, is not flashed by `idf.py flash`; development boards use `dev`:
 
 ```sh

@@ -3,21 +3,19 @@ __pycache__
 .pytest_cache
 node_modules
 /.ruff.toml
-*/build/
-*/build-cov/
+build/
+build-*/
 *.cov
 
 # ESP-IDF firmware build artifacts
-firmware/build/
-firmware/build-*/
-machn/build-*/
-firmware/sdkconfig
-firmware/sdkconfig.old
-firmware/sdkconfig.credentials
+sdkconfig
+sdkconfig.old
+sdkconfig.credentials
 # Secure Boot keys and the flash-encryption master belong outside the repository
-primary.pem
-backup.pem
-fe_master.txt
+*.pem
+fe_master*.txt
+# any built / signed bootloaders
+*.bin
 # host runner binary
 host/machine_app_runner
 # host unit-test binaries
@@ -34,8 +32,11 @@ firmware/managed_components/
 
 # Production flash images (remote + machine roles) — contain baked-in secrets
 # (Tailscale key, WiFi creds, admin password, fleet key). Never commit.
-tools/production_image/
-tools/production_image_machn/
+production_image/
+production_image_machn/
+# Release images downloaded for the quickstart
+pstop_remote-*
+SHA256SUMS
 
 # analysis / CAD / stray artifacts
 *.dump

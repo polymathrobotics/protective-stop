@@ -67,6 +67,17 @@ when a direct path is unavailable. Their sockets are pinned to the tunnel, so
 losing the VPN causes silence instead of a plaintext downgrade. Ethernet is
 preferred, with USB-NCM and WiFi available as fallbacks.
 
+### Complex scenarios
+
+One machine can bond several remotes, and the machine runs only while all of
+them report OK. Which remote may re-arm after a stop depends on roles, arming
+ownership, and heartbeat timeouts.
+[Multi-remote, single machine](design/MULTI_REMOTE_SINGLE_MACHINE.md) walks
+through two remotes under each combination of stop, drop, and unbond, and gives
+the number of remotes one machine can hold.
+[Single remote, multiple machines](design/SINGLE_REMOTE_MULTI_MACHINE.md)
+describes how one remote's button and heartbeats reach up to four machines.
+
 ## What's included
 
 | Path | Contents |
@@ -99,9 +110,10 @@ The short version (ESP-IDF 5.5 required):
 ```sh
 cp firmware/sdkconfig.credentials.example firmware/sdkconfig.credentials
 $EDITOR firmware/sdkconfig.credentials            # Tailscale auth key + admin password
-cd firmware && . /path/to/esp-idf-v5.5/export.sh
+cd firmware && . ~/esp/esp-idf/export.sh
 idf.py -DPSTOP_PROFILE=dev build && idf.py -p /dev/ttyACM0 flash   # dev profile: bench only
 
+cd ../tools && uv sync                # once: the Python environment for flashing and tests, see developing/testing/tools.md
 cd ../ros2 && colcon build --packages-up-to protective_stop_machine
 ros2 run protective_stop_machine machine_bridge_node
 curl -X POST "http://<remote>/api/pstop_peer?ip=<laptop-tailscale-ip>&port=8890"
