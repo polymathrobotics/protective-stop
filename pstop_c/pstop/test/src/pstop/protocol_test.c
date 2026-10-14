@@ -192,7 +192,7 @@ test_protocol_bond_then_unbond(void)
     machine_init(&machine, &pstop_app, pstop_clients, MAX_CLIENTS);
 
     operator_allowed_flag = true;
-    current_time = 10;
+    current_time = 100;
 
     pstop_msg_t req;
     pstop_message_init(&req);
@@ -212,7 +212,7 @@ test_protocol_bond_then_unbond(void)
     TEST_ASSERT_EQUAL(1U, resp.counter);
     TEST_ASSERT_EQUAL(10, resp.received_counter);
     TEST_ASSERT_EQUAL(100, resp.received_stamp);
-    TEST_ASSERT_EQUAL(12, resp.stamp);
+    TEST_ASSERT_EQUAL(102, resp.stamp);
     TEST_ASSERT_EQUAL(0, device_id_cmp(&req.id, &resp.receiver_id));
     TEST_ASSERT_EQUAL(0, device_id_cmp(&req.receiver_id, &resp.id));
 
@@ -223,7 +223,8 @@ test_protocol_bond_then_unbond(void)
     req.id.data = PSTOP_ID;
     req.receiver_id.data = MACHINE_ID;
     req.received_counter = 1;
-    req.received_stamp = 12;
+    req.received_stamp = 100;
+    current_time = 110;
     pstop_message_init(&resp);
     TEST_ASSERT_EQUAL(PSTOP_OK, machine_process_message(&machine, &req, &resp));
     TEST_ASSERT_EQUAL(PSTOP_MESSAGE_UNBOND, resp.message);
@@ -382,6 +383,7 @@ test_protocol_bond_correct_timestamp(void)
     req.received_stamp = resp.stamp;
     req.received_counter = resp.counter;
     req.stamp = 110;
+    current_time = 110;
     TEST_ASSERT_EQUAL(PSTOP_OK, machine_process_message(&machine, &req, &resp));
 }
 
@@ -479,12 +481,16 @@ test_protocol_bond_invalid_echo_counter(void)
     req.message = PSTOP_MESSAGE_OK;
     req.counter = 11;
     req.stamp = 110;
+    req.received_stamp = 100;
     req.received_counter = 1;
+    current_time = 110;
     TEST_ASSERT_EQUAL(PSTOP_OK, machine_process_message(&machine, &req, &resp));
 
     req.message = PSTOP_MESSAGE_OK;
     req.counter = 12;
     req.stamp = 120;
+    req.received_stamp = 110;
+    current_time = 120;
     req.received_counter = 0;
     TEST_ASSERT_EQUAL(PSTOP_MSG_LOST, machine_process_message(&machine, &req, &resp));
 }
@@ -519,6 +525,8 @@ test_protocol_bond_missing_sent_messages(void)
     req.counter = 11;
     req.stamp = 110;
     req.received_counter = 0; // we didn't receive the previous mssage
+    req.received_stamp = 100;
+    current_time = 110;
     TEST_ASSERT_EQUAL(PSTOP_OK, machine_process_message(&machine, &req, &resp));
     TEST_ASSERT_EQUAL(2U, resp.counter);
     TEST_ASSERT_EQUAL(PSTOP_MESSAGE_STOP, resp.message);
@@ -527,6 +535,8 @@ test_protocol_bond_missing_sent_messages(void)
     req.counter = 12;
     req.stamp = 120;
     req.received_counter = 0; // we didn't receive the previous mssage
+    req.received_stamp = 110;
+    current_time = 120;
     TEST_ASSERT_EQUAL(PSTOP_MSG_LOST, machine_process_message(&machine, &req, &resp));
     TEST_ASSERT_EQUAL(2U, resp.counter);
     TEST_ASSERT_EQUAL(PSTOP_MESSAGE_STOP, resp.message);
