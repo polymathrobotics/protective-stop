@@ -437,7 +437,7 @@ static uint32_t estop_padcfg_reverify(void)
  * so the cores stop running and this software check cannot execute — that case
  * is caught only by the hardware watchdogs (TWDT feed stops -> reset; the
  * RTC WDT on its independent slow clock is the ultimate backstop). See
- * docs/WATCHDOG_CLOCK_PROTECTION.md.
+ * docs/safety/WATCHDOG_CLOCK_PROTECTION.md.
  * ========================================================================== */
 
 #define XCHECK_STALL_TICKS pdMS_TO_TICKS(500) /* 5 ticks of no-advance tolerance */

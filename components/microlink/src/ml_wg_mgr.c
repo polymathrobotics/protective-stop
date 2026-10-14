@@ -1394,7 +1394,7 @@ static void neg_apply_target(microlink_t * ml, uint16_t target, uint8_t src)
     /* Pin->MBB: pin convergence is owned by neg_pin_tick — gapless MBB while
      * the home conn is alive, the DERP task's own home-reconnect (straight to
      * the override) when it is not; a teardown here would starve heartbeat rx
-     * (docs/STAGE1_PIN_MBB_DESIGN.md). Cancel only a FOREIGN in-flight MBB
+     * (docs/design/STAGE1_PIN_MBB_DESIGN.md). Cancel only a FOREIGN in-flight MBB
      * (autoneg toward some other region — the I2 "lock wins instantly"
      * intent); NEVER the pin's own, or the pin could never complete (this
      * runs every 3 s). */
@@ -1503,7 +1503,7 @@ static void neg_apply_target(microlink_t * ml, uint16_t target, uint8_t src)
 }
 
 /* ============================================================================
- * Stage-1 pin->MBB (docs/STAGE1_PIN_MBB_DESIGN.md): drive the operator region
+ * Stage-1 pin->MBB (docs/design/STAGE1_PIN_MBB_DESIGN.md): drive the operator region
  * pin (derp_region_override) GAPLESSLY. While the home conn is alive, the pin
  * is applied via the §7 make-before-break executor (open target as aux, prove,
  * swap the home index — no teardown, no rx gap). With no live home there is
@@ -3732,7 +3732,7 @@ static void wg_mgr_drain_wg_rx(microlink_t * ml)
  * needs NAT hairpin). Source it instead from the active uplink: the default-route
  * esp_netif (highest route_prio, up, with a valid IPv4). The WG tunnel is a raw
  * lwIP netif (not an esp_netif) so it is never returned here. Falls back to
- * WIFI_STA_DEF for safety. See docs/SAME_LAN_DIRECT_PATH_PLAN.md. */
+ * WIFI_STA_DEF for safety. See docs/design/SAME_LAN_DIRECT_PATH_PLAN.md. */
 uint32_t ml_active_lan_ip(void)
 {
   esp_netif_ip_info_t ip;

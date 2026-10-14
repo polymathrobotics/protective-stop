@@ -16,7 +16,7 @@ _Last updated: 2026-08-11 (machine relay-feedback DESCOPE, reversible — see be
 > divider feedback voltages cannot be read sanely. Relays are still **driven**
 > unchanged; the series de-energize-to-safe stop (HFT=1) and the l0/l1 dual-core
 > lockstep/arming path are **unchanged**. Full writeup, reversal steps, and
-> safety-case impact: **docs/RELAY_FEEDBACK_DESCOPE.md**.
+> safety-case impact: **docs/design/RELAY_FEEDBACK_DESCOPE.md**.
 > - [x] **Descope banners added** to FMEA §5, FMEDA §5 + MC-2/MC-3, HARA H-10/SG-5,
 >   SAFETY_REQUIREMENTS SR-SYS-05 (marked descoped / stale / reversible, pointing
 >   to the descope doc).
@@ -102,7 +102,7 @@ _Prior update: 2026-08-07 (C-hardening pass — OTA-lineage, USB-NCM, cold-recov
 >    diverse expressions survive the optimizer (distinct object code) +
 >    `scripts/check_estop_diversity.sh` CI guard. **DU-3 CLOSED.**
 > 3. **#3 — production networking robustness DONE** (`1f7604e`,
->    `docs/PRODUCTION_NETWORKING.md`): same-LAN direct-path validated; DERP-home +
+>    `docs/design/PRODUCTION_NETWORKING.md`): same-LAN direct-path validated; DERP-home +
 >    promote-direct-after-DISCO shipped.
 > 4. **Stability battery (~30 min) PASSED:** power-cycle 6/6, arm/press/discordance
 >    3/3, 4-min soak, `pstop_multi_remote_test` 34/34, real 2-chip E2E.
@@ -118,7 +118,7 @@ _Prior update: 2026-08-07 (C-hardening pass — OTA-lineage, USB-NCM, cold-recov
 >    the fixed safety link** — this also closes the deferred firmware-extraction
 >    HIL validation. No infra workaround needed.
 > 2. **SR-H-04 / DU-2 CLOSED**: ESP32 TWDT/IWDT/RTC-WDT + dual-core mutual clock
->    cross-check (`docs/WATCHDOG_CLOCK_PROTECTION.md`); fault-injection proved a
+>    cross-check (`docs/safety/WATCHDOG_CLOCK_PROTECTION.md`); fault-injection proved a
 >    frozen clock is caught by the cross-check (missed by the lockstep memcmp).
 > 3. **Quantitative FMEDA** (`docs/safety/FMEDA.md`): SFF≈93% / PFH≈3.7e-9/h /
 >    β=10%, SIL 3 met-but-fragile; closing DU-2 (done) + DU-1 → SFF≥99%.

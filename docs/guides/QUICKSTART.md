@@ -1,3 +1,7 @@
+---
+sidebar_position: 1
+---
+
 <!--
 SPDX-FileCopyrightText: 2026 Polymath Robotics
 SPDX-License-Identifier: CC-BY-4.0
@@ -23,7 +27,7 @@ the ROS 2 install.
 
 | Item | Notes |
 |---|---|
-| Assembled remote | Waveshare ESP32-S3-ETH + NKK FF01 switch + LED ring: [`hardware/README.md`](../hardware/README.md), [`hardware/ASSEMBLY.md`](../hardware/ASSEMBLY.md). A bare board works for everything except the button steps. |
+| Assembled remote | Waveshare ESP32-S3-ETH + NKK FF01 switch + LED ring: [hardware guide](../hardware/index.md), [assembly guide](../hardware/assembly.md). A bare board works for everything except the button steps. |
 | USB-C data cable | Power, and the network if you use USB. |
 | Ethernet cable and a DHCP LAN with internet | Only for the Ethernet path. A PoE switch port powers the remote too. |
 | Laptop | Ubuntu 24.04 with internet (22.04 works with ROS 2 Humble). |
@@ -78,7 +82,7 @@ Into an empty folder, download three files from the
 mode) and, using the exact filename you downloaded:
 
 ```sh
-python3 -m pip install --user esptool      # once; the repo's tools/ venv (uv) also has it, see tools/README.md
+python3 -m pip install --user esptool      # once; the repo's tools/ venv (uv) also has it, see docs/developing/testing/tools.md
 sha256sum -c SHA256SUMS --ignore-missing   # expect: two lines ending in OK
 ls /dev/ttyACM*                            # expect: /dev/ttyACM0
 python3 -m esptool --chip esp32s3 -p /dev/ttyACM0 -b 460800 write_flash 0x0 pstop_remote-<version>-public-fullflash.bin
@@ -230,7 +234,7 @@ remote, so repeat step 4 with a new key, then step 6.
 | Ring stays white after `pstop_peer` | The POST failed; re-run and read the JSON. |
 | Ring blue, never green | Role still stop-only (`curl -u "admin:$ADMIN_PW" http://$DEV/api/role`), node not running, or ufw. `/machine_bridge/remotes` shows `stop_only: true` while the remote announces stop-only. |
 | Ring red pulsing slowly | Peer configured but unreachable: node down, wrong `$LAPTOP_TS`, ufw. `tailscale ping $REMOTE` from the laptop. |
-| Ring purple | One switch loop open while the other is closed: wiring fault ([`hardware/README.md`](../hardware/README.md)). |
+| Ring purple | One switch loop open while the other is closed: wiring fault ([hardware guide](../hardware/index.md)). |
 
 Remote-side counters: `curl -s "http://$REMOTE/state.json" | python3 -m json.tool | grep -E 'pstop_(sent|replies)|ml_state|role'` — `pstop_sent` and `pstop_replies` climbing together means the bond is healthy. More: [`TROUBLESHOOTING.md`](TROUBLESHOOTING.md), [`API.md`](API.md).
 
@@ -344,11 +348,11 @@ cd host && make
 #         ARMED by 0x01XXXXXX: STOP held 804 ms (policy minimum 500 ms)
 ```
 
-Same pairing steps as section 6. Details: [`host/README.md`](../host/README.md).
+Same pairing steps as section 6. Details: [host guide](host.md).
 
 **No hardware yet**: `cd tools && uv run python pstop_test_remote.py --port 8890`
 is a software remote that runs the same arming sequence against the node
-([`TESTING.md`](TESTING.md), [`../tools/README.md`](../tools/README.md)).
+([`TESTING.md`](../developing/testing/TESTING.md), [tools guide](../developing/testing/tools.md)).
 
 ## Appendix E: build the firmware yourself
 

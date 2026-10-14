@@ -60,7 +60,7 @@ computes `PSTOP_MSG_LOST` from the *echoed* `received_stamp` ack-lag and uses
 window on the counter/stamp round-trip, **not** the liveness timeout — its `+1`
 is correct and intentional and was **not** changed (both are inside the
 pre-qualified `pstop_c` boundary and out of scope for modification). `pstop_c`
-is untouched. `host/README.md` §"Liveness timeout" already documents this
+is untouched. `docs/guides/host.md` §"Liveness timeout" already documents this
 distinction correctly.
 
 ## Docs reviewed and found consistent (no edit needed)
@@ -69,12 +69,12 @@ distinction correctly.
 |---|---|
 | `docs/safety/SYSTEM_DEFINITION.md` | Authoritative backbone — reflects Option A+B / C-dropped, `hb×max_missed`, SIL 3 / PL e. **Updated 2026-08-04:** `max_missed` 3 → 5, so timeout is now 400×5≈2.0 s (was 400×3≈1.2 s). |
 | `docs/safety/HARA.md`, `docs/safety/FMEA.md` | Seed findings; already code-accurate. Their D1–D6 / §6 lists are subsumed by this register. No change. |
-| `docs/MACHINE_ROS2_NODE_DESIGN.md` | Uses `max_missed` correctly; example config still shows defaults 400/3/500 (§4, §12). No stale heartbeat formula, no Option C, no SIL2. **§6 threading model corrected 2026-08-05 — see R-10.** **Note (2026-08-04):** the machn (safety-credited, A-07) default was raised to `max_missed` = 5; the ROS 2 node's own compiled default was **not** confirmed changed by that commit (machn-specific), so its example still reads 3. **Open reconciliation item:** confirm whether the ROS 2 node default should track machn (=5) and update the example + code accordingly, or document the two paths intentionally differ. 5 is within the ROS 2 validator envelope [1,5]. |
-| `docs/MACHINE_ESP32_DESIGN.md` | Series-relay + feedback actuator description matches design intent; no stale safety claim. |
-| `docs/SAFETY_CHAIN.md` | Reboot/rollback recovery only; correctly states machine holds STOP on silence. No verdict/heartbeat/Option-C claims. |
-| `docs/FAILOVER_AND_ARMING_DESIGN_2026-07-21.md` | Arming policy + debounce match the code (`min_stop_ms=500`, single-tick STOP, 3-tick reclose). No stale claim. |
-| `docs/TESTING.md`, `docs/MISRA_COMPLIANCE_2026-07-21.md` | Procedural; no stale safety formula or dropped-feature claim. |
-| `host/README.md` §"Liveness timeout" | **Already correct** — states `heartbeat_ms × max_missed_heartbeats` and explicitly "not `× (max_missed + 1)`", with the `max_missed=1` false-STOP caveat. No change. |
+| `docs/design/MACHINE_ROS2_NODE_DESIGN.md` | Uses `max_missed` correctly; example config still shows defaults 400/3/500 (§4, §12). No stale heartbeat formula, no Option C, no SIL2. **§6 threading model corrected 2026-08-05 — see R-10.** **Note (2026-08-04):** the machn (safety-credited, A-07) default was raised to `max_missed` = 5; the ROS 2 node's own compiled default was **not** confirmed changed by that commit (machn-specific), so its example still reads 3. **Open reconciliation item:** confirm whether the ROS 2 node default should track machn (=5) and update the example + code accordingly, or document the two paths intentionally differ. 5 is within the ROS 2 validator envelope [1,5]. |
+| `docs/design/MACHINE_ESP32_DESIGN.md` | Series-relay + feedback actuator description matches design intent; no stale safety claim. |
+| `docs/safety/SAFETY_CHAIN.md` | Reboot/rollback recovery only; correctly states machine holds STOP on silence. No verdict/heartbeat/Option-C claims. |
+| `docs/design/FAILOVER_AND_ARMING_DESIGN_2026-07-21.md` | Arming policy + debounce match the code (`min_stop_ms=500`, single-tick STOP, 3-tick reclose). No stale claim. |
+| `docs/developing/testing/TESTING.md`, `docs/safety/MISRA_COMPLIANCE_2026-07-21.md` | Procedural; no stale safety formula or dropped-feature claim. |
+| `docs/guides/host.md` §"Liveness timeout" | **Already correct** — states `heartbeat_ms × max_missed_heartbeats` and explicitly "not `× (max_missed + 1)`", with the `max_missed=1` false-STOP caveat. No change. |
 | `docs/archive/*` (ESTOP_SAFETY_DESIGN, ESTOP_SAFETY_DECISIONS, transport/chaos reports) | **Historical / superseded** — intentionally left unedited. They contain the same stale `hb×(max_missed+1)` formula and Option-C language, but archival status is their reconciliation. |
 | `docs/safety/coverage/*.html` | **Generated** gcov artifacts; the stale `:721` comment appears only as a rendering of the source that R-08 fixed. Regenerate to refresh; not hand-edited. |
 

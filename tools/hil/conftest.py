@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2026 Polymath Robotics
 # SPDX-License-Identifier: Apache-2.0
-"""pytest fixtures wiring the HIL rig together. See README.md for the rig."""
+"""pytest fixtures wiring the HIL rig together. See docs/developing/testing/hil.md for the rig."""
 
 from __future__ import annotations
 

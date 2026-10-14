@@ -8,7 +8,7 @@ flags.
 Most tools here are stdlib-only and run under any Python 3.11+. The
 `tools/` uv environment covers all of them plus the ones with dependencies
 (`usb_relay4.py`, the HIL suite), so the commands below use `uv run`; see
-[`../tools/README.md`](../tools/README.md) for the one-time setup.
+[tools guide](tools.md) for the one-time setup.
 
 ## 1. Machine arming-policy suite — `tools/pstop_test_remote.py`
 

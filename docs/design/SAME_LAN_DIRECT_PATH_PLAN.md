@@ -85,7 +85,7 @@ that *does* advertise a LAN endpoint:
 `via 192.168.107.131:51820` (WiFi) and `via 10.42.0.80:51820` (USB-NCM
 point-to-point, where the peer also learns the addr from the ping source on the
 shared L2). The failing case is exactly the Ethernet/same-subnet topology where
-the advertisement is empty. `docs/PEER_SCALING_DESIGN.md:108-116` independently
+the advertisement is empty. `docs/design/PEER_SCALING_DESIGN.md:108-116` independently
 notes same-public-IP topologies fall back to DERP on the bench.
 
 ### 2.4 Why it kept recurring (so we don't circle again)

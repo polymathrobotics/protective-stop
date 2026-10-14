@@ -1440,7 +1440,7 @@ static int add_endpoints_to_json(microlink_t * ml, cJSON * root)
 
   /* LAN endpoint — active uplink (eth/usb/wifi), not WiFi-only. Lets same-LAN
      * peers learn our real local address and form a direct path. See
-     * ml_active_lan_ip() (ml_wg_mgr.c) and docs/SAME_LAN_DIRECT_PATH_PLAN.md. */
+     * ml_active_lan_ip() (ml_wg_mgr.c) and docs/design/SAME_LAN_DIRECT_PATH_PLAN.md. */
   uint32_t local_ip = ml_active_lan_ip();
   if (local_ip != 0) {
     char ep_str[32];
