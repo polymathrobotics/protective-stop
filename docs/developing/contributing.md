@@ -40,7 +40,7 @@ process. It then flows back here as a version bump. PRs that edit
 
 ### Firmware (ESP32-S3 remote)
 
-Requires ESP-IDF v5.5 (install: [Quickstart](../guides/QUICKSTART.md) Appendix E). The default [security profile](../guides/SECURITY_PROFILES.md),
+Requires ESP-IDF v5.5 (install: [Quickstart](../guides/quickstart.md) Appendix E). The default [security profile](../guides/secure_boot_guide.md),
 `secure-fe`, is not flashed by `idf.py flash`; development boards use `dev`:
 
 ```sh
@@ -53,7 +53,7 @@ idf.py flash                       # to a connected board
 `idf.py monitor` only shows the first seconds of boot: the USB port becomes the
 network tether once TinyUSB starts and the serial console goes quiet. Use
 `http://<remote>/state.json` and `/api/last_log` instead, or wire a USB-UART
-adapter to the UART0 pins. Full first-time walkthrough: [Quickstart](../guides/QUICKSTART.md).
+adapter to the UART0 pins. Full first-time walkthrough: [Quickstart](../guides/quickstart.md).
 
 `sdkconfig.credentials` holds secrets (Wi-Fi, Tailscale auth key, admin
 password) and is gitignored — never commit it. Every value in it is compiled
@@ -101,7 +101,7 @@ make                    # produces ./machine_app_runner
 - **Remote protocol / arming policy:** `tools/pstop_test_remote.py` bonds
   over the real wire protocol and runs timed STOP/OK sequences against a
   runner instance. Run it as `cd tools && uv run python
-  pstop_test_remote.py`; see [`TESTING.md`](testing/TESTING.md) and the [tools guide](testing/tools.md).
+  pstop_test_remote.py`; see [`testing.md`](testing/testing.md) and the [tools guide](testing/tools.md).
 - **Test ladders:** the scripts in `test/` (`chaos_ladder.sh`,
   `netem_ladder.sh`, `longsoak.sh`, `test_suite.sh`, recovery scripts)
   exercise the system under packet loss, latency, and fault injection.
@@ -113,7 +113,7 @@ make                    # produces ./machine_app_runner
   ```
 
   Residual findings are the documented deviation register in
-  [`MISRA_COMPLIANCE_2026-07-21.md`](../safety/MISRA_COMPLIANCE_2026-07-21.md). This is an engineering pre-check;
+  [`misra_c_compliance_review.md`](../safety/misra_c_compliance_review.md). This is an engineering pre-check;
   formal certification evidence needs a licensed MISRA checker.
 
 ## Pre-commit

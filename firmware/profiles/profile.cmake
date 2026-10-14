@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2026 Polymath Robotics
 # SPDX-License-Identifier: Apache-2.0
 #
-# Security profile overlay for firmware/ and machn/; see docs/guides/SECURITY_PROFILES.md.
+# Security profile overlay for firmware/ and machn/; see docs/guides/secure_boot_guide.md.
 
 set(PSTOP_PROFILE "secure-fe" CACHE STRING "Security profile: secure-fe, secure or dev")
 # Index = how many of Secure Boot and flash encryption the profile turns on.

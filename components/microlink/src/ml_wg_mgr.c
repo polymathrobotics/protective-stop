@@ -1394,7 +1394,7 @@ static void neg_apply_target(microlink_t * ml, uint16_t target, uint8_t src)
     /* Pin->MBB: pin convergence is owned by neg_pin_tick — gapless MBB while
      * the home conn is alive, the DERP task's own home-reconnect (straight to
      * the override) when it is not; a teardown here would starve heartbeat rx
-     * (docs/design/STAGE1_PIN_MBB_DESIGN.md). Cancel only a FOREIGN in-flight MBB
+     * (docs/design/gapless_forced_region_switch.md). Cancel only a FOREIGN in-flight MBB
      * (autoneg toward some other region — the I2 "lock wins instantly"
      * intent); NEVER the pin's own, or the pin could never complete (this
      * runs every 3 s). */
@@ -1503,7 +1503,7 @@ static void neg_apply_target(microlink_t * ml, uint16_t target, uint8_t src)
 }
 
 /* ============================================================================
- * Stage-1 pin->MBB (docs/design/STAGE1_PIN_MBB_DESIGN.md): drive the operator region
+ * Stage-1 pin->MBB (docs/design/gapless_forced_region_switch.md): drive the operator region
  * pin (derp_region_override) GAPLESSLY. While the home conn is alive, the pin
  * is applied via the §7 make-before-break executor (open target as aux, prove,
  * swap the home index — no teardown, no rx gap). With no live home there is
@@ -3648,7 +3648,7 @@ static void process_wg_packet(microlink_t * ml, const ml_rx_packet_t * pkt)
 }
 
 /* THE wg_rx drain — every processing site uses it (docs/
- * STALL_EVENT_CLOSURE_DESIGN.md §2). Data packets (heartbeat decrypt is
+ * all_path_stall_closure.md §2). Data packets (heartbeat decrypt is
  * sub-ms) flow freely; HANDSHAKES (~45 ms of X25519 each, under
  * LOCK_TCPIP_CORE) share one per-pass budget across all call sites so a
  * wave can never stall heartbeat processing. Snapshot-bounded: a deferred
@@ -3732,7 +3732,7 @@ static void wg_mgr_drain_wg_rx(microlink_t * ml)
  * needs NAT hairpin). Source it instead from the active uplink: the default-route
  * esp_netif (highest route_prio, up, with a valid IPv4). The WG tunnel is a raw
  * lwIP netif (not an esp_netif) so it is never returned here. Falls back to
- * WIFI_STA_DEF for safety. See docs/design/SAME_LAN_DIRECT_PATH_PLAN.md. */
+ * WIFI_STA_DEF for safety. See docs/design/same_lan_direct_path.md. */
 uint32_t ml_active_lan_ip(void)
 {
   esp_netif_ip_info_t ip;
@@ -4448,7 +4448,7 @@ static void disco_periodic_probes(microlink_t * ml)
      * `active` so wireguardif retransmits their handshake init between the 3 s
      * disco wakes — critical for a cross-region bond that only completes once an
      * aux DERP conn comes up. The ~120 non-pinned bulk peers still get the clear,
-     * so the retry-storm armor (PEER_SCALING_DESIGN.md:39) is preserved. */
+     * so the retry-storm armor (peer_capacity_scaling.md:39) is preserved. */
     if (!is_priority && !is_pinned_peer(ml, p->vpn_ip) && (ml->wg_netif != NULL) && (p->wg_peer_index >= 0)) {
       struct netif * nif = (struct netif *)ml->wg_netif;
       if (wireguardif_peer_is_up(nif, (u8_t)p->wg_peer_index, NULL, NULL) != ERR_OK) {

@@ -254,7 +254,7 @@ esp_err_t ml_dev_tether_try_start(uint32_t timeout_ms)
     /* Per-unit USB iSerial (descriptor string index 3) derived from the
          * eFuse MAC, replacing the shared Kconfig constant "123456". Lets a
          * host tell two connected units apart (udev ID_SERIAL_SHORT) and pin
-         * per-unit interface names — see docs/design/USB_NCM_STABILITY.md. Stable
+         * per-unit interface names — see docs/design/usb_ncm_tether_stability.md. Stable
          * across reboots (eFuse MAC is fixed), unique per unit. */
     static char s_usb_serial[13];
     uint8_t idserial[6];
