@@ -65,9 +65,17 @@ check_timestamp(const pstop_application_config_t *app_config, const protocol_dat
 pstop_error_t
 protocol_handle_message(pstop_machine_t *machine, const pstop_msg_t *req, pstop_msg_t *resp)
 {
+    if(req->version != PSTOP_VERSION) {
+        return PSTOP_INVALID_VERSION;
+    }
+
     // validate checksum
     if(!is_checksum_valid(req)) {
         return PSTOP_MSG_INVALID_CHECKSUM;
+    }
+
+    if(pstop_message_calculate_inverted(req) != req->inverted_value) {
+        return PSTOP_INVALID_INVERTED_VALUE;
     }
 
     // make sure te target ID is this machine ID
