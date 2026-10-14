@@ -22,6 +22,8 @@ repos:
     hooks:
       # Everything
       - id: polymath-general
+        # npm-generated; polymath-general's check-added-large-files has a fixed 500 KB limit.
+        exclude: ^website/package-lock\.json$
       - id: polymath-copyright
         args: [--license, Apache-2.0, --wildcard-copyright-org, --reuse-style]
       # Implementation

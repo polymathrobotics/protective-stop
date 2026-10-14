@@ -58,7 +58,7 @@ else
   echo "ERROR: neither NetworkManager nor systemd-networkd is active — cannot"
   echo "install the tether's shared-link config automatically. The 70-*.link"
   echo "naming rule was installed; configure a shared/DHCP link on esp-pstop0"
-  echo "manually (static 10.42.0.1/24 + a DHCP server + NAT). See docs/USB_NCM_SETUP.md."
+  echo "manually (static 10.42.0.1/24 + a DHCP server + NAT). See docs/guides/USB_NCM_SETUP.md."
   exit 1
 fi
 

@@ -3,7 +3,7 @@
 //
 // MachineBridgeNode — managed (lifecycle) node presenting one ROS 2 surface over
 // either machine backend. ROS glue only; all machine logic lives behind
-// IMachineBackend. See docs/MACHINE_ROS2_NODE_DESIGN.md.
+// IMachineBackend. See docs/design/MACHINE_ROS2_NODE_DESIGN.md.
 #include "protective_stop_machine/machine_bridge_node.hpp"
 
 #include <cstdlib>

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-FileCopyrightText: 2026 Polymath Robotics
 # SPDX-License-Identifier: Apache-2.0
-"""Sign, encrypt, provision and re-flash units of the secure profiles; see docs/SECURITY_PROFILES.md.
+"""Sign, encrypt, provision and re-flash units of the secure profiles; see docs/guides/SECURITY_PROFILES.md.
 
 Secrets come from PSTOP_SIGNING_KEY, PSTOP_BACKUP_KEY (sign-bootloader only) and PSTOP_FE_MASTER,
 each a file path or a 1Password op:// reference.
@@ -344,7 +344,7 @@ def cmd_provision(args):
         fe_key_id = check_record(record, b['profile'], fe_raw)
         fe_key = write_secret(sd / 'fe.bin', fe_raw) if fe else None
 
-        print(f'\nProvisioning {mac} as {b["profile"]} burns eFuses permanently (docs/SECURITY_PROFILES.md).')
+        print(f'\nProvisioning {mac} as {b["profile"]} burns eFuses permanently (docs/guides/SECURITY_PROFILES.md).')
         print(f'Key digests: primary {digests[0].hex()}\n             backup  {digests[1].hex()}')
         if not args.virt and not args.yes:
             if input(f'\nType the MAC ({mac}) to continue: ').strip().lower() != mac:

@@ -43,7 +43,7 @@ menu "MicroLink V2 Configuration"
             ceiling. Pinned peers (configured machines on a remote, operators on a
             machine) are exempt and always kept. Raise toward the ceiling only for
             a machine that must serve more than ~28 remotes. See
-            docs/MULTI_REMOTE_MULTI_MACHINE.md.
+            docs/guides/MULTI_REMOTE_MULTI_MACHINE.md.
 
             Most deployments need 1-4 peers (only the peers you actively
             communicate with). For large tailnets, set this to the actual
@@ -175,7 +175,7 @@ menu "MicroLink V2 Configuration"
                 without it. A one-off (not reusable) key is recommended; it
                 must NOT be ephemeral (the node identity is persisted in NVS)
                 and must be pre-approved if device approval is on. A tagged
-                key also disables node key expiry. See docs/QUICKSTART.md.
+                key also disables node key expiry. See docs/guides/QUICKSTART.md.
                 This is stored in sdkconfig which should be git-ignored.
 
         config ML_DEVICE_TYPE

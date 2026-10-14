@@ -31,7 +31,7 @@ set_source_files_properties(
 
 # Crypto speedup (from fast-crypto, 2026-08-04): -O3 on the vetted per-packet AEAD
 # primitives (project default -Og). Same code, output verified identical on-device.
-# See docs/CRYPTO_SPEEDUP_REPORT.md.
+# See docs/design/CRYPTO_SPEEDUP_REPORT.md.
 set_source_files_properties(
     src/crypto/refc/chacha20poly1305.c
     src/crypto/refc/chacha20.c

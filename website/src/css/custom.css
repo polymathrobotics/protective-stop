@@ -1,0 +1,157 @@
+/**
+ * Global styles. Bundles Infima by default.
+ */
+
+ :root {
+  /* Brand palette tokens */
+  --pm-purple: #5138ee;
+  --pm-outer-space: #0a071b;
+  --pm-lime: #d1ee78;
+  --pm-white: #ffffff;
+  --pm-black: #000000;
+}
+
+/* ===================== Light mode ===================== */
+:root {
+  /* Primary = Polymath Purple (shades generated on the Infima lightness curve) */
+  --ifm-color-primary: #5138ee;
+  --ifm-color-primary-dark: #391dec;
+  --ifm-color-primary-darker: #3114e6;
+  --ifm-color-primary-darkest: #2810be;
+  --ifm-color-primary-light: #6953f0;
+  --ifm-color-primary-lighter: #7561f1;
+  --ifm-color-primary-lightest: #9889f5;
+
+  /* Surfaces & text */
+  --ifm-background-color: var(--pm-white);
+  --ifm-background-surface-color: var(--pm-outer-space);
+  --ifm-font-color-base: var(--pm-outer-space);
+  --ifm-heading-color: var(--pm-outer-space);
+
+  --ifm-code-font-size: 95%;
+  --docusaurus-highlighted-code-line-bg: rgba(81, 56, 238, 0.1);
+}
+
+/* ===================== Dark mode ====================== */
+[data-theme='dark'] {
+  /* Lightened purple so links/headings read on the near-black background */
+  --ifm-color-primary: #8472f3;
+  --ifm-color-primary-dark: #6751f0;
+  --ifm-color-primary-darker: #5941ef;
+  --ifm-color-primary-darkest: #3114e6;
+  --ifm-color-primary-light: #a193f6;
+  --ifm-color-primary-lighter: #afa3f7;
+  --ifm-color-primary-lightest: #dad5fb;
+
+  /* Outer Space background, purple-tinted surfaces */
+  --ifm-background-color: #09080e;
+  --ifm-background-surface-color: #110a3b;
+  --ifm-font-color-base: #eceaf6;
+  --ifm-heading-color: var(--pm-white);
+
+  --docusaurus-highlighted-code-line-bg: rgba(209, 238, 120, 0.12);
+}
+
+/* Highlighted selection */
+::selection {
+  background: var(--pm-purple);
+  color: var(--pm-white);
+}
+[data-theme='dark'] ::selection {
+  background: var(--pm-lime);
+  color: var(--pm-outer-space);
+}
+
+/* Active menu link in the left sidebar gets an accent edge marker */
+.menu__link--active:not(.menu__link--sublist) {
+  box-shadow: inset 3px 0 0 var(--pm-purple);
+  color: var(--pm-purple);
+}
+[data-theme='dark'] .menu__link--active:not(.menu__link--sublist) {
+  box-shadow: inset 3px 0 0 var(--pm-lime);
+  color: var(--pm-lime);
+}
+
+/* Active collapsible section in the left sidebar gets an accent edge marker */
+.menu__list-item-collapsible--active {
+  box-shadow: inset 3px 0 0 var(--pm-purple);
+  color: var(--pm-purple);
+}
+[data-theme='dark'] .menu__list-item-collapsible--active {
+  box-shadow: inset 3px 0 0 var(--pm-lime);
+  color: var(--pm-lime);
+  --ifm-menu-color-active: var(--pm-lime);
+}
+
+/* Hover state for menu links */
+.menu__link:hover {
+  color: var(--pm-purple);
+  background-color: rgba(81, 56, 238, 0.1);
+}
+[data-theme='dark'] .menu__link:hover {
+  color: var(--pm-lime);
+  background-color: rgba(81, 56, 238, 0.1);
+}
+
+/* Active link in the right table-of-contents gets an accent edge marker */
+.table-of-contents__link--active {
+  border-left: 2px solid var(--pm-purple);
+  padding-left: 0.6rem;
+  margin-left: -0.7rem;
+}
+[data-theme='dark'] .table-of-contents__link--active {
+  border-left: 2px solid var(--pm-lime);
+  padding-left: 0.6rem;
+  margin-left: -0.7rem;
+}
+
+/* Navbar color */
+.navbar {
+  color: #ffffff;
+  --ifm-navbar-link-color: #ffffff;
+  --ifm-navbar-link-hover-color: var(--pm-lime);
+}
+
+/* Sidebar color */
+.theme-doc-sidebar-container {
+  background-color: #f2f2f3;
+}
+[data-theme='dark'] .theme-doc-sidebar-container {
+  background-color: #02010e;
+}
+
+/* Footer color */
+.footer {
+  --ifm-footer-background-color: var(--pm-outer-space);
+  --ifm-footer-color: #cfcbe6;
+  --ifm-footer-link-color: #cfcbe6;
+  --ifm-footer-title-color: var(--pm-white);
+}
+[data-theme='dark'] .footer {
+  --ifm-footer-background-color: #110a3b;
+}
+
+/* Hover state for footer links */
+.footer .footer__link-item:hover {
+  color: var(--pm-lime);
+  text-decoration: none;
+}
+
+
+/* Sidebar logo */
+.sidebar-brand {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 2rem 1rem 3rem;
+  margin-bottom: 0.5rem;
+}
+.sidebar-brand img {
+  width: 85%;
+  max-width: 210px;
+  height: auto;
+}
+/* The sidebar logo is black, invert it in dark mode */
+[data-theme='dark'] .sidebar-brand img {
+  filter: brightness(0) invert(1);
+}

@@ -240,7 +240,7 @@ achieved by the *series relay chain on the `machn` device*, not by the app.
 - **Relay weld (ESP32 `machn`, hardware-backend actuator).**
   **[DESCOPED 2026-08 — relay feedback OFF by default, pending new machine
   hardware; REVERSIBLE via `CONFIG_MACHN_RELAY_FEEDBACK`. See
-  docs/RELAY_FEEDBACK_DESCOPE.md.** The series two-relay de-energize-to-safe stop
+  docs/design/RELAY_FEEDBACK_DESCOPE.md.** The series two-relay de-energize-to-safe stop
   (HFT=1, either contact opens the chain) is UNCHANGED and still safe on demand.
   What is descoped is the resistor-divider **feedback/diagnosis** below: a single
   weld is now **latent (dangerous-undetected)** until the next stop demand, and

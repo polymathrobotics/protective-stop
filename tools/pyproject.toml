@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2026 Polymath Robotics
 # SPDX-License-Identifier: Apache-2.0
 #
-# The single Python environment for everything in tools/. See README.md.
+# The single Python environment for everything in tools/. See docs/developing/testing/tools.md.
 
 [project]
 name = "pstop-tools"

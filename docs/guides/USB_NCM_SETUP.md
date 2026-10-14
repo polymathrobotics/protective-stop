@@ -10,7 +10,7 @@ cable (the "USB-NCM tether"). USB-NCM is the recommended transport for
 **bench work and field service** — no LAN, no WiFi credentials, no Tailscale
 round-trip — and it is the third automatic uplink after Ethernet and WiFi.
 Firmware stability of the tether itself is characterized separately in
-[`USB_NCM_STABILITY.md`](USB_NCM_STABILITY.md); this guide is only about
+[`USB_NCM_STABILITY.md`](../design/USB_NCM_STABILITY.md); this guide is only about
 preparing the host.
 
 ## Why a host setup is needed at all
@@ -110,7 +110,7 @@ table, DHCP lease, ping, and HTTP all recover).
 needs its own profile/match.
 
 Background on why the naming rule (not just a MAC-keyed profile) is required
-is in [`USB_NCM_STABILITY.md`](USB_NCM_STABILITY.md).
+is in [`USB_NCM_STABILITY.md`](../design/USB_NCM_STABILITY.md).
 
 ---
 
