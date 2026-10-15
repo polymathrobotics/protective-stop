@@ -1,30 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Polymath Robotics, Inc.
 // SPDX-License-Identifier: Apache-2.0
-//
-// FleetCheckin — optional periodic DEVICE CHECK-IN to the management backend so a software
-// machine registers there EXACTLY like an ESP32 machine does: a
-// `device_type:"machine"` device with full metadata, not just the lighter
-// [announce] overview ping. It mirrors the ESP32's fleet_ota_checkin()
-// (components/microlink/src/ml_app.c): one bearer-authenticated POST to
-// `<base>/api/v1/checkin` carrying the ESP32 check-in schema (device_id,
-// app_version, idf_version, uptime_s, device_type, check_interval_s, local_ip,
-// state, rollback_occurred), every check_interval_s, plus an immediate boot
-// check-in. The fleet then parses the software machine identically to a chip.
-//
-// This is COMPLEMENTARY to MachineAnnouncer, not a replacement: the announcer
-// feeds the console's live per-remote overview; the check-in registers the
-// device record + advertises cadence/version the same way the firmware does.
-//
-// Deliberately OUTSIDE the safety loop — own thread, libcurl only (already a
-// dependency), and any failure only logs. The pstop safety protocol never
-// depends on it, and it is fully OFF when the base URL is empty (opt-in). No
-// firmware OTA is attempted: a software machine has no ESP-OTA image, so an
-// `update_available` directive from the fleet is logged for the operator and
-// otherwise a no-op.
-//
-// The payload builder (build_checkin_payload) and state mapping (checkin_state)
-// are header-inline and rclcpp-free so they are unit-testable with no network
-// and no ROS runtime, matching the repo's announce / operator_policy pattern.
 #pragma once
 
 #include <atomic>
@@ -143,12 +118,19 @@ inline std::string checkin_endpoint(const std::string & base_url)
   return trimmed_base + "/api/v1/checkin";
 }
 
-/// @brief Owns a background thread that POSTs the check-in every interval_s.
+/// @brief Periodically POSTs a device check-in to `<base_url>/api/v1/checkin`.
+/// The payload follows the ESP32 check-in schema, so the fleet registers this
+/// software machine as a `device_type:"machine"` device. An `update_available`
+/// directive in the response is logged only.
+/// Runs on its own thread, off the safety path: failures only log.
 /// Driven from the node's activate/deactivate transitions, so it runs only
 /// while the node is ACTIVE. start() and stop() are idempotent.
 class FleetCheckin
 {
 public:
+  /// @param config Deployment values.
+  /// @param machine_id Device ID of this machine.
+  /// @param snapshot_fn Returns the state to report; called from the check-in thread.
   FleetCheckin(FleetCheckinConfig config, uint32_t machine_id, std::function<MachineSnapshot()> snapshot_fn);
   ~FleetCheckin();
 
@@ -163,6 +145,7 @@ public:
   /// @brief Stops the thread and joins. Idempotent.
   void stop();
 
+  /// True while the check-in thread is running.
   bool enabled() const
   {
     return enabled_.load();
