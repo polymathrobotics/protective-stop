@@ -16,6 +16,7 @@ typedef enum {
     PSTOP_STATUS_STOP = 1
 } pstop_status_message_t;
 
+/// Per-remote settings returned by get_remote_details_t.
 typedef struct {
 
     /**
@@ -96,6 +97,7 @@ typedef struct {
 
 } pstop_application_config_t;
 
+/// Callbacks and configuration supplied by the application.
 typedef struct pstop_application_t {
 
     /**
@@ -126,6 +128,7 @@ typedef struct pstop_application_t {
      */
     log_message_t log_message_cb;
 
+    /// Limits for lost messages and heartbeats.
     pstop_application_config_t app_config;
 
 } pstop_application_t;

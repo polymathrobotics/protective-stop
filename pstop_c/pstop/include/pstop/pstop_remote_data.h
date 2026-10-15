@@ -21,30 +21,39 @@ typedef enum {
 
 } pstop_remote_state_t;
 
+/// State tracked for one remote.
 typedef struct {
 
+    /// Local identifier of the remote.
     uint32_t local_remote_id;
 
+    /// Protocol state for the remote.
     protocol_data_t remote_data;
 
+    /// Last message type received from the remote.
     uint8_t last_message;
 
-    // is this remote a stop-only operator?
+    /// True if the remote can stop but not restart the robot.
     bool is_stop_only;
 
-    // how many messages have we lost so far?
+    /// Messages lost so far.
     uint16_t lost_message_counter;
 
-    // how many heartbeats have we missed?
+    /// Heartbeats missed so far.
     uint16_t missed_heartbeats_counter;
 
+    /// Lifecycle state of the remote.
     pstop_remote_state_t remote_state;
 
 } pstop_remote_data_t;
 
+/// A fixed-capacity collection of remotes.
 typedef struct {
 
+    /// Caller-owned array of max_remotes entries.
     pstop_remote_data_t *remotes;
+
+    /// Capacity of the remotes array.
     uint16_t max_remotes;
 
 } pstop_remotes_t;
@@ -85,6 +94,12 @@ pstop_remote_data_t *pstop_remote_get_free_remote(pstop_remotes_t *remotes);
  */
 void pstop_remote_deactivate(pstop_remote_data_t *remote);
 
+/**
+ * @brief Returns the number of remotes in the stopped state.
+ *
+ * @param remotes The collection of remotes.
+ * @return The number of remotes in PSTOP_REMOTE_STOPPED.
+ */
 uint16_t pstop_remote_num_stopped(const pstop_remotes_t *remotes);
 
 /**

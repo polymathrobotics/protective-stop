@@ -28,15 +28,23 @@ namespace protective_stop_machine
 class MachineBridgeNode : public rclcpp_lifecycle::LifecycleNode
 {
 public:
+  /// Lifecycle transition result.
   using CallbackReturn = rclcpp_lifecycle::node_interfaces::LifecycleNodeInterface::CallbackReturn;
 
+  /// Declares parameters and creates the ROS interfaces.
   explicit MachineBridgeNode(const rclcpp::NodeOptions & options);
 
+  /// Builds the configured backend and validates parameters.
   CallbackReturn on_configure(const rclcpp_lifecycle::State &) override;
+  /// Starts the backend, publishing and the fleet reporters.
   CallbackReturn on_activate(const rclcpp_lifecycle::State &) override;
+  /// Stops the backend, publishing and the fleet reporters.
   CallbackReturn on_deactivate(const rclcpp_lifecycle::State &) override;
+  /// Releases the backend.
   CallbackReturn on_cleanup(const rclcpp_lifecycle::State &) override;
+  /// Stops everything, from any state.
   CallbackReturn on_shutdown(const rclcpp_lifecycle::State &) override;
+  /// Handles a failed transition.
   CallbackReturn on_error(const rclcpp_lifecycle::State &) override;
 
 private:

@@ -18,10 +18,13 @@ struct HardwareConfig
 {
   /// ESP32 machn admin/state URL.
   std::string device_url{"http://127.0.0.1"};
+  /// Admin API user name.
   std::string admin_user{"admin"};
   /// Read from PSTOP_MACHINE_ADMIN_PASS, never a param file.
   std::string admin_pass;
+  /// /state.json polling rate, in hertz.
   double poll_hz{5.0};
+  /// HTTP request timeout, in seconds.
   double http_timeout_s{2.0};
 };
 
@@ -32,6 +35,7 @@ struct HardwareConfig
 class HardwareMachineBackend : public IMachineBackend
 {
 public:
+  /// Copies config; no I/O until start().
   explicit HardwareMachineBackend(const HardwareConfig & config);
   ~HardwareMachineBackend() override;
 

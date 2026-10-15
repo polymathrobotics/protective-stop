@@ -39,9 +39,10 @@ typedef pstop_error_t (* pstop_check_heartbeats_t)(pstop_machine_t *machine);
 #define ROBOT_RESTART_STATE_NEED_STOP 1
 #define ROBOT_RESTART_STATE_STOP_RECEIVED 2
 
+/// Stop/restart state of the robot.
 typedef struct {
 
-    /* Is the robot stopped or OK? */
+    /// ROBOT_STATE_OK or ROBOT_STATE_STOPPED.
     int robot_state;
 
     /**
@@ -64,12 +65,16 @@ typedef struct {
     uint64_t stop_time_ms;
 } robot_state_t;
 
+/// The machine side of the protocol: connected remotes, application callbacks, and robot state.
 typedef struct pstop_machine_t {
 
+    /// Remote slots tracked by this machine.
     pstop_remotes_t remotes;
 
+    /// Application callbacks and configuration; not owned.
     pstop_application_t *application;
 
+    /// Current stop/restart state.
     robot_state_t robot_state;
 
 } pstop_machine_t;

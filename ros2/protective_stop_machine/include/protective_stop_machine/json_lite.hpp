@@ -1,11 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Polymath Robotics, Inc.
 // SPDX-License-Identifier: Apache-2.0
-//
-// json_lite — a tiny, self-contained JSON reader. Just enough to parse the
-// ESP32 /state.json (objects, arrays, strings, numbers, bools, null). Avoids a
-// dependency on nlohmann/json so the package builds with only rclcpp + libcurl.
-// Not a general-purpose library: no unicode-escape expansion beyond passthrough,
-// tolerant number parsing. Adequate and tested for the device's flat schema.
 #pragma once
 
 #include <cctype>
@@ -18,8 +12,11 @@
 namespace jsonlite
 {
 
+/// @brief A parsed JSON value: null, bool, number, string, array or object.
+/// Accessors return the supplied default when the value has a different type.
 struct Value
 {
+  /// JSON type held by a Value.
   enum Type
   {
     NUL,
@@ -30,24 +27,32 @@ struct Value
     OBJ
   };
 
+  /// Active type; selects which of the members below is meaningful.
   Type type{NUL};
+  /// Value when type is BOOL.
   bool b{false};
+  /// Value when type is NUM.
   double num{0.0};
+  /// Value when type is STR.
   std::string str;
+  /// Elements when type is ARR.
   std::vector<Value> arr;
+  /// Members when type is OBJ.
   std::map<std::string, Value> obj;
 
+  /// True when type is OBJ.
   bool is_obj() const
   {
     return type == OBJ;
   }
 
+  /// True when type is ARR.
   bool is_arr() const
   {
     return type == ARR;
   }
 
-  // Object lookup; nullptr if absent or not an object.
+  /// Returns the member named key, or nullptr if absent or not an object.
   const Value * find(const std::string & key) const
   {
     if (type != OBJ) {
@@ -57,11 +62,13 @@ struct Value
     return it == obj.end() ? nullptr : &it->second;
   }
 
+  /// Number value, or dflt unless type is NUM.
   double as_num(double dflt = 0.0) const
   {
     return type == NUM ? num : dflt;
   }
 
+  /// Bool value, a NUM compared against zero, or dflt for other types.
   bool as_bool(bool dflt = false) const
   {
     if (type == BOOL) {
@@ -73,24 +80,27 @@ struct Value
     return dflt;
   }
 
+  /// String value, or dflt unless type is STR.
   std::string as_str(const std::string & dflt = "") const
   {
     return type == STR ? str : dflt;
   }
 
-  // Convenience: number/bool/string field of an object by key.
+  /// as_num() of member k, or dflt if the member is absent.
   double num_at(const std::string & k, double dflt = 0.0) const
   {
     const Value * v = find(k);
     return v ? v->as_num(dflt) : dflt;
   }
 
+  /// as_bool() of member k, or dflt if the member is absent.
   bool bool_at(const std::string & k, bool dflt = false) const
   {
     const Value * v = find(k);
     return v ? v->as_bool(dflt) : dflt;
   }
 
+  /// as_str() of member k, or dflt if the member is absent.
   std::string str_at(const std::string & k, const std::string & dflt = "") const
   {
     const Value * v = find(k);
@@ -98,13 +108,19 @@ struct Value
   }
 };
 
+/// @brief Recursive-descent parser for the flat JSON schema of the ESP32 /state.json.
+/// Nesting deeper than 32 levels is rejected. Unicode escapes pass through unexpanded.
 class Parser
 {
 public:
+  /// Parses s; the string must outlive the parser.
   explicit Parser(const std::string & s)
   : s_(s)
   {}
 
+  /// @brief Parses the document into out.
+  /// Trailing content after the first value is ignored.
+  /// @return False on malformed input.
   bool parse(Value & out)
   {
     skip_ws();

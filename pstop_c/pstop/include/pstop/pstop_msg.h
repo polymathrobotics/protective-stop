@@ -75,6 +75,8 @@ typedef struct {
      * extra padding bytes
      */
     uint32_t padding1;
+
+    /// Reserved.
     uint32_t padding2;
 
     /**

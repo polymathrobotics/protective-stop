@@ -1,21 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Polymath Robotics, Inc.
 // SPDX-License-Identifier: Apache-2.0
-//
-// MachineAnnouncer — optional periodic check-in to a central fleet console so an
-// operator dashboard shows this software machine as RUNNING, exactly like the
-// host runner's announce (host/machine_app_runner.c: announce_thread /
-// announce_post_once) and the ESP32 machn's fleet check-in. One bearer-
-// authenticated POST every interval_s; the console attributes the source IP
-// itself and derives `running` / `announce_age_s` from the check-in stream.
-//
-// Deliberately OUTSIDE the safety loop: it runs on its own thread, links only
-// libcurl (already a dependency), and any failure only logs — the pstop safety
-// protocol never depends on it. Fully OFF when the URL is empty, so a non-fleet
-// deployment is unaffected (default-disabled, opt-in).
-//
-// The payload builder (build_announce_payload) is header-inline and rclcpp-free
-// so it is unit-testable with no network and no ROS runtime, matching the
-// repo's operator_policy testable-logic pattern.
 #pragma once
 
 #include <atomic>
@@ -40,7 +24,9 @@ struct AnnounceConfig
   std::string key_file;
   /// Display name on the console. Empty uses this host's hostname.
   std::string name;
+  /// Seconds between check-ins.
   int interval_s{60};
+  /// HTTP request timeout, in seconds.
   double http_timeout_s{10.0};
 };
 
@@ -124,12 +110,17 @@ inline std::string build_announce_payload(
   return payload;
 }
 
-/// @brief Owns a background thread that POSTs the check-in every interval_s.
+/// @brief Periodically POSTs a bearer-authenticated RUNNING check-in to a fleet console.
+/// Runs on its own thread, off the safety path: failures only log.
 /// Driven from the node's activate/deactivate transitions, so it runs only
 /// while the node is ACTIVE. start() and stop() are idempotent.
 class MachineAnnouncer
 {
 public:
+  /// @param config Deployment values.
+  /// @param port UDP port the machine listens on.
+  /// @param machine_id Device ID of this machine.
+  /// @param snapshot_fn Returns the state to report; called from the check-in thread.
   MachineAnnouncer(AnnounceConfig config, int port, uint32_t machine_id, std::function<MachineSnapshot()> snapshot_fn);
   ~MachineAnnouncer();
 
@@ -144,6 +135,7 @@ public:
   /// @brief Stops the thread and joins. Idempotent.
   void stop();
 
+  /// True while the check-in thread is running.
   bool enabled() const
   {
     return enabled_.load();
