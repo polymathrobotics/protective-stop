@@ -402,8 +402,7 @@ def group_a_single(verbose):
         a = SoftRemote(RID_A, '127.0.0.1', m.port)
         assert a.bond(), 'bond failed'
         check(
-            a.last_reply['version'] == PSTOP_VERSION
-            and a.last_reply['padding1'] == 0,
+            a.last_reply['version'] == PSTOP_VERSION and a.last_reply['padding1'] == 0,
             'A0 machine reply initializes version and aux padding',
         )
         s = Session([a])
