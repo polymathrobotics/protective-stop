@@ -227,19 +227,9 @@ discipline):
   > data race on `last_snapshot_`, and **must** be accompanied by explicit
   > lifetime/state guards. Off-executor work belongs on a backend thread behind
   > `IMachineBackend`'s mutex-guarded snapshot, which is where it already is.
-- Backends implement one interface:
-
-  ```cpp
-  class IMachineBackend {            // pure, no rclcpp
-  virtual void start() = 0;        // bind/socket or begin polling
-    virtual void stop()  = 0;        // → safe state
-    virtual MachineSnapshot snapshot() const = 0;   // thread-safe read
-    virtual bool configure(const MachineTiming&) = 0; // runtime reconfig
-  };
-  ```
-
-  `SoftwareMachineBackend` and `HardwareMachineBackend` are the two impls; the
-node depends only on `IMachineBackend`.
+- The node depends only on `IMachineBackend`, implemented by
+  `SoftwareMachineBackend` and `HardwareMachineBackend`.
+  The interface is documented in `backend.hpp` and the generated API reference.
 
 ---
 

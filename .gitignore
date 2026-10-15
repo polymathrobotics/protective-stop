@@ -77,3 +77,5 @@ tools/fleet.env
 # Docusaurus site (website/); node_modules and build/ are covered above
 website/.docusaurus/
 website/.cache-loader/
+# generated Doxygen API reference
+website/static/api/

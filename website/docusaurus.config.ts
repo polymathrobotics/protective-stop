@@ -101,6 +101,7 @@ const config: Config = {
         {type: 'docSidebar', sidebarId: 'design', position: 'left', label: 'Design'},
         {type: 'docSidebar', sidebarId: 'developing', position: 'left', label: 'Developing'},
         {type: 'docSidebar', sidebarId: 'archive', position: 'left', label: 'Archive'},
+        {href: 'pathname:///protective-stop/api/index.html', label: 'API', position: 'left'},
         {type: 'search', position: 'right'},
         {
           href: 'https://github.com/polymathrobotics/protective-stop',

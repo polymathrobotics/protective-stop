@@ -81,7 +81,7 @@ pstop_remote_data_t *pstop_remote_get_free_remote(pstop_remotes_t *remotes);
 /**
  * @brief Deactivates this remote.
  *
- * @param remotes The collection of remotes.
+ * @param remote The remote to deactivate.
  */
 void pstop_remote_deactivate(pstop_remote_data_t *remote);
 

@@ -4,9 +4,13 @@ name: Docs
 on:
   push:
     branches: [main]
+    # Keep the header paths in sync with INPUT in docs/developing/Doxyfile.
     paths:
       - docs/**
       - website/**
+      - pstop_c/pstop/include/**
+      - ros2/protective_stop_machine/include/**
+      - common/**
       - .github/workflows/docs.yml
   # Unfiltered: docs link to files across the repo, and the build fails on a broken one.
   pull_request:
@@ -31,6 +35,15 @@ jobs:
       - name: Install dependencies
         working-directory: website
         run: npm ci
+
+      - name: Install Doxygen
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y doxygen graphviz
+
+      - name: Build API docs
+        working-directory: website
+        run: npm run docs:api
 
       - name: Build site
         working-directory: website
