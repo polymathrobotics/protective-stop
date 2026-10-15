@@ -29,7 +29,6 @@ MARKDOWN_SUPPORT       = YES
 
 HAVE_DOT               = YES
 CALL_GRAPH             = NO
-CLASS_DIAGRAMS         = YES
 DOT_IMAGE_FORMAT       = svg
 INTERACTIVE_SVG        = NO
 
