@@ -3,9 +3,9 @@
 # SPDX-License-Identifier: Apache-2.0
 """Scripted pstop remote for machine-side policy testing.
 
-Speaks the pstop_c v2 wire protocol (48-byte messages, CRC16 poly 0x8D95,
-little-endian fields, far-Hamming message codewords, aux channel in
-padding1) well enough to bond and run timed STOP/OK sequences against a
+Speaks the pstop_c v3 wire protocol (50-byte messages, CRC-32 poly 0x9D7F97D6,
+little-endian fields, far-Hamming message codewords, inverted-value check
+field, aux channel in padding1) well enough to bond and run timed STOP/OK sequences against a
 machine — used to verify the min-STOP-duration arming policy without
 touching a chip. Works against host/machine_app_runner and the ROS 2
 machine_bridge_node alike (same pstop_c, same UDP port):
@@ -42,11 +42,11 @@ import time
 
 # Wire protocol — MUST track pstop_c (config.h PSTOP_VERSION / PSTOP_MESSAGE_SIZE,
 # pstop_msg.h codewords) and common/pstop_aux_channel.h (padding1 layout).
-PSTOP_VERSION = 0x02
+PSTOP_VERSION = 0x03
 MSG_OK, MSG_STOP, MSG_BOND, MSG_UNBOND = 0x55, 0x92, 0xAD, 0x6A
 NAMES = {0x55: 'OK', 0x92: 'STOP', 0xAD: 'BOND', 0x6A: 'UNBOND', 0x0F: 'UNKNOWN'}
-SIZE = 48
-FMT = '<BBQQIIIIIII'  # 46 bytes + u16 CRC
+SIZE = 50
+FMT = '<BBQQIIIIIII'  # 46 bytes + u32 CRC-32
 AUX_VERSION = 0x01
 ROLE_STOP_ONLY, ROLE_OPERATOR = 1, 2
 ROLES = {'stop_only': ROLE_STOP_ONLY, 'operator': ROLE_OPERATOR}
@@ -57,14 +57,20 @@ MACHINE_ID = 0x01020304
 HEARTBEAT_MS = 1000
 
 
-def crc16(data: bytes) -> int:
-    crc = 0xFFFF
+def crc32(data: bytes) -> int:
+    # pstop_c checksum_crc32(): reflected, init 0xFFFFFFFF, custom poly, final
+    # invert. NOT zlib.crc32 (different polynomial).
+    crc = 0xFFFFFFFF
     for b in data:
-        crc ^= b << 8
+        crc ^= b
         for _ in range(8):
-            crc = ((crc << 1) ^ 0x8D95) if crc & 0x8000 else (crc << 1)
-            crc &= 0xFFFF
-    return crc
+            crc = (crc >> 1) ^ (0x9D7F97D6 if crc & 1 else 0)
+    return ~crc & 0xFFFFFFFF
+
+
+def inverted(message, sender_id):
+    # pstop_message_calculate_inverted(): catches stuck-at-0/1 bits.
+    return ~((message << 24) | (sender_id & 0x00FFFFFF)) & 0xFFFFFFFF
 
 
 def encode(message, stamp, received_stamp, counter, received_counter):
@@ -79,10 +85,10 @@ def encode(message, stamp, received_stamp, counter, received_counter):
         HEARTBEAT_MS,
         counter,
         received_counter,
+        inverted(message, REMOTE_ID),
         AUX_VERSION | (ROLE << 8),  # padding1 = aux channel: version + self-role
-        0,  # padding2
     )
-    return body + struct.pack('<H', crc16(body))
+    return body + struct.pack('<I', crc32(body))
 
 
 def decode(data):
@@ -98,11 +104,11 @@ def decode(data):
         hb,
         counter,
         received_counter,
+        inverted_value,
         _padding1,
-        _padding2,
     ) = struct.unpack(FMT, data[:46])
-    (checksum,) = struct.unpack('<H', data[46:48])
-    ok = checksum == crc16(data[:46])
+    (checksum,) = struct.unpack('<I', data[46:50])
+    ok = checksum == crc32(data[:46]) and inverted_value == inverted(message, sender)
     return dict(
         message=message,
         stamp=stamp,

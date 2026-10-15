@@ -31,9 +31,9 @@ machine_app_runner: machine_app_runner.c clock_guard.c $(PSTOP_SRCS) $(TRANS_SRC
 test_clock_guard: test_clock_guard.c clock_guard.c
 	$(CC) $(CFLAGS) -o $@ $^
 
-# Aux-channel codec test (common/pstop_aux_channel.h): header-only static
-# inline logic, needs the pstop + common include paths but no pstop_c .c files.
-test_aux_channel: test_aux_channel.c
+# Aux-channel codec + role-hook test (common/pstop_aux_channel.h). The hooks
+# call into pstop_c, so it links the pstop_c sources like machine_app_runner.
+test_aux_channel: test_aux_channel.c $(PSTOP_SRCS)
 	$(CC) $(CFLAGS) $(PSTOP_INC) -o $@ $^
 
 # Golden-vector KATs for the safety-path crypto primitives switched to -O3.

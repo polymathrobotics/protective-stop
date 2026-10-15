@@ -4,9 +4,10 @@
 #ifndef PSTOP_AUX_CHANNEL_H
 #define PSTOP_AUX_CHANNEL_H
 
-/* Wrapper-only role schema over pstop_c v2 padding1. pstop_c remains
+/* Wrapper-only role schema over pstop_c v3 padding1. pstop_c remains
  * unmodified; every wrapper includes this header so the wire values stay in
- * sync. padding2 remains unused and zero-initialized by pstop_message_init(). */
+ * sync. padding1 is the only padding field left in v3 (padding2 became the
+ * library-owned inverted_value). */
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -107,6 +108,11 @@ static inline const char * pstop_aux_role_str(pstop_aux_role_t role)
  */
 static inline void pstop_aux_apply_role_pre(pstop_machine_t * machine, const pstop_msg_t * req)
 {
+  /* Runs before pstop_c validates the frame: a CRC-valid frame with a bad inverted value may carry a
+   * corrupted sender id, so it must not change any remote's role. */
+  if (pstop_message_calculate_inverted(req) != req->inverted_value) {
+    return;
+  }
   pstop_remote_data_t * c = pstop_remote_get(&machine->remotes, &req->id);
   if (c == NULL) {
     return;
