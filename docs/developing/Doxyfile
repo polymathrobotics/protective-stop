@@ -1,0 +1,39 @@
+# SPDX-FileCopyrightText: 2026 Polymath Robotics
+# SPDX-License-Identifier: Apache-2.0
+#
+# Run from the repository root: doxygen docs/developing/Doxyfile
+
+PROJECT_NAME           = "Protective Stop"
+OUTPUT_DIRECTORY       = website/static/api
+HTML_OUTPUT            = .
+GENERATE_HTML          = YES
+GENERATE_LATEX         = NO
+GENERATE_XML           = NO
+
+# Keep in sync with the push paths in .github/workflows/docs.yml.
+INPUT                  = pstop_c/pstop/include \
+                         ros2/protective_stop_machine/include \
+                         common
+FILE_PATTERNS          = *.h *.hpp
+RECURSIVE              = YES
+EXTRACT_ALL            = NO
+STRIP_FROM_PATH        = pstop_c/pstop/include \
+                         ros2/protective_stop_machine/include \
+                         common
+FULL_PATH_NAMES        = YES
+
+JAVADOC_AUTOBRIEF      = YES
+QT_AUTOBRIEF           = YES
+OPTIMIZE_OUTPUT_FOR_C  = NO
+MARKDOWN_SUPPORT       = YES
+
+HAVE_DOT               = YES
+CALL_GRAPH             = NO
+CLASS_DIAGRAMS         = YES
+DOT_IMAGE_FORMAT       = svg
+INTERACTIVE_SVG        = NO
+
+SEARCHENGINE           = YES
+QUIET                  = YES
+WARN_IF_UNDOCUMENTED   = NO
+WARN_AS_ERROR          = YES

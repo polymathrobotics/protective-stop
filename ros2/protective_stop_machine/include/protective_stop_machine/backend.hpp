@@ -99,6 +99,7 @@ public:
   virtual MachineSnapshot snapshot() const = 0;
 
   /// @brief Applies an already safety-validated timing change.
+  /// @param timing Timing to apply.
   /// @param error Set when the backend cannot honour the change.
   /// @return False on an error or a refusal.
   virtual bool configure(const MachineTiming & timing, std::string & error) = 0;
