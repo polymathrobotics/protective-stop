@@ -7,22 +7,6 @@
 
 static
 void
-test_little_endian_uint16(void)
-{
-    size_t pos = 0U;
-    uint8_t data[] = { 0x01U, 0x02U };
-    TEST_ASSERT_EQUAL(0x0201U, read_uint16_le(data, &pos));
-    TEST_ASSERT_EQUAL(2U, pos);
-
-    uint8_t result[2];
-    pos = 0U;
-    write_uint16_le(0x0201U, result, &pos);
-    TEST_ASSERT_EQUAL(2U, pos);
-    TEST_ASSERT_EQUAL_UINT8_ARRAY(data, result, 2U);
-}
-
-static
-void
 test_little_endian_uint32(void)
 {
     size_t pos = 0U;
@@ -51,22 +35,6 @@ test_little_endian_uint64(void)
     write_uint64_le(0x0807060504030201ULL, result, &pos);
     TEST_ASSERT_EQUAL(8U, pos);
     TEST_ASSERT_EQUAL_UINT8_ARRAY(data, result, 8U);
-}
-
-static
-void
-test_big_endian_uint16(void)
-{
-    size_t pos = 0U;
-    uint8_t data[] = { 0x01U, 0x02U };
-    TEST_ASSERT_EQUAL(0x0102U, read_uint16_be(data, &pos));
-    TEST_ASSERT_EQUAL(2U, pos);
-
-    uint8_t result[2];
-    pos = 0U;
-    write_uint16_be(0x0102U, result, &pos);
-    TEST_ASSERT_EQUAL(2U, pos);
-    TEST_ASSERT_EQUAL_UINT8_ARRAY(data, result, 2U);
 }
 
 static
@@ -106,11 +74,9 @@ main_endian_test(void)
 {
     UnitySetTestFile("endian_test.c");
 
-    RUN_TEST(test_little_endian_uint16);
     RUN_TEST(test_little_endian_uint32);
     RUN_TEST(test_little_endian_uint64);
 
-    RUN_TEST(test_big_endian_uint16);
     RUN_TEST(test_big_endian_uint32);
     RUN_TEST(test_big_endian_uint64);
 }

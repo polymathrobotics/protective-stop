@@ -7,7 +7,6 @@
 #include <stdint.h>
 #include <stddef.h>
 
-uint16_t checksum_crc16(const uint8_t *data, size_t data_length);
 uint32_t checksum_crc32(const uint8_t *data, size_t data_length);
 
 #endif /* PSTOP_CHECKSUM_H */
