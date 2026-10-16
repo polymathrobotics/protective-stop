@@ -11,6 +11,8 @@ on:
     branches: [main]
     paths:
       - host/**
+      - pstop_c/**
+      - common/**
       - components/**
       - firmware/main/**
       - firmware/sdkconfig.defaults
@@ -21,6 +23,8 @@ on:
   pull_request:
     paths:
       - host/**
+      - pstop_c/**
+      - common/**
       - components/**
       - firmware/main/**
       - firmware/sdkconfig.defaults
