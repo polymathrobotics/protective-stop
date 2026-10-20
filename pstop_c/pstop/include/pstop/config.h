@@ -5,11 +5,11 @@
 #define PSTOP_CONFIG_H
 
 #ifndef PSTOP_VERSION
-#   define PSTOP_VERSION 0x02U
+#   define PSTOP_VERSION 0x03U
 #endif
 
-#if PSTOP_VERSION == 0x02U
-#   define PSTOP_MESSAGE_SIZE 48U
+#if PSTOP_VERSION == 0x03U
+#   define PSTOP_MESSAGE_SIZE 50U
 #   define PSTOP_DEVICE_ID_LENGTH 4U
 #else
 #   error "Unsupported PSTOP_VERSION"

@@ -21,8 +21,8 @@ pstop_message_init(pstop_msg_t *msg)
     msg->counter = 0U;
     msg->received_counter = 0U;
     msg->message = PSTOP_MESSAGE_UNKNOWN;
+    msg->inverted_value = 0U;
     msg->padding1 = 0U;
-    msg->padding2 = 0U;
     msg->checksum = 0U;
     msg->calculated_checksum = 0U;
 }
@@ -58,28 +58,6 @@ write_uint8(uint8_t value, uint8_t *data, size_t *pos)
 {
     data[*pos] = value;
     *pos = *pos + 1U;
-}
-
-static
-uint16_t
-read_uint16(const uint8_t *data, size_t *pos)
-{
-#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
-    return read_uint16_le(data, pos);
-#else
-    return read_uint16_be(data, pos);
-#endif
-}
-
-static
-void
-write_uint16(uint16_t value, uint8_t *data, size_t *pos)
-{
-#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
-    write_uint16_le(value, data, pos);
-#else
-    write_uint16_be(value, data, pos);
-#endif
 }
 
 static
@@ -130,7 +108,7 @@ static
 void
 read_device_id(device_id_t *device_id, const uint8_t *data, size_t *pos)
 {
-#if PSTOP_VERSION == 0x02
+#if PSTOP_VERSION == 0x03
     device_id->data = read_uint32(data, pos);
 #else
 #   error "Unsupported PSTOP_VERSION"
@@ -141,7 +119,7 @@ static
 void
 write_device_id(const device_id_t *device_id, uint8_t *data, size_t *pos)
 {
-#if PSTOP_VERSION == 0x02
+#if PSTOP_VERSION == 0x03
     write_uint32(device_id->data, data, pos);
 #else
 #   error "Unsupported PSTOP_VERSION"
@@ -166,6 +144,12 @@ pstop_message_get_counter(const pstop_msg_t *msg)
     return msg->counter;
 }
 
+uint32_t
+pstop_message_calculate_inverted(const pstop_msg_t *msg)
+{
+    return ~((((uint32_t)msg->message) << 24) | (msg->id.data & 0x00FFFFFFU));
+}
+
 void
 pstop_create_generic_message(pstop_msg_t *msg,
     uint8_t message,
@@ -182,8 +166,8 @@ pstop_create_generic_message(pstop_msg_t *msg,
     msg->heartbeat_timeout = 0U;
     msg->counter = counter;
     msg->received_counter = received_counter;
+    msg->inverted_value = 0U;
     msg->padding1 = 0U;
-    msg->padding2 = 0U;
     msg->checksum = 0U;
     msg->calculated_checksum = 0U;
 }
@@ -238,19 +222,19 @@ void
 pstop_message_decode(pstop_msg_t *msg, const uint8_t *data)
 {
     size_t pos = 0U;
-    msg->version = read_uint8(data, &pos);
-    msg->message = read_uint8(data, &pos);
-    msg->stamp = read_uint64(data, &pos);
-    msg->received_stamp = read_uint64(data, &pos);
-    read_device_id(&(msg->id), data, &pos);
-    read_device_id(&(msg->receiver_id), data, &pos);
-    msg->heartbeat_timeout = read_uint32(data, &pos);
-    msg->counter = read_uint32(data, &pos);
-    msg->received_counter = read_uint32(data, &pos);
-    msg->padding1 = read_uint32(data, &pos);
-    msg->padding2 = read_uint32(data, &pos);
-    msg->checksum = read_uint16(data, &pos);
-    msg->calculated_checksum = checksum_crc16(data, PSTOP_MESSAGE_SIZE - 2U);
+    msg->version = read_uint8(data, &pos);           // 1
+    msg->message = read_uint8(data, &pos);           // 2
+    msg->stamp = read_uint64(data, &pos);            // 10
+    msg->received_stamp = read_uint64(data, &pos);   // 18
+    read_device_id(&(msg->id), data, &pos);          // 22
+    read_device_id(&(msg->receiver_id), data, &pos); // 26
+    msg->heartbeat_timeout = read_uint32(data, &pos);// 30
+    msg->counter = read_uint32(data, &pos);          // 34
+    msg->received_counter = read_uint32(data, &pos); // 38
+    msg->inverted_value = read_uint32(data, &pos);   // 42
+    msg->padding1 = read_uint32(data, &pos);         // 46
+    msg->checksum = read_uint32(data, &pos);         // 50
+    msg->calculated_checksum = checksum_crc32(data, PSTOP_MESSAGE_SIZE - 4U);
 }
 
 void
@@ -266,8 +250,8 @@ pstop_message_encode(const pstop_msg_t *msg, uint8_t *data)
     write_uint32(msg->heartbeat_timeout, data, &pos);
     write_uint32(msg->counter, data, &pos);
     write_uint32(msg->received_counter, data, &pos);
+    write_uint32(pstop_message_calculate_inverted(msg), data, &pos);
     write_uint32(msg->padding1, data, &pos);
-    write_uint32(msg->padding2, data, &pos);
-    uint16_t checksum = checksum_crc16(data, PSTOP_MESSAGE_SIZE - 2U);
-    write_uint16(checksum, data, &pos);
+    uint32_t checksum = checksum_crc32(data, PSTOP_MESSAGE_SIZE - 4U);
+    write_uint32(checksum, data, &pos);
 }

@@ -70,6 +70,22 @@ static pstop_remote_data_t pstop_clients[MAX_CLIENTS];
 
 static
 void
+test_protocol_invalid_version(void)
+{
+    pstop_machine_t machine;
+    machine_init(&machine, &pstop_app, pstop_clients, MAX_CLIENTS);
+
+    pstop_msg_t req;
+    pstop_msg_t resp;
+    pstop_message_init(&req);
+    pstop_message_init(&resp);
+    req.version = PSTOP_VERSION + 1;
+
+    TEST_ASSERT_EQUAL(PSTOP_INVALID_VERSION, machine_process_message(&machine, &req, &resp));
+}
+
+static
+void
 test_protocol_invalid_checksum_req_2_01(void)
 {
     pstop_machine_t machine;
@@ -81,6 +97,7 @@ test_protocol_invalid_checksum_req_2_01(void)
     pstop_message_init(&resp);
     req.checksum = 10U;
     req.calculated_checksum = 14U; // calculated by pstop_message_decode
+    req.inverted_value = pstop_message_calculate_inverted(&req);
 
     TEST_ASSERT_EQUAL(PSTOP_MSG_INVALID_CHECKSUM, machine_process_message(&machine, &req, &resp));
 }
@@ -97,8 +114,27 @@ test_protocol_invalid_receiver_id_req_2_07(void)
     pstop_message_init(&req);
     pstop_message_init(&resp);
     req.receiver_id.data = 4567; // doesn't match the machine ID
+    req.inverted_value = pstop_message_calculate_inverted(&req);
 
     TEST_ASSERT_EQUAL(PSTOP_ERROR_INVALID_ID, machine_process_message(&machine, &req, &resp));
+}
+
+static
+void
+test_protocol_invalid_inverted_value(void)
+{
+    pstop_machine_t machine;
+    machine_init(&machine, &pstop_app, pstop_clients, MAX_CLIENTS);
+
+    pstop_msg_t req;
+    pstop_msg_t resp;
+    pstop_message_init(&req);
+    pstop_message_init(&resp);
+    req.message = PSTOP_MESSAGE_OK;
+    req.id.data = 12345;
+    req.inverted_value = pstop_message_calculate_inverted(&req) + 1;
+
+    TEST_ASSERT_EQUAL(PSTOP_INVALID_INVERTED_VALUE, machine_process_message(&machine, &req, &resp));
 }
 
 static
@@ -117,6 +153,7 @@ test_protocol_out_of_order_message_req_2_02(void)
     req.receiver_id.data = MACHINE_ID;
     req.received_counter = 0U;
     req.received_stamp = 0U;
+    req.inverted_value = pstop_message_calculate_inverted(&req);
 
     pstop_msg_t resp;
     pstop_message_init(&resp);
@@ -132,6 +169,7 @@ test_protocol_out_of_order_message_req_2_02(void)
     req.stamp = 110;
     req.received_counter = resp.counter;
     req.received_stamp = resp.stamp;
+    req.inverted_value = pstop_message_calculate_inverted(&req);
     TEST_ASSERT_EQUAL(PSTOP_MSG_OUT_OF_ORDER, machine_process_message(&machine, &req, &resp));
 }
 
@@ -149,6 +187,7 @@ test_protocol_operator_not_allowed_req_2_06(void)
     pstop_message_init(&req);
     pstop_message_init(&resp);
     req.receiver_id.data = MACHINE_ID;
+    req.inverted_value = pstop_message_calculate_inverted(&req);
 
     TEST_ASSERT_EQUAL(PSTOP_OPERATOR_NOT_ALLOWED, machine_process_message(&machine, &req, &resp));
 }
@@ -171,6 +210,7 @@ test_protocol_bond_request(void)
     req.receiver_id.data = MACHINE_ID;
     req.received_counter = 0U;
     req.received_stamp = 0U;
+    req.inverted_value = pstop_message_calculate_inverted(&req);
 
     pstop_msg_t resp;
     pstop_message_init(&resp);
@@ -203,6 +243,7 @@ test_protocol_bond_then_unbond(void)
     req.receiver_id.data = MACHINE_ID;
     req.received_counter = 0U;
     req.received_stamp = 0U;
+    req.inverted_value = pstop_message_calculate_inverted(&req);
 
     pstop_msg_t resp;
     pstop_message_init(&resp);
@@ -224,6 +265,7 @@ test_protocol_bond_then_unbond(void)
     req.receiver_id.data = MACHINE_ID;
     req.received_counter = 1;
     req.received_stamp = 12;
+    req.inverted_value = pstop_message_calculate_inverted(&req);
     pstop_message_init(&resp);
     TEST_ASSERT_EQUAL(PSTOP_OK, machine_process_message(&machine, &req, &resp));
     TEST_ASSERT_EQUAL(PSTOP_MESSAGE_UNBOND, resp.message);
@@ -247,6 +289,7 @@ test_protocol_invalid_message_req_2_08(void)
     req.receiver_id.data = MACHINE_ID;
     req.received_counter = 0U;
     req.received_stamp = 0U;
+    req.inverted_value = pstop_message_calculate_inverted(&req);
 
     pstop_msg_t resp;
     pstop_message_init(&resp);
@@ -270,6 +313,7 @@ test_protocol_invalid_counter(void)
     req.stamp = 100;
     req.id.data = PSTOP_ID;
     req.receiver_id.data = MACHINE_ID;
+    req.inverted_value = pstop_message_calculate_inverted(&req);
 
     pstop_msg_t resp;
     pstop_message_init(&resp);
@@ -280,6 +324,7 @@ test_protocol_invalid_counter(void)
 
     req.message = PSTOP_MESSAGE_OK;
     req.counter = 9;
+    req.inverted_value = pstop_message_calculate_inverted(&req);
     TEST_ASSERT_EQUAL(PSTOP_MSG_OUT_OF_ORDER, machine_process_message(&machine, &req, &resp));
 }
 
@@ -299,6 +344,7 @@ test_protocol_lost_messages_req_2_03(void)
     req.stamp = 100;
     req.id.data = PSTOP_ID;
     req.receiver_id.data = MACHINE_ID;
+    req.inverted_value = pstop_message_calculate_inverted(&req);
 
     pstop_msg_t resp;
     pstop_message_init(&resp);
@@ -314,6 +360,7 @@ test_protocol_lost_messages_req_2_03(void)
     req.receiver_id.data = MACHINE_ID;
     req.received_counter = resp.counter;
     req.received_stamp = resp.stamp;
+    req.inverted_value = pstop_message_calculate_inverted(&req);
     TEST_ASSERT_EQUAL(PSTOP_MSG_LOST, machine_process_message(&machine, &req, &resp));
 }
 
@@ -335,6 +382,7 @@ test_protocol_bond_invalid_timestamp(void)
     req.stamp = 100;
     req.id.data = PSTOP_ID;
     req.receiver_id.data = MACHINE_ID;
+    req.inverted_value = pstop_message_calculate_inverted(&req);
 
     pstop_msg_t resp;
     pstop_message_init(&resp);
@@ -349,6 +397,7 @@ test_protocol_bond_invalid_timestamp(void)
     req.received_stamp = resp.stamp + 1U;
     req.received_counter = resp.counter;
     req.stamp = 90;
+    req.inverted_value = pstop_message_calculate_inverted(&req);
     TEST_ASSERT_EQUAL(PSTOP_MSG_OUT_OF_ORDER, machine_process_message(&machine, &req, &resp));
 }
 
@@ -368,6 +417,7 @@ test_protocol_bond_correct_timestamp(void)
     req.stamp = 100;
     req.id.data = PSTOP_ID;
     req.receiver_id.data = MACHINE_ID;
+    req.inverted_value = pstop_message_calculate_inverted(&req);
 
     pstop_msg_t resp;
     pstop_message_init(&resp);
@@ -382,6 +432,7 @@ test_protocol_bond_correct_timestamp(void)
     req.received_stamp = resp.stamp;
     req.received_counter = resp.counter;
     req.stamp = 110;
+    req.inverted_value = pstop_message_calculate_inverted(&req);
     TEST_ASSERT_EQUAL(PSTOP_OK, machine_process_message(&machine, &req, &resp));
 }
 
@@ -401,6 +452,7 @@ test_protocol_bond_missed_message_timestamps(void)
     req.stamp = 5000;
     req.id.data = PSTOP_ID;
     req.receiver_id.data = MACHINE_ID;
+    req.inverted_value = pstop_message_calculate_inverted(&req);
 
     pstop_msg_t resp;
     pstop_message_init(&resp);
@@ -417,6 +469,7 @@ test_protocol_bond_missed_message_timestamps(void)
     req.received_stamp = 1000;
     req.received_counter = resp.counter;
     req.stamp = 5010;
+    req.inverted_value = pstop_message_calculate_inverted(&req);
     TEST_ASSERT_EQUAL(PSTOP_MSG_LOST, machine_process_message(&machine, &req, &resp));
 }
 
@@ -436,6 +489,7 @@ test_protocol_bond_missed_too_many_messages(void)
     req.stamp = 100;
     req.id.data = PSTOP_ID;
     req.receiver_id.data = MACHINE_ID;
+    req.inverted_value = pstop_message_calculate_inverted(&req);
 
     pstop_msg_t resp;
     pstop_message_init(&resp);
@@ -448,6 +502,7 @@ test_protocol_bond_missed_too_many_messages(void)
     req.message = PSTOP_MESSAGE_OK;
     req.counter = 12; // missed message 11
     req.stamp = 110;
+    req.inverted_value = pstop_message_calculate_inverted(&req);
     TEST_ASSERT_EQUAL(PSTOP_MSG_LOST, machine_process_message(&machine, &req, &resp));
 }
 
@@ -467,6 +522,7 @@ test_protocol_bond_invalid_echo_counter(void)
     req.stamp = 100;
     req.id.data = PSTOP_ID;
     req.receiver_id.data = MACHINE_ID;
+    req.inverted_value = pstop_message_calculate_inverted(&req);
 
     pstop_msg_t resp;
     pstop_message_init(&resp);
@@ -480,12 +536,14 @@ test_protocol_bond_invalid_echo_counter(void)
     req.counter = 11;
     req.stamp = 110;
     req.received_counter = 1;
+    req.inverted_value = pstop_message_calculate_inverted(&req);
     TEST_ASSERT_EQUAL(PSTOP_OK, machine_process_message(&machine, &req, &resp));
 
     req.message = PSTOP_MESSAGE_OK;
     req.counter = 12;
     req.stamp = 120;
     req.received_counter = 0;
+    req.inverted_value = pstop_message_calculate_inverted(&req);
     TEST_ASSERT_EQUAL(PSTOP_MSG_LOST, machine_process_message(&machine, &req, &resp));
 }
 
@@ -506,6 +564,7 @@ test_protocol_bond_missing_sent_messages(void)
     req.stamp = 100;
     req.id.data = PSTOP_ID;
     req.receiver_id.data = MACHINE_ID;
+    req.inverted_value = pstop_message_calculate_inverted(&req);
 
     pstop_msg_t resp;
     pstop_message_init(&resp);
@@ -519,6 +578,7 @@ test_protocol_bond_missing_sent_messages(void)
     req.counter = 11;
     req.stamp = 110;
     req.received_counter = 0; // we didn't receive the previous mssage
+    req.inverted_value = pstop_message_calculate_inverted(&req);
     TEST_ASSERT_EQUAL(PSTOP_OK, machine_process_message(&machine, &req, &resp));
     TEST_ASSERT_EQUAL(2U, resp.counter);
     TEST_ASSERT_EQUAL(PSTOP_MESSAGE_STOP, resp.message);
@@ -527,6 +587,7 @@ test_protocol_bond_missing_sent_messages(void)
     req.counter = 12;
     req.stamp = 120;
     req.received_counter = 0; // we didn't receive the previous mssage
+    req.inverted_value = pstop_message_calculate_inverted(&req);
     TEST_ASSERT_EQUAL(PSTOP_MSG_LOST, machine_process_message(&machine, &req, &resp));
     TEST_ASSERT_EQUAL(2U, resp.counter);
     TEST_ASSERT_EQUAL(PSTOP_MESSAGE_STOP, resp.message);
@@ -549,6 +610,7 @@ test_protocol_bond_received_counter_invalid(void)
     req.stamp = 100;
     req.id.data = PSTOP_ID;
     req.receiver_id.data = MACHINE_ID;
+    req.inverted_value = pstop_message_calculate_inverted(&req);
 
     pstop_msg_t resp;
     pstop_message_init(&resp);
@@ -562,6 +624,7 @@ test_protocol_bond_received_counter_invalid(void)
     req.counter = 11;
     req.stamp = 110;
     req.received_counter = 10; // bigger than the current msg counter
+    req.inverted_value = pstop_message_calculate_inverted(&req);
     TEST_ASSERT_EQUAL(PSTOP_MSG_OUT_OF_ORDER, machine_process_message(&machine, &req, &resp));
 }
 
@@ -583,6 +646,7 @@ test_protocol_new_client_invalid_received_counter_req_4_05(void)
     req.stamp = 100;
     req.id.data = PSTOP_ID;
     req.receiver_id.data = MACHINE_ID;
+    req.inverted_value = pstop_message_calculate_inverted(&req);
 
     pstop_msg_t resp;
     pstop_message_init(&resp);
@@ -611,6 +675,7 @@ test_protocol_new_client_invalid_received_counter_req_4_06(void)
     req.stamp = 100;
     req.id.data = PSTOP_ID;
     req.receiver_id.data = MACHINE_ID;
+    req.inverted_value = pstop_message_calculate_inverted(&req);
 
     pstop_msg_t resp;
     pstop_message_init(&resp);
@@ -625,7 +690,9 @@ main_protocol_test(void)
 {
     UnitySetTestFile("protocol_test.c");
 
+    RUN_TEST(test_protocol_invalid_version);
     RUN_TEST(test_protocol_invalid_checksum_req_2_01);
+    RUN_TEST(test_protocol_invalid_inverted_value);
     RUN_TEST(test_protocol_out_of_order_message_req_2_02);
     RUN_TEST(test_protocol_lost_messages_req_2_03);
     RUN_TEST(test_protocol_operator_not_allowed_req_2_06);

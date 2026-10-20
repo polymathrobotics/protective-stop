@@ -54,6 +54,7 @@ req_2_01_test(void)
     req.received_stamp = 0U;
     req.checksum = 10U;
     req.calculated_checksum = 10U;
+    req.inverted_value = pstop_message_calculate_inverted(&req);
 
     pstop_msg_t resp;
     pstop_message_init(&resp);
@@ -72,6 +73,7 @@ req_2_01_test(void)
 
     req.calculated_checksum = 14U; // usually calculated by pstop_message_decode
     req.checksum = 10U;
+    req.inverted_value = pstop_message_calculate_inverted(&req);
 
     TEST_ASSERT_EQUAL(PSTOP_MSG_INVALID_CHECKSUM, machine_process_message(&machine, &req, &resp));
     remote = machine_get_protocol_data(&machine, &REMOTE);

@@ -46,6 +46,7 @@ req_3_03_test(void)
     req.received_stamp = 0U;
     req.checksum = 10U;
     req.calculated_checksum = 10U;
+    req.inverted_value = pstop_message_calculate_inverted(&req);
 
     pstop_msg_t resp;
     pstop_message_init(&resp);
@@ -60,6 +61,7 @@ req_3_03_test(void)
     req.stamp++;
     req.received_counter = resp.counter;
     req.received_stamp = resp.stamp;
+    req.inverted_value = pstop_message_calculate_inverted(&req);
 
     TEST_ASSERT_EQUAL(PSTOP_OK, machine_process_message(&machine, &req, &resp));
     TEST_ASSERT_EQUAL(PSTOP_MESSAGE_BOND, resp.message);

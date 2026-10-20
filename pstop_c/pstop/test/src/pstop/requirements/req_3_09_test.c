@@ -96,6 +96,7 @@ req_3_09_test(void)
         req.received_stamp = resp.stamp;
         req.checksum = 10U;
         req.calculated_checksum = 10U;
+        req.inverted_value = pstop_message_calculate_inverted(&req);
         TEST_ASSERT_EQUAL(PSTOP_OK, machine_process_message(&machine, &req, &resp));
         TEST_ASSERT_EQUAL(PSTOP_MESSAGE_STOP, resp.message);
     }
