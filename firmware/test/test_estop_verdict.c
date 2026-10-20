@@ -6,7 +6,7 @@
 // statement + branch + MC/DC on the SIL-critical verdict logic that cannot be
 // gcov-instrumented on-target (its JTAG pins are the E-stop loop pins).
 //
-// Requirement trace (docs/safety/SAFETY_REQUIREMENTS.md): exercises the
+// Requirement trace (docs/safety/safety_requirements_specification.md): exercises the
 // fresh-both-phase verdict (SR-R-01/02), Option-B diversity equivalence
 // (SR-R-03), asymmetric release debounce (SR-R-04-adjacent), and boot priming.
 

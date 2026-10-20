@@ -4,9 +4,12 @@
 #ifndef PSTOP_AUX_CHANNEL_H
 #define PSTOP_AUX_CHANNEL_H
 
-/* Wrapper-only role schema over pstop_c v2 padding1. pstop_c remains
- * unmodified; every wrapper includes this header so the wire values stay in
- * sync. padding2 remains unused and zero-initialized by pstop_message_init(). */
+/**
+ * @file
+ * Role schema carried in pstop_c v2 padding1.
+ * Every wrapper includes this header to share the wire values.
+ * padding2 is unused and zero-initialized by pstop_message_init().
+ */
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -16,24 +19,22 @@
 #include "pstop/pstop_remote_data.h"
 
 /* padding1: bits 0..7 schema version, bits 8..15 role, bits 16..31 zero. */
+
+/// Schema version stored in padding1 bits 0..7.
 #define PSTOP_AUX_UP_VERSION 0x01u
+/// Bit position of the role in padding1.
 #define PSTOP_AUX_UP_ROLE_SHIFT 8u
+/// Mask for one byte of padding1.
 #define PSTOP_AUX_BYTE_MASK 0xFFu
 
-/*
- * Remote role, wire-stable values. The REMOTE alone declares its role and the
- * machine honours it on every frame (see pstop_aux_apply_role_pre/post below);
- * the machine keeps no operator list. Whether a remote may BOND at all is a
- * separate, optional machine-side admission decision (allow/denylist).
- *   UNSPECIFIED : remote made no role claim (unprovisioned / version mismatch).
- *                 The machine treats this as non-operator (fail-safe).
- *   STOP_ONLY   : remote may only STOP, never re-arm. Monotonic toward safety.
- *   OPERATOR    : remote may re-arm (STOP -> OK gesture).
- */
+/// Remote role, declared by the remote on every frame; wire-stable values.
 typedef enum
 {
+  /// No role claim (unprovisioned or version mismatch); treated as non-operator.
   PSTOP_AUX_ROLE_UNSPECIFIED = 0,
+  /// May only STOP, never re-arm.
   PSTOP_AUX_ROLE_STOP_ONLY = 1,
+  /// May re-arm with a STOP -> OK gesture.
   PSTOP_AUX_ROLE_OPERATOR = 2
 } pstop_aux_role_t;
 

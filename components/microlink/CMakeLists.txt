@@ -50,7 +50,7 @@ idf_component_register(
 # ~2.5x on X25519 on real ESP32-S3 silicon; SAME code, output verified identical
 # vs -Og on-device. No new crypto in the safety path — just the compiler flag.
 # X25519 is handshake-only (WG handshake/rekey + disco cold-contact), so this is
-# a latency win on bond setup, not per-packet. See docs/design/CRYPTO_SPEEDUP_REPORT.md.
+# a latency win on bond setup, not per-packet. See docs/design/x25519_crypto_speedup.md.
 set_source_files_properties(
     "src/x25519.c"
     "src/nacl_box.c"

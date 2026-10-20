@@ -16,7 +16,7 @@ uint8_t estop_decide(estop_state_t * st, int core_id, int rb_hi, int rb_lo)
   // the physical image is only a table INDEX, so this survives an upstream move
   // of OK/STOP to far-Hamming values. (OK==0 today is fail-danger polarity
   // inherited from pstop_c; this live-sample derivation is the compensating
-  // measure — see docs/safety/FMEA.md.)
+  // measure — see docs/safety/fmea.md.)
   //
   // DIVERSITY (Option B): the two cores form the verdict by INDEPENDENT
   // expressions of the same physical reads. Core 0 selects the codeword by the

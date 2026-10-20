@@ -20,16 +20,16 @@ def _ids(path, pattern):
 def analyze(root):
     root = Path(root).resolve()
     safety = root / 'docs/safety'
-    srs_path = safety / 'SAFETY_REQUIREMENTS.md'
+    srs_path = safety / 'safety_requirements_specification.md'
     trace, reverse, issues = parse_traceability(root)
     return Analysis(
         root,
         parse_srs(srs_path),
         trace,
-        parse_system_definition(safety / 'SYSTEM_DEFINITION.md'),
+        parse_system_definition(safety / 'system_definition.md'),
         reverse,
         issues,
         convention_statuses(srs_path),
-        _ids(safety / 'HARA.md', r'\b(?:SG-\d+|H-\d{2})\b'),
-        _ids(safety / 'FMEA.md', r'\bDU-\d+\b'),
+        _ids(safety / 'hazard_analysis_and_risk_assessment.md', r'\b(?:SG-\d+|H-\d{2})\b'),
+        _ids(safety / 'fmea.md', r'\bDU-\d+\b'),
     )

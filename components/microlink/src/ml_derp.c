@@ -484,7 +484,7 @@ esp_err_t ml_derp_queue_send(microlink_t * ml, const uint8_t * dest_key, const u
   bool is_priority = is_wg_handshake || safety_prio;
   QueueHandle_t txq = is_priority ? ml->derp_tx_prio_queue : ml->derp_tx_queue;
 
-  /* Path diversity (docs/design/HEARTBEAT_PATH_DIVERSITY_DESIGN.md): heartbeat
+  /* Path diversity (docs/design/heartbeat_path_diversity.md): heartbeat
    * carriers get a SECOND DERP leg on a distinct connected pool conn.
    * Enqueued AFTER the primary so a nearly-full queue can never let the
    * mirror displace or evict a real frame. Best-effort. */
@@ -1003,7 +1003,7 @@ static void derp_mbb_tick(microlink_t * ml, uint64_t now)
     return;
   }
 
-  /* I2' (Stage-1 pin->MBB, docs/design/STAGE1_PIN_MBB_DESIGN.md): an override aborts
+  /* I2' (Stage-1 pin->MBB, docs/design/gapless_forced_region_switch.md): an override aborts
    * an in-flight MBB only when it names a DIFFERENT region than the target —
    * operator preemption of an autoneg switch, the original I2 intent. An MBB
    * whose target EQUALS the override IS the override being applied (the
@@ -1674,7 +1674,7 @@ bool microlink_is_derp_paused(void)
  * ========================================================================== */
 
 /* ============================================================================
- * Stage-2/3 async connect engine (docs/design/NONBLOCKING_DERP_TLS_PLAN.md §2).
+ * Stage-2/3 async connect engine (docs/design/non_blocking_derp_tls_handshake.md §2).
  *
  * The former monolithic ml_derp_connect() blocked the DERP I/O task for the
  * whole DNS→TCP→TLS→HTTP-upgrade→DERP-handshake sequence (1-2 s typical,

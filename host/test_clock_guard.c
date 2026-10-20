@@ -7,7 +7,7 @@
  * must trip -> STOP (the runner forces machine_stop_robot on any latched
  * fault). Style follows firmware/test/test_estop_verdict.c.
  *
- * Requirement trace (docs/safety/SAFETY_REQUIREMENTS.md SR-H-04):
+ * Requirement trace (docs/safety/safety_requirements_specification.md SR-H-04):
  *   - a frozen CLOCK_MONOTONIC while independent references advance -> FROZEN
  *   - a frozen CLOCK_MONOTONIC while ALL clocks are wedged (call-count proxy) -> FROZEN
  *   - a backward CLOCK_MONOTONIC jump -> BACKWARD

@@ -20,6 +20,7 @@ enum class MachineState : uint8_t
   UNSTABLE = 2
 };
 
+/// @brief State of one remote as seen by the machine.
 struct RemoteInfo
 {
   /// 8 hex digits, e.g. "01d7eed0".
@@ -28,21 +29,32 @@ struct RemoteInfo
   uint8_t bond_state{0};
   /// Owns the current arming cycle.
   bool in_use{false};
+  /// Remote may stop but not re-arm.
   bool stop_only{false};
+  /// Milliseconds since the last reply from the remote.
   uint32_t reply_age_ms{0};
+  /// Loop round-trip time, in milliseconds.
   uint32_t loop_rtt_ms{0};
+  /// Discovery round-trip time, in milliseconds.
   uint32_t disco_rtt_ms{0};
+  /// Number of times the remote has re-bonded.
   uint32_t rebonds{0};
 };
 
+/// @brief Relay and fault state of a hardware machine.
 struct RelayInfo
 {
   /// Set by the hardware backend; the software backend has no relays.
   bool applicable{false};
+  /// Run relay energized.
   bool run{false};
+  /// Stop relay asserted.
   bool relay_stop{true};
+  /// Fault flag of channel A.
   bool fault_a{false};
+  /// Fault flag of channel B.
   bool fault_b{false};
+  /// Count of A/B channel mismatches.
   uint32_t mismatch{0};
 };
 
@@ -50,14 +62,22 @@ struct RelayInfo
 /// messages.
 struct MachineSnapshot
 {
+  /// Backend can reach the machine.
   bool reachable{false};
+  /// Machine is cleared to run.
   bool running{false};
+  /// Machine awaits a STOP before it can be re-armed.
   bool need_stop{false};
+  /// Human-readable cause of the current state.
   std::string status_reason;
+  /// Relay state.
   RelayInfo relay;
+  /// Known remotes.
   std::vector<RemoteInfo> remotes;
+  /// Number of bonded remotes.
   uint32_t active_remotes{0};
 
+  /// State derived from reachable and running.
   MachineState state() const
   {
     if (!reachable) {
@@ -72,8 +92,11 @@ struct MachineSnapshot
 /// before calling configure().
 struct MachineTiming
 {
+  /// Heartbeat interval, in milliseconds.
   uint64_t heartbeat_ms{400};
+  /// Heartbeats that may be missed before the machine stops.
   uint16_t max_missed{3};
+  /// Minimum time between STOP and OK, in milliseconds.
   uint64_t min_stop_ms{500};
 };
 
@@ -99,6 +122,7 @@ public:
   virtual MachineSnapshot snapshot() const = 0;
 
   /// @brief Applies an already safety-validated timing change.
+  /// @param timing Timing to apply.
   /// @param error Set when the backend cannot honour the change.
   /// @return False on an error or a refusal.
   virtual bool configure(const MachineTiming & timing, std::string & error) = 0;
