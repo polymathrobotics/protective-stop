@@ -15,7 +15,7 @@
  * so the ESP prefers the USB host when present and falls back to WiFi otherwise.
  *
  * Host-side setup (Linux): NetworkManager "shared" connection profile on the
- * new usbN interface, or dnsmasq + iptables MASQUERADE. See docs/developing/ML_DEV_TETHER.md.
+ * new usbN interface, or dnsmasq + iptables MASQUERADE. See docs/developing/ml_dev_tether.md.
  *
  * Caveats:
  *   - Composite USB descriptor (NCM + CDC). USB-Serial-JTAG console is

@@ -67,6 +67,17 @@ when a direct path is unavailable. Their sockets are pinned to the tunnel, so
 losing the VPN causes silence instead of a plaintext downgrade. Ethernet is
 preferred, with USB-NCM and WiFi available as fallbacks.
 
+### Complex scenarios
+
+One machine can bond several remotes, and the machine runs only while all of
+them report OK. Which remote may re-arm after a stop depends on roles, arming
+ownership, and heartbeat timeouts.
+[Multi-remote, single machine](design/multiple_remotes_single_machine.md) walks
+through two remotes under each combination of stop, drop, and unbond, and gives
+the number of remotes one machine can hold.
+[Single remote, multiple machines](design/single_remote_multiple_machines.md)
+describes how one remote's button and heartbeats reach up to four machines.
+
 ## What's included
 
 | Path | Contents |
@@ -91,7 +102,7 @@ The protective stop machine node is compatible with the following ros2 Distros:
 
 ## Build and run
 
-**[Quickstart](guides/QUICKSTART.md)** walks a fresh laptop through
+**[Quickstart](guides/quickstart.md)** walks a fresh laptop through
 the whole thing: Tailscale account and key, USB tether, build and flash,
 the ROS 2 machine node, pairing, and a bench test through STOP and ARM.
 The short version (ESP-IDF 5.5 required):
@@ -99,9 +110,10 @@ The short version (ESP-IDF 5.5 required):
 ```sh
 cp firmware/sdkconfig.credentials.example firmware/sdkconfig.credentials
 $EDITOR firmware/sdkconfig.credentials            # Tailscale auth key + admin password
-cd firmware && . /path/to/esp-idf-v5.5/export.sh
+cd firmware && . ~/esp/esp-idf/export.sh
 idf.py -DPSTOP_PROFILE=dev build && idf.py -p /dev/ttyACM0 flash   # dev profile: bench only
 
+cd ../tools && uv sync                # once: the Python environment for flashing and tests, see developing/testing/tools.md
 cd ../ros2 && colcon build --packages-up-to protective_stop_machine
 ros2 run protective_stop_machine machine_bridge_node
 curl -X POST "http://<remote>/api/pstop_peer?ip=<laptop-tailscale-ip>&port=8890"
@@ -146,9 +158,9 @@ machine controls its own heartbeat window, timeout and admission policy.
 
 The repository includes host-side protocol tests, fault-injection and chaos
 ladders, transport soaks, ROS 2 tests, firmware builds, and a MISRA C:2012
-pre-check. Start with [`TESTING.md`](developing/testing/TESTING.md); long-run transport
+pre-check. Start with [`testing.md`](developing/testing/testing.md); long-run transport
 testing is documented in
-[`CONNECTIVITY_SOAK.md`](developing/testing/CONNECTIVITY_SOAK.md).
+[`connectivity_soak.md`](developing/testing/connectivity_soak.md).
 
 ```sh
 make -C host test
@@ -169,14 +181,14 @@ hardware on August 27, 2026:
 [![Open source license facts: hardware CERN-OHL-P-2.0, software Apache-2.0, documentation CC-BY-4.0](../hardware/oshw-license-facts.svg)](https://oshwa.github.io/certification-mark-generator/facts)
 
 The source package, licensing map, and mark guidance are summarized in
-[`OSHWA_COMPLIANCE.md`](hardware/OSHWA_COMPLIANCE.md). Full license texts are
+[`oshwa_certification.md`](hardware/oshwa_certification.md). Full license texts are
 in [`LICENSE`](/LICENSE) and [`LICENSES/`](/LICENSES/).
 
 The design target for the on-demand stop function is SIL 3 under IEC 61508 and
 PL e under ISO 13849. These are engineering targets, not current
 functional-safety certifications. The safety case and remaining evidence gaps
-are tracked in [`docs/safety/`](safety/SYSTEM_DEFINITION.md) and
-[`OPEN_ITEMS.md`](safety/OPEN_ITEMS.md).
+are tracked in [`docs/safety/`](safety/system_definition.md) and
+[`open_items.md`](safety/open_items.md).
 
 ## Contributing
 

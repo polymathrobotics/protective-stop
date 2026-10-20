@@ -15,11 +15,17 @@ namespace protective_stop_machine
 /// @brief Deployment values for the in-process software backend.
 struct SoftwareConfig
 {
+  /// Local address the UDP socket binds to.
   std::string bind_addr{"0.0.0.0"};
+  /// UDP port remotes bond to.
   int port{8890};
+  /// Device ID of this machine.
   uint32_t machine_id{0x01020304};
+  /// Initial timing envelope.
   MachineTiming timing;
+  /// Remote IDs permitted to bond; empty admits any remote.
   std::vector<uint32_t> allowlist{};
+  /// Remote IDs refused regardless of the allowlist.
   std::vector<uint32_t> denylist{};
 };
 
@@ -53,6 +59,7 @@ inline bool software_remote_admitted(const SoftwareConfig & config, uint32_t rem
 class SoftwareMachineBackend : public IMachineBackend
 {
 public:
+  /// Copies config; no I/O until start().
   explicit SoftwareMachineBackend(const SoftwareConfig & config);
   ~SoftwareMachineBackend() override;
 
