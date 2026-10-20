@@ -3,28 +3,6 @@
 
 #include "pstop/endian.h"
 
-uint16_t
-read_uint16_le(const uint8_t *data, size_t *pos)
-{
-    const uint8_t *bytes = data + *pos;
-    *pos = *pos + 2U;
-    uint16_t b0 = (uint16_t)bytes[0];
-    uint16_t b1 = (uint16_t)bytes[1];
-    uint16_t val = (uint16_t)(b0 | (b1 << 8U));
-    return val;
-}
-
-uint16_t
-read_uint16_be(const uint8_t *data, size_t *pos)
-{
-    const uint8_t *bytes = data + *pos;
-    *pos = *pos + 2U;
-    uint16_t b0 = (uint16_t)bytes[0];
-    uint16_t b1 = (uint16_t)bytes[1];
-    uint16_t val = (b0 << 8) | b1;
-    return val;
-}
-
 uint32_t
 read_uint32_le(const uint8_t *data, size_t *pos)
 {
@@ -83,24 +61,6 @@ read_uint64_be(const uint8_t *data, size_t *pos)
     uint64_t b7 = (uint64_t)bytes[7];
     uint64_t val = (b0 << 56U) | (b1 << 48U) | (b2 << 40U) | (b3 << 32U) | (b4 << 24U) | (b5 << 16U) | (b6 << 8U) | b7;
     return val;
-}
-
-void
-write_uint16_le(uint16_t value, uint8_t *data, size_t *pos)
-{
-    uint8_t *bytes = data + *pos;
-    *pos = *pos + 2U;
-    bytes[0] = (uint8_t)(value & 0xFFU);
-    bytes[1] = (uint8_t)((value >> 8U) & 0xFFU);
-}
-
-void
-write_uint16_be(uint16_t value, uint8_t *data, size_t *pos)
-{
-    uint8_t *bytes = (data + *pos);
-    *pos = *pos + 2U;
-    bytes[1] = (uint8_t)(value & 0xFFU);
-    bytes[0] = (uint8_t)((value >> 8U)& 0xFFU);
 }
 
 void
