@@ -98,6 +98,7 @@ const config: Config = {
         {type: 'docSidebar', sidebarId: 'guides', position: 'left', label: 'Guides'},
         {type: 'docSidebar', sidebarId: 'hardware', position: 'left', label: 'Hardware'},
         {type: 'docSidebar', sidebarId: 'safety', position: 'left', label: 'Safety'},
+        {type: 'docSidebar', sidebarId: 'process', position: 'left', label: 'Process'},
         {type: 'docSidebar', sidebarId: 'design', position: 'left', label: 'Design'},
         {type: 'docSidebar', sidebarId: 'developing', position: 'left', label: 'Developing'},
         {type: 'docSidebar', sidebarId: 'archive', position: 'left', label: 'Archive'},
