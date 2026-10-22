@@ -59,6 +59,9 @@ const config: Config = {
           path: '../docs',
           routeBasePath: '/',
           sidebarPath: './sidebars.ts',
+          // Keep date prefixes on meeting records (20260930_topic.md) in the URL and doc ID,
+          // so records sharing a topic don't collide.
+          numberPrefixParser: false,
           exclude: ['**/*.json'],
           beforeDefaultRemarkPlugins: [remarkRepoLinks],
           editUrl: 'https://github.com/polymathrobotics/protective-stop/tree/main/docs/',
