@@ -12,8 +12,8 @@ title: Documentation Kickoff
 | | |
 |---|---|
 | Type | Documentation sync |
-| Required attendees | Raj Madhivanan (organizer, remote), David Tarazi, Ilia Baranov |
-| Optional attendees | Emerson |
+| Required attendees | Raj Madhivanan (organizer, remote), David Tarazi, Ilia Baranov, Emerson |
+| Optional attendees | None |
 | Absent | None |
 | Quorum | Met |
 | Organizer | Raj Madhivanan |
