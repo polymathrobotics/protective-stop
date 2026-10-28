@@ -1,5 +1,5 @@
 ---
-name: PStop Meeting Notes
+name: pstop-meeting-notes
 description: Draft a Protective Stop meeting record from a meeting transcript, following docs/process/meeting_procedure.md. Use when the user shares a PStop meeting transcript or asks for meeting notes, a meeting record, or action items from a PStop documentation, design or review meeting.
 ---
 
