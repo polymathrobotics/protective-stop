@@ -33,6 +33,28 @@ A status changes only through a pull request that links the new evidence. When a
 documentation meeting moves an item forward, its record links the pull request
 that makes the change (see the [Meeting Procedure](meeting_procedure.md)).
 
+Each obligation has an ID of the form `RM-<area>-<nn>`. `RM` stands for Readiness Matrix,
+and keeps these IDs distinct from the safety requirement (`SR-`), function (`F-`) and hazard
+(`H-`) IDs used in the safety case. For example, `RM-MGT-05` is the fifth obligation under
+Functional Safety Management. The area codes are:
+
+| Code | Area |
+|---|---|
+| MGT | [Functional Safety Management](#functional-safety-management) |
+| DOC | [Documentation](#documentation) |
+| CFG | [Configuration Management](#configuration-management) |
+| SRQ | [Safety Requirements](#safety-requirements) |
+| ARC | [Architecture](#architecture) |
+| DES | [Detailed Design](#detailed-design) |
+| COD | [Coding Standard and Implementation](#coding-standard-and-implementation) |
+| TLS | [Support Tools and Languages](#support-tools-and-languages) |
+| VER | [Verification](#verification) |
+| INT | [Integration Testing](#integration-testing) |
+| VAL | [Validation](#validation) |
+| MOD | [Modification](#modification) |
+| MAN | [Safety Manual and User Documentation](#safety-manual-and-user-documentation) |
+| TRC | [Traceability](#traceability) |
+
 Clause references are given as part and clause, for example *Part 3: 7.4.4.13* for
 IEC 61508-3 clause 7.4.4.13. Letters such as *A.4.5* refer to the annex tables.
 
