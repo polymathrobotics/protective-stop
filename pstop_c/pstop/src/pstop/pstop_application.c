@@ -44,7 +44,7 @@ pstop_application_init(pstop_application_t *app)
     pstop_application_set_remote_cb(app, NULL);
     pstop_application_set_hardware_status_cb(app, NULL);
     pstop_application_set_log_cb(app, NULL);
-    pstop_application_set_protocol_limits(app, 0U, 0U, 1000U);
+    pstop_application_set_protocol_limits(app, 1U, 1U, 1000U);
 }
 
 void
