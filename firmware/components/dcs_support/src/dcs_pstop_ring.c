@@ -215,6 +215,11 @@ static bool ring_hw_init(void)
   if (s_hw != HW_UNTRIED) {
     return (s_hw == HW_OK);
   }
+  /* The RMT interrupt lands on the allocating core and is shared with the RGB channel on
+   * CPU0 (#158). Off CPU0 (a main task moved by config), leave it to the CPU0-pinned ring task. */
+  if (xPortGetCoreID() != 0) {
+    return false;
+  }
   s_hw = HW_FAILED;
 
   rmt_tx_channel_config_t chan_cfg = {
@@ -549,8 +554,10 @@ void dcs_pstop_ring_start(void)
      * up) — the ring task lives on a PSRAM stack and must not touch NVS. */
   atomic_store(&s_ring_offset, dcs_nvs_read_ring_offset());
   atomic_store(&s_ring_brightness_pct, dcs_nvs_read_led_brightness());
-  /* PSRAM stack: LED ring is non-safety, does no flash/NVS. */
-  (void)dcs_task_spawn_psram(ring_task, "pstop_ring", 4096, NULL, 2, tskNO_AFFINITY);
+  /* PSRAM stack: LED ring is non-safety, does no flash/NVS.
+   * CPU0: if the boot sign did not claim the RMT channel, this task does, and
+   * ring_hw_init() only does so on CPU0, next to the RGB channel's interrupt (#158). */
+  (void)dcs_task_spawn_psram(ring_task, "pstop_ring", 4096, NULL, 2, 0);
 }
 
 void dcs_pstop_ring_set_offset(uint8_t off)
