@@ -76,6 +76,9 @@ struct MachineSnapshot
   std::vector<RemoteInfo> remotes;
   /// Number of bonded remotes.
   uint32_t active_remotes{0};
+  /// Stops caused by a remote missing its heartbeats, since the backend started.
+  /// Software backend only.
+  uint32_t heartbeat_timeout_stops{0};
 
   /// State derived from reachable and running.
   MachineState state() const

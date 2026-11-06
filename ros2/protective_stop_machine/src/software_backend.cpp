@@ -55,6 +55,11 @@ struct SoftwareMachineBackend::Impl
   uint32_t frame_role_id{0};
   pstop_aux_role_t frame_role{PSTOP_AUX_ROLE_UNSPECIFIED};
 
+  // Set by the log callback on a missed-heartbeat stop; run() counts it once per check.
+  // Machine thread only.
+  bool heartbeat_timeout_pending{false};
+  std::atomic<uint32_t> heartbeat_timeout_stops{0};
+
   void run();
   // caller holds no lock; locks internally
   void rebuild_snapshot();
@@ -106,8 +111,12 @@ static void ignore_status(pstop_status_message_t /*status*/)
   // callback is intentionally a no-op (avoids the early-OK latch subtlety).
 }
 
-static void ignore_log(uint64_t, const device_id_t *, uint8_t, pstop_error_t)
-{}
+static void record_log(uint64_t, const device_id_t *, uint8_t, pstop_error_t error)
+{
+  if (PSTOP_MISSED_HEARTBEATS == error && g_active_impl) {
+    g_active_impl->heartbeat_timeout_pending = true;
+  }
+}
 
 SoftwareMachineBackend::SoftwareMachineBackend(const SoftwareConfig & config)
 : impl_(std::make_unique<Impl>())
@@ -136,6 +145,8 @@ bool SoftwareMachineBackend::start()
   // bonded-remote slot pool
   constexpr uint16_t kMaxRemotes = 4;
   impl_->clients.assign(kMaxRemotes, pstop_remote_data_t{});
+  impl_->heartbeat_timeout_pending = false;
+  impl_->heartbeat_timeout_stops = 0;
   // Seed app_config from the latest stashed timing (configure() may have run
   // while inactive); the machine thread keeps it current thereafter.
   impl_->config.timing = impl_->timing;
@@ -147,7 +158,7 @@ bool SoftwareMachineBackend::start()
   impl_->application.app_config.delay_between_stop_ms = static_cast<uint32_t>(impl_->config.timing.min_stop_ms);
   impl_->application.remote_details_cb = resolve_remote_details;
   impl_->application.status_cb = ignore_status;
-  impl_->application.log_message_cb = ignore_log;
+  impl_->application.log_message_cb = record_log;
   impl_->application.env.get_time_cb = now_ms;
 
   machine_init(&impl_->machine, &impl_->application, impl_->clients.data(), kMaxRemotes);
@@ -202,6 +213,10 @@ void SoftwareMachineBackend::Impl::run()
       application.app_config.delay_between_stop_ms = static_cast<uint32_t>(timing.min_stop_ms);
     }
     machine_validate_heartbeats(&machine);
+    if (heartbeat_timeout_pending) {
+      heartbeat_timeout_pending = false;
+      ++heartbeat_timeout_stops;
+    }
 
     struct sockaddr_storage client_addr;
     int bytes_read = transport_udp_read(&udp_transport, request_bytes, PSTOP_MESSAGE_SIZE, &client_addr);
@@ -262,6 +277,7 @@ void SoftwareMachineBackend::Impl::rebuild_snapshot()
   rebuilt.running = robot_state->robot_state == ROBOT_STATE_OK;
   rebuilt.need_stop = robot_state->restart_state == ROBOT_RESTART_STATE_NEED_STOP;
   rebuilt.active_remotes = pstop_remote_num_active(&machine.remotes);
+  rebuilt.heartbeat_timeout_stops = heartbeat_timeout_stops.load();
   // the software backend has no physical relays
   rebuilt.relay.applicable = false;
   rebuilt.relay.run = rebuilt.running;
