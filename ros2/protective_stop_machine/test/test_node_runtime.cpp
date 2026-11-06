@@ -334,7 +334,7 @@ TEST_F(NodeRuntime, HardwareMismatchDiagnosesWarn)
 // A remote that bonds then misses its heartbeats stops the machine -> WARN summary.
 TEST_F(NodeRuntime, SoftwareHeartbeatTimeoutStopDiagnosesWarn)
 {
-  constexpr int PORT = 18932;
+  constexpr int PORT = 18933;
   constexpr uint32_t MACHINE_ID = 0x01020304U;
   auto node = std::make_shared<MachineBridgeNode>(with(
     {rclcpp::Parameter("backend", "software"),

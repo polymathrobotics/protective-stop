@@ -19,7 +19,8 @@ using protective_stop_machine::SoftwareMachineBackend;
 namespace
 {
 
-constexpr int TEST_PORT = 18931;
+constexpr int SILENT_REMOTE_PORT = 18931;
+constexpr int NO_REMOTE_PORT = 18932;
 constexpr uint32_t REMOTE_ID = 0x01d7791cU;
 
 }  // namespace
@@ -28,7 +29,7 @@ TEST(SoftwareBackend, SilentRemoteCountsOneHeartbeatTimeoutStop)
 {
   SoftwareConfig config;
   config.bind_addr = "127.0.0.1";
-  config.port = TEST_PORT;
+  config.port = SILENT_REMOTE_PORT;
   config.timing.heartbeat_ms = 50;
   config.timing.max_missed = 3;
   SoftwareMachineBackend backend(config);
@@ -56,7 +57,7 @@ TEST(SoftwareBackend, NoRemoteNoHeartbeatTimeoutStops)
 {
   SoftwareConfig config;
   config.bind_addr = "127.0.0.1";
-  config.port = TEST_PORT + 1;
+  config.port = NO_REMOTE_PORT;
   config.timing.heartbeat_ms = 50;
   SoftwareMachineBackend backend(config);
   ASSERT_TRUE(backend.start());
