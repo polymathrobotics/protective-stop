@@ -21,6 +21,7 @@ namespace
 
 constexpr int SILENT_REMOTE_PORT = 18931;
 constexpr int NO_REMOTE_PORT = 18932;
+constexpr int DENIED_REMOTE_PORT = 18934;
 constexpr uint32_t REMOTE_ID = 0x01d7791cU;
 
 }  // namespace
@@ -63,5 +64,28 @@ TEST(SoftwareBackend, NoRemoteNoHeartbeatTimeoutStops)
   ASSERT_TRUE(backend.start());
   std::this_thread::sleep_for(std::chrono::milliseconds(400));
   EXPECT_EQ(0U, backend.snapshot().heartbeat_timeout_stops);
+  backend.stop();
+}
+
+TEST(SoftwareBackend, DeniedRemoteCountsRefusedBond)
+{
+  SoftwareConfig config;
+  config.bind_addr = "127.0.0.1";
+  config.port = DENIED_REMOTE_PORT;
+  config.denylist = {REMOTE_ID};
+  SoftwareMachineBackend backend(config);
+  ASSERT_TRUE(backend.start());
+  EXPECT_EQ(0U, backend.snapshot().bonds_refused);
+
+  // The UNBOND reply arrives, so the machine refused the bond.
+  ASSERT_TRUE(pstop_test::bond_remote(config.port, config.machine_id, REMOTE_ID));
+
+  MachineSnapshot snapshot;
+  for (int i = 0; 100 > i && 0U == snapshot.bonds_refused; ++i) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    snapshot = backend.snapshot();
+  }
+  EXPECT_EQ(1U, snapshot.bonds_refused);
+  EXPECT_EQ(0U, snapshot.active_remotes);
   backend.stop();
 }

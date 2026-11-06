@@ -60,6 +60,9 @@ struct SoftwareMachineBackend::Impl
   bool heartbeat_timeout_pending{false};
   std::atomic<uint32_t> heartbeat_timeout_stops{0};
 
+  // Machine thread only.
+  uint32_t bonds_refused{0};
+
   void run();
   // caller holds no lock; locks internally
   void rebuild_snapshot();
@@ -147,6 +150,7 @@ bool SoftwareMachineBackend::start()
   impl_->clients.assign(kMaxRemotes, pstop_remote_data_t{});
   impl_->heartbeat_timeout_pending = false;
   impl_->heartbeat_timeout_stops = 0;
+  impl_->bonds_refused = 0;
   // Seed app_config from the latest stashed timing (configure() may have run
   // while inactive); the machine thread keeps it current thereafter.
   impl_->config.timing = impl_->timing;
@@ -250,6 +254,7 @@ void SoftwareMachineBackend::Impl::run()
           transport_udp_write(
             &udp_transport, response_bytes, PSTOP_MESSAGE_SIZE, reinterpret_cast<struct sockaddr_in *>(&client_addr));
         } else if (process_result == PSTOP_OPERATOR_NOT_ALLOWED) {
+          ++bonds_refused;
           // Admission refused: pstop_c prepared an UNBOND reply but left the
           // addressing blank. Fill it and send it so the remote learns it was
           // refused (it parks until a manual rebond) instead of hearing silence.
@@ -278,6 +283,7 @@ void SoftwareMachineBackend::Impl::rebuild_snapshot()
   rebuilt.need_stop = robot_state->restart_state == ROBOT_RESTART_STATE_NEED_STOP;
   rebuilt.active_remotes = pstop_remote_num_active(&machine.remotes);
   rebuilt.heartbeat_timeout_stops = heartbeat_timeout_stops.load();
+  rebuilt.bonds_refused = bonds_refused;
   // the software backend has no physical relays
   rebuilt.relay.applicable = false;
   rebuilt.relay.run = rebuilt.running;

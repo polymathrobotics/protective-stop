@@ -451,6 +451,7 @@ void MachineBridgeNode::diagnostics(diagnostic_updater::DiagnosticStatusWrapper 
   stat.add("running", snapshot.running);
   stat.add("active_remotes", snapshot.active_remotes);
   stat.add("heartbeat_timeout_stops", snapshot.heartbeat_timeout_stops);
+  stat.add("bonds_refused", snapshot.bonds_refused);
   stat.add("relay_stop", snapshot.relay.relay_stop);
   stat.add("mismatch", snapshot.relay.mismatch);
 }
