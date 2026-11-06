@@ -4,6 +4,7 @@
 #ifndef PSTOP_ERROR_H
 #define PSTOP_ERROR_H
 
+/// Result code of a pstop operation.
 typedef enum {
 
     PSTOP_OK = 0,

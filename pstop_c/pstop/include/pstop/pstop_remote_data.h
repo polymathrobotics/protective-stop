@@ -11,6 +11,7 @@
 #include "pstop/constants.h"
 #include "pstop/protocol_data.h"
 
+/// Protocol state of a remote.
 typedef enum {
 
     PSTOP_REMOTE_INITING = 0,

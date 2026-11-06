@@ -11,6 +11,7 @@
 #include "pstop/device_id.h"
 #include "pstop/os.h"
 
+/// Robot status reported to the hardware status callback.
 typedef enum {
     PSTOP_STATUS_OK = 0,
     PSTOP_STATUS_STOP = 1
