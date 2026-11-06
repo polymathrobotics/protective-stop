@@ -24,6 +24,7 @@
 #include <utility>
 #include <vector>
 
+#include "bond_remote.hpp"  // NOLINT(build/include_subdir)
 #include "diagnostic_msgs/msg/diagnostic_array.hpp"
 #include "http_stub.hpp"  // NOLINT(build/include_subdir)
 #include "lifecycle_msgs/msg/state.hpp"
@@ -328,6 +329,42 @@ TEST_F(NodeRuntime, HardwareMismatchDiagnosesWarn)
     "lockstep mismatch",
     static_cast<uint8_t>(protective_stop_machine::MachineState::ACTIVE),
     false);
+}
+
+// A remote that bonds then misses its heartbeats stops the machine -> heartbeat_timeout_stops key.
+TEST_F(NodeRuntime, SoftwareHeartbeatTimeoutStopReportedInDiagnostics)
+{
+  constexpr int PORT = 18933;
+  constexpr uint32_t MACHINE_ID = 0x01020304U;
+  auto node = std::make_shared<MachineBridgeNode>(with(
+    {rclcpp::Parameter("backend", "software"),
+     rclcpp::Parameter("software.port", PORT),
+     rclcpp::Parameter("rates.publish_rate_hz", 40.0),
+     rclcpp::Parameter("rates.diagnostics_rate_hz", 40.0)}));
+  ASSERT_EQ(node->configure().id(), State::PRIMARY_STATE_INACTIVE);
+  ASSERT_EQ(node->activate().id(), State::PRIMARY_STATE_ACTIVE);
+  ASSERT_TRUE(pstop_test::bond_remote(PORT, MACHINE_ID, 0x01d7791cU));
+
+  auto sub = std::make_shared<rclcpp::Node>("listener_hb_timeout");
+  bool diag_hit = false;
+  auto diag_sub =
+    sub->create_subscription<DiagnosticArray>("/diagnostics", rclcpp::QoS(5), [&](DiagnosticArray::SharedPtr msg) {
+      for (const auto & st : msg->status) {
+        for (const auto & value : st.values) {
+          if ("heartbeat_timeout_stops" == value.key && "1" == value.value) {
+            diag_hit = true;
+          }
+        }
+      }
+    });
+
+  rclcpp::executors::SingleThreadedExecutor exec;
+  exec.add_node(node->get_node_base_interface());
+  exec.add_node(sub);
+  EXPECT_TRUE(spin_until(exec, [&] { return diag_hit; }, std::chrono::seconds(10)));
+
+  EXPECT_EQ(node->deactivate().id(), State::PRIMARY_STATE_INACTIVE);
+  EXPECT_EQ(node->cleanup().id(), State::PRIMARY_STATE_UNCONFIGURED);
 }
 
 // on_set_parameters: a tighter (still-safe) timing envelope is accepted and

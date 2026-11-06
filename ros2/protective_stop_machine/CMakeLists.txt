@@ -129,13 +129,19 @@ if(BUILD_TESTING)
   target_include_directories(test_hardware_backend PRIVATE test)
   target_link_libraries(test_hardware_backend ${PROJECT_NAME} CURL::libcurl)
 
+  # Software backend counts a bonded-then-silent remote as a heartbeat-timeout
+  # stop (real loopback UDP, hand-built BOND frame).
+  ament_add_gtest(test_software_backend test/test_software_backend.cpp)
+  target_include_directories(test_software_backend PRIVATE test ${PSTOP_ROOT}/pstop/include)
+  target_link_libraries(test_software_backend ${PROJECT_NAME} CURL::libcurl)
+
   # Lifecycle transitions + spun-executor runtime paths (SR-M-01 / SR-M-07).
   ament_add_gtest(test_lifecycle test/test_lifecycle.cpp)
   target_link_libraries(test_lifecycle ${PROJECT_NAME})
 
   # test_node_runtime drives the loopback HTTP stub (http_stub.hpp) directly.
   ament_add_gtest(test_node_runtime test/test_node_runtime.cpp)
-  target_include_directories(test_node_runtime PRIVATE test)
+  target_include_directories(test_node_runtime PRIVATE test ${PSTOP_ROOT}/pstop/include)
   target_link_libraries(test_node_runtime ${PROJECT_NAME} CURL::libcurl)
 endif()
 

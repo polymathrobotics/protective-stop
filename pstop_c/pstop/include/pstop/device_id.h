@@ -8,9 +8,10 @@
 
 #include "pstop/config.h"
 
+/// Identifier of a pstop device.
 typedef struct {
 #if PSTOP_VERSION == 0x02
-    // IPv4 address
+    /// IPv4 address.
     uint32_t data;
 #else
 #   error "Unsupported PSTOP_VERSION"
