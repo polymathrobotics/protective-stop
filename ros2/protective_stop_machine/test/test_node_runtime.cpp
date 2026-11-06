@@ -331,8 +331,8 @@ TEST_F(NodeRuntime, HardwareMismatchDiagnosesWarn)
     false);
 }
 
-// A remote that bonds then misses its heartbeats stops the machine -> WARN summary.
-TEST_F(NodeRuntime, SoftwareHeartbeatTimeoutStopDiagnosesWarn)
+// A remote that bonds then misses its heartbeats stops the machine -> heartbeat_timeout_stops key.
+TEST_F(NodeRuntime, SoftwareHeartbeatTimeoutStopReportedInDiagnostics)
 {
   constexpr int PORT = 18933;
   constexpr uint32_t MACHINE_ID = 0x01020304U;
@@ -350,8 +350,10 @@ TEST_F(NodeRuntime, SoftwareHeartbeatTimeoutStopDiagnosesWarn)
   auto diag_sub =
     sub->create_subscription<DiagnosticArray>("/diagnostics", rclcpp::QoS(5), [&](DiagnosticArray::SharedPtr msg) {
       for (const auto & st : msg->status) {
-        if (DiagnosticStatus::WARN == st.level && std::string::npos != st.message.find("missing heartbeats")) {
-          diag_hit = true;
+        for (const auto & value : st.values) {
+          if ("heartbeat_timeout_stops" == value.key && "1" == value.value) {
+            diag_hit = true;
+          }
         }
       }
     });

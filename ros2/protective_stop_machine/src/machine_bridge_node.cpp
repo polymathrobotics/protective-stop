@@ -440,8 +440,6 @@ void MachineBridgeNode::diagnostics(diagnostic_updater::DiagnosticStatusWrapper 
     stat.summary(DiagnosticStatus::ERROR, "relay feedback fault");
   } else if (snapshot.relay.mismatch > 0) {
     stat.summary(DiagnosticStatus::WARN, "lockstep mismatch present");
-  } else if (snapshot.heartbeat_timeout_stops > 0) {
-    stat.summary(DiagnosticStatus::WARN, "stopped by a remote missing heartbeats");
   } else if (snapshot.running) {
     stat.summary(DiagnosticStatus::OK, "running");
   } else {
