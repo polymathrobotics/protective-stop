@@ -14,6 +14,7 @@ Acronyms stay uppercase (`FMEA`, `HIL`, `USB-NCM`).
 **Dates**: never in a title or filename.
 State the date in an italic line under the H1: `*Date: 2026-07-21.*`.
 Write ranges and times of day out (`*Date: 2026-07-20 to 2026-07-21.*`).
+Exception: meeting records in `docs/process/meetings/` start their filename with the meeting date (`20260930_documentation_kickoff.md`), per the [Meeting Procedure](docs/process/meeting_procedure.md). Their titles still carry no date.
 
 **Versions**: not in titles either; state them in the page body.
 
