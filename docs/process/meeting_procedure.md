@@ -12,7 +12,8 @@ sidebar_position: 1
 
 This procedure covers Protective Stop meetings whose outcome belongs in the safety case:
 documentation syncs, design and requirements reviews, test plan reviews, and any meeting
-that moves the IEC 61508 readiness work forward, whether or not an item's status changes.
+that moves an item in the [Safety Certification Readiness](safety_certification_readiness.md)
+matrix forward, whether or not its status changes.
 Each meeting produces a short public record under Meeting Records in this section, merged
 by pull request, so the record, the people who agreed to it and the date are all in Git
 history. The [Documentation Kickoff](meetings/20260930_documentation_kickoff.md) record is
