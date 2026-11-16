@@ -19,6 +19,7 @@
  *   POST /api/usb_enable          Flip NVS dcs_app/usb_en flag and reboot
  *   POST /api/ts_boot             Flip NVS dcs_app/ts_boot flag (next reboot)
  *   POST /api/pstop_peer?ip&port  Set + persist pstop peer target
+ *   GET/POST /api/pstop_clear_bonds_on_boot  Read or set erase-machine-peers-at-boot (admin auth)
  *   POST /api/pstop_num?n=N       Set USB "PSTOPxx" unit number (0 = auto)
  *   POST /api/pstop_peers?slot..  Multi-machine peer table (set/clear slot)
  *   POST /api/ring_offset?n=N     Set + persist LED-ring rotation (physical LED 1)
@@ -739,6 +740,55 @@ static esp_err_t api_pstop_peer(httpd_req_t * req)
   int n = snprintf(resp, sizeof(resp), "{\"ok\":true,\"ip\":\"%u.%u.%u.%u\",\"port\":%d}", a, b, c, d, port);
   (void)httpd_resp_set_type(req, "application/json");
   return httpd_resp_send(req, resp, n);
+}
+
+static bool admin_required(httpd_req_t * req); /* defined with /api/admission below */
+
+/* === /api/pstop_clear_bonds_on_boot — erase the machine peer table at boot ======= *
+ *   GET  /api/pstop_clear_bonds_on_boot             -> {"ok":true,"clear_bonds_on_boot":false}
+ *   POST /api/pstop_clear_bonds_on_boot?enable=0|1  persist; applies at the next boot.
+ * Admin-authenticated. Default off: the remote rebonds to its saved machines. */
+static esp_err_t clear_on_boot_send(httpd_req_t * req)
+{
+  char buf[64];
+  int len = snprintf(
+    buf,
+    sizeof(buf),
+    "{\"ok\":true,\"clear_bonds_on_boot\":%s}",
+    dcs_nvs_read_pstop_clear_bonds_on_boot() ? "true" : "false");
+  (void)httpd_resp_set_type(req, "application/json");
+  return httpd_resp_send(req, buf, len);
+}
+
+static esp_err_t api_pstop_clear_bonds_on_boot_get(httpd_req_t * req)
+{
+  if (!admin_required(req)) {
+    return ESP_OK;
+  }
+  return clear_on_boot_send(req);
+}
+
+static esp_err_t api_pstop_clear_bonds_on_boot_post(httpd_req_t * req)
+{
+  if (!admin_required(req)) {
+    return ESP_OK;
+  }
+  (void)httpd_resp_set_type(req, "application/json");
+  char query[32];
+  char val[4];
+  if (
+    (httpd_req_get_url_query_str(req, query, sizeof(query)) != ESP_OK) ||
+    (httpd_query_key_value(query, "enable", val, sizeof(val)) != ESP_OK) || (('0' != val[0]) && ('1' != val[0])) ||
+    ('\0' != val[1]))
+  {
+    (void)httpd_resp_set_status(req, "400 Bad Request");
+    return httpd_resp_sendstr(req, "{\"ok\":false,\"error\":\"need ?enable=0|1\"}");
+  }
+  if (ESP_OK != dcs_nvs_write_pstop_clear_bonds_on_boot('1' == val[0])) {
+    (void)httpd_resp_set_status(req, "500 Internal Server Error");
+    return httpd_resp_sendstr(req, "{\"ok\":false,\"error\":\"NVS write failed\"}");
+  }
+  return clear_on_boot_send(req);
 }
 
 /* === POST /api/pstop_peers?slot=N&ip=A.B.C.D&port=P[&id=HEX] ============== *
@@ -1548,6 +1598,10 @@ void dcs_admin_pages_register(ml_app_t * app)
   (void)ml_app_add_page(app, "/api/ts_boot", HTTP_POST, api_ts_boot_toggle);
   (void)ml_app_add_page(app, "/api/pstop_peer", HTTP_POST, api_pstop_peer);
   (void)ml_app_add_page(app, "/api/pstop_peers", HTTP_POST, api_pstop_peers);
+#ifndef DCS_PAGE_MACHINE
+  (void)ml_app_add_page(app, "/api/pstop_clear_bonds_on_boot", HTTP_GET, api_pstop_clear_bonds_on_boot_get);
+  (void)ml_app_add_page(app, "/api/pstop_clear_bonds_on_boot", HTTP_POST, api_pstop_clear_bonds_on_boot_post);
+#endif
   (void)ml_app_add_page(app, "/api/last_log", HTTP_GET, api_last_log);
   (void)ml_app_add_page(app, "/api/coredump", HTTP_GET, api_coredump);
   (void)ml_app_add_page(app, "/api/iface/eth", HTTP_POST, api_iface_eth);
