@@ -39,7 +39,7 @@ admission allow/denylist (`/api/admission`). See
 1. **Point the remote at the machine.** On the remote, set a machine peer slot to
    the machine's tailnet IP + pstop port:
    `POST /api/pstop_peers?slot=N&ip=<machine_vpn_ip>&port=8890` (slot 0..3; admin
-   auth). `POST .../api/pstop_peers?slot=N&clear=1` clears a slot. The remote
+   auth). `POST .../api/pstop_peers?slot=N&clear=1` clears a slot. Slots persist across reboots and the remote rebonds to them at boot; to make a remote forget every machine at each boot instead, `POST /api/pstop_clear_bonds_on_boot?enable=1` (admin auth, effective next reboot; `enable=0` restores the default). The remote
    **pins** each configured machine so the machine can never be trimmed from the
    remote's netmap (see §5).
 2. **Decide operator vs stop-only — on the remote.** A new remote announces

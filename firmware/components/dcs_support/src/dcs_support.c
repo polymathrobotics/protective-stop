@@ -612,6 +612,24 @@ dcs_boot_state_t dcs_support_init(void)
   {
     dcs_pstop_peer_rec_t peers[DCS_PSTOP_MAX_MACHINES];
     dcs_nvs_read_pstop_peers(peers);
+    /* Opt-in (/api/pstop_clear_bonds_on_boot): erase the persisted table so this
+     * remote stays unbonded (WHITE ring) until an admin configures a machine
+     * again. Written back through the normal writer so the legacy ps_ip/ps_port
+     * mirror is zeroed too; skipped when already empty to spare flash. */
+    if (dcs_nvs_read_pstop_clear_bonds_on_boot()) {
+      bool any = false;
+      for (int i = 0; i < DCS_PSTOP_MAX_MACHINES; i++) {
+        any = any || peers[i].configured;
+      }
+      if (any) {
+        (void)memset(peers, 0, sizeof(peers));
+        if (dcs_nvs_write_pstop_peers(peers) != ESP_OK) {
+          ESP_LOGE(TAG, "clear bonds on boot: NVS write failed; peers cleared for this boot only");
+        } else {
+          ESP_LOGW(TAG, "clear bonds on boot: machine peer table erased");
+        }
+      }
+    }
     for (int i = 0; i < DCS_PSTOP_MAX_MACHINES; i++) {
       atomic_store(&g_dcs_pstop_slot_ep[i], pstop_ep_pack(peers[i].configured, peers[i].ip, peers[i].port));
       atomic_store(&g_dcs_pstop_slot_id[i], peers[i].machine_id);

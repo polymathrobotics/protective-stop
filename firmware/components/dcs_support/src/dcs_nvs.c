@@ -14,6 +14,7 @@
  *   ring_off  u8   LED-ring rotation: physical pixel index of LED 1 (default 0)
  *   ps_peers  blob multi-machine peer table: version byte + per-slot records
  *                  (absent -> migrate legacy ps_ip/ps_port into slot 0)
+ *   clear_bonds u8   1 = erase ps_peers at boot so the remote does not rebond until reconfigured (default 0)
  *   adm_allow blob admission allowlist: count byte + u32 ids
  *   adm_deny  blob admission denylist: same layout
  *   adm_pin   blob WG pin list: same layout (seeded once from the legacy operators blob)
@@ -460,6 +461,30 @@ void dcs_nvs_read_pstop_peers(dcs_pstop_peer_rec_t out[DCS_PSTOP_MAX_MACHINES])
     out[0].machine_id = DCS_PSTOP_DEFAULT_MACHINE_ID;
   }
   /* else: no legacy peer -> whole table stays zeroed (no machine configured). */
+}
+
+bool dcs_nvs_read_pstop_clear_bonds_on_boot(void)
+{
+  nvs_handle_t h;
+  if (nvs_open(DCS_NVS_NS, NVS_READONLY, &h) != ESP_OK) return false;
+  uint8_t v = 0;
+  (void)nvs_get_u8(h, DCS_NVS_KEY_PSTOP_CLEAR_BONDS_ON_BOOT, &v); /* absent -> default OFF: rebond at boot */
+  nvs_close(h);
+  return v != 0u;
+}
+
+esp_err_t dcs_nvs_write_pstop_clear_bonds_on_boot(bool enable)
+{
+  nvs_handle_t h;
+  uint32_t t0 = 0;
+  esp_err_t r = nvs_open_rw(&h, &t0);
+  if (r != ESP_OK) return r;
+  r = nvs_set_u8(h, DCS_NVS_KEY_PSTOP_CLEAR_BONDS_ON_BOOT, enable ? 1 : 0);
+  if (r == ESP_OK) {
+    r = nvs_commit(h);
+  }
+  nvs_close_rw(h, t0);
+  return r;
 }
 
 esp_err_t dcs_nvs_write_pstop_peers(const dcs_pstop_peer_rec_t recs[DCS_PSTOP_MAX_MACHINES])

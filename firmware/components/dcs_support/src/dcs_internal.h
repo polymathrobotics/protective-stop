@@ -48,6 +48,8 @@ extern "C"
 #define DCS_NVS_KEY_WIFI_TXP "wifi_txp" /* WiFi max TX power, quarter-dBm (8..84); 0/absent = config default */
 #define DCS_NVS_KEY_LED_BRIGHT "led_bri" /* master LED brightness, 0..100%; absent = default */
 #define DCS_NVS_KEY_ROLE "role" /* remote self-role: pstop_aux_role_t value (1=stop_only default, 2=operator) */
+/* u8: 1 = erase the machine peer table at every boot (default 0). NVS keys max out at 15 characters. */
+#define DCS_NVS_KEY_PSTOP_CLEAR_BONDS_ON_BOOT "clear_bonds"
 #define DCS_NVS_KEY_HEALTH "health" /* lifetime wear counters (blob, see dcs_health_logic.h) */
 
 #define DCS_LED_BRIGHTNESS_DEFAULT 50 /* master ring brightness when the NVS key is absent */
@@ -391,6 +393,10 @@ typedef struct
 } dcs_pstop_peer_rec_t;
 
 void dcs_nvs_read_pstop_peers(dcs_pstop_peer_rec_t out[DCS_PSTOP_MAX_MACHINES]);
+/** @brief Read the clear-peers-on-boot flag; absent or unreadable -> false (rebond as before). */
+bool dcs_nvs_read_pstop_clear_bonds_on_boot(void);
+/** @brief Persist the clear-peers-on-boot flag. */
+esp_err_t dcs_nvs_write_pstop_clear_bonds_on_boot(bool enable);
 esp_err_t dcs_nvs_write_pstop_peers(const dcs_pstop_peer_rec_t recs[DCS_PSTOP_MAX_MACHINES]);
 
 /* Admission lists (blob: count byte + count*u32 ids, big-endian). Read

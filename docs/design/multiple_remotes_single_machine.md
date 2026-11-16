@@ -188,4 +188,4 @@ Candidate levers, in rough priority:
 
 ### Caveats
 - Measured on the office bench with all remotes on region 9 (dfw, a far relay); a nearer region or true LAN-direct-only fleet may shift the numbers, but the machn-side scaling is the invariant.
-- Separate, unrelated limits observed the same day: remote must pin its machine in the peer table at 128-node scale; the sustained-ENOTCONN kick doesn't always recover; `/api/pstop_peer?clear=1` is broken (use `ip=127.0.0.1&port=1` to unbond).
+- Separate, unrelated limits observed the same day: remote must pin its machine in the peer table at 128-node scale; the sustained-ENOTCONN kick doesn't always recover. (An earlier note here that `/api/pstop_peer?clear=1` was broken is obsolete: it now clears slot 0, so no `127.0.0.1:1` dummy peer is needed to unbond.)

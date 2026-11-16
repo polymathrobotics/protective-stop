@@ -57,7 +57,8 @@ typedef struct
  *   - nvs_flash_init() with auto-erase on version mismatch
  *   - esp_reset_reason() + boot-counter accounting (may rollback+reboot if
  *     boot_count > SAFETY_MAX_RAPID_BOOTS — does NOT return in that case)
- *   - Reads NVS for usb_en, ts_boot, pstop_peer
+ *   - Reads NVS for usb_en, ts_boot, pstop_peer (the peer table is erased
+ *     first when the clear-bonds-on-boot flag is set)
  *   - Applies safety ladder: boot_count==1 → derp_only_mode;
  *                             boot_count>=2 → forces ts_boot_en=false
  *   - Spawns app_heartbeat_task (TWDT keep-alive)
