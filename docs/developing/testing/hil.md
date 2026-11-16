@@ -70,7 +70,7 @@ the wiring is live.
   machine stops via MISSED_HEARTBEATS, chip counts lockstep mismatches,
   and healing the fault must NOT re-arm without a fresh gesture.
 - `test_30_power_cycle.py` (`-m power`) — power loss stops the machine;
-  a cold boot re-bonds (NVS peer slot) but never self-arms; boot with
+  a cold boot re-bonds by default (saved NVS peer slot; not when `/api/pstop_clear_bonds_on_boot` is enabled) but never self-arms; boot with
   the button held flows STOP and then completes a gesture on release.
 
 Timing knobs live in `hil.toml [timing]` and are fed into the generated

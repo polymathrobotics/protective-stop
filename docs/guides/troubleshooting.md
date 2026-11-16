@@ -20,7 +20,7 @@ machine's replies:
 
 | Ring | Meaning |
 |---|---|
-| WHITE | idle — no pstop peer (machine) configured; nothing to connect to (fresh unit, or peer cleared) |
+| WHITE | idle — no pstop peer (machine) configured; nothing to connect to (fresh unit, peer cleared, or `/api/pstop_clear_bonds_on_boot` erased it at boot) |
 | RED (slow pulse) | a peer IS configured but no fresh reply — never bonded, machine down/unreachable, or the comparator stopped after a lockstep fault. Distinct from a solid-red commanded STOP |
 | BLUE | bonded, not armed — last reply was BOND/UNBOND |
 | GREEN | armed — last reply OK, robot cleared to run |

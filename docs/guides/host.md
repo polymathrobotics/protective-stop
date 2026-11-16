@@ -128,7 +128,7 @@ HOST_TS_IP=$(tailscale ip -4)
 curl -X POST "http://$CHIP/api/pstop_peer?ip=$HOST_TS_IP&port=8890"
 ```
 
-The change persists to NVS and the comparator picks it up within one
+The change persists to NVS (and is reloaded at boot unless `/api/pstop_clear_bonds_on_boot` is enabled) and the comparator picks it up within one
 tick (~100 ms), no reboot. For a Tailscale peer the chip source-binds
 its socket to the VPN IP — if the tunnel is down it holds the bond and
 the machine safely sees silence.
