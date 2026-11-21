@@ -94,7 +94,7 @@ main(int argc, char *argv[])
     pstop_application_set_log_cb(&pstop_app, simple_log);
     pstop_application_set_remote_cb(&pstop_app, is_operator_allowed);
     pstop_application_set_hardware_status_cb(&pstop_app, robot_status);
-
+    pstop_application_set_protocol_limits(&pstop_app, 1U, 2U, 1000U);
     machine_init(&machine, &pstop_app, pstop_clients, MAX_CLIENTS);
 
     int port = 8890;
