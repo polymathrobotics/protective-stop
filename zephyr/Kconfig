@@ -1,0 +1,77 @@
+# SPDX-FileCopyrightText: 2026 Polymath Robotics, Inc.
+# SPDX-License-Identifier: Apache-2.0
+
+config PSTOP
+	bool "pstop protective-stop protocol library"
+	help
+	  Build pstop_c: the 48-byte wire format, message encode/decode, and
+	  the protocol state machines used by the protective-stop system.
+
+	  Defaults to n so that merely having this repository in west.yml does
+	  not add code to an image that does not ask for it.
+
+if PSTOP
+
+config PSTOP_MACHINE
+	bool "Machine-side protocol state machine"
+	help
+	  Compile the machine half of the library: machine.c, protocol.c,
+	  pstop_application.c and pstop_remote_data.c.
+
+	  A remote — the unit carrying the stop switch — needs none of these,
+	  and leaving them out keeps its image smaller. Enable this only when
+	  building the machine side.
+
+choice PSTOP_TIME_SOURCE
+	prompt "time_get_now() implementation"
+	default PSTOP_TIME_ZEPHYR
+	help
+	  Which definition of time_get_now() the module links, if any.
+
+	  This is a choice rather than a single option because "use the Zephyr
+	  clock" and "I will supply my own" are different intentions, and a
+	  plain on/off switch cannot express the second: turning it off would
+	  still compile pstop_c's own time.c, whose time_get_now() is a strong
+	  symbol, so an application defining its own would fail to link.
+
+config PSTOP_TIME_ZEPHYR
+	bool "Zephyr kernel clock"
+	help
+	  Compile a k_uptime_get()-backed implementation supplied by this
+	  module. Monotonic milliseconds since boot, with no RTC or NTP
+	  discontinuities, which is what a timeout clock needs.
+
+	  This is the right answer on every Zephyr target and is the default.
+
+config PSTOP_TIME_UPSTREAM
+	bool "pstop_c's own time.c"
+	help
+	  Compile pstop_c/pstop/src/pstop/time.c unchanged.
+
+	  Be careful with this one. That file implements time_get_now() only
+	  under __linux__ and returns 0 on every other target, so it gives a
+	  real clock on a POSIX build such as native_sim, but on any other
+	  target it silently yields a clock that never advances — disabling
+	  every heartbeat and timeout in the protocol, a failure that looks
+	  like a network problem rather than a build problem.
+
+config PSTOP_TIME_APPLICATION
+	bool "Supplied by the application"
+	help
+	  Compile neither implementation. The application must define
+	  time_get_now() itself, returning monotonic milliseconds.
+
+	  Use this when the clock has to come from somewhere the module cannot
+	  know about — a synchronised time source, or a test harness that
+	  drives time explicitly.
+
+endchoice
+
+config PSTOP_TRANSPORT_UDP
+	bool "UDP transport helpers"
+	depends on NET_SOCKETS
+	help
+	  Compile pstop_c's optional BSD-socket UDP transport. Applications
+	  that manage their own sockets do not need it.
+
+endif # PSTOP
