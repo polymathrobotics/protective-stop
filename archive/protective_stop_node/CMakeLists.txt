@@ -27,6 +27,10 @@ if(BUILD_TESTING)
     test/unmonitored_mode.test.py
     TIMEOUT "60"
   )
+  add_launch_test(
+    test/multiple_remotes.test.py
+    TIMEOUT "60"
+  )
 endif()
 
 ament_package()

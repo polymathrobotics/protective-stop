@@ -56,7 +56,7 @@ class ProtectiveStopNode(LifecycleNode):
             'max_pstop_count',
             10,
             ParameterDescriptor(
-                description='Maximum number of pstops that can be registered to the protective stop node'
+                description='Maximum number of pstops that can be registered to the protective stop node. When full, the oldest deactivated pstop is removed; activation is refused while every registered pstop is active'
             ),
         )
 
@@ -237,22 +237,6 @@ Node configured successfully with:
             return response
 
         if activate:
-            while len(self.connected_remote_pstop_state) >= self.max_pstop_count:
-                oldest_pstop = sorted(
-                    self._safe_remote_iterator(),
-                    key=lambda x: x[1].init_timestamp.to_ros_time(self.get_clock()),
-                )
-                self.get_logger().warn(
-                    colored(
-                        f'Max pstop count of {self.max_pstop_count} reached. Pruning oldest pstop: {oldest_pstop[0][0]}',
-                        'yellow',
-                    ),
-                    throttle_duration_sec=1.0,
-                )
-
-                with self.connected_remote_pstop_state_lock:
-                    del self.connected_remote_pstop_state[oldest_pstop[0][0]]
-
             if (
                 uuid in self.connected_remote_pstop_state
                 and self.connected_remote_pstop_state[uuid].connection_status.status
@@ -268,6 +252,42 @@ Node configured successfully with:
                 response.success = False
                 response.message = f'Already activated. Current state of remote is {self.connected_remote_pstop_state[uuid].connection_status.status.name}'
                 return response
+
+            # Only deactivated remotes are pruned: removing an active or unstable one would silently drop its stop.
+            while (
+                uuid not in self.connected_remote_pstop_state
+                and len(self.connected_remote_pstop_state) >= self.max_pstop_count
+            ):
+                deactivated_pstops = sorted(
+                    (
+                        (remote_uuid, pstop_remote)
+                        for remote_uuid, pstop_remote in self._safe_remote_iterator()
+                        if pstop_remote.connection_status.status == PStopRemoteStatusEnum.DEACTIVATED
+                    ),
+                    key=lambda x: x[1].init_timestamp.to_ros_time(self.get_clock()),
+                )
+                if not deactivated_pstops:
+                    self.get_logger().warn(
+                        colored(
+                            f'Max pstop count of {self.max_pstop_count} reached and every remote is active. Refusing {uuid}',
+                            'yellow',
+                        ),
+                        throttle_duration_sec=1.0,
+                    )
+                    response.success = False
+                    response.message = f'Max pstop count of {self.max_pstop_count} reached and every remote is active. Retry once a remote is deactivated'
+                    return response
+
+                self.get_logger().warn(
+                    colored(
+                        f'Max pstop count of {self.max_pstop_count} reached. Pruning oldest deactivated pstop: {deactivated_pstops[0][0]}',
+                        'yellow',
+                    ),
+                    throttle_duration_sec=1.0,
+                )
+
+                with self.connected_remote_pstop_state_lock:
+                    del self.connected_remote_pstop_state[deactivated_pstops[0][0]]
 
             pstop_state = PStopModel(
                 connection_status=ConnectionStatus(status=PStopRemoteStatusEnum.ACTIVE, message='Activated by remote'),
@@ -376,6 +396,7 @@ Node configured successfully with:
         """
         Handles loss of comms or timeouts
         if a pstop is connected, and is in active mode, it must report in at least every heartbeat_timeout seconds
+        the machine is stopped if any non-deactivated pstop is pressed or has missed its heartbeat
         """
         stop = None if self.is_user_monitored else False
 
@@ -431,7 +452,7 @@ Node configured successfully with:
             self.connected_remote_pstop_state[uuid].connection_status = ConnectionStatus(
                 status=PStopRemoteStatusEnum.ACTIVE, message=''
             )
-            stop = self.connected_remote_pstop_state[uuid].pstop_pressed
+            stop = stop or self.connected_remote_pstop_state[uuid].pstop_pressed
 
         hb_msg = ProtectiveStopHeartbeat()
         hb_msg.stop = stop if stop is not None else True

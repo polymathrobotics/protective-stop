@@ -70,6 +70,8 @@ class TestProtectiveStopNode(BaseTestProtectiveStopNode):
         response = future.result()
         self.assertFalse(response.success)
 
+        self._deactivate()
+
     def test_err_uuid_mismatch_state_transition_service(self):
         request = ProtectiveStopSrv.Request()
         # Set to unknown machine uuid
@@ -105,9 +107,26 @@ class TestProtectiveStopNode(BaseTestProtectiveStopNode):
             self._deactivate()
 
     def test_max_connections(self):
+        remotes = [str(uuid.uuid4()) for _ in range(MAX_PSTOP_COUNT)]
+        for remote_uuid in remotes:
+            self._activate(remote_uuid)
+
+        # Active remotes are never pruned to make room
+        request = ProtectiveStopSrv.Request()
+        request.recv_uuid = machine_uuid
+        request.sender_uuid = str(uuid.uuid4())
+        future = self.activate_client.call_async(request)
+        rclpy.spin_until_future_complete(self.node, future)
+        self.assertFalse(future.result().success)
+
+        for remote_uuid in remotes:
+            self._deactivate(remote_uuid)
+
+        # Deactivated remotes are pruned to make room
         for _ in range(MAX_PSTOP_COUNT + 1):
-            self._activate(str(uuid.uuid4()))
-            self._deactivate(str(uuid.uuid4()))
+            remote_uuid = str(uuid.uuid4())
+            self._activate(remote_uuid)
+            self._deactivate(remote_uuid)
 
     def test_receives_ok_messages(self):
         self._activate()
